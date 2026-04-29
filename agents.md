@@ -144,6 +144,7 @@ If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the 
 ## UI/UX Rules (HIG‑Aligned)
 - If content may exceed the window height, place the main content in a vertical `ScrollView` and keep footer/action controls outside the scroll region so actions remain visible.
 - Use the shared spacing tokens and dynamic system colors. Avoid ad‑hoc paddings; prefer consistent section spacing and card padding.
+- For subtle SwiftUI/AppKit visual changes, first identify the actual rendering layer that paints the visible UI. Do not assume a nearby palette, token, or model value is authoritative. Trace modifiers, custom `NSViewRepresentable` views, layout managers, drawing overrides, cached attributed strings, and alternate render modes as needed; patch the layer that actually draws the pixels, then verify the diff touches that layer.
 
 ## Safety & Execution
 - Avoid shelling out when a safe `Process` + argument list is possible. Use timeouts and clear, inline error messages for failures.

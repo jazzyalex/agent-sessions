@@ -277,6 +277,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var selectedNSRange: NSRange? = nil
     @State private var selectionScrollMode: SelectionScrollMode = .ensureVisible
     @State private var tailUpdateState = TranscriptTailUpdateState()
+    @State private var isNearTranscriptTop: Bool = true
     // Ephemeral copy confirmation (popover)
     @State private var showIDCopiedPopover: Bool = false
     // Terminal-only jump trigger (Session view uses SessionTerminalView, not NSTextView selection)
@@ -360,15 +361,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
-                ZStack(alignment: .bottom) {
+                ZStack {
                     if viewMode == .terminal {
                         terminalTranscriptView(session: session)
                     } else {
                         plainTranscriptView(session: session)
                     }
 
-                    if shouldShowJumpToLatestButton {
-                        jumpToLatestButton
+                    if shouldShowFirstPromptJumpButton(session) || shouldShowJumpToLatestButton {
+                        floatingTranscriptControls(session: session)
                     }
                 }
             }
@@ -380,6 +381,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     sessionID: session.id,
                     contentVersion: transcriptContentVersion(for: session)
                 )
+                isNearTranscriptTop = true
             }
             .onChange(of: session.id) { _, _ in
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -389,6 +391,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     sessionID: session.id,
                     contentVersion: transcriptContentVersion(for: session)
                 )
+                isNearTranscriptTop = true
             }
             .onChange(of: renderKey) { oldValue, newValue in
                 transcriptTrace("renderKey changed id=\(sessionID ?? "nil") old=\(oldValue) new=\(newValue)")
@@ -483,16 +486,55 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         tailUpdateState.shouldShowJumpToLatestButton
     }
 
-    private var jumpToLatestButton: some View {
+    private func hasFirstPromptJumpTarget(_ session: Session) -> Bool {
+        session.events.contains { $0.kind == .user }
+    }
+
+    private func shouldShowFirstPromptJumpButton(_ session: Session) -> Bool {
+        hasFirstPromptJumpTarget(session) && !isNearTranscriptTop
+    }
+
+    private func floatingTranscriptControls(session: Session) -> some View {
+        VStack {
+            if shouldShowFirstPromptJumpButton(session) {
+                transcriptJumpButton(
+                    systemImage: "arrow.up",
+                    help: "Jump to first user prompt",
+                    action: { jumpToFirstPrompt(session: session) }
+                )
+            }
+
+            Spacer(minLength: 0)
+
+            if shouldShowJumpToLatestButton {
+                transcriptJumpButton(
+                    systemImage: "arrow.down",
+                    help: "Jump to latest output",
+                    action: { tailUpdateState.jumpToLatest() }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: .infinity)
+        .padding(.top, firstPromptJumpTopInset)
+        .padding(.bottom, 12)
+        .zIndex(4)
+    }
+
+    private var firstPromptJumpTopInset: CGFloat {
+        viewMode == .terminal ? 56 : 12
+    }
+
+    private func transcriptJumpButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: {
-            tailUpdateState.jumpToLatest()
+            action()
         }) {
             ZStack {
                 Circle()
                     .fill(Color.white)
                 Circle()
                     .stroke(Color.black.opacity(0.18), lineWidth: 1)
-                Image(systemName: "arrow.down")
+                Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .regular))
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(Color.black)
@@ -500,15 +542,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             .frame(width: 32, height: 32)
         }
         .buttonStyle(.plain)
-        .help("Jump to latest output")
-        .accessibilityLabel("Jump to latest output")
-        .frame(maxWidth: .infinity)
-        .padding(.bottom, 12)
-        .zIndex(4)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func updateBottomProximity(_ isNearBottom: Bool) {
         tailUpdateState.viewportChanged(isNearBottom: isNearBottom)
+    }
+
+    private func updateTopProximity(_ isNearTop: Bool) {
+        isNearTranscriptTop = isNearTop
     }
 
     private func terminalTranscriptView(session: Session) -> some View {
@@ -529,6 +572,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             allowMatchAutoScroll: terminalAllowMatchAutoScroll,
             scrollToBottomToken: tailUpdateState.scrollToBottomToken,
             onBottomProximityChange: updateBottomProximity,
+            onTopProximityChange: updateTopProximity,
             onRenderComplete: { id in
                 if pendingFirstRenderSessionID == id {
                     pendingFirstRenderSessionID = nil
@@ -557,6 +601,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             findCurrentRange: findCurrentRange,
             scrollToBottomToken: tailUpdateState.scrollToBottomToken,
             onBottomProximityChange: updateBottomProximity,
+            onTopProximityChange: updateTopProximity,
             commandRanges: roleRangesEnabled ? commandRanges : [],
             userRanges: roleRangesEnabled ? userRanges : [],
             assistantRanges: roleRangesEnabled ? assistantRanges : [],
@@ -2621,6 +2666,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
     let findCurrentRange: NSRange?
     let scrollToBottomToken: Int
     let onBottomProximityChange: (Bool) -> Void
+    let onTopProximityChange: (Bool) -> Void
     let commandRanges: [NSRange]
     let userRanges: [NSRange]
     let assistantRanges: [NSRange]
@@ -2646,8 +2692,10 @@ private struct PlainTextScrollView: NSViewRepresentable {
         weak var observedDocumentView: NSView?
         var documentFrameObserver: NSObjectProtocol?
         var lastNearBottom: Bool? = nil
+        var lastNearTop: Bool? = nil
         var lastProximityContextID: String = ""
         var onBottomProximityChange: ((Bool) -> Void)?
+        var onTopProximityChange: ((Bool) -> Void)?
         var lastScrollToBottomToken: Int = 0
 
         deinit {
@@ -2724,6 +2772,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
         context.coordinator.lastColorScheme = colorScheme
         context.coordinator.lastFindRange = findCurrentRange
         context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
         context.coordinator.lastProximityContextID = proximityContextID
 
         // Set background with proper dark mode support
@@ -2764,12 +2813,14 @@ private struct PlainTextScrollView: NSViewRepresentable {
         guard let tv = nsView.documentView as? NSTextView else { return }
 
         context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
         installScrollObserverIfNeeded(scrollView: nsView, coordinator: context.coordinator)
 
         let proximityContextChanged = context.coordinator.lastProximityContextID != proximityContextID
         if proximityContextChanged {
             context.coordinator.lastProximityContextID = proximityContextID
             context.coordinator.lastNearBottom = nil
+            context.coordinator.lastNearTop = nil
             emitBottomProximityIfNeeded(scrollView: nsView, coordinator: context.coordinator, force: true)
         }
 
@@ -2884,6 +2935,7 @@ private struct PlainTextScrollView: NSViewRepresentable {
             coordinator.observedDocumentView = nil
             coordinator.scrollView = scrollView
             coordinator.lastNearBottom = nil
+            coordinator.lastNearTop = nil
         }
 
         if coordinator.scrollObserver == nil {
@@ -2922,7 +2974,17 @@ private struct PlainTextScrollView: NSViewRepresentable {
     private func emitBottomProximityIfNeeded(scrollView: NSScrollView,
                                              coordinator: Coordinator,
                                              force: Bool = false) {
-        let nearBottom = isNearBottom(scrollView: scrollView)
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let contentHeight = measuredContentHeight(scrollView: scrollView)
+        let maxOffset = max(0, contentHeight - visibleRect.height)
+        let currentOffset = max(0, min(visibleRect.origin.y, maxOffset))
+        let nearTop = currentOffset <= 48
+        let distanceToBottom = max(0, maxOffset - currentOffset)
+        let nearBottom = distanceToBottom <= 48
+        if force || coordinator.lastNearTop != nearTop {
+            coordinator.lastNearTop = nearTop
+            coordinator.onTopProximityChange?(nearTop)
+        }
         guard force || coordinator.lastNearBottom != nearBottom else { return }
         coordinator.lastNearBottom = nearBottom
         coordinator.onBottomProximityChange?(nearBottom)

@@ -90,6 +90,7 @@ struct SessionTerminalView: View {
     let allowMatchAutoScroll: Bool
     let scrollToBottomToken: Int
     let onBottomProximityChange: (Bool) -> Void
+    let onTopProximityChange: (Bool) -> Void
     let onRenderComplete: (String) -> Void
     let jumpToken: Int
     let roleNavToken: Int
@@ -548,6 +549,7 @@ struct SessionTerminalView: View {
                     imageHighlightLineID: imageHighlightLineID,
                     imageHighlightToken: imageHighlightToken,
                     onBottomProximityChange: onBottomProximityChange,
+                    onTopProximityChange: onTopProximityChange,
                     renderCompleteSessionID: session.id,
                     onRenderComplete: onRenderComplete,
                     focusRequestToken: transcriptFocusToken,
@@ -2068,17 +2070,22 @@ struct SessionTerminalView: View {
 
     private func jumpToFirstPrompt() {
         guard let lineID = userPromptLineID(for: .firstUserPrompt, skipAgentsPreamble: skipAgentsPreambleEnabled()) else { return }
-        jumpToUserPrompt(lineID: lineID)
+        jumpToUserPrompt(lineID: lineID, alignTop: true)
     }
 
-    private func jumpToUserPrompt(lineID: Int) {
+    private func jumpToUserPrompt(lineID: Int, alignTop: Bool = false) {
         if !activeRoles.contains(.user) {
             activeRoles.insert(.user)
             persistRoleToggles()
         }
         updateUserNavigationPosition(lineID: lineID)
-        roleNavScrollTargetLineID = lineID
-        roleNavScrollToken &+= 1
+        if alignTop {
+            scrollTargetLineID = lineID
+            scrollTargetToken &+= 1
+        } else {
+            roleNavScrollTargetLineID = lineID
+            roleNavScrollToken &+= 1
+        }
     }
 
     private func jumpToUserPromptIndex(_ index: Int) -> Bool {
@@ -2330,7 +2337,7 @@ private struct TerminalRolePalette {
                     foreground: isDark ? NSColor.black : NSColor.white,
                     background: isDark
                         ? NSColor(white: 0.94, alpha: 0.96)
-                        : NSColor(white: 0.20, alpha: 0.90),
+                        : NSColor(white: 0.40, alpha: 0.90),
                     accent: isDark
                         ? NSColor(white: 0.30, alpha: 1.0)
                         : NSColor(white: 0.75, alpha: 1.0)
@@ -2374,7 +2381,7 @@ private struct TerminalRolePalette {
                     foreground: isDark ? NSColor.black : NSColor.white,
                     background: isDark
                         ? NSColor(white: 0.94, alpha: 0.96)
-                        : NSColor(white: 0.20, alpha: 0.90),
+                        : NSColor(white: 0.40, alpha: 0.90),
                     accent: NSColor.systemBlue
                 )
             case .assistant:
@@ -2502,7 +2509,7 @@ private extension TerminalLineRole {
         case .user:
             let fill = dark
                 ? NSColor(white: 0.94, alpha: 0.96)
-                : NSColor(white: 0.20, alpha: 0.90)
+                : NSColor(white: 0.40, alpha: 0.90)
             return BlockStyle(
                 fill: fill,
                 accent: nil,
@@ -2957,6 +2964,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let imageHighlightLineID: Int?
     let imageHighlightToken: Int
     let onBottomProximityChange: (Bool) -> Void
+    let onTopProximityChange: (Bool) -> Void
     let renderCompleteSessionID: String
     let onRenderComplete: (String) -> Void
     let focusRequestToken: Int
@@ -3170,6 +3178,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastLinkificationEnabled: Bool = true
         var lastScrollToBottomToken: Int = 0
         var lastNearBottom: Bool? = nil
+        var lastNearTop: Bool? = nil
         var lastProximityContextID: String = ""
         var lastScrollToken: Int = 0
         var lastRoleNavScrollToken: Int = 0
@@ -3177,6 +3186,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastImageHighlightToken: Int = 0
         var lastRenderCompleteSessionID: String? = nil
         var onBottomProximityChange: ((Bool) -> Void)? = nil
+        var onTopProximityChange: ((Bool) -> Void)? = nil
 
         var lastUnifiedFindQuery: String = ""
         var lastUnifiedAutoScrollToken: Int = 0
@@ -3505,8 +3515,15 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             let contentHeight = measuredContentHeight(for: scrollView)
             let maxOffset = max(0, contentHeight - visibleRect.height)
             let currentOffset = max(0, min(visibleRect.origin.y, maxOffset))
+            let nearTop = currentOffset <= Self.nearBottomThreshold
             let distanceToBottom = max(0, maxOffset - currentOffset)
             let nearBottom = distanceToBottom <= Self.nearBottomThreshold
+            if force || lastNearTop != nearTop {
+                lastNearTop = nearTop
+                DispatchQueue.main.async { [weak self] in
+                    self?.onTopProximityChange?(nearTop)
+                }
+            }
             guard force || lastNearBottom != nearBottom else { return }
             lastNearBottom = nearBottom
             DispatchQueue.main.async { [weak self] in
@@ -4303,6 +4320,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.ideTarget = ideTarget
         context.coordinator.ideBinaryOverridePath = ideBinaryOverridePath
         context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
         context.coordinator.installScrollObserver(scrollView: scroll, textView: textView)
         applyContent(to: textView, context: context)
         context.coordinator.lastLinesSignature = lineSignature
@@ -4334,12 +4352,14 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.ideTarget = ideTarget
         context.coordinator.ideBinaryOverridePath = ideBinaryOverridePath
         context.coordinator.onBottomProximityChange = onBottomProximityChange
+        context.coordinator.onTopProximityChange = onTopProximityChange
         context.coordinator.installScrollObserver(scrollView: nsView, textView: tv)
 
         let proximityContextChanged = context.coordinator.lastProximityContextID != proximityContextID
         if proximityContextChanged {
             context.coordinator.lastProximityContextID = proximityContextID
             context.coordinator.lastNearBottom = nil
+            context.coordinator.lastNearTop = nil
             context.coordinator.emitBottomProximityIfNeeded(force: true)
         }
         var needsBottomProximityRefresh = proximityContextChanged

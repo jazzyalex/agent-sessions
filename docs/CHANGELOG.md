@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
+- Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
 - Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.
 - Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.
 
