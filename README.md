@@ -22,7 +22,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.5/AgentSessions-3.6.5.dmg"><b>Download Agent Sessions 3.6.5 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.6/AgentSessions-3.6.6.dmg"><b>Download Agent Sessions 3.6.6 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -45,11 +45,11 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
-## What's New in 3.6.5
+## What's New in 3.6.6
 
-**TL;DR** — Codex resume handling, transcript readability, crash-report parsing, and session refresh performance are tighter.
+**TL;DR** — Onboarding tips, transcript readability, session navigation, and agent-format coverage are sharper.
 
-**Highlights:** Resume in Terminal now keeps the launched command as plain `codex resume`, unsupported VS Code-surface sessions no longer offer unusable CLI resume commands, Codex subagent rows keep their Desktop badge while showing the subagent marker in the title, and tool output blocks are easier to read. Index refreshes now use the interactive profile for faster catch-up after resets, and pretty-printed `.ips` crash reports include exception details, timestamps, and top frames.
+**Highlights:** Update and fresh-install tours now surface Power Tips for Hide Dock icon and Agent Cockpit, Help can reopen the tips tour, transcript JSON-style tool outputs render as readable text instead of raw pretty-printed JSON, and Session view adds a floating jump-to-first-prompt control. Agent-format monitoring now covers Hermes sessions and Gemini CLI 0.40 JSONL sessions, while archived Codex Desktop sessions keep their `desk` pill in italic.
 
 ## Core Features
 
@@ -95,7 +95,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.6.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.5/AgentSessions-3.6.5.dmg)
+1. [Download AgentSessions-3.6.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.6/AgentSessions-3.6.6.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
