@@ -1158,14 +1158,15 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func readableToolOutputLines(_ lines: [String]) -> [String] {
-        let withoutOutputMarker = lines.filter { line in
-            line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "output:"
-        }
-        guard containsAccessibilityTreeLines(withoutOutputMarker) else {
-            return withoutOutputMarker
+        guard containsAccessibilityTreeLines(lines) else {
+            return lines
         }
 
-        let cleanedLines = withoutOutputMarker.compactMap(cleanAccessibilityTreeLine)
+        let axLines = lines.filter { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "output:"
+        }
+        let baseIndent = accessibilityBaseIndent(in: axLines)
+        let cleanedLines = axLines.compactMap { cleanAccessibilityTreeLine($0, baseIndent: baseIndent) }
             .flatMap { splitAndTrimTrailingEmptyLines($0) }
         return trimRepeatedEmptyLines(cleanedLines)
     }
@@ -1180,8 +1181,17 @@ enum ToolTextBlockNormalizer {
         }
     }
 
-    private static func cleanAccessibilityTreeLine(_ line: String) -> String? {
-        let indentWidth = max(0, line.prefix { $0 == "\t" }.count - 1) * 2
+    private static func accessibilityBaseIndent(in lines: [String]) -> Int {
+        let indents = lines.compactMap { line -> Int? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard parseAccessibilityElementLine(trimmed) != nil else { return nil }
+            return line.prefix { $0 == "\t" }.count
+        }
+        return indents.min() ?? 0
+    }
+
+    private static func cleanAccessibilityTreeLine(_ line: String, baseIndent: Int) -> String? {
+        let indentWidth = max(0, line.prefix { $0 == "\t" }.count - baseIndent) * 2
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 

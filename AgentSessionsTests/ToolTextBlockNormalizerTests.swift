@@ -202,6 +202,36 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         XCTAssertFalse(rendered.contains(#"\t"#))
     }
 
+    func testNonAccessibilityOutputMarkerIsPreserved() {
+        let output = #"[{"text":"Header\nOutput:\nvalue","type":"input_text"}]"#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
+        XCTAssertEqual(block?.lines, ["Header", "Output:", "value"])
+    }
+
+    func testAccessibilityTreeRootWithNoTabsKeepsChildIndentation() {
+        let output = #"""
+        [{"text":"App=com.apple.Safari (pid 93404)\nWindow: \"New Issue\", App: Safari.\n0 standard window New Issue, ID: SafariWindow\n\t1 split group\n\t\t4 scroll area\n\t\t\t40 text field (settable, string) Add a title, Value: Hello, Placeholder: ","type":"input_text"}]
+        """#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
+        XCTAssertEqual(block?.lines, [
+            "App: Safari",
+            "Window: New Issue",
+            "0 standard window \"New Issue\"",
+            "  1 split group",
+            "    4 scroll area",
+            "      40 text field \"Add a title\"",
+            "        Value: Hello"
+        ])
+    }
+
     func testHermesSimpleFilesOutputRendersAsList() {
         let output = #"{"total_count":3,"files":["/tmp/a.json","/tmp/b.json","/tmp/c.json"],"truncated":true}"#
         let event = makeEvent(kind: .tool_result,
