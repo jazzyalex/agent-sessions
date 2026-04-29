@@ -3,18 +3,30 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6.6</title>
-            <pubDate>Wed, 29 Apr 2026 16:08:30 -0700</pubDate>
+            <title>3.6.7</title>
+            <pubDate>Wed, 29 Apr 2026 16:55:08 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6.6</h2>
+<h2>What&#x27;s New in 3.6.7</h2>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Menu bar: Preferences changes now update the status item immediately without requiring relaunch.</li>
+<li>Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li>Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.</li>
+<li>Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.</li>
+<li>Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/&lt;project&gt;/chats/session-*.jsonl`.</li>
+<li>Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.</li>
+</ul>
 <h3>Improvements</h3>
 <ul>
-<li>Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.</li>
-<li>Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.</li>
+<li>Menu bar: Agent Cockpit and Agent Sessions commands now switch between Open and Hide based on window visibility.</li>
+<li>Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.</li>
 <li>Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.</li>
 <li>Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.</li>
 <li>Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.</li>
-<li>Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/&lt;project&gt;/chats/session-*.jsonl`.</li>
+<li>Monitoring: Updated agent format checks for Claude 2.1.123 metadata, Gemini 0.40 JSONL sessions, Copilot 1.0.39 `system.message`, OpenCode 1.14.29, and OpenClaw 2026.4.26.</li>
 </ul>
 <h3>Reminder: What You Got in 3.6</h3>
 <ul>
@@ -23,12 +35,12 @@
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.6</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.7">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.7</a></p>
             ]]></description>
-            <sparkle:version>42</sparkle:version>
-            <sparkle:shortVersionString>3.6.6</sparkle:shortVersionString>
+            <sparkle:version>43</sparkle:version>
+            <sparkle:shortVersionString>3.6.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.6/AgentSessions-3.6.6.dmg" length="17102381" type="application/octet-stream" sparkle:edSignature="wQp6yJxR004b/eZEhOcKYKQoE69sUaIC9Zru16Pu5EdGIDaIGhUz1X2L33lQqYlkTA2RXym/PX5rx7yzVO/nDw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.7/AgentSessions-3.6.7.dmg" length="17099581" type="application/octet-stream" sparkle:edSignature="LfXQNCju62vcfeS3CYVBdlXqMhPag50KBKsf444dOHkZgu7x05XMD7B0FhnefGtd59hSidHPk1MktGFYjkDaCQ=="/>
         </item>
     </channel>
 </rss>
