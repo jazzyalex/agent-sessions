@@ -173,7 +173,7 @@ final class TranscriptBuilderTests: XCTestCase {
         XCTAssertFalse(txt.contains("success: true\nquery: x"))
     }
 
-    func testUnsupportedResultsPayloadFallsBackToPrettyJSON() throws {
+    func testStringResultsPayloadRendersAsReadableList() throws {
         let output = #"{"success":true,"query":"x","results":["a","b"]}"#
         let events: [SessionEvent] = [
             SessionEvent(id: "e1",
@@ -200,13 +200,15 @@ final class TranscriptBuilderTests: XCTestCase {
                         events: events)
 
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertTrue(txt.contains(#""results" : ["#))
-        XCTAssertTrue(txt.contains(#""a""#))
-        XCTAssertTrue(txt.contains(#""b""#))
-        XCTAssertFalse(txt.contains("results: 2"))
+        XCTAssertTrue(txt.contains("success: true"))
+        XCTAssertTrue(txt.contains("query: x"))
+        XCTAssertTrue(txt.contains("results: 2"))
+        XCTAssertTrue(txt.contains("[1] a"))
+        XCTAssertTrue(txt.contains("[2] b"))
+        XCTAssertFalse(txt.contains(#""results" : ["#))
     }
 
-    func testUnsupportedResultObjectPayloadFallsBackToPrettyJSON() throws {
+    func testSimpleResultObjectPayloadRendersAsReadableRows() throws {
         let output = #"{"success":true,"query":"x","results":[{"path":"/tmp/a","matches":3}]}"#
         let events: [SessionEvent] = [
             SessionEvent(id: "e1",
@@ -233,10 +235,12 @@ final class TranscriptBuilderTests: XCTestCase {
                         events: events)
 
         let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
-        XCTAssertTrue(txt.contains(#""path" : "#))
-        XCTAssertTrue(txt.contains("tmp"))
-        XCTAssertTrue(txt.contains(#""matches" : 3"#))
-        XCTAssertFalse(txt.contains("[1] result"))
+        XCTAssertTrue(txt.contains("success: true"))
+        XCTAssertTrue(txt.contains("query: x"))
+        XCTAssertTrue(txt.contains("results: 1"))
+        XCTAssertTrue(txt.contains("[1] /tmp/a"))
+        XCTAssertTrue(txt.contains("matches: 3"))
+        XCTAssertFalse(txt.contains(#""path" : "#))
     }
 
     func testRawJSONOnlyNestedValueRemainsVisible() throws {

@@ -156,6 +156,64 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         XCTAssertEqual(block?.lines, ["https://github.com/aome510/spotify-player"])
     }
 
+    func testHermesSimpleFilesOutputRendersAsList() {
+        let output = #"{"total_count":3,"files":["/tmp/a.json","/tmp/b.json","/tmp/c.json"],"truncated":true}"#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .hermes)
+        XCTAssertEqual(block?.lines, [
+            "total_count: 3",
+            "files: 3",
+            "",
+            "[1] /tmp/a.json",
+            "",
+            "[2] /tmp/b.json",
+            "",
+            "[3] /tmp/c.json"
+        ])
+    }
+
+    func testHermesMatchObjectsRenderAsReadableRows() {
+        let output = #"{"total_count":2,"matches":[{"path":"/tmp/a.swift","line":12,"content":"let a = 1"},{"path":"/tmp/b.swift","line":20,"content":"let b = 2"}],"truncated":false}"#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .hermes)
+        XCTAssertEqual(block?.lines, [
+            "total_count: 2",
+            "matches: 2",
+            "",
+            "[1] /tmp/a.swift",
+            "line: 12",
+            "content: let a = 1",
+            "",
+            "[2] /tmp/b.swift",
+            "line: 20",
+            "content: let b = 2"
+        ])
+    }
+
+    func testStructuredReviewOutputRendersSimpleArrays() {
+        let output = #"{"passed":true,"security_concerns":[],"logic_errors":[],"suggestions":["Add a UI test."],"summary":"Diff looks safe."}"#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .hermes)
+        XCTAssertEqual(block?.lines, [
+            "summary: Diff looks safe.",
+            "passed: true",
+            "security_concerns: 0",
+            "logic_errors: 0",
+            "suggestions: 1",
+            "",
+            "[1] Add a UI test."
+        ])
+    }
+
     func testGroupKeyFallsBackToRawJSONCallID() {
         let raw = #"{"tool_call_id":"call_123","stdout":"ok"}"#
         let event = SessionEvent(id: "e2",

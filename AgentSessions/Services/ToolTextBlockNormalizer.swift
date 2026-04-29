@@ -898,18 +898,17 @@ enum ToolTextBlockNormalizer {
         appendSimpleLine(key: "success", from: dict, to: &lines)
         appendSimpleLine(key: "query", from: dict, to: &lines)
         appendSimpleLine(key: "target", from: dict, to: &lines)
+        appendSimpleLine(key: "message", from: dict, to: &lines)
+        appendSimpleLine(key: "summary", from: dict, to: &lines)
+        appendSimpleLine(key: "passed", from: dict, to: &lines)
+        appendSimpleLine(key: "total_count", from: dict, to: &lines)
 
         if let rawEntries = dict["entries"] {
-            guard let entries = rawEntries as? [String] else {
+            guard appendReadableArraySection(key: "entries",
+                                             value: rawEntries,
+                                             countOverride: firstInt(for: ["entry_count"], in: dict),
+                                             to: &lines) else {
                 return nil
-            }
-
-            lines.append("entries: \(entries.count)")
-            for (index, entry) in entries.enumerated() {
-                let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                if !lines.isEmpty { lines.append("") }
-                lines.append("[\(index + 1)] \(trimmed)")
             }
 
             let supportedKeys = Set(["success", "target", "entries", "usage", "entry_count", "message"])
@@ -917,47 +916,141 @@ enum ToolTextBlockNormalizer {
             return hasOnlySupportedSummaryKeys && !lines.isEmpty ? lines : nil
         }
 
-        if let rawResults = dict["results"], !(rawResults is [[String: Any]]) {
+        if let rawResults = dict["results"] {
+            guard appendReadableArraySection(key: "results",
+                                             value: rawResults,
+                                             countOverride: firstInt(for: ["count"], in: dict),
+                                             to: &lines) else {
+                return nil
+            }
+            return lines.isEmpty ? nil : lines
+        }
+
+        let collectionKeys = ["matches", "files", "items", "security_concerns", "logic_errors", "suggestions"]
+        var appendedCollection = false
+        for key in collectionKeys {
+            guard let value = dict[key] else { continue }
+            guard appendReadableArraySection(key: key, value: value, to: &lines) else {
+                return nil
+            }
+            appendedCollection = true
+        }
+
+        if appendedCollection {
+            return lines.isEmpty ? nil : lines
+        }
+
+        if containsOutputPayloadKey(dict) {
             return nil
         }
 
-        let results = dict["results"] as? [[String: Any]]
-        if results != nil {
-            appendSimpleLine(key: "count", label: "results", from: dict, to: &lines)
-            if dict["count"] == nil {
-                lines.append("results: \(results?.count ?? 0)")
-            }
-        } else {
-            appendSimpleLine(key: "count", from: dict, to: &lines)
-        }
-
-        guard let results, !results.isEmpty else {
-            let supportedKeys = Set(["success", "query", "target", "count"])
-            let hasOnlySupportedSummaryKeys = dict.keys.allSatisfy { supportedKeys.contains($0) }
-            return hasOnlySupportedSummaryKeys && !lines.isEmpty ? lines : nil
-        }
-        let supportedResultKeys = Set(["session_id", "id", "title", "name", "when", "source", "model", "summary", "content", "text"])
-        guard results.allSatisfy({ result in
-            result.keys.allSatisfy { supportedResultKeys.contains($0) }
-        }) else {
+        let knownMetadataKeys = Set(["success", "query", "target", "message", "summary", "total_count", "entry_count", "count", "truncated", "passed"])
+        guard dict.keys.allSatisfy({ knownMetadataKeys.contains($0) }) else {
             return nil
         }
-        for (index, result) in results.enumerated() {
-            if !lines.isEmpty { lines.append("") }
-            let identifier = firstString(for: ["session_id", "id", "title", "name"], in: result) ?? "result"
-            lines.append("[\(index + 1)] \(identifier)")
-            appendSimpleLine(key: "when", from: result, to: &lines)
-            appendSimpleLine(key: "source", from: result, to: &lines)
-            appendSimpleLine(key: "model", from: result, to: &lines)
-
-            if let summary = firstString(for: ["summary", "content", "text"], in: result),
-               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append("")
-                lines.append(contentsOf: readableMarkdownLines(summary))
-            }
-        }
+        appendSimpleLine(key: "entry_count", from: dict, to: &lines)
+        appendSimpleLine(key: "count", from: dict, to: &lines)
+        appendSimpleLine(key: "truncated", from: dict, to: &lines)
 
         return lines.isEmpty ? nil : lines
+    }
+
+    private static func appendReadableArraySection(key: String,
+                                                   value: Any,
+                                                   countOverride: Int? = nil,
+                                                   to lines: inout [String]) -> Bool {
+        guard let array = value as? [Any] else {
+            return false
+        }
+
+        appendCountLine(key: key, count: countOverride ?? array.count, to: &lines)
+        guard !array.isEmpty else { return true }
+
+        for (index, item) in array.enumerated() {
+            if !lines.isEmpty { lines.append("") }
+
+            if let text = readableScalarText(item) {
+                lines.append("[\(index + 1)] \(text)")
+                continue
+            }
+
+            guard let dict = item as? [String: Any],
+                  isReadableSummaryObject(dict) else {
+                return false
+            }
+
+            let title = summaryObjectTitle(for: dict)
+            lines.append("[\(index + 1)] \(title)")
+
+            for key in summaryObjectDisplayKeys(from: dict) {
+                guard dict[key] != nil else { continue }
+                if let longText = firstString(for: [key], in: dict),
+                   ["summary", "content", "text"].contains(key),
+                   longText.contains("\n") {
+                    lines.append("")
+                    lines.append(contentsOf: readableMarkdownLines(longText))
+                } else {
+                    appendSimpleLine(key: key, from: dict, to: &lines)
+                }
+            }
+        }
+
+        return true
+    }
+
+    private static func appendCountLine(key: String, count: Int, to lines: inout [String]) {
+        let countLine = "\(key): \(count)"
+        if !lines.contains(countLine) {
+            lines.append(countLine)
+        }
+    }
+
+    private static func readableScalarText(_ value: Any) -> String? {
+        if let s = value as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let i = value as? Int { return String(i) }
+        if let d = value as? Double { return String(d) }
+        if let b = value as? Bool { return b ? "true" : "false" }
+        return nil
+    }
+
+    private static func isReadableSummaryObject(_ dict: [String: Any]) -> Bool {
+        dict.values.allSatisfy { value in
+            if readableScalarText(value) != nil { return true }
+            if let arr = value as? [Any] {
+                return arr.isEmpty || arr.allSatisfy { readableScalarText($0) != nil }
+            }
+            return false
+        }
+    }
+
+    private static func summaryObjectTitle(for dict: [String: Any]) -> String {
+        firstString(for: ["session_id", "id", "title", "name", "path", "file", "url"], in: dict) ?? "result"
+    }
+
+    private static func summaryObjectDisplayKeys(from dict: [String: Any]) -> [String] {
+        let titleKeys = Set(["session_id", "id", "title", "name", "path", "file", "url"])
+        let preferred = [
+            "when", "source", "model", "line", "column", "matches", "score",
+            "content", "summary", "text", "message", "status", "error"
+        ]
+        var keys: [String] = []
+        for key in preferred where dict.keys.contains(key) && !titleKeys.contains(key) {
+            keys.append(key)
+        }
+        for key in dict.keys.sorted() where !titleKeys.contains(key) && !keys.contains(key) {
+            keys.append(key)
+        }
+        return keys
+    }
+
+    private static func containsOutputPayloadKey(_ dict: [String: Any]) -> Bool {
+        let outputKeys = ["stdout", "stderr", "output", "result", "content", "text", "toolUseResult"]
+        return dict.keys.contains { key in
+            outputKeys.contains { $0.caseInsensitiveCompare(key) == .orderedSame }
+        }
     }
 
     private static func appendSimpleLine(key: String,
