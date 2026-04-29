@@ -99,26 +99,28 @@ final class OnboardingCoordinatorTests: XCTestCase {
         let fullTour = OnboardingContent.fullTour(for: "3.0")
         let titles = fullTour.screens.map(\.title)
 
-        XCTAssertEqual(titles.count, 5)
+        XCTAssertEqual(titles.count, 6)
         XCTAssertEqual(titles[0], "Sessions Found")
         XCTAssertEqual(titles[1], "Connect Your Agents")
         XCTAssertEqual(titles[2], "Agent Cockpit (Beta)")
-        XCTAssertEqual(titles[3], "Analytics & Usage")
-        XCTAssertEqual(titles[4], "Feedback & Community Support")
+        XCTAssertEqual(titles[3], "Power Tips")
+        XCTAssertEqual(titles[4], "Analytics & Usage")
+        XCTAssertEqual(titles[5], "Feedback & Community Support")
     }
 
-    func testReleaseThreeUpdateCatalogHasThreeScreenTour() {
+    func testReleaseThreeUpdateCatalogHasFourScreenTour() {
         let updateTour = OnboardingContent.updateTour(for: "3.0")
 
         XCTAssertEqual(updateTour?.kind, .updateTour)
         // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
-        XCTAssertEqual(updateTour?.screens.count, 3)
+        XCTAssertEqual(updateTour?.screens.count, 4)
         XCTAssertEqual(updateTour?.screens.first?.title, "Agent Cockpit (Beta)")
-        XCTAssertEqual(updateTour?.screens[1].title, "Feedback & Community Support")
+        XCTAssertEqual(updateTour?.screens[1].title, "Power Tips")
+        XCTAssertEqual(updateTour?.screens[2].title, "Feedback & Community Support")
         XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
     }
 
-    func testCheckAndPresentIfNeededForReleaseThreeShowsThreeScreenUpdateTour() async {
+    func testCheckAndPresentIfNeededForReleaseThreeShowsFourScreenUpdateTour() async {
         let suite = "OnboardingCoordinatorTests.release3Update"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
@@ -138,15 +140,16 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertTrue(result.isPresented)
         XCTAssertEqual(result.kind, .updateTour)
         // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
-        XCTAssertEqual(result.screens, 3)
+        XCTAssertEqual(result.screens, 4)
     }
 
     func testFallbackUpdateTourLeadsWithCockpit() {
         let fallback = OnboardingContent.fallbackUpdateTour(for: "9.9")
 
         XCTAssertEqual(fallback.kind, .updateTour)
-        XCTAssertEqual(fallback.screens.count, 2)
+        XCTAssertEqual(fallback.screens.count, 3)
         XCTAssertEqual(fallback.screens.first?.title, "Agent Cockpit (Beta)")
+        XCTAssertEqual(fallback.screens[1].title, "Power Tips")
         XCTAssertEqual(fallback.screens.last?.title, "Feedback & Community Support")
     }
 

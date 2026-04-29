@@ -55,9 +55,9 @@ struct OnboardingSheetView: View {
     private var slides: [OnboardingSlide] {
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .agentCockpit, .analyticsUsage, .feedbackSupport]
+            return [.sessionsFound, .connectAgents, .agentCockpit, .powerTips, .analyticsUsage, .feedbackSupport]
         case .updateTour:
-            return [.agentCockpit, .feedbackSupport]
+            return [.agentCockpit, .powerTips, .feedbackSupport]
         }
     }
     private var isFirst: Bool { slideIndex == 0 }
@@ -142,6 +142,8 @@ struct OnboardingSheetView: View {
                 connectAgentsSlide
             case .agentCockpit:
                 agentCockpitSlide
+            case .powerTips:
+                powerTipsSlide
             case .workWithSessions:
                 workWithSessionsSlide
             case .analyticsUsage:
@@ -163,6 +165,41 @@ struct OnboardingSheetView: View {
             insertion: .opacity.combined(with: .offset(x: isForward ? 28 : -28)),
             removal: .opacity.combined(with: .offset(x: isForward ? -28 : 28))
         )
+    }
+
+    private var powerTipsSlide: some View {
+        VStack(spacing: 18) {
+            SlideHeader(
+                palette: palette,
+                icon: .symbol("lightbulb.max"),
+                iconGradient: palette.iconGradientPurple,
+                title: "Power Tips",
+                subtitle: "A couple of useful settings are easy to miss"
+            )
+
+            VStack(spacing: 12) {
+                FeatureRow(
+                    palette: palette,
+                    icon: "dock.rectangle",
+                    iconColor: palette.accentPurple,
+                    title: "Hide the Dock icon",
+                    description: "Turn on Settings → Advanced → Hide Dock icon. Agent Sessions keeps the menu bar item enabled so the app remains reachable."
+                )
+
+                FeatureRow(
+                    palette: palette,
+                    icon: "sparkles.tv",
+                    iconColor: palette.accentBlue,
+                    title: "Use Agent Cockpit",
+                    description: "Open View → Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+                )
+            }
+
+            TipBox(
+                text: "Both tips are optional. They are useful when you keep Agent Sessions running while agents work in terminal tabs.",
+                palette: palette
+            )
+        }
     }
 
     private var sessionsFoundSlide: some View {
@@ -793,6 +830,7 @@ private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
     case agentCockpit
+    case powerTips
     case workWithSessions
     case analyticsUsage
     case feedbackSupport

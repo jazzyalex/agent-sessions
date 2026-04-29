@@ -138,6 +138,7 @@ extension OnboardingContent {
                 title: "Agent Cockpit (Beta)",
                 body: "Open a live HUD for active sessions in iTerm2. Beta scope currently covers Codex CLI, Claude Code, and OpenCode."
             ),
+            powerTipsScreen(),
             Screen(
                 symbolName: "chart.bar.xaxis",
                 title: "Analytics & Usage",
@@ -183,11 +184,24 @@ extension OnboardingContent {
                 title: "Agent Cockpit (Beta)",
                 body: "Live session HUD for iTerm2, currently scoped to Codex CLI, Claude Code, and OpenCode."
             ),
+            powerTipsScreen(),
             Screen(
                 symbolName: "heart.text.square",
                 title: "Feedback & Community Support",
                 body: "Share feedback in the Google Form, star the GitHub repository, and support ongoing development via GitHub Sponsors or Buy Me a Coffee."
             )
         ]
+    }
+
+    private static func powerTipsScreen() -> Screen {
+        Screen(
+            symbolName: "lightbulb.max",
+            title: "Power Tips",
+            body: "A couple of useful settings are easy to miss.",
+            bullets: [
+                "Hide the Dock icon from Settings > Advanced. Agent Sessions keeps the menu bar item enabled so the app remains reachable.",
+                "Open Agent Cockpit from View > Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+            ]
+        )
     }
 }

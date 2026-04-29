@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.
 - Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
 - Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
 - Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
