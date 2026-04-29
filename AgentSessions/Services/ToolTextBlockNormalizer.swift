@@ -978,10 +978,12 @@ enum ToolTextBlockNormalizer {
         appendSimpleLine(key: "success", from: dict, to: &lines)
         appendSimpleLine(key: "query", from: dict, to: &lines)
         appendSimpleLine(key: "target", from: dict, to: &lines)
+        appendSimpleLine(key: "error", from: dict, to: &lines)
         appendSimpleLine(key: "message", from: dict, to: &lines)
         appendSimpleLine(key: "summary", from: dict, to: &lines)
         appendSimpleLine(key: "passed", from: dict, to: &lines)
         appendSimpleLine(key: "total_count", from: dict, to: &lines)
+        appendSimpleLine(key: "hint", from: dict, to: &lines)
 
         if let rawEntries = dict["entries"] {
             guard appendReadableArraySection(key: "entries",
@@ -1016,7 +1018,7 @@ enum ToolTextBlockNormalizer {
             return lines.isEmpty ? nil : lines
         }
 
-        let collectionKeys = ["files", "items", "security_concerns", "logic_errors", "suggestions"]
+        let collectionKeys = ["files", "items", "available_skills", "security_concerns", "logic_errors", "suggestions"]
         var appendedCollection = false
         for key in collectionKeys {
             guard let value = dict[key] else { continue }
@@ -1034,7 +1036,7 @@ enum ToolTextBlockNormalizer {
             return nil
         }
 
-        let knownMetadataKeys = Set(["success", "query", "target", "message", "summary", "total_count", "entry_count", "count", "truncated", "passed"])
+        let knownMetadataKeys = Set(["success", "query", "target", "error", "message", "summary", "total_count", "entry_count", "count", "truncated", "passed", "hint"])
         guard dict.keys.allSatisfy({ knownMetadataKeys.contains($0) }) else {
             return nil
         }
@@ -1152,8 +1154,16 @@ enum ToolTextBlockNormalizer {
         }
 
         var output = lines
+        let trailingLines = splitAndTrimTrailingEmptyLines(trailingText).filter { trailingLine in
+            let trimmed = trailingLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return true }
+            return !output.contains { existing in
+                existing == trimmed || existing.hasSuffix(": \(trimmed)")
+            }
+        }
+        guard !trailingLines.isEmpty else { return output }
         if !output.isEmpty { output.append("") }
-        output.append(contentsOf: splitAndTrimTrailingEmptyLines(trailingText))
+        output.append(contentsOf: trailingLines)
         return output
     }
 

@@ -232,6 +232,33 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         ])
     }
 
+    func testStructuredErrorEnvelopeRendersReadablyAcrossAgents() {
+        let output = """
+        {"success":false,"error":"Skill 'autonomous-ai-agents:hermes-agent' not found.","available_skills":["apple-reminders","imessage","findmy"],"hint":"Use skills_list to see all available skills"}
+        Skill 'autonomous-ai-agents:hermes-agent' not found.
+        """
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
+        XCTAssertEqual(block?.lines, [
+            "success: false",
+            "error: Skill 'autonomous-ai-agents:hermes-agent' not found.",
+            "hint: Use skills_list to see all available skills",
+            "available_skills: 3",
+            "",
+            "[1] apple-reminders",
+            "",
+            "[2] imessage",
+            "",
+            "[3] findmy"
+        ])
+        let rendered = block?.lines.joined(separator: "\n") ?? ""
+        XCTAssertFalse(rendered.contains(#""available_skills""#))
+        XCTAssertEqual(rendered.components(separatedBy: "Skill 'autonomous-ai-agents:hermes-agent' not found.").count, 2)
+    }
+
     func testHermesSimpleFilesOutputRendersAsList() {
         let output = #"{"total_count":3,"files":["/tmp/a.json","/tmp/b.json","/tmp/c.json"],"truncated":true}"#
         let event = makeEvent(kind: .tool_result,
