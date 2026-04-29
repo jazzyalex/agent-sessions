@@ -2018,7 +2018,7 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
         let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
-        let codexSurfaceLabel: String? = Self.codexSurfaceLabel(for: session)
+        let codexSurfacePill: CodexSurfacePill? = Self.codexSurfacePill(for: session)
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -2047,15 +2047,15 @@ struct UnifiedSessionsView: View {
             Text(label)
                 .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
                 .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
-            if let codexSurfaceLabel {
-                Text(codexSurfaceLabel)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            if let codexSurfacePill {
+                Text(codexSurfacePill.label)
+                    .font(codexSurfacePill.font)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
                     .background(Color.secondary.opacity(0.12))
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.85) : Color.secondary)
+                    .foregroundStyle(codexSurfacePill.foreground(isSelected: isSelected))
                     .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .accessibilityLabel("Codex \(codexSurfaceLabel)")
+                    .accessibilityLabel("Codex \(codexSurfacePill.accessibilityLabel)")
             }
             Spacer(minLength: 4)
         }
@@ -2063,36 +2063,68 @@ struct UnifiedSessionsView: View {
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
     }
 
-    private static func codexSurfaceLabel(for session: Session) -> String? {
+    private static func codexSurfacePill(for session: Session) -> CodexSurfacePill? {
         guard session.source == .codex else { return nil }
         switch session.codexSurface {
         case .desktop:
-            return "desk"
+            return .desktop(isArchived: isCodexArchived(session))
         case .vscode:
-            return "vsc"
+            return .standard(label: "vsc", accessibilityLabel: "VS Code")
         case .cli:
-            return "cli"
+            return .standard(label: "cli", accessibilityLabel: "CLI")
         case .subagent:
-            return codexOriginatorSurfaceLabel(for: session)
+            return codexOriginatorSurfacePill(for: session)
         case .other, .unknown, .none:
-            return session.isSubagent ? nil : "cli"
+            return session.isSubagent ? nil : .standard(label: "cli", accessibilityLabel: "CLI")
         }
     }
 
-    private static func codexOriginatorSurfaceLabel(for session: Session) -> String? {
+    private static func codexOriginatorSurfacePill(for session: Session) -> CodexSurfacePill? {
         let originator = session.codexOriginator?.lowercased()
         if originator == "codex desktop" ||
             originator?.contains("desktop") == true ||
             originator?.contains("app") == true {
-            return "desk"
+            return .desktop(isArchived: isCodexArchived(session))
         }
         if originator == "codex_vscode" {
-            return "vsc"
+            return .standard(label: "vsc", accessibilityLabel: "VS Code")
         }
         if originator == "codex_cli_rs" || originator == "codex-tui" {
-            return "cli"
+            return .standard(label: "cli", accessibilityLabel: "CLI")
         }
         return nil
+    }
+
+    private static func isCodexArchived(_ session: Session) -> Bool {
+        guard session.source == .codex else { return false }
+        return URL(fileURLWithPath: session.filePath).pathComponents.contains("archived_sessions")
+    }
+
+    private struct CodexSurfacePill {
+        let label: String
+        let accessibilityLabel: String
+        let isItalic: Bool
+
+        static func desktop(isArchived: Bool) -> CodexSurfacePill {
+            CodexSurfacePill(
+                label: "desk",
+                accessibilityLabel: isArchived ? "Desktop app archived" : "Desktop app",
+                isItalic: isArchived
+            )
+        }
+
+        static func standard(label: String, accessibilityLabel: String) -> CodexSurfacePill {
+            CodexSurfacePill(label: label, accessibilityLabel: accessibilityLabel, isItalic: false)
+        }
+
+        func foreground(isSelected: Bool) -> Color {
+            return isSelected ? Color.white.opacity(0.85) : Color.secondary
+        }
+
+        var font: Font {
+            let base = Font.system(size: 10, weight: .semibold, design: .monospaced)
+            return isItalic ? base.italic() : base
+        }
     }
 
     private struct TerminalFocusAvailability {
