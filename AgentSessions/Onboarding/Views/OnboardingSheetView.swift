@@ -44,6 +44,7 @@ struct OnboardingSheetView: View {
     @State private var indexedSessionsSnapshot: [SessionSource: [Session]] = [:]
     @State private var cachedSessionCounts: [SessionSource: (total: Int, visible: Int)] = [:]
     @State private var didLoadIndexedSessionsSnapshot: Bool = false
+    @State private var powerTipsReturnSlideIndex: Int?
     @StateObject private var agentAvailabilityModel = OnboardingAgentAvailabilityModel()
 
     private let onboardingFeedbackFormURL = URL(string: "https://docs.google.com/forms/d/1SSILAAn0RYmjhWDfJwc5BqpAIunhrJN1SAvy_OzhdaA/viewform")
@@ -52,12 +53,29 @@ struct OnboardingSheetView: View {
     private let buyMeCoffeeURL = URL(string: "https://buymeacoffee.com/jazzyalexd")
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
+    private var isBrowsingPowerTipsFromOnboarding: Bool { powerTipsReturnSlideIndex != nil }
+    private var powerTipScreens: [OnboardingContent.Screen] {
+        if content.kind == .powerTips || isBrowsingPowerTipsFromOnboarding {
+            return OnboardingContent.powerTipsTour(for: content.versionMajorMinor).screens
+        }
+        if let embedded = content.screens.first(where: { $0.title == "Power Tips" }) {
+            return [embedded]
+        }
+        return [OnboardingContent.primaryPowerTipsScreen()]
+    }
+
     private var slides: [OnboardingSlide] {
+        if isBrowsingPowerTipsFromOnboarding {
+            return powerTipScreens.indices.map { .powerTips($0) }
+        }
+
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .agentCockpit, .powerTips, .analyticsUsage, .feedbackSupport]
+            return [.sessionsFound, .connectAgents, .agentCockpit, .powerTips(0), .analyticsUsage, .feedbackSupport]
         case .updateTour:
-            return [.agentCockpit, .powerTips, .feedbackSupport]
+            return [.powerTips(0), .agentCockpit, .feedbackSupport]
+        case .powerTips:
+            return powerTipScreens.indices.map { .powerTips($0) }
         }
     }
     private var isFirst: Bool { slideIndex == 0 }
@@ -123,9 +141,11 @@ struct OnboardingSheetView: View {
         .onChange(of: hasCommandsOnlyPref) { _, _ in handleSessionDataUpdate() }
         .onChange(of: showSystemProbeSessions) { _, _ in handleSessionDataUpdate() }
         .onChange(of: content.versionMajorMinor) { _, _ in
+            powerTipsReturnSlideIndex = nil
             slideIndex = 0
         }
         .onChange(of: content.kind) { _, _ in
+            powerTipsReturnSlideIndex = nil
             slideIndex = 0
         }
         .onChange(of: slideIndex) { _, _ in
@@ -142,8 +162,8 @@ struct OnboardingSheetView: View {
                 connectAgentsSlide
             case .agentCockpit:
                 agentCockpitSlide
-            case .powerTips:
-                powerTipsSlide
+            case .powerTips(let index):
+                powerTipsSlide(index: index)
             case .workWithSessions:
                 workWithSessionsSlide
             case .analyticsUsage:
@@ -167,39 +187,60 @@ struct OnboardingSheetView: View {
         )
     }
 
-    private var powerTipsSlide: some View {
-        VStack(spacing: 18) {
+    private func powerTipsSlide(index: Int) -> some View {
+        let screens = powerTipScreens
+        let screen = screens.indices.contains(index) ? screens[index] : screens[0]
+        let tips = screen.bullets.map(splitPowerTip)
+
+        return VStack(spacing: 18) {
             SlideHeader(
                 palette: palette,
-                icon: .symbol("lightbulb.max"),
+                icon: .symbol(screen.symbolName),
                 iconGradient: palette.iconGradientPurple,
-                title: "Power Tips",
-                subtitle: "A couple of useful settings are easy to miss"
+                title: screen.title,
+                subtitle: screen.body
             )
 
             VStack(spacing: 12) {
-                FeatureRow(
-                    palette: palette,
-                    icon: "dock.rectangle",
-                    iconColor: palette.accentPurple,
-                    title: "Hide the Dock icon",
-                    description: "Turn on Settings → Advanced → Hide Dock icon. Agent Sessions keeps the menu bar item enabled so the app remains reachable."
-                )
-
-                FeatureRow(
-                    palette: palette,
-                    icon: "sparkles.tv",
-                    iconColor: palette.accentBlue,
-                    title: "Use Agent Cockpit",
-                    description: "Open View → Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
-                )
+                ForEach(Array(tips.enumerated()), id: \.offset) { offset, tip in
+                    FeatureRow(
+                        palette: palette,
+                        icon: offset == 0 ? "1.circle.fill" : "2.circle.fill",
+                        iconColor: offset == 0 ? palette.accentPurple : palette.accentBlue,
+                        title: tip.title,
+                        description: tip.description
+                    )
+                }
             }
 
             TipBox(
-                text: "Both tips are optional. They are useful when you keep Agent Sessions running while agents work in terminal tabs.",
+                text: content.kind == .powerTips
+                    ? "Use Back and Next to move through the Power Tips tour."
+                    : isBrowsingPowerTipsFromOnboarding
+                        ? "Use Back and Next to move through the Power Tips tour, then return to onboarding."
+                    : content.kind == .fullTour
+                        ? "Open the full Power Tips tour here, or return to it anytime from Help → Power Tips after onboarding."
+                        : "More tips are available anytime from Help → Power Tips.",
                 palette: palette
             )
+
+            if content.kind == .fullTour && !isBrowsingPowerTipsFromOnboarding {
+                Button("Open Full Power Tips") {
+                    openPowerTipsCatalogFromOnboarding()
+                }
+                .buttonStyle(OnboardingSecondaryButtonStyle(palette: palette))
+                .help("Open the full multi-slide Power Tips tour, then return to onboarding")
+            }
         }
+    }
+
+    private func splitPowerTip(_ text: String) -> (title: String, description: String) {
+        guard let separator = text.firstIndex(of: ":") else {
+            return ("Tip", text)
+        }
+        let title = String(text[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = String(text[text.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (title, description)
     }
 
     private var sessionsFoundSlide: some View {
@@ -461,12 +502,16 @@ struct OnboardingSheetView: View {
 
     private var footer: some View {
         HStack(alignment: .center) {
-            Button("Later") {
-                coordinator.skip()
+            Button(isBrowsingPowerTipsFromOnboarding ? "Back to Onboarding" : "Later") {
+                if isBrowsingPowerTipsFromOnboarding {
+                    closePowerTipsCatalogToOnboarding()
+                } else {
+                    coordinator.skip()
+                }
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Reopen from Help → Show Onboarding")
+            .help(isBrowsingPowerTipsFromOnboarding ? "Return to the onboarding tour" : "Reopen from Help → Show Onboarding")
 
             Spacer()
 
@@ -499,7 +544,11 @@ struct OnboardingSheetView: View {
 
                 Button(isLast ? lastSlideButtonLabel : "Next") {
                     if isLast {
-                        coordinator.complete()
+                        if isBrowsingPowerTipsFromOnboarding {
+                            closePowerTipsCatalogToOnboarding()
+                        } else {
+                            coordinator.complete()
+                        }
                     } else {
                         goToSlide(min(slides.count - 1, slideIndex + 1))
                     }
@@ -511,11 +560,30 @@ struct OnboardingSheetView: View {
     }
 
     private var lastSlideButtonLabel: String {
+        if isBrowsingPowerTipsFromOnboarding {
+            return "Back to Onboarding"
+        }
         switch slides.last {
         case .analyticsUsage: return "Start Exploring"
         case .feedbackSupport: return "Get Started"
+        case .powerTips: return "Done"
         default: return "Get Started"
         }
+    }
+
+    private func openPowerTipsCatalogFromOnboarding() {
+        powerTipsReturnSlideIndex = slideIndex
+        isForward = true
+        slideIndex = 0
+        triggerSlideAppear()
+    }
+
+    private func closePowerTipsCatalogToOnboarding() {
+        let target = powerTipsReturnSlideIndex ?? 0
+        powerTipsReturnSlideIndex = nil
+        isForward = false
+        slideIndex = min(target, slides.count - 1)
+        triggerSlideAppear()
     }
 
     private func goToSlide(_ index: Int) {
@@ -830,7 +898,7 @@ private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
     case agentCockpit
-    case powerTips
+    case powerTips(Int)
     case workWithSessions
     case analyticsUsage
     case feedbackSupport

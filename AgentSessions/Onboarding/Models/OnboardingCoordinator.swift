@@ -38,6 +38,11 @@ final class OnboardingCoordinator: ObservableObject {
         present(kind: .fullTour, majorMinor: majorMinor)
     }
 
+    func presentPowerTips() {
+        guard let majorMinor = currentMajorMinorProvider() else { return }
+        present(kind: .powerTips, majorMinor: majorMinor)
+    }
+
     func skip() {
         recordActionAndDismiss()
     }
@@ -72,13 +77,17 @@ final class OnboardingCoordinator: ObservableObject {
             content = OnboardingContent.fullTour(for: majorMinor)
         case .updateTour:
             content = OnboardingContent.updateTour(for: majorMinor) ?? OnboardingContent.fallbackUpdateTour(for: majorMinor)
+        case .powerTips:
+            content = OnboardingContent.powerTipsTour(for: majorMinor)
         }
         isPresented = true
     }
 
     private func recordActionAndDismiss() {
         if let majorMinor = content?.versionMajorMinor {
-            defaults.onboardingLastActionMajorMinor = majorMinor
+            if content?.kind == .fullTour || content?.kind == .updateTour {
+                defaults.onboardingLastActionMajorMinor = majorMinor
+            }
 
             if content?.kind == .fullTour {
                 defaults.onboardingFullTourCompleted = true

@@ -108,14 +108,25 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(titles[5], "Feedback & Community Support")
     }
 
-    func testReleaseThreeUpdateCatalogHasFourScreenTour() {
+    func testFullTourUsesPrimaryPowerTips() {
+        let fullTour = OnboardingContent.fullTour(for: "3.0")
+        let powerTips = fullTour.screens.first { $0.title == "Power Tips" }
+
+        XCTAssertEqual(powerTips?.bullets.count, 2)
+        XCTAssertTrue(powerTips?.bullets.first?.hasPrefix("Hide the Dock icon:") == true)
+        XCTAssertTrue(powerTips?.bullets.last?.hasPrefix("Use Agent Cockpit:") == true)
+    }
+
+    func testReleaseThreeUpdateCatalogStartsWithPowerTips() {
         let updateTour = OnboardingContent.updateTour(for: "3.0")
 
         XCTAssertEqual(updateTour?.kind, .updateTour)
         // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
         XCTAssertEqual(updateTour?.screens.count, 4)
-        XCTAssertEqual(updateTour?.screens.first?.title, "Agent Cockpit (Beta)")
-        XCTAssertEqual(updateTour?.screens[1].title, "Power Tips")
+        XCTAssertEqual(updateTour?.screens.first?.title, "Power Tips")
+        XCTAssertEqual(updateTour?.screens.first?.body, "Two quick tips from Agent Sessions.")
+        XCTAssertEqual(updateTour?.screens.first?.bullets.count, 2)
+        XCTAssertEqual(updateTour?.screens[1].title, "Agent Cockpit (Beta)")
         XCTAssertEqual(updateTour?.screens[2].title, "Feedback & Community Support")
         XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
     }
@@ -143,14 +154,45 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(result.screens, 4)
     }
 
-    func testFallbackUpdateTourLeadsWithCockpit() {
+    func testFallbackUpdateTourStartsWithPowerTips() {
         let fallback = OnboardingContent.fallbackUpdateTour(for: "9.9")
 
         XCTAssertEqual(fallback.kind, .updateTour)
         XCTAssertEqual(fallback.screens.count, 3)
-        XCTAssertEqual(fallback.screens.first?.title, "Agent Cockpit (Beta)")
-        XCTAssertEqual(fallback.screens[1].title, "Power Tips")
+        XCTAssertEqual(fallback.screens.first?.title, "Power Tips")
+        XCTAssertEqual(fallback.screens.first?.body, "Two quick tips from Agent Sessions.")
+        XCTAssertEqual(fallback.screens.first?.bullets.count, 2)
+        XCTAssertEqual(fallback.screens[1].title, "Agent Cockpit (Beta)")
         XCTAssertEqual(fallback.screens.last?.title, "Feedback & Community Support")
+    }
+
+    func testPowerTipsTourContainsAllTipSlides() {
+        let tour = OnboardingContent.powerTipsTour(for: "3.0")
+
+        XCTAssertEqual(tour.kind, .powerTips)
+        XCTAssertEqual(tour.screens.count, 13)
+        XCTAssertEqual(tour.screens.first?.title, "Power Tips")
+        XCTAssertEqual(tour.screens.last?.title, "Quick Navigation")
+        XCTAssertTrue(tour.screens.allSatisfy { $0.bullets.count == 2 })
+    }
+
+    func testPowerTipsDismissDoesNotRecordOnboardingCompletion() async {
+        let suite = "OnboardingCoordinatorTests.powerTips"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        await MainActor.run {
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "3.0" },
+                isFreshInstallProvider: { false }
+            )
+            coordinator.presentPowerTips()
+            coordinator.complete()
+        }
+
+        XCTAssertNil(defaults.onboardingLastActionMajorMinor)
+        XCTAssertFalse(defaults.onboardingFullTourCompleted)
     }
 
     func testSkipRecordsVersionAndDismisses() async {

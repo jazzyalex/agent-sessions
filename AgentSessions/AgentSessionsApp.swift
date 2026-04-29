@@ -7,6 +7,7 @@ extension Notification.Name {
     static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
+    static let showPowerTipsFromMenu = Notification.Name("AgentSessionsShowPowerTipsFromMenu")
     static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
@@ -309,6 +310,9 @@ struct AgentSessionsApp: App {
         .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
             onboardingCoordinator.presentManually()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showPowerTipsFromMenu)) { _ in
+            onboardingCoordinator.presentPowerTips()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .requestCoreIndexRebuild)) { _ in
             unified.rebuildCoreIndex()
         }
@@ -382,6 +386,10 @@ struct AgentSessionsApp: App {
                     .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)
             }
             CommandGroup(after: .help) {
+                Button("Power Tips") {
+                    NotificationCenter.default.post(name: .showPowerTipsFromMenu, object: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
                 Button("Show Onboarding") {
                     NotificationCenter.default.post(name: .showOnboardingFromMenu, object: nil)
                     NSApp.activate(ignoringOtherApps: true)
