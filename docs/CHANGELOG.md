@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.6.6] - 2026-04-29
 - Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.
 - Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.
 - Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
