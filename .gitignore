@@ -41,6 +41,7 @@ fastlane/test_output
 # Internal reviews (local git only)
 docs/Sonnet-4.5-review.md
 docs/social/agent-sessions-outreach/
+.codex/
 .venv/
 
 # Claude AI local settings
