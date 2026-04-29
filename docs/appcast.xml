@@ -3,18 +3,18 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.6.5</title>
-            <pubDate>Tue, 28 Apr 2026 14:21:35 -0700</pubDate>
+            <title>3.6.6</title>
+            <pubDate>Wed, 29 Apr 2026 16:08:30 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.6.5</h2>
+<h2>What&#x27;s New in 3.6.6</h2>
 <h3>Improvements</h3>
 <ul>
-<li>Indexing: Launch and manual session refreshes now use the interactive indexing profile instead of the active-window capped profile, avoiding slow full catch-up scans after an index reset.</li>
-<li>Codex: Subagent session pills now show provider-reported reasoning effort in their hover tooltip when Codex records `turn_context.payload.effort`.</li>
-<li>Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.</li>
-<li>Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.</li>
-<li>Codex: VS Code-surface sessions no longer offer Codex CLI resume commands when they cannot hydrate useful CLI content.</li>
-<li>Codex: Desktop-originated Codex subagent rows now keep the `desk` Agent-column badge while showing the subagent marker in the session title.</li>
+<li>Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.</li>
+<li>Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.</li>
+<li>Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.</li>
+<li>Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.</li>
+<li>Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.</li>
+<li>Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/&lt;project&gt;/chats/session-*.jsonl`.</li>
 </ul>
 <h3>Reminder: What You Got in 3.6</h3>
 <ul>
@@ -23,12 +23,12 @@
 <li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
 <li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.5</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.6.6</a></p>
             ]]></description>
-            <sparkle:version>41</sparkle:version>
-            <sparkle:shortVersionString>3.6.5</sparkle:shortVersionString>
+            <sparkle:version>42</sparkle:version>
+            <sparkle:shortVersionString>3.6.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.5/AgentSessions-3.6.5.dmg" length="16958521" type="application/octet-stream" sparkle:edSignature="9TWEGDCGRti5ODpaAlnNGuIr/PGHiKIP+KqHXRdjzQwxeRskrkT74KeXjUaYOSgeN7gfjIsbcKBhWJgL6fD7DQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.6/AgentSessions-3.6.6.dmg" length="17102381" type="application/octet-stream" sparkle:edSignature="wQp6yJxR004b/eZEhOcKYKQoE69sUaIC9Zru16Pu5EdGIDaIGhUz1X2L33lQqYlkTA2RXym/PX5rx7yzVO/nDw=="/>
         </item>
     </channel>
 </rss>
