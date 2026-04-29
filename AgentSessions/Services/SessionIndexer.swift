@@ -474,10 +474,20 @@ final class SessionIndexer: ObservableObject {
                         self.allSessions = updated
                         DBG("✅ Reloaded: \(filename) events=\(merged.events.count) nonMeta=\(merged.nonMetaCount) msgCount=\(merged.messageCount)")
 
-                        // Update transcript cache for accurate search
+                        // Keep first-paint responsive; selection loads should not compete
+                        // with the terminal renderer for the same transcript text.
                         let cache = self.transcriptCache
                         cache.remove(merged.id)
+                        let cacheSourceStat = postParseStat ?? preParseStat
                         Task.detached(priority: .utility) {
+                            if reason == .selection {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                if let cacheSourceStat,
+                                   Self.fileStat(for: URL(fileURLWithPath: merged.filePath)) != cacheSourceStat {
+                                    return
+                                }
+                            }
+                            guard !Task.isCancelled else { return }
                             let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                             let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
                                 session: merged,

@@ -404,6 +404,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
                 guard let resolvedSession = resolvedSessionForRender(id: id) else { return }
                 transcriptTrace("task rebuild id=\(id) events=\(resolvedSession.events.count) eventCount=\(resolvedSession.eventCount)")
+                lastResolvedSession = resolvedSession
+                guard viewMode != .terminal else { return }
                 rebuild(session: resolvedSession)
             }
             .onChange(of: viewModeRaw) { _, _ in

@@ -27,7 +27,18 @@ struct TranscriptLinkifier {
         try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_./\-\(\)])([A-Za-z0-9_./\-\(\) +]+)#L(\d+)(?:-L?(\d+))?\b"#)
     ]
 
+    static func mightContainFileLink(in text: String) -> Bool {
+        if containsColonLineReference(in: text) {
+            return true
+        }
+        if text.contains("#L") || text.contains("line ") {
+            return containsPathLikeToken(in: text)
+        }
+        return false
+    }
+
     static func matches(in text: String) -> [FileLinkMatch] {
+        guard mightContainFileLink(in: text) else { return [] }
         let nsText = text as NSString
         let full = NSRange(location: 0, length: nsText.length)
         var out: [FileLinkMatch] = []
@@ -128,6 +139,57 @@ struct TranscriptLinkifier {
             return allowedExtensions.contains(ext)
         }
         return allowedExtensionlessBasenames.contains(basename.lowercased())
+    }
+
+    private static func containsColonLineReference(in text: String) -> Bool {
+        var idx = text.startIndex
+        while idx < text.endIndex {
+            guard text[idx] == ":" else {
+                idx = text.index(after: idx)
+                continue
+            }
+
+            let next = text.index(after: idx)
+            guard next < text.endIndex, text[next].isNumber else {
+                idx = next
+                continue
+            }
+
+            if let candidate = pathCandidateBeforeLineMarker(in: text, markerIndex: idx),
+               isAllowedPath(candidate) {
+                return true
+            }
+            idx = next
+        }
+        return false
+    }
+
+    private static func containsPathLikeToken(in text: String) -> Bool {
+        let lower = text.lowercased()
+        for ext in allowedExtensions where lower.contains(".\(ext)") {
+            return true
+        }
+        for basename in allowedExtensionlessBasenames where lower.contains(basename) {
+            return true
+        }
+        return false
+    }
+
+    private static func pathCandidateBeforeLineMarker(in text: String, markerIndex: String.Index) -> String? {
+        guard markerIndex > text.startIndex else { return nil }
+
+        var start = markerIndex
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            let ch = text[previous]
+            if ch.isWhitespace || "\"'`([{<,;".contains(ch) {
+                break
+            }
+            start = previous
+        }
+
+        let raw = String(text[start..<markerIndex])
+        return normalizePathCandidate(raw)?.path
     }
 
     private static func normalizePathCandidate(_ rawPath: String) -> (path: String, leadingTrimUTF16: Int, trailingTrimUTF16: Int)? {

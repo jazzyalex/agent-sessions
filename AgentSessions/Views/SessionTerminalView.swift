@@ -185,7 +185,6 @@ struct SessionTerminalView: View {
     @State private var roleNavScrollToken: Int = 0
     @State private var preambleUserBlockIndexes: Set<Int> = []
     @State private var autoScrollSessionID: String? = nil
-    @State private var lastReportedRenderSessionID: String? = nil
 
     // Derived agent label for legend chips (Codex / Claude / Gemini)
     private var agentLegendLabel: String {
@@ -251,7 +250,6 @@ struct SessionTerminalView: View {
             autoScrollSessionID = nil
             imageHighlightLineID = nil
             selectedInlineImageUserBlockIndex = nil
-            lastReportedRenderSessionID = nil
             rebuildLines(priority: .userInitiated)
             refreshInlineImages()
         }
@@ -267,7 +265,7 @@ struct SessionTerminalView: View {
             rebuildLines(priority: .userInitiated)
         }
         .onChange(of: transcriptCodeDiffLineNumbersEnabled) { _, _ in
-            fullSnapshot = buildTextSnapshot(lines: lines)
+            refreshSearchSnapshotsIfNeeded()
             refreshVisibleLinesAndMatches()
         }
         .onChange(of: activeRoles) { _, _ in
@@ -550,6 +548,8 @@ struct SessionTerminalView: View {
                     imageHighlightLineID: imageHighlightLineID,
                     imageHighlightToken: imageHighlightToken,
                     onBottomProximityChange: onBottomProximityChange,
+                    renderCompleteSessionID: session.id,
+                    onRenderComplete: onRenderComplete,
                     focusRequestToken: transcriptFocusToken,
                     colorScheme: colorScheme,
                     monochrome: stripMonochrome,
@@ -578,6 +578,13 @@ struct SessionTerminalView: View {
             return
         }
 
+        guard !session.events.isEmpty else {
+            hasInlineImagesInSession = false
+            inlineImagesByUserBlockIndex = [:]
+            inlineImagesSignature = 0
+            return
+        }
+
         guard session.source == .codex
                 || session.source == .claude
                 || session.source == .opencode
@@ -592,8 +599,14 @@ struct SessionTerminalView: View {
 
         let sessionSnapshot = session
         let sessionFileURL = URL(fileURLWithPath: sessionSnapshot.filePath)
+        hasInlineImagesInSession = false
+        inlineImagesByUserBlockIndex = [:]
+        inlineImagesSignature = 0
 
         inlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot, sessionFileURL] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+
             let outcome: (Bool, [Int: [InlineSessionImage]], Int) = { () -> (Bool, [Int: [InlineSessionImage]], Int) in
                 guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return (false, [:], 0) }
 
@@ -1020,8 +1033,7 @@ struct SessionTerminalView: View {
                 lines = result.lines
                 visibleLines = applyLineFilters(result.lines)
                 visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
-                fullSnapshot = buildTextSnapshot(lines: result.lines)
-                visibleSnapshot = buildTextSnapshot(lines: visibleLines)
+                refreshSearchSnapshotsIfNeeded()
                 conversationStartLineID = result.conversationStartLineID
                 preambleUserBlockIndexes = result.preambleUserBlockIndexes
                 userLineIndices = result.userLineIndices
@@ -1035,13 +1047,6 @@ struct SessionTerminalView: View {
                 }
                 if let pending = pendingEventJumpID, jumpToEventID(pending) {
                     pendingEventJumpID = nil
-                }
-
-                if lastReportedRenderSessionID != sessionSnapshot.id {
-                    lastReportedRenderSessionID = sessionSnapshot.id
-                    DispatchQueue.main.async {
-                        onRenderComplete(sessionSnapshot.id)
-                    }
                 }
 
                 if appendOnlyUpdate {
@@ -1099,7 +1104,7 @@ struct SessionTerminalView: View {
     private func refreshVisibleLinesAndMatches() {
         visibleLines = applyLineFilters(lines)
         visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
-        visibleSnapshot = buildTextSnapshot(lines: visibleLines)
+        refreshSearchSnapshotsIfNeeded()
         roleNavPositions = [:]
         semanticNavPositions = [:]
         if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1107,6 +1112,31 @@ struct SessionTerminalView: View {
         }
         if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             recomputeFindMatches(resetIndex: true)
+        }
+    }
+
+    private var hasActiveTextSearch: Bool {
+        !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func refreshSearchSnapshotsIfNeeded() {
+        guard hasActiveTextSearch else {
+            fullSnapshot = .empty
+            visibleSnapshot = .empty
+            return
+        }
+        fullSnapshot = buildTextSnapshot(lines: lines)
+        visibleSnapshot = buildTextSnapshot(lines: visibleLines)
+    }
+
+    private func ensureSearchSnapshots() {
+        guard hasActiveTextSearch else { return }
+        if fullSnapshot.text.isEmpty, !lines.isEmpty {
+            fullSnapshot = buildTextSnapshot(lines: lines)
+        }
+        if visibleSnapshot.text.isEmpty, !visibleLines.isEmpty {
+            visibleSnapshot = buildTextSnapshot(lines: visibleLines)
         }
     }
 
@@ -1144,9 +1174,9 @@ struct SessionTerminalView: View {
                                                        skipAgentsPreamble: Bool,
                                                        enableReviewCards: Bool) -> RebuildResult {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
-        let built = TerminalBuilder.buildLines(for: session, showMeta: false, enableReviewCards: enableReviewCards)
+        let built = TerminalBuilder.buildLines(from: blocks, source: session.source, enableReviewCards: enableReviewCards)
         let startLineID = conversationStartLineIDIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
-        let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session)
+        let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session, blocks: blocks)
 
         // Collapse multi-line blocks into single navigable/message entries per role.
         var firstLineForBlock: [Int: Int] = [:]       // blockIndex -> first line id
@@ -1322,12 +1352,12 @@ struct SessionTerminalView: View {
         }
     }
 
-    nonisolated private static func computePreambleUserBlockIndexes(session: Session) -> Set<Int> {
+    nonisolated private static func computePreambleUserBlockIndexes(session: Session,
+                                                                    blocks: [SessionTranscriptBuilder.LogicalBlock]) -> Set<Int> {
         // Only style preamble differently for Codex + Droid, where the "system prompt" is commonly embedded
         // as a user-authored-looking block.
         guard session.source == .codex || session.source == .droid else { return [] }
 
-        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
         var out: Set<Int> = []
         out.reserveCapacity(4)
         for (idx, block) in blocks.enumerated() where block.kind == .user {
@@ -1836,6 +1866,7 @@ struct SessionTerminalView: View {
             return
         }
 
+        ensureSearchSnapshots()
         let visibleRanges = SearchTextMatcher.matchRanges(in: visibleSnapshot.text, query: query)
         let visibleOccurrences = occurrences(from: visibleRanges, in: visibleSnapshot)
         unifiedMatchOccurrences = visibleOccurrences
@@ -1886,6 +1917,7 @@ struct SessionTerminalView: View {
             return
         }
 
+        ensureSearchSnapshots()
         let visibleRanges = SearchTextMatcher.matchRanges(in: visibleSnapshot.text, query: query)
         let visibleOccurrences = occurrences(from: visibleRanges, in: visibleSnapshot)
         findMatchOccurrences = visibleOccurrences
@@ -2723,8 +2755,26 @@ private extension TerminalLineRole {
 
         let cardCornerRadius: CGFloat = 8
         let cardInsetX: CGFloat = 8
+        let visibleCharacterRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let visibleCharacterEnd = NSMaxRange(visibleCharacterRange)
 
-        for block in blocks {
+        var low = 0
+        var high = blocks.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(blocks[mid].range) < visibleCharacterRange.location {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+
+        var blockIndex = low
+        while blockIndex < blocks.count {
+            let block = blocks[blockIndex]
+            if block.range.location > visibleCharacterEnd { break }
+            blockIndex += 1
+
             let blockGlyphs = glyphRange(forCharacterRange: block.range, actualCharacterRange: nil)
             guard NSIntersectionRange(blockGlyphs, glyphsToShow).length > 0 else { continue }
 
@@ -2907,6 +2957,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
     let imageHighlightLineID: Int?
     let imageHighlightToken: Int
     let onBottomProximityChange: (Bool) -> Void
+    let renderCompleteSessionID: String
+    let onRenderComplete: (String) -> Void
     let focusRequestToken: Int
     let colorScheme: ColorScheme
     let monochrome: Bool
@@ -3096,6 +3148,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         var lineRanges: [Int: NSRange] = [:]
         var lineRoles: [Int: TerminalLineRole] = [:]
+        struct LineLinkAttribute {
+            let range: NSRange
+            let payload: String
+        }
+
+        private struct CachedLineLinks {
+            let text: String
+            let sessionCwd: String?
+            let repoRootPath: String?
+            let links: [LineLinkAttribute]
+        }
+
+        private var lineLinkCache: [Int: CachedLineLinks] = [:]
         var lastLinesSignature: Int = 0
         var lastFontSize: CGFloat = 0
         var lastMonochrome: Bool = false
@@ -3110,6 +3175,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var lastRoleNavScrollToken: Int = 0
         var lastFocusRequestToken: Int = 0
         var lastImageHighlightToken: Int = 0
+        var lastRenderCompleteSessionID: String? = nil
         var onBottomProximityChange: ((Bool) -> Void)? = nil
 
         var lastUnifiedFindQuery: String = ""
@@ -3126,6 +3192,38 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         var orderedLineIDs: [Int] = []
         var ideTarget: IDEOpener.Target = .systemDefault
         var ideBinaryOverridePath: String = ""
+
+        func linkAttributes(for line: TerminalLine,
+                            sessionCwd: String?,
+                            repoRootPath: String?) -> [LineLinkAttribute] {
+            if let cached = lineLinkCache[line.id],
+               cached.text == line.text,
+               cached.sessionCwd == sessionCwd,
+               cached.repoRootPath == repoRootPath {
+                return cached.links
+            }
+
+            let links = TranscriptLinkifier.matches(in: line.text).compactMap { match -> LineLinkAttribute? in
+                guard let resolved = TranscriptLinkifier.resolve(path: match.path,
+                                                                 sessionCwd: sessionCwd,
+                                                                 repoRoot: repoRootPath) else {
+                    return nil
+                }
+                let payload = TranscriptLinkifier.linkPayload(path: resolved, line: match.line, column: match.column)
+                return LineLinkAttribute(range: match.range, payload: payload)
+            }
+
+            lineLinkCache[line.id] = CachedLineLinks(text: line.text,
+                                                     sessionCwd: sessionCwd,
+                                                     repoRootPath: repoRootPath,
+                                                     links: links)
+            return links
+        }
+
+        func pruneLinkCache(keepingLineIDs lineIDs: Set<Int>) {
+            guard lineLinkCache.count > lineIDs.count + 256 else { return }
+            lineLinkCache = lineLinkCache.filter { lineIDs.contains($0.key) }
+        }
 
         private weak var activeTextView: NSTextView?
         private weak var activeScrollView: NSScrollView?
@@ -4405,12 +4503,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         // Ensure container tracks width (also used for inline thumbnail sizing).
         let width = max(1, textView.enclosingScrollView?.contentSize.width ?? textView.bounds.width)
 
-        let (attr, ranges) = buildAttributedString(containerWidth: width)
+        let (attr, ranges) = buildAttributedString(containerWidth: width, coordinator: context.coordinator)
         context.coordinator.lineRanges = ranges
         context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
         context.coordinator.orderedLineIDs = lines.map(\.id)
+        context.coordinator.pruneLinkCache(keepingLineIDs: Set(lines.map(\.id)))
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
@@ -4442,6 +4541,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+        emitRenderCompleteIfNeeded(context: context)
     }
 
     private func semanticLineNumberCounters(before endIndex: Int) -> [Int: Int] {
@@ -4494,7 +4594,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             containerWidth: width,
             renderedLines: tailLines,
             previousDecorationGroupID: previousDecorationGroupID,
-            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters
+            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters,
+            coordinator: context.coordinator
         )
         let baseLocation = storage.length
         storage.append(tailAttr)
@@ -4519,6 +4620,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = mergedOrderedRanges
         context.coordinator.orderedLineIDs = mergedOrderedIDs
+        context.coordinator.pruneLinkCache(keepingLineIDs: Set(lines.map(\.id)))
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
@@ -4552,6 +4654,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+        emitRenderCompleteIfNeeded(context: context)
     }
 
     private func replaceTailContent(to textView: NSTextView, context: Context, startIndex: Int) {
@@ -4584,7 +4687,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             containerWidth: width,
             renderedLines: replacementLines,
             previousDecorationGroupID: previousDecorationGroupID,
-            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters
+            initialSemanticLineNumberCounters: initialSemanticLineNumberCounters,
+            coordinator: context.coordinator
         )
 
         storage.beginEditing()
@@ -4627,6 +4731,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = mergedOrderedRanges
         context.coordinator.orderedLineIDs = mergedOrderedIDs
+        context.coordinator.pruneLinkCache(keepingLineIDs: Set(lines.map(\.id)))
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
         context.coordinator.lastUnifiedFindQuery = unifiedFindQuery
@@ -4660,6 +4765,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         textView.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+        emitRenderCompleteIfNeeded(context: context)
+    }
+
+    private func emitRenderCompleteIfNeeded(context: Context) {
+        guard !lines.isEmpty else { return }
+        guard context.coordinator.lastRenderCompleteSessionID != renderCompleteSessionID else { return }
+        context.coordinator.lastRenderCompleteSessionID = renderCompleteSessionID
+        DispatchQueue.main.async {
+            onRenderComplete(renderCompleteSessionID)
+        }
     }
 
     private func updateUnifiedHighlights(in textView: NSTextView, context: Context, query: String, occurrences: [MatchOccurrence], currentLineID: Int?) {
@@ -4909,14 +5024,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         lm.localFindCurrentLineID = out.isEmpty ? nil : currentLineID
     }
 
-    private func buildAttributedString(containerWidth: CGFloat) -> (NSAttributedString, [Int: NSRange]) {
-        buildAttributedString(containerWidth: containerWidth, renderedLines: lines, previousDecorationGroupID: nil)
+    private func buildAttributedString(containerWidth: CGFloat,
+                                       coordinator: Coordinator) -> (NSAttributedString, [Int: NSRange]) {
+        buildAttributedString(containerWidth: containerWidth,
+                              renderedLines: lines,
+                              previousDecorationGroupID: nil,
+                              coordinator: coordinator)
     }
 
     private func buildAttributedString(containerWidth: CGFloat,
                                        renderedLines: [TerminalLine],
                                        previousDecorationGroupID: Int?,
-                                       initialSemanticLineNumberCounters: [Int: Int] = [:]) -> (NSAttributedString, [Int: NSRange]) {
+                                       initialSemanticLineNumberCounters: [Int: Int] = [:],
+                                       coordinator: Coordinator) -> (NSAttributedString, [Int: NSRange]) {
         let attr = NSMutableAttributedString()
         var ranges: [Int: NSRange] = [:]
         ranges.reserveCapacity(renderedLines.count)
@@ -5131,16 +5251,13 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             attr.append(NSAttributedString(string: lineString, attributes: attributes))
 
             if linkificationEnabled {
-                let localMatches = TranscriptLinkifier.matches(in: line.text)
-                for match in localMatches {
-                    guard let resolved = TranscriptLinkifier.resolve(path: match.path,
-                                                                     sessionCwd: sessionCwd,
-                                                                     repoRoot: repoRootPath) else { continue }
-                    let payload = TranscriptLinkifier.linkPayload(path: resolved, line: match.line, column: match.column)
-                    let absoluteRange = NSRange(location: start + lineTextWithPrefix.linkOffset + match.range.location,
-                                                length: match.range.length)
+                for link in coordinator.linkAttributes(for: line,
+                                                       sessionCwd: sessionCwd,
+                                                       repoRootPath: repoRootPath) {
+                    let absoluteRange = NSRange(location: start + lineTextWithPrefix.linkOffset + link.range.location,
+                                                length: link.range.length)
                     attr.addAttributes([
-                        .link: payload,
+                        .link: link.payload,
                         .underlineStyle: NSUnderlineStyle.single.rawValue
                     ], range: absoluteRange)
                 }

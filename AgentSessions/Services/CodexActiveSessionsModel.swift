@@ -207,6 +207,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private var forceFullProbeNextRefresh: Bool = false
     private var consecutiveStableCycles: Int = 0
     private var consecutiveEmptySuppressedCycles: Int = 0
+    private var deferExpensiveProbesUntil: Date? = nil
     private enum ManagedProbeKind: String, Hashable {
         case processDiscovery
         case iTermInventory
@@ -480,6 +481,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         cachedITermPresences = []
         cachedITermTabTitleByTTY = [:]
         cachedITermTabTitleBySessionGuid = [:]
+        deferExpensiveProbesUntil = nil
         forceFullProbeNextRefresh = true
         consecutiveEmptySuppressedCycles = 0
         resetStablePollBackoff()
@@ -489,6 +491,11 @@ final class CodexActiveSessionsModel: ObservableObject {
         refreshTask = Task { [weak self] in
             await self?.refreshOnce()
         }
+    }
+
+    func deferExpensiveProbesForSelectionOpen(duration: TimeInterval = 2.5) {
+        guard !AppRuntime.isRunningTests else { return }
+        deferExpensiveProbesUntil = Date().addingTimeInterval(duration)
     }
 
     // MARK: - Polling
@@ -773,6 +780,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                          appIsActiveSnapshot: Bool,
                                          isCockpitVisibleSnapshot: Bool,
                                          isPinnedCockpitVisibleSnapshot: Bool,
+                                         deferExpensiveProbesSnapshot: Bool,
                                          shouldUseITermSnapshot: Bool,
                                          shouldProbeITermSnapshot: Bool) async -> RefreshDiscoveryResult? {
         guard isCurrentRefreshGeneration(generation) else {
@@ -811,6 +819,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             hasVisibleConsumer: hasVisibleConsumerSnapshot
         )
         let shouldProbeProcesses: Bool = {
+            guard !deferExpensiveProbesSnapshot else { return false }
             guard let last = lastProcessProbeAtSnapshot else { return true }
             return now.timeIntervalSince(last) >= processProbeMinInterval
         }()
@@ -1165,6 +1174,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         let appIsActiveSnapshot = appIsActive
         let isCockpitVisibleSnapshot = isCockpitVisible
         let isPinnedCockpitVisibleSnapshot = isPinnedCockpitVisible
+        let deferExpensiveProbesSnapshot = deferExpensiveProbesUntil.map { now < $0 } ?? false
         let shouldUseITermSnapshot = Self.shouldProbeITermSessions(
             appIsActive: appIsActiveSnapshot,
             hasVisibleConsumer: hasVisibleConsumerSnapshot,
@@ -1172,6 +1182,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
         let shouldProbeITermSnapshot: Bool = {
+            guard !deferExpensiveProbesSnapshot else { return false }
             guard shouldUseITermSnapshot else { return false }
             let probeMinInterval = Self.itermProbeMinIntervalSeconds(
                 appIsActive: appIsActiveSnapshot,
@@ -1200,6 +1211,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             appIsActiveSnapshot: appIsActiveSnapshot,
             isCockpitVisibleSnapshot: isCockpitVisibleSnapshot,
             isPinnedCockpitVisibleSnapshot: isPinnedCockpitVisibleSnapshot,
+            deferExpensiveProbesSnapshot: deferExpensiveProbesSnapshot,
             shouldUseITermSnapshot: shouldUseITermSnapshot,
             shouldProbeITermSnapshot: shouldProbeITermSnapshot
         ) else {

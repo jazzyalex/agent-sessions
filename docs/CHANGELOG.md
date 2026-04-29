@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 - Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.
+- Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.
 
 ## [3.6.5] - 2026-04-28
 - Indexing: Launch and manual session refreshes now use the interactive indexing profile instead of the active-window capped profile, avoiding slow full catch-up scans after an index reset.

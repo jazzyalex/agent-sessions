@@ -1602,6 +1602,7 @@ struct UnifiedSessionsView: View {
 	            updateFocusedSessionIfNeeded(nil)
 	            return
 	        }
+        activeCodexSessions.deferExpensiveProbesForSelectionOpen()
 	        selectionSource = s.source
 	        lastSelectedSource = s.source
 
@@ -1623,25 +1624,34 @@ struct UnifiedSessionsView: View {
             searchCoordinator.promote(id: s.id)
         }
         // Lazy load full session per source
+        var requestedSelectionReload = false
         if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             codexIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             claudeIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             geminiIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             opencodeIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             copilotIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             droidIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .openclaw, let exist = openclawIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             openclawIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         } else if s.source == .cursor, let exist = cursorIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(exist) {
             cursorIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         }
 
-        searchCoordinator.prewarmTranscriptIfNeeded(for: s)
+        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
         updateFocusedSessionIfNeeded(s)
     }
 

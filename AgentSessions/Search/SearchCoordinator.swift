@@ -125,7 +125,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func prewarmTranscriptIfNeeded(for session: Session) {
+    func prewarmTranscriptIfNeeded(for session: Session, allowParsingLightweight: Bool = true) {
+        if !allowParsingLightweight, session.events.isEmpty { return }
         if !appIsActive { return }
         if !NSApp.isActive { return }
         guard let cache = transcriptCache(for: session.source) else { return }

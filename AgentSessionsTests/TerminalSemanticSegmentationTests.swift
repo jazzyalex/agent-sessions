@@ -157,6 +157,21 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         XCTAssertTrue(lines.contains(where: { $0.semanticKind == .diff }))
     }
 
+    func testTerminalBuilderPrecomputedBlocksMatchSessionBuild() {
+        let session = makeSession(source: .codex, events: [
+            makeEvent(id: "u1", kind: .user, text: "Open Foo.swift:10"),
+            makeEvent(id: "a1", kind: .assistant, text: "```swift\nprint(\"hello\")\n```"),
+            makeToolResultEvent(id: "t1", toolName: "bash", output: "diff --git a/Foo.swift b/Foo.swift\n")
+        ])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        func signature(_ lines: [TerminalLine]) -> [String] {
+            lines.map { "\($0.id)|\($0.role)|\($0.text)|\($0.blockIndex ?? -1)|\($0.decorationGroupID)|\(String(describing: $0.semanticKind))" }
+        }
+
+        XCTAssertEqual(signature(TerminalBuilder.buildLines(from: blocks, source: session.source)),
+                       signature(TerminalBuilder.buildLines(for: session, showMeta: false)))
+    }
+
     func testReadToolOutputMapsToCodeSemanticKind() {
         let output = """
              219→        // Check exit code
@@ -214,6 +229,17 @@ final class TerminalSemanticSegmentationTests: XCTestCase {
         XCTAssertTrue(matches.contains(where: { $0.path == "Foo.swift" && $0.line == 56 }))
         XCTAssertTrue(matches.contains(where: { $0.path == "src/App.swift" && $0.line == 10 && $0.column == 2 }))
         XCTAssertTrue(matches.contains(where: { $0.path == "lib/A.swift" && $0.line == 3 }))
+    }
+
+    func testTranscriptLinkifierFastPathRejectsPlainText() {
+        XCTAssertFalse(TranscriptLinkifier.mightContainFileLink(in: "plain assistant output without file references"))
+        XCTAssertTrue(TranscriptLinkifier.matches(in: "plain assistant output without file references").isEmpty)
+    }
+
+    func testTranscriptLinkifierFastPathRejectsTimesAndRatios() {
+        let input = "Started at 12:34, finished at 13:05, ratio 10:2, no file path here"
+        XCTAssertFalse(TranscriptLinkifier.mightContainFileLink(in: input))
+        XCTAssertTrue(TranscriptLinkifier.matches(in: input).isEmpty)
     }
 
     func testTranscriptLinkifierPathLineColumnDoesNotCreateLineOnlyDuplicate() {

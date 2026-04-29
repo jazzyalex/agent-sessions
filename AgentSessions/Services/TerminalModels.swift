@@ -69,6 +69,12 @@ struct TerminalBuilder {
                            showMeta: Bool = false,
                            enableReviewCards: Bool = true) -> [TerminalLine] {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: showMeta)
+        return buildLines(from: blocks, source: session.source, enableReviewCards: enableReviewCards)
+    }
+
+    static func buildLines(from blocks: [SessionTranscriptBuilder.LogicalBlock],
+                           source: SessionSource,
+                           enableReviewCards: Bool = true) -> [TerminalLine] {
         var lines: [TerminalLine] = []
         lines.reserveCapacity(blocks.count * 2)
 
@@ -97,7 +103,7 @@ struct TerminalBuilder {
 
             var rawText = block.text
             if block.kind == .toolCall || block.kind == .toolOut {
-                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source) {
+                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: source) {
                     rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
                 }
             }
@@ -105,7 +111,7 @@ struct TerminalBuilder {
                                         baseRole: baseRole,
                                         rawText: rawText,
                                         blockIndex: blockIndex,
-                                        source: session.source,
+                                        source: source,
                                         enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
 
@@ -151,6 +157,12 @@ struct TerminalBuilder {
                                     showMeta: Bool = false,
                                     enableReviewCards: Bool = true) -> ([TerminalLine], [TerminalBlock]) {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: showMeta)
+        return buildLinesAndBlocks(from: blocks, source: session.source, enableReviewCards: enableReviewCards)
+    }
+
+    static func buildLinesAndBlocks(from blocks: [SessionTranscriptBuilder.LogicalBlock],
+                                    source: SessionSource,
+                                    enableReviewCards: Bool = true) -> ([TerminalLine], [TerminalBlock]) {
         var lines: [TerminalLine] = []
         var terminalBlocks: [TerminalBlock] = []
         lines.reserveCapacity(blocks.count * 2)
@@ -179,7 +191,7 @@ struct TerminalBuilder {
 
             var rawText = block.text
             if block.kind == .toolCall || block.kind == .toolOut {
-                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source) {
+                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: source) {
                     rawText = ToolTextBlockNormalizer.displayText(for: toolBlock)
                 }
             }
@@ -187,7 +199,7 @@ struct TerminalBuilder {
                                         baseRole: baseRole,
                                         rawText: rawText,
                                         blockIndex: blockIndex,
-                                        source: session.source,
+                                        source: source,
                                         enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
 
