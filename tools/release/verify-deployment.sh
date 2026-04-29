@@ -14,6 +14,9 @@ VERSION=${1:-}
 TAG="v$VERSION"
 ERRORS=0
 WARNINGS=0
+TRANSIENT_ERRORS=0
+LAST_CHECK_ERROR=""
+LAST_CHECK_OUTPUT=""
 
 green(){ printf "\033[32m✅ %s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m⚠️  %s\033[0m\n" "$*"; }
@@ -27,21 +30,70 @@ for cmd in git gh curl grep base64; do
   fi
 done
 
+is_transient_error() {
+    grep -Eqi 'TLS handshake timeout|i/o timeout|connection timed out|operation timed out|connection reset|connection refused|Could not resolve host|network is unreachable|HTTP status code: 5[0-9][0-9]|502|503|504|temporary failure' <<<"$1"
+}
+
+retry_eval() {
+    local command="$1"
+    local attempts="${2:-3}"
+    local sleep_s="${3:-3}"
+    local output=""
+    local status=0
+
+    LAST_CHECK_ERROR=""
+    LAST_CHECK_OUTPUT=""
+
+    for ((attempt=1; attempt<=attempts; attempt++)); do
+        output=$(eval "$command" 2>&1)
+        status=$?
+        if [[ $status -eq 0 ]]; then
+            LAST_CHECK_OUTPUT="$output"
+            return 0
+        fi
+
+        LAST_CHECK_ERROR="$output"
+        if [[ $attempt -lt $attempts ]] && is_transient_error "$output"; then
+            yellow "Transient verification failure on attempt $attempt/$attempts; retrying in ${sleep_s}s"
+            sleep "$sleep_s"
+            sleep_s=$((sleep_s * 2))
+            continue
+        fi
+
+        return "$status"
+    done
+
+    return "$status"
+}
+
+record_failed_check() {
+    local name="$1"
+    local required="${2:-true}"
+    local detail="${LAST_CHECK_ERROR:-}"
+
+    if [[ "$required" == "true" ]]; then
+        if [[ -n "$detail" ]] && is_transient_error "$detail"; then
+            red "$name (transient network/API failure after retries: $detail)"
+            ((TRANSIENT_ERRORS+=1))
+        else
+            red "$name"
+        fi
+        ((ERRORS+=1))
+    else
+        yellow "$name (optional check failed)"
+        ((WARNINGS+=1))
+    fi
+}
+
 check() {
     local name="$1"
     local command="$2"
     local required="${3:-true}"
 
-    if eval "$command" >/dev/null 2>&1; then
+    if retry_eval "$command >/dev/null"; then
         green "$name"
     else
-        if [[ "$required" == "true" ]]; then
-            red "$name"
-            ((ERRORS++))
-        else
-            yellow "$name (optional check failed)"
-            ((WARNINGS++))
-        fi
+        record_failed_check "$name" "$required"
     fi
 }
 
@@ -52,17 +104,26 @@ check_output() {
     local required="${4:-true}"
 
     local output
-    output=$(eval "$command" 2>/dev/null || echo "")
+    if retry_eval "$command"; then
+        output="$LAST_CHECK_OUTPUT"
+    else
+        output=""
+    fi
 
     if grep -q -- "$expected" <<<"$output"; then
         green "$name"
     else
         if [[ "$required" == "true" ]]; then
-            red "$name (expected: $expected, got: $output)"
-            ((ERRORS++))
+            if [[ -n "${LAST_CHECK_ERROR:-}" ]] && is_transient_error "$LAST_CHECK_ERROR"; then
+                red "$name (transient network/API failure after retries: $LAST_CHECK_ERROR)"
+                ((TRANSIENT_ERRORS+=1))
+            else
+                red "$name (expected: $expected, got: $output)"
+            fi
+            ((ERRORS+=1))
         else
             yellow "$name (expected: $expected, got: $output)"
-            ((WARNINGS++))
+            ((WARNINGS+=1))
         fi
     fi
 }
@@ -102,7 +163,7 @@ if curl -sf "$APPCAST_URL" >"$APPCAST_TMP"; then
     green "Appcast is accessible"
 else
     red "Appcast is accessible"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 APPCAST_ITEM=""
@@ -114,14 +175,14 @@ if [[ -n "$APPCAST_ITEM" ]]; then
     green "Appcast has exact release item for $VERSION"
 else
     red "Appcast has exact release item for $VERSION"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 if [[ -n "$APPCAST_ITEM" ]] && grep -q 'sparkle:edSignature=' <<<"$APPCAST_ITEM"; then
     green "Appcast item has EdDSA signature"
 else
     red "Appcast item has EdDSA signature"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 EXPECTED_APPCAST_URL="https://github.com/jazzyalex/agent-sessions/releases/download/v$VERSION/AgentSessions-$VERSION.dmg"
@@ -129,14 +190,14 @@ if [[ -n "$APPCAST_ITEM" ]] && grep -Fq "$EXPECTED_APPCAST_URL" <<<"$APPCAST_ITE
     green "Appcast item points to GitHub Releases"
 else
     red "Appcast item points to GitHub Releases"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 if [[ -n "$APPCAST_ITEM" ]] && grep -q '<description' <<<"$APPCAST_ITEM"; then
     green "Appcast item has release notes"
 else
     red "Appcast item has release notes"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 echo ""
@@ -151,7 +212,7 @@ if [[ -n "$BUILD_NUMBER" ]] && [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
     green "Build number is $BUILD_NUMBER"
 else
     red "Build number missing or invalid: $BUILD_NUMBER"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 echo ""
@@ -167,20 +228,29 @@ echo ""
 
 # 5. Homebrew cask check
 echo "Homebrew Cask:"
-CASK_VERSION=$(gh api -H "Accept: application/vnd.github+json" "/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode | grep -E '^[[:space:]]*version "' | head -1 | cut -d'"' -f2 || echo "")
-if [[ "$CASK_VERSION" == "$VERSION" ]]; then
-    green "Cask version is $VERSION"
+CASK_CONTENT=""
+if retry_eval "gh api -H 'Accept: application/vnd.github+json' '/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb' --jq '.content' | tr -d '\n' | base64 --decode"; then
+    CASK_CONTENT="$LAST_CHECK_OUTPUT"
 else
-    red "Cask version is $CASK_VERSION (expected $VERSION)"
-    ((ERRORS++))
+    record_failed_check "Cask content fetched" "true"
 fi
 
-CASK_URL=$(gh api -H "Accept: application/vnd.github+json" "/repos/jazzyalex/homebrew-agent-sessions/contents/Casks/agent-sessions.rb" --jq '.content' 2>/dev/null | tr -d '\n' | base64 --decode | grep 'url' | head -1 || echo "")
-if echo "$CASK_URL" | grep -q "v#{version}/AgentSessions-#{version}.dmg"; then
-    green "Cask URL template correct"
-else
-    yellow "Cask URL may need review: $CASK_URL"
-    ((WARNINGS++))
+if [[ -n "$CASK_CONTENT" ]]; then
+    CASK_VERSION=$(grep -E '^[[:space:]]*version "' <<<"$CASK_CONTENT" | head -1 | cut -d'"' -f2 || echo "")
+    if [[ "$CASK_VERSION" == "$VERSION" ]]; then
+        green "Cask version is $VERSION"
+    else
+        red "Cask version is $CASK_VERSION (expected $VERSION)"
+        ((ERRORS+=1))
+    fi
+
+    CASK_URL=$(grep 'url' <<<"$CASK_CONTENT" | head -1 || echo "")
+    if echo "$CASK_URL" | grep -q "v#{version}/AgentSessions-#{version}.dmg"; then
+        green "Cask URL template correct"
+    else
+        yellow "Cask URL may need review: $CASK_URL"
+        ((WARNINGS+=1))
+    fi
 fi
 
 echo ""
@@ -197,11 +267,11 @@ if curl -fsSLI "$DMG_URL" >/dev/null 2>&1; then
         green "DMG size is reasonable ($(numfmt --to=iec $DMG_SIZE 2>/dev/null || echo $DMG_SIZE bytes))"
     else
         yellow "DMG size seems small: $DMG_SIZE bytes"
-        ((WARNINGS++))
+        ((WARNINGS+=1))
     fi
 else
     red "DMG is not downloadable (HTTP error)"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 echo ""
@@ -216,11 +286,11 @@ if [[ -f "dist/AgentSessions-$VERSION.dmg" ]]; then
         green "SHA256 matches (${LOCAL_SHA:0:16}...)"
     else
         red "SHA256 mismatch. Local: $LOCAL_SHA, Remote: $REMOTE_SHA"
-        ((ERRORS++))
+        ((ERRORS+=1))
     fi
 else
     yellow "Local DMG not found at dist/AgentSessions-$VERSION.dmg (skipping SHA256 check)"
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 fi
 
 echo ""
@@ -233,7 +303,7 @@ if git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; then
     REMOTE_TAG_OK=1
 else
     red "Remote tag $TAG not found"
-    ((ERRORS++))
+    ((ERRORS+=1))
 fi
 
 if git tag | grep -q "^$TAG$"; then
@@ -249,7 +319,7 @@ else
         green "Local tag $TAG exists (fetched)"
     else
         yellow "Local tag $TAG not found"
-        ((WARNINGS++))
+        ((WARNINGS+=1))
     fi
 fi
 
@@ -259,6 +329,9 @@ echo ""
 echo "==> Verification Summary"
 echo "Errors:   $ERRORS"
 echo "Warnings: $WARNINGS"
+if [[ $TRANSIENT_ERRORS -gt 0 ]]; then
+    echo "Transient network/API errors: $TRANSIENT_ERRORS"
+fi
 echo ""
 
 if [[ $ERRORS -eq 0 ]]; then
@@ -278,7 +351,12 @@ else
     echo ""
     echo "Recommended actions:"
     echo "  1. Review errors above"
-    echo "  2. Check deployment logs: /tmp/deploy-$VERSION.log"
-    echo "  3. Consider rollback: tools/release/rollback-release.sh $VERSION"
+    if [[ $TRANSIENT_ERRORS -gt 0 ]]; then
+        echo "  2. Rerun verification before rollback; at least one failure was classified as transient network/API behavior"
+        echo "  3. Check deployment logs: /tmp/deploy-$VERSION.log"
+    else
+        echo "  2. Check deployment logs: /tmp/deploy-$VERSION.log"
+        echo "  3. Consider rollback: tools/release/rollback-release.sh $VERSION"
+    fi
     exit 1
 fi

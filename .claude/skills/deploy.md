@@ -31,7 +31,8 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
   3. **Full test suite** — `./scripts/xcode_test_stable.sh`
   4. **Targeted tests** — run suites for touched high-risk areas (session parsing, usage tracking, onboarding, etc.)
   5. **Warnings sweep** — flag any new actionable warnings in build output.
-  6. **Manual smoke reminder** — list the manual steps from `docs/release/pre-release-qa.md` §2–3 and ask the user to confirm GO/NO-GO after completing them.
+  6. **Manual smoke reminder** — list the manual steps from `docs/release/pre-release-qa.md` §2–3. In interactive releases, ask the user to confirm GO/NO-GO after completing them. In unattended releases (`SKIP_CONFIRM=1` or explicit "fully automatic"), keep these as post-deploy reminders instead of blocking the release.
+- In Codex Desktop, run Swift/Xcode build and test commands with approved Xcode cache access up front when they will touch DerivedData, ModuleCache, SourcePackages, simulator caches, SwiftPM diagnostics, or `~/.cache/clang`. If a first run fails only because sandboxing blocked one of those paths, rerun the exact same command with approved Xcode access and report it as a sandbox access retry, not as a code or test failure.
 - If automated gates fail → stop, report failure, do not proceed to bump/release.
 - If user says "skip QA" or "no QA" → proceed without running, note it was skipped.
 
@@ -78,4 +79,5 @@ tools/release/deploy verify <VERSION>
 ## Failure Handling
 
 - First stop: `docs/deployment.md` → Troubleshooting, logs, and rollback guidance.
+- If post-deploy verification fails on a GitHub/network check with timeout or 5xx behavior, rerun `tools/release/deploy verify <VERSION>` before considering rollback. Treat repeated transient API failures differently from confirmed missing release assets, bad appcast entries, or SHA mismatches.
 - Rollback only after reviewing logs: `tools/release/rollback-release.sh <VERSION>`.

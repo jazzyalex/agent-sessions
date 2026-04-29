@@ -36,6 +36,7 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 
 **Key environment flags**:
 - `SKIP_CONFIRM=1` — make bump and release flows unattended (suppresses confirmation prompts where supported).
+- In unattended mode, manual smoke checks are reported as post-deploy reminders rather than blocking prompts.
 - `NOTARIZE_SYNC=1` — use legacy blocking notarization instead of background polling.
 - `UPDATE_CASK=1` — update the Homebrew tap via GitHub API.
 - Notary auth is resolved in this order:
@@ -117,6 +118,7 @@ Post-deployment verification (runs automatically after release):
 - DMG downloadable and correct size
 - SHA256 checksums match
 - Git tags exist locally and remotely
+- GitHub/API checks retry transient network failures before reporting an error. If verification still fails with a classified timeout or temporary API/network failure, rerun verification before rollback.
 
 ### `deploy changelog [FROM_TAG]`
 Generate CHANGELOG from conventional commits:
@@ -124,7 +126,7 @@ Generate CHANGELOG from conventional commits:
 - Extracts feat/fix/perf/refactor/docs commits
 - Groups into CHANGELOG sections (Added, Fixed, Performance, etc.)
 - Shows commit breakdown by category
-- Offers to save snippet file for easy copying
+- Offers to save snippet file for easy copying when run interactively; in unattended/non-interactive runs it prints the preview and exits successfully without modifying files.
 
 ### Emergency Rollback
 

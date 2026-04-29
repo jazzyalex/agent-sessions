@@ -61,6 +61,15 @@ log() {
   echo "[$(date -Iseconds)] [$level] $*"
 }
 
+count_lines() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    echo "0"
+  else
+    printf '%s\n' "$value" | grep -c '^'
+  fi
+}
+
 # Comprehensive dependency validation
 check_dependencies() {
   local required_cmds=("$@")
@@ -577,11 +586,11 @@ cmd_changelog() {
   local DOCS_COMMITS=$(git log --pretty=format:"%s" "$FROM_TAG..HEAD" | grep "^docs:" || true)
 
   # Count commits by category
-  local FEAT_COUNT=$(echo "$FEAT_COMMITS" | grep -c "^" || echo "0")
-  local FIX_COUNT=$(echo "$FIX_COMMITS" | grep -c "^" || echo "0")
-  local PERF_COUNT=$(echo "$PERF_COMMITS" | grep -c "^" || echo "0")
-  local REFACTOR_COUNT=$(echo "$REFACTOR_COMMITS" | grep -c "^" || echo "0")
-  local DOCS_COUNT=$(echo "$DOCS_COMMITS" | grep -c "^" || echo "0")
+  local FEAT_COUNT=$(count_lines "$FEAT_COMMITS")
+  local FIX_COUNT=$(count_lines "$FIX_COMMITS")
+  local PERF_COUNT=$(count_lines "$PERF_COMMITS")
+  local REFACTOR_COUNT=$(count_lines "$REFACTOR_COMMITS")
+  local DOCS_COUNT=$(count_lines "$DOCS_COMMITS")
 
   echo "Commit breakdown:"
   echo "  Features:     $FEAT_COUNT"
@@ -650,16 +659,19 @@ cmd_changelog() {
   echo ""
   echo -e "$OUTPUT"
 
-  # Offer to save to file
   echo ""
-  read -p "Save to CHANGELOG snippet file? [y/N] " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    local SNIPPET_FILE="/tmp/changelog-snippet-$(date +%s).md"
-    echo -e "$OUTPUT" > "$SNIPPET_FILE"
-    green "✓ Saved to $SNIPPET_FILE"
-    echo ""
-    echo "You can now copy this content into docs/CHANGELOG.md under the [Unreleased] section"
+  if [[ -t 0 && "${SKIP_CONFIRM:-0}" != "1" ]]; then
+    read -p "Save to CHANGELOG snippet file? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      local SNIPPET_FILE="/tmp/changelog-snippet-$(date +%s).md"
+      echo -e "$OUTPUT" > "$SNIPPET_FILE"
+      green "✓ Saved to $SNIPPET_FILE"
+      echo ""
+      echo "You can now copy this content into docs/CHANGELOG.md under the [Unreleased] section"
+    fi
+  else
+    yellow "Preview only: CHANGELOG snippet was printed and no files were modified."
   fi
 }
 
