@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.6.7] - 2026-04-29
 - Menu bar: The Preferences toggle now updates the status item immediately without requiring relaunch, and the menu switches Agent Cockpit/Agent Sessions commands between Open and Hide based on window visibility.
 
 ## [3.6.6] - 2026-04-29
