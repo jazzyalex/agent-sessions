@@ -57,6 +57,14 @@ enum AppWindowRouter {
         }
     }
 
+    @MainActor static var isAgentSessionsWindowVisible: Bool {
+        existingWindow(title: "Agent Sessions")?.isVisible ?? false
+    }
+
+    @MainActor static func closeAgentSessionsWindow() {
+        existingWindow(title: "Agent Sessions")?.close()
+    }
+
     @MainActor static func showAgentCockpitWindow() {
         NSApp.activate(ignoringOtherApps: true)
         if let cockpit = existingWindow(identifier: "AgentCockpit") {
@@ -67,6 +75,14 @@ enum AppWindowRouter {
             openAgentCockpitWindow()
             return
         }
+    }
+
+    @MainActor static var isAgentCockpitWindowVisible: Bool {
+        existingWindow(identifier: "AgentCockpit")?.isVisible ?? false
+    }
+
+    @MainActor static func closeAgentCockpitWindow() {
+        existingWindow(identifier: "AgentCockpit")?.close()
     }
 
     @MainActor
@@ -168,6 +184,9 @@ struct AgentSessionsApp: App {
     @State private var statusItemController: StatusItemController? = nil
     @State private var analyticsToggleObserver: NSObjectProtocol?
     @State private var mainWindowCloseObserver: NSObjectProtocol?
+    @State private var menuBarDefaultsObserver: NSObjectProtocol?
+    @State private var lastObservedMenuBarEnabled: Bool?
+    @State private var lastObservedHideDockIcon: Bool?
     @State private var didRunStartupTasks: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -290,8 +309,7 @@ struct AgentSessionsApp: App {
             updateUsageModels()
         }
         .onChange(of: menuBarEnabled) { _, newValue in
-            updateUsageModels()
-            Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: newValue)
+            handleMenuBarEnabledChange(newValue)
         }
         .onChange(of: liveSessionsEnabled) { _, _ in
             updateUsageModels()
@@ -567,6 +585,7 @@ extension AgentSessionsApp {
             UpdaterController.shared = updaterController
         }
         ensureStatusItemController()
+        setupMenuBarDefaultsObserverIfNeeded()
         updateUsageModels()
         setupMainWindowCloseObserverIfNeeded()
 
@@ -706,14 +725,48 @@ extension AgentSessionsApp {
         updateUsageModels()
     }
 
-    private func updateUsageModels() {
+    private func handleMenuBarEnabledChange(_ enabled: Bool) {
+        guard !AppRuntime.isRunningTests else { return }
+        lastObservedMenuBarEnabled = enabled
+        lastObservedHideDockIcon = hideDockIcon
+        updateUsageModels(menuBarEnabledOverride: enabled)
+        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: enabled)
+    }
+
+    private func setupMenuBarDefaultsObserverIfNeeded() {
+        guard !AppRuntime.isRunningTests else { return }
+        guard menuBarDefaultsObserver == nil else { return }
+        let defaults = UserDefaults.standard
+        lastObservedMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
+        lastObservedHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+
+        menuBarDefaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [self] _ in
+            let nextMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
+            let nextHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+
+            guard nextMenuBarEnabled != self.lastObservedMenuBarEnabled
+                || nextHideDockIcon != self.lastObservedHideDockIcon else { return }
+
+            self.lastObservedMenuBarEnabled = nextMenuBarEnabled
+            self.lastObservedHideDockIcon = nextHideDockIcon
+            self.updateUsageModels(menuBarEnabledOverride: nextMenuBarEnabled)
+            Self.applyActivationPolicy(hideDockIcon: nextHideDockIcon, menuBarEnabled: nextMenuBarEnabled)
+        }
+    }
+
+    private func updateUsageModels(menuBarEnabledOverride: Bool? = nil) {
         guard !AppRuntime.isRunningTests else { return }
         let d = UserDefaults.standard
+        let effectiveMenuBarEnabled = menuBarEnabledOverride ?? menuBarEnabled
         // Migration defaults on first run of new toggles
         let codexEnabled: Bool = {
             if d.object(forKey: "CodexUsageEnabled") == nil {
                 // default to previous implicit behavior: on when either strip or menu bar shown
-                let def = menuBarEnabled || showUsageStrip
+                let def = effectiveMenuBarEnabled || showUsageStrip
                 d.set(def, forKey: "CodexUsageEnabled")
                 return def
             }
@@ -734,7 +787,10 @@ extension AgentSessionsApp {
         let claudeTrackingEnabled = claudeEnabled && claudeAgentEnabled
         claudeUsageModel.setEnabled(claudeTrackingEnabled)
 
-        statusItemController?.setEnabled(menuBarEnabled)
+        if effectiveMenuBarEnabled {
+            ensureStatusItemController()
+        }
+        statusItemController?.setEnabled(effectiveMenuBarEnabled)
     }
 
     private func ensureStatusItemController() {

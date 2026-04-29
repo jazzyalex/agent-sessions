@@ -92,7 +92,15 @@ final class StatusItemController: NSObject {
             .store(in: &cancellables)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let isEnabled = UserDefaults.standard.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
+                if isEnabled {
+                    self.scheduleLengthUpdate()
+                } else {
+                    self.removeStatusItem()
+                }
+            }
             .store(in: &cancellables)
 
         // No popover; we construct an NSMenu on demand in togglePopover
@@ -164,8 +172,16 @@ final class StatusItemController: NSObject {
             )
             menu.addItem(makeTitleItem("Live Sessions"))
             menu.addItem(makeTitleItem("\(summary.activeCount) active • \(summary.waitingCount) waiting"))
-            menu.addItem(makeActionItem(title: "Open Agent Cockpit", action: #selector(openAgentCockpit)))
-            menu.addItem(makeActionItem(title: "Open Agent Sessions", action: #selector(openAgentSessions)))
+            let cockpitVisible = AppWindowRouter.isAgentCockpitWindowVisible
+            menu.addItem(makeActionItem(
+                title: cockpitVisible ? "Hide Agent Cockpit" : "Open Agent Cockpit",
+                action: cockpitVisible ? #selector(hideAgentCockpit) : #selector(openAgentCockpit)
+            ))
+            let sessionsVisible = AppWindowRouter.isAgentSessionsWindowVisible
+            menu.addItem(makeActionItem(
+                title: sessionsVisible ? "Hide Agent Sessions" : "Open Agent Sessions",
+                action: sessionsVisible ? #selector(hideAgentSessions) : #selector(openAgentSessions)
+            ))
         }
 
         let liveSessionsToggle = makeCheckboxItem(
@@ -314,8 +330,14 @@ final class StatusItemController: NSObject {
     @objc private func openAgentCockpit() {
         AppWindowRouter.showAgentCockpitWindow()
     }
+    @objc private func hideAgentCockpit() {
+        AppWindowRouter.closeAgentCockpitWindow()
+    }
     @objc private func openAgentSessions() {
         AppWindowRouter.showAgentSessionsWindow()
+    }
+    @objc private func hideAgentSessions() {
+        AppWindowRouter.closeAgentSessionsWindow()
     }
     @objc private func refreshCodexHard() {
         let d = UserDefaults.standard

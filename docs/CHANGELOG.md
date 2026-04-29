@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Menu bar: The Preferences toggle now updates the status item immediately without requiring relaunch, and the menu switches Agent Cockpit/Agent Sessions commands between Open and Hide based on window visibility.
 
 ## [3.6.6] - 2026-04-29
 - Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.
