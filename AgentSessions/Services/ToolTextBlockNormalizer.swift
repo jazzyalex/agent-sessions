@@ -222,6 +222,7 @@ enum ToolTextBlockNormalizer {
         if let stderr {
             lines.append(contentsOf: splitAndTrimTrailingEmptyLines(stderr))
         }
+        lines = readableToolOutputLines(lines)
 
         if isShellTool(name: toolName, inputObject: nil) {
             if info.exitCode == nil {
@@ -648,6 +649,11 @@ enum ToolTextBlockNormalizer {
             lines.append("dir: \(dir)")
         }
 
+        appendKeyValueLine(key: "app", from: dict, to: &lines)
+        appendKeyValueLine(key: "direction", from: dict, to: &lines)
+        appendKeyValueLine(key: "element_index", label: "element", from: dict, to: &lines)
+        appendKeyValueLine(key: "pages", from: dict, to: &lines)
+
         if let num = firstInt(for: ["numResults", "num_results", "topK", "top_k", "limit", "count", "k", "n"], in: dict) {
             lines.append("numResults: \(num)")
         }
@@ -668,6 +674,18 @@ enum ToolTextBlockNormalizer {
             }
         }
         return simpleLines.isEmpty ? nil : simpleLines
+    }
+
+    private static func appendKeyValueLine(key: String,
+                                           label: String? = nil,
+                                           from dict: [String: Any],
+                                           to lines: inout [String]) {
+        guard let value = dict[key],
+              let line = simpleKeyValueLine(key: label ?? key, value: value),
+              !lines.contains(line) else {
+            return
+        }
+        lines.append(line)
     }
 
     private static func simpleKeyValueLine(key: String, value: Any) -> String? {
@@ -1139,6 +1157,183 @@ enum ToolTextBlockNormalizer {
         return output
     }
 
+    private static func readableToolOutputLines(_ lines: [String]) -> [String] {
+        let withoutOutputMarker = lines.filter { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "output:"
+        }
+        guard containsAccessibilityTreeLines(withoutOutputMarker) else {
+            return withoutOutputMarker
+        }
+
+        let cleanedLines = withoutOutputMarker.compactMap(cleanAccessibilityTreeLine)
+            .flatMap { splitAndTrimTrailingEmptyLines($0) }
+        return trimRepeatedEmptyLines(cleanedLines)
+    }
+
+    private static func containsAccessibilityTreeLines(_ lines: [String]) -> Bool {
+        lines.contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.hasPrefix("App=") ||
+                trimmed.hasPrefix("Window:") ||
+                trimmed.range(of: #"^\d+\s+(standard window|split group|tab group|scroll area|HTML content|link|button|pop up button|text field|heading|container|content list|text)\b"#,
+                              options: .regularExpression) != nil
+        }
+    }
+
+    private static func cleanAccessibilityTreeLine(_ line: String) -> String? {
+        let indentWidth = max(0, line.prefix { $0 == "\t" }.count - 1) * 2
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        if trimmed.hasPrefix("App=") {
+            return "App: \(readableAppName(from: trimmed))"
+        }
+
+        if trimmed.hasPrefix("Window:") {
+            if let windowTitle = firstRegexCapture(in: trimmed, pattern: #"Window:\s*"([^"]+)""#) {
+                return "Window: \(windowTitle)"
+            }
+            return trimmed.replacingOccurrences(of: ".", with: "")
+        }
+
+        guard let parsed = parseAccessibilityElementLine(trimmed) else {
+            return String(repeating: " ", count: indentWidth) + trimmed
+        }
+
+        var output = String(repeating: " ", count: indentWidth) + parsed.summary
+        if let value = parsed.value,
+           parsed.shouldShowValue {
+            output += "\n" + String(repeating: " ", count: indentWidth + 2) + "Value: \(value)"
+        }
+        return output
+    }
+
+    private static func readableAppName(from line: String) -> String {
+        if line.contains("Safari") { return "Safari" }
+        if let bundle = firstRegexCapture(in: line, pattern: #"App=([^\s]+)"#) {
+            return bundle.replacingOccurrences(of: "com.apple.", with: "")
+        }
+        return line.replacingOccurrences(of: "App=", with: "")
+    }
+
+    private struct AccessibilityElementLine {
+        let summary: String
+        let value: String?
+        let shouldShowValue: Bool
+    }
+
+    private static func parseAccessibilityElementLine(_ line: String) -> AccessibilityElementLine? {
+        let match = regexMatch(in: line, pattern: #"^(\d+)\s+(.+)$"#)
+        guard match.count >= 3 else {
+            return nil
+        }
+        let index = match[1]
+        let body = match[2]
+        let role = accessibilityRole(from: body)
+        guard !role.isEmpty else { return nil }
+
+        let remainder = body.dropFirst(role.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedRemainder = stripLeadingAttributes(from: remainder)
+        let label = accessibilityLabel(from: cleanedRemainder)
+        let value = accessibilityValue(from: body)
+        let summary = label.isEmpty ? "\(index) \(role)" : "\(index) \(role) \"\(label)\""
+        return AccessibilityElementLine(summary: summary,
+                                        value: value,
+                                        shouldShowValue: shouldShowAccessibilityValue(role: role, value: value))
+    }
+
+    private static func accessibilityRole(from body: String) -> String {
+        let roles = [
+            "pop up button", "standard window", "split group", "tab group", "scroll area",
+            "HTML content", "content list", "text field", "container", "heading", "button",
+            "link", "text", "splitter"
+        ]
+        return roles.first { body.hasPrefix($0) } ?? ""
+    }
+
+    private static func stripLeadingAttributes(from text: String) -> String {
+        var output = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while output.hasPrefix("("),
+              let close = output.firstIndex(of: ")") {
+            output = String(output[output.index(after: close)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return output
+    }
+
+    private static func accessibilityLabel(from text: String) -> String {
+        if let description = firstRegexCapture(in: text, pattern: #"Description:\s*([^,]+)"#) {
+            return description.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var candidate = text
+        if let range = candidate.range(of: ", Value:") {
+            candidate = String(candidate[..<range.lowerBound])
+        }
+        if let range = candidate.range(of: ", ID:") {
+            candidate = String(candidate[..<range.lowerBound])
+        }
+        if let range = candidate.range(of: ", URL:") {
+            candidate = String(candidate[..<range.lowerBound])
+        }
+        if let range = candidate.range(of: ", Placeholder:") {
+            candidate = String(candidate[..<range.lowerBound])
+        }
+
+        candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        if candidate.hasPrefix("Value:") {
+            let parts = candidate.split(separator: ",", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                candidate = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                candidate = ""
+            }
+        }
+        return candidate
+    }
+
+    private static func accessibilityValue(from text: String) -> String? {
+        guard let value = firstRegexCapture(in: text, pattern: #", Value:\s*([^,]+)"#)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              !value.hasPrefix("github.com/") else {
+            return nil
+        }
+        return value
+    }
+
+    private static func shouldShowAccessibilityValue(role: String, value: String?) -> Bool {
+        guard let value, !value.isEmpty else { return false }
+        if Int(value) != nil { return false }
+        return role.contains("field") || role.contains("text area") || role == "text"
+    }
+
+    private static func trimRepeatedEmptyLines(_ lines: [String]) -> [String] {
+        var output: [String] = []
+        var previousWasEmpty = false
+        for line in lines {
+            let isEmpty = line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if isEmpty, previousWasEmpty { continue }
+            output.append(line)
+            previousWasEmpty = isEmpty
+        }
+        return trimTrailingEmptyLines(output)
+    }
+
+    private static func firstRegexCapture(in text: String, pattern: String) -> String? {
+        regexMatch(in: text, pattern: pattern).dropFirst().first
+    }
+
+    private static func regexMatch(in text: String, pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)) else {
+            return []
+        }
+        return (0..<match.numberOfRanges).compactMap { index in
+            guard let range = Range(match.range(at: index), in: text) else { return nil }
+            return String(text[range])
+        }
+    }
+
     private static func readableScalarText(_ value: Any) -> String? {
         if let s = value as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1317,7 +1512,7 @@ enum ToolTextBlockNormalizer {
                 let type = (dict["type"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let text = (dict["text"] as? String) ?? (dict["content"] as? String)
                 if let text, !text.isEmpty {
-                    if type == nil || type == "text" || type == "output_text" || type == "output" {
+                    if type == nil || type == "text" || type == "input_text" || type == "output_text" || type == "output" {
                         parts.append(text)
                         sawBlockLikeDict = true
                         continue

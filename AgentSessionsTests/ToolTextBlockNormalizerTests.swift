@@ -156,6 +156,52 @@ final class ToolTextBlockNormalizerTests: XCTestCase {
         XCTAssertEqual(block?.lines, ["https://github.com/aome510/spotify-player"])
     }
 
+    func testBrowserActionInputUsesHumanLabels() {
+        let input = #"{"app":"Safari","direction":"down","element_index":4,"pages":0.7}"#
+        let event = makeEvent(kind: .tool_call,
+                              toolName: "tool",
+                              toolInput: input,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
+        XCTAssertEqual(block?.lines, [
+            "app: Safari",
+            "direction: down",
+            "element: 4",
+            "pages: 0.7"
+        ])
+    }
+
+    func testCodexInputTextBlocksRenderAccessibilityTreeReadably() {
+        let output = #"""
+        [{"text":"Wall time: 4.4710 seconds\nOutput:","type":"input_text"},{"text":"App=com.apple.Safari (pid 93404)\nWindow: \"New Issue\", App: Safari.\n\t0 standard window New Issue, ID: SafariWindow?IsSecure=true&UUID=abc, Secondary Actions: Raise\n\t\t1 split group\n\t\t\t3 tab group\n\t\t\t\t4 scroll area\n\t\t\t\t\t5 HTML content Description: New Issue, URL: github.com/hesreallyhim/awesome-claude-code/issues/new?template=recommend-resource.yml\n\t\t\t\t\t\t6 link Skip to content, Value: github.com/hesreallyhim/awesome-claude-code/issues/new?template=recommend-resource.yml#start-of-content\n\t\t\t\t\t\t14 button Search or jump to…\n\t\t\t\t\t\t28 link Value: github.com/hesreallyhim/awesome-claude-code/issues, Issues\n\t\t\t\t\t\t37 heading Create new issue, Value: 1\n\t\t\t\t\t\t40 text field (settable, string) Add a title, Value: [Resource]: Agent Sessions, Placeholder: ","type":"input_text"}]
+        """#
+        let event = makeEvent(kind: .tool_result,
+                              toolName: "tool",
+                              toolOutput: output,
+                              rawJSON: "{}")
+        let block = ToolTextBlockNormalizer.normalize(event: event, source: .codex)
+        XCTAssertEqual(block?.lines, [
+            "Wall time: 4.4710 seconds",
+            "App: Safari",
+            "Window: New Issue",
+            "0 standard window \"New Issue\"",
+            "  1 split group",
+            "    3 tab group",
+            "      4 scroll area",
+            "        5 HTML content \"New Issue\"",
+            "          6 link \"Skip to content\"",
+            "          14 button \"Search or jump to…\"",
+            "          28 link \"Issues\"",
+            "          37 heading \"Create new issue\"",
+            "          40 text field \"Add a title\"",
+            "            Value: [Resource]: Agent Sessions"
+        ])
+        let rendered = block?.lines.joined(separator: "\n") ?? ""
+        XCTAssertFalse(rendered.contains(#""type":"input_text""#))
+        XCTAssertFalse(rendered.contains(#"\n"#))
+        XCTAssertFalse(rendered.contains(#"\t"#))
+    }
+
     func testHermesSimpleFilesOutputRendersAsList() {
         let output = #"{"total_count":3,"files":["/tmp/a.json","/tmp/b.json","/tmp/c.json"],"truncated":true}"#
         let event = makeEvent(kind: .tool_result,
