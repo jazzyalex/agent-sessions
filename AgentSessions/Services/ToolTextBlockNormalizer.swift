@@ -239,7 +239,7 @@ enum ToolTextBlockNormalizer {
 
         if let parsedOutputObject,
            let summaryLines = structuredSummaryLines(from: parsedOutputObject) {
-            return (structuredSummaryLabel(toolName: toolName, fallback: label), summaryLines)
+            return (structuredSummaryLabel(toolName: toolName, fallback: label, object: parsedOutputObject), summaryLines)
         }
 
         if shouldPreferStructuredJSONDisplay(parsedOutputObject, extracted: info, rawOutput: outputText),
@@ -872,12 +872,21 @@ enum ToolTextBlockNormalizer {
         return splitAndTrimTrailingEmptyLines(text)
     }
 
-    private static func structuredSummaryLabel(toolName: String?, fallback: String) -> String {
-        guard let toolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !toolName.isEmpty else {
-            return fallback
+    private static func structuredSummaryLabel(toolName: String?, fallback: String, object: Any) -> String {
+        let normalizedToolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let toolName = normalizedToolName,
+           !toolName.isEmpty,
+           toolName.lowercased() != "tool" {
+            return toolName
         }
-        return toolName
+
+        if let dict = object as? [String: Any],
+           let target = firstString(for: ["target"], in: dict),
+           !target.isEmpty {
+            return target
+        }
+
+        return fallback
     }
 
     private static func structuredSummaryLines(from obj: Any) -> [String]? {
@@ -888,6 +897,25 @@ enum ToolTextBlockNormalizer {
         var lines: [String] = []
         appendSimpleLine(key: "success", from: dict, to: &lines)
         appendSimpleLine(key: "query", from: dict, to: &lines)
+        appendSimpleLine(key: "target", from: dict, to: &lines)
+
+        if let rawEntries = dict["entries"] {
+            guard let entries = rawEntries as? [String] else {
+                return nil
+            }
+
+            lines.append("entries: \(entries.count)")
+            for (index, entry) in entries.enumerated() {
+                let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                if !lines.isEmpty { lines.append("") }
+                lines.append("[\(index + 1)] \(trimmed)")
+            }
+
+            let supportedKeys = Set(["success", "target", "entries", "usage", "entry_count", "message"])
+            let hasOnlySupportedSummaryKeys = dict.keys.allSatisfy { supportedKeys.contains($0) }
+            return hasOnlySupportedSummaryKeys && !lines.isEmpty ? lines : nil
+        }
 
         if let rawResults = dict["results"], !(rawResults is [[String: Any]]) {
             return nil
@@ -904,7 +932,7 @@ enum ToolTextBlockNormalizer {
         }
 
         guard let results, !results.isEmpty else {
-            let supportedKeys = Set(["success", "query", "count"])
+            let supportedKeys = Set(["success", "query", "target", "count"])
             let hasOnlySupportedSummaryKeys = dict.keys.allSatisfy { supportedKeys.contains($0) }
             return hasOnlySupportedSummaryKeys && !lines.isEmpty ? lines : nil
         }

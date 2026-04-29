@@ -106,6 +106,42 @@ final class TranscriptBuilderTests: XCTestCase {
         XCTAssertFalse(txt.contains("*   "))
     }
 
+    func testHermesTargetEntriesToolOutputIsReadable() throws {
+        let output = #"{"success":true,"target":"memory","entries":["On Alex's iTerm light-mode setup, Hermes default skin has poor text contrast; setting display.skin to warm-lightmode fixes visibility for Hermes CLI/TUI.","Hermes quick_commands in Telegram aren't working as expected. Getting \"Unrecognized slash command\" errors for /qwen, /gpt-m. OpenAI provider also shows \"unknown provider 'openai'\" error. Need to research proper quick_commands format or alternative approach."],"usage":"18% — 413/2,200 chars","entry_count":2,"message":"Entry added."}"#
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "tool",
+                         toolInput: nil,
+                         toolOutput: output,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-memory-entries",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/memory-entries.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let txt = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: s, filters: .current(showTimestamps: false, showMeta: false))
+        XCTAssertTrue(txt.contains("out: memory"))
+        XCTAssertTrue(txt.contains("target: memory"))
+        XCTAssertTrue(txt.contains("entries: 2"))
+        XCTAssertTrue(txt.contains("[1] On Alex's iTerm light-mode setup"))
+        XCTAssertTrue(txt.contains("[2] Hermes quick_commands in Telegram aren't working as expected."))
+        XCTAssertFalse(txt.contains(#""success" : true"#))
+        XCTAssertFalse(txt.contains(#""entries" : ["#))
+    }
+
     func testStructuredMetadataDoesNotHideStdoutPayload() throws {
         let output = #"{"success":true,"query":"x","stdout":"real output"}"#
         let events: [SessionEvent] = [
