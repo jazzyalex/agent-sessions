@@ -45,11 +45,12 @@ retry_eval() {
     LAST_CHECK_OUTPUT=""
 
     for ((attempt=1; attempt<=attempts; attempt++)); do
-        output=$(eval "$command" 2>&1)
-        status=$?
-        if [[ $status -eq 0 ]]; then
+        if output=$(eval "$command" 2>&1); then
+            status=0
             LAST_CHECK_OUTPUT="$output"
             return 0
+        else
+            status=$?
         fi
 
         LAST_CHECK_ERROR="$output"
