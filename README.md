@@ -45,6 +45,17 @@ Agent Sessions helps you search across large session histories, quickly find the
   <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
+## Security & Privacy
+
+- Local-first: session data stays on your Mac.
+- No telemetry, analytics, remote logging, advertising identifiers, or session-history uploads.
+- Reads local session folders you choose, plus supported default CLI locations.
+- Builds local indexes/databases for search and navigation.
+- Explicit actions may open Terminal/iTerm2 resume commands or run status/probe cleanup workflows.
+- The only network activity is optional Sparkle update checks.
+
+Details: `docs/PRIVACY.md` and `docs/security.md`.
+
 ## What's New in 3.6.7
 
 **TL;DR** - Menu bar controls now stay in sync without relaunching Agent Sessions.

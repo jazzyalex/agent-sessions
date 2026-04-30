@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/xcode_build_policy.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking shell policy"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/xcode_build_policy.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking shell approval policy"
+          }
+        ]
+      }
+    ]
+  }
+}
