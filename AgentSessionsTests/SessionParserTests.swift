@@ -1271,6 +1271,28 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(session.endTime?.timeIntervalSince1970, 1770000100)
     }
 
+    func testClaudeParserMarksDesktopEntrypointTranscript() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopEntrypoint-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let projectsDir = root.appendingPathComponent(".claude/projects/-Users-test-Repo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+
+        let transcriptURL = projectsDir.appendingPathComponent("5d607a99-541f-4a7a-a4bb-c9fe5e763e4e.jsonl")
+        try writeText(
+            #"{"type":"user","sessionId":"5d607a99-541f-4a7a-a4bb-c9fe5e763e4e","entrypoint":"claude-desktop","cwd":"/Users/test/Repo","version":"2.1.119","message":{"role":"user","content":"create TEST 2 session"}}"# + "\n",
+            to: transcriptURL
+        )
+
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFile(at: transcriptURL))
+        XCTAssertEqual(session.source, .claude)
+        XCTAssertEqual(session.surface, .desktop)
+        XCTAssertEqual(session.originator, "Claude Desktop")
+        XCTAssertEqual(session.originSource, "claude-desktop")
+        XCTAssertEqual(session.codexInternalSessionIDHint, "5d607a99-541f-4a7a-a4bb-c9fe5e763e4e")
+    }
+
     func testClaudeParserUsesDesktopMetadataTitleWhenTranscriptTitleIsFallback() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopTitle-\(UUID().uuidString)", isDirectory: true)

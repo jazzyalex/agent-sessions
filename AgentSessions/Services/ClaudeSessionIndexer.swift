@@ -17,7 +17,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         let stats: [String: PersistedFileStat]
     }
 
-    private static let coreFileStatsStateKey = "core_file_stats_v1:claude"
+    private static let coreFileStatsStateKey = "core_file_stats_v3:claude"
 
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
@@ -592,7 +592,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         guard !snapshot.isEmpty else { return }
         do {
             let payload = PersistedFileStatPayload(
-                version: 1,
+                version: 3,
                 stats: snapshot.reduce(into: [:]) { partial, entry in
                     partial[entry.key] = PersistedFileStat(mtime: entry.value.mtime, size: entry.value.size)
                 }
@@ -613,7 +613,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             return nil
         }
         let payload = try JSONDecoder().decode(PersistedFileStatPayload.self, from: data)
-        guard payload.version == 1 else { return nil }
+        guard payload.version == 3 else { return nil }
         let map = payload.stats.reduce(into: [String: SessionFileStat]()) { partial, entry in
             partial[entry.key] = SessionFileStat(mtime: entry.value.mtime, size: entry.value.size)
         }
@@ -639,25 +639,53 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         let list = try await repo.fetchSessions(for: .claude)
         guard !list.isEmpty else { return nil }
         let sorted = list.sorted { $0.modifiedAt > $1.modifiedAt }
-        return await Self.fixupHydratedClaudeTitlesIfNeeded(sorted, db: db, limit: 200)
+        return await Self.fixupHydratedClaudeMetadataIfNeeded(sorted, db: db, titleRepairLimit: 200)
     }
 
-    private static func fixupHydratedClaudeTitlesIfNeeded(_ sessions: [Session], db: IndexDB, limit: Int) async -> [Session] {
+    private static func fixupHydratedClaudeMetadataIfNeeded(_ sessions: [Session], db: IndexDB, titleRepairLimit: Int) async -> [Session] {
         var out = sessions
-        let cap = min(limit, out.count)
-        guard cap > 0 else { return out }
+        guard !out.isEmpty else { return out }
 
-        for i in 0..<cap {
+        for i in out.indices {
             let current = out[i]
             guard current.source == .claude, current.events.isEmpty else { continue }
-            guard let existing = current.lightweightTitle, Self.looksLikeClaudeLocalCommandTitle(existing) else { continue }
-            let url = URL(fileURLWithPath: current.filePath)
-            guard let reparsed = ClaudeSessionParser.parseFile(at: url),
-                  let newTitleRaw = reparsed.lightweightTitle else { continue }
+            let titleLooksRepairable = current.lightweightTitle.map(Self.looksLikeClaudeLocalCommandTitle) == true
+            let needsTitleRepair = i < titleRepairLimit && titleLooksRepairable
+            let needsSurfaceClassification = current.surface == nil && !current.isSubagent
+            let hasDesktopLocalAgentPath = needsSurfaceClassification && Self.isClaudeDesktopLocalAgentPath(current.filePath)
+            let hasDesktopEntrypoint = needsSurfaceClassification &&
+                !hasDesktopLocalAgentPath &&
+                Self.fileHasClaudeDesktopEntrypoint(current.filePath)
+            guard needsTitleRepair || needsSurfaceClassification else { continue }
 
-            let newTitle = newTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !newTitle.isEmpty, !Self.looksLikeClaudeLocalCommandTitle(newTitle) else { continue }
-            if newTitle == existing { continue }
+            let reparsed: Session? = {
+                guard needsTitleRepair || hasDesktopLocalAgentPath else { return nil }
+                return ClaudeSessionParser.parseFile(at: URL(fileURLWithPath: current.filePath))
+            }()
+            if needsTitleRepair && reparsed == nil { continue }
+
+            let repairedTitle: String? = {
+                guard (needsTitleRepair || ((hasDesktopEntrypoint || hasDesktopLocalAgentPath) && titleLooksRepairable)),
+                      let raw = reparsed?.lightweightTitle else {
+                    return current.lightweightTitle
+                }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty, !Self.looksLikeClaudeLocalCommandTitle(trimmed) else {
+                    return current.lightweightTitle
+                }
+                return trimmed
+            }()
+            let repairedOriginator = reparsed?.originator ??
+                ((hasDesktopEntrypoint || hasDesktopLocalAgentPath) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : current.originator)
+            let repairedOriginSource = reparsed?.originSource ??
+                (hasDesktopEntrypoint ? "claude-desktop" : (hasDesktopLocalAgentPath ? "local-agent-mode" : current.originSource))
+            let repairedSurface = reparsed?.surface ??
+                (hasDesktopEntrypoint || hasDesktopLocalAgentPath ? .desktop : (needsSurfaceClassification ? .cli : current.surface))
+            let changed = repairedTitle != current.lightweightTitle ||
+                repairedOriginator != current.originator ||
+                repairedOriginSource != current.originSource ||
+                repairedSurface != current.surface
+            guard changed else { continue }
 
             out[i] = Session(
                 id: current.id,
@@ -671,25 +699,45 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 events: current.events,
                 cwd: current.lightweightCwd,
                 repoName: nil,
-                lightweightTitle: newTitle,
+                lightweightTitle: repairedTitle,
                 lightweightCommands: current.lightweightCommands,
+                isHousekeeping: current.isHousekeeping,
                 codexInternalSessionIDHint: current.codexInternalSessionIDHint,
                 parentSessionID: current.parentSessionID,
                 subagentType: current.subagentType,
                 customTitle: current.customTitle,
-                originator: current.originator,
-                originSource: current.originSource,
-                surface: current.surface
+                originator: repairedOriginator,
+                originSource: repairedOriginSource,
+                surface: repairedSurface
             )
 
             do {
-                try await db.updateSessionMetaTitle(sessionID: current.id, source: SessionSource.claude.rawValue, title: newTitle)
+                try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: out[i]))
             } catch {
                 // Non-fatal: leave DB stale; in-memory list is still improved for this run.
             }
         }
 
         return out
+    }
+
+    private static func fileHasClaudeDesktopEntrypoint(_ path: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 128 * 1024),
+              let text = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return text.contains(#""entrypoint":"claude-desktop""#) ||
+            text.contains(#""entrypoint": "claude-desktop""#)
+    }
+
+    private static func isClaudeDesktopLocalAgentPath(_ path: String) -> Bool {
+        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        return components.contains("local-agent-mode-sessions") &&
+            components.contains(".claude") &&
+            components.contains("projects") &&
+            components.contains { $0.hasPrefix("local_") }
     }
 
     private static func looksLikeClaudeLocalCommandTitle(_ text: String) -> Bool {

@@ -2064,6 +2064,10 @@ struct UnifiedSessionsView: View {
     }
 
     private static func surfacePill(for session: Session) -> CodexSurfacePill? {
+        if let claudeDesktopPill = claudeDesktopSurfacePill(for: session) {
+            return claudeDesktopPill
+        }
+
         switch session.surface ?? session.codexSurface {
         case .desktop:
             return .desktop(isArchived: isArchivedDesktopSession(session))
@@ -2084,6 +2088,24 @@ struct UnifiedSessionsView: View {
 
     private static func supportsAgentSurfacePills(_ session: Session) -> Bool {
         session.source == .codex || session.source == .claude
+    }
+
+    private static func claudeDesktopSurfacePill(for session: Session) -> CodexSurfacePill? {
+        guard session.source == .claude else { return nil }
+        let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let originSource = session.originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if originator == "claude desktop" || originSource == "local-agent-mode" || isClaudeDesktopLocalAgentPath(session.filePath) {
+            return .desktop(isArchived: false)
+        }
+        return nil
+    }
+
+    private static func isClaudeDesktopLocalAgentPath(_ path: String) -> Bool {
+        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        return components.contains("local-agent-mode-sessions") &&
+            components.contains(".claude") &&
+            components.contains("projects") &&
+            components.contains { $0.hasPrefix("local_") }
     }
 
     private static func codexOriginatorSurfacePill(for session: Session) -> CodexSurfacePill? {

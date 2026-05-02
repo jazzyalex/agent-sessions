@@ -44,6 +44,7 @@ final class ClaudeSessionParser {
         var customTitle: String?
         var aiTitle: String?
         var hasExplicitCustomTitle = false
+        var entrypoint: String?
         var idx = 0
 
         // Detect subagent from file path
@@ -73,6 +74,9 @@ final class ClaudeSessionParser {
                 }
                 if model == nil, let ver = obj["version"] as? String {
                     model = "Claude Code \(ver)"
+                }
+                if entrypoint == nil, let rawEntrypoint = obj["entrypoint"] as? String, !rawEntrypoint.isEmpty {
+                    entrypoint = rawEntrypoint
                 }
                 // Prefer actual LLM model from assistant events over CLI version
                 if llmModel == nil,
@@ -136,7 +140,10 @@ final class ClaudeSessionParser {
             codexInternalSessionIDHint: sessionID,
             parentSessionID: parentSessionID,
             subagentType: subagentType,
-            customTitle: hasExplicitCustomTitle ? customTitle : nil
+            customTitle: hasExplicitCustomTitle ? customTitle : nil,
+            originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
+            originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
+            surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil
         )
         return enrichWithDesktopMetadataIfNeeded(session, url: url)
     }
@@ -182,6 +189,10 @@ final class ClaudeSessionParser {
             reasoningEffort: session.reasoningEffort,
             deletedAt: session.deletedAt
         )
+    }
+
+    private static func isClaudeDesktopEntrypoint(_ raw: String?) -> Bool {
+        raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "claude-desktop"
     }
 
     private static func metadataDateReplacingMtimeFallback(_ current: Date?,
@@ -813,6 +824,7 @@ final class ClaudeSessionParser {
             var customTitle: String?
             var aiTitle: String?
             var hasExplicitCustomTitle = false
+            var entrypoint: String?
 
             func ingest(_ rawLine: String) {
                 guard let data = rawLine.data(using: .utf8),
@@ -833,6 +845,9 @@ final class ClaudeSessionParser {
                 }
                 if model == nil, let ver = obj["version"] as? String {
                     model = "Claude Code \(ver)"
+                }
+                if entrypoint == nil, let rawEntrypoint = obj["entrypoint"] as? String, !rawEntrypoint.isEmpty {
+                    entrypoint = rawEntrypoint
                 }
                 // Prefer actual LLM model from assistant events over CLI version
                 if llmModel == nil,
@@ -976,7 +991,10 @@ final class ClaudeSessionParser {
                                       codexInternalSessionIDHint: sessionID,
                                       parentSessionID: parentSessionID,
                                       subagentType: subagentType,
-                                      customTitle: titleFallback)
+                                      customTitle: titleFallback,
+                                      originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
+                                      originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
+                                      surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil)
             let title = tempSession.title
             let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
 
@@ -997,7 +1015,10 @@ final class ClaudeSessionParser {
                            codexInternalSessionIDHint: sessionID,
                            parentSessionID: parentSessionID,
                            subagentType: subagentType,
-                           customTitle: explicitCustomTitle)
+                           customTitle: explicitCustomTitle,
+                           originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
+                           originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
+                           surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil)
         }
 
         guard let initial = build(headBytes: headBytesInitial) else { return nil }

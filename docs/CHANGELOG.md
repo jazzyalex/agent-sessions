@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Claude: Standard `~/.claude` transcripts launched from Claude Desktop now persist Desktop origin metadata and show the `desk` pill instead of the CLI pill.
+- Session list: Claude Desktop rows keep the `desk` pill even when cached rows have not yet hydrated generic surface metadata.
 
 ## [3.7] - 2026-05-01
 ### Features
