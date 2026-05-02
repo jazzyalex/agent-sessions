@@ -9,6 +9,49 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "3.6.7"
+    as_of_date_utc: "2026-05-02"
+    as_of_commit: "107aa239"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.128.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260502-012414Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+        usage_limits:
+          max_verified_version: "0.128.0"
+          evidence: ["AgentSessions/Resources/codex_status_capture.sh", "scripts/probe_scan_output/agent_watch/20260502-012414Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.126"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+        usage_limits:
+          max_verified_version: "2.1.126"
+          evidence: ["AgentSessions/Resources/claude_usage_capture.sh", "scripts/claude-status", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+      gemini:
+        sessions:
+          max_verified_version: "0.40.1"
+          evidence: ["Resources/Fixtures/stage0/agents/gemini/small.json", "Resources/Fixtures/stage0/agents/gemini/large.json", "Resources/Fixtures/stage0/agents/gemini/jsonl_v040.jsonl", "Resources/Fixtures/stage0/agents/gemini/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260502-015517Z-prebump/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.40"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260502-013211Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.14.31"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/001.json", "scripts/probe_scan_output/agent_watch/20260502-013503Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.4.29"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "scripts/probe_scan_output/agent_watch/20260502-020911Z/report.json", "~/.openclaw/agents/main/sessions/005976ca-88c4-4ec6-98fb-21d838cd3ecb.jsonl"]
+    notes:
+      - "Follow-up checks 2026-05-02: bumped Codex 0.125.0->0.128.0, Claude 2.1.123->2.1.126, Gemini 0.40.0->0.40.1, Copilot 1.0.39->1.0.40, OpenCode 1.14.29->1.14.31, and OpenClaw 2026.4.26->2026.4.29."
+      - "Claude: fresh real-home 2.1.126 session matched baseline; no parser, UI, or UX changes were needed."
+      - "Copilot: auth-enabled prebump passed after adding normal hook.start/hook.end envelope coverage to the large fixture. The parser already preserves these envelopes as metadata."
+      - "Gemini: 0.40.1 prebump passed with a fresh sandbox session after setting GEMINI_CLI_TRUST_WORKSPACE=true for headless workspace trust. Schema matched the existing baseline."
+      - "OpenCode: fresh 1.14.31 evidence added top-level part.tool metadata coverage. Runtime parsing already preserves raw part JSON."
+      - "OpenClaw: 2026.4.29 initially failed during plugin bootstrap because the bundled Telegram plugin could not load ../dist/babel.cjs from the runtime dependency cache. Running the plugin dependency inspection/repair path completed the cache; a fresh local agent session then matched baseline, so OpenClaw is verified at 2026.4.29."
+      - "Final weekly check after the fixture and matrix updates reported schema_matches_baseline=true and recommendation=ignore for Claude, Copilot, Gemini, OpenCode, and OpenClaw."
+
   - agent_sessions_version: "3.6.5"
     as_of_date_utc: "2026-04-29"
     as_of_commit: "f528abf0"

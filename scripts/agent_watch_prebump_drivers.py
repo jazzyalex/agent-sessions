@@ -306,6 +306,7 @@ class GeminiPromptDriver:
         gemini_home.mkdir(parents=True, exist_ok=True)
         # F2: env comes from prepare_auth.
         env = dict(env)
+        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
         stdout_file = sandbox / "gemini.stdout.txt"
         stderr_file = sandbox / "gemini.stderr.txt"
         try:

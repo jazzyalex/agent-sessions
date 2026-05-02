@@ -8,6 +8,7 @@
 ## Swift/macOS QA
 - If test automation or QA scripts force macOS Appearance to Dark Mode, always restore macOS Appearance back to `System` at the end of the run.
 - In Codex Desktop, Swift/Xcode build and test commands commonly need access to Xcode cache directories that are outside the workspace sandbox. For `xcodebuild`, SwiftPM, or XCTest runs, request approved Xcode access up front when the command is expected to touch DerivedData, ModuleCache, SourcePackages, simulator caches, or other Xcode-managed cache paths. If a first run fails only because sandboxing blocked one of those paths, rerun the exact same command with approved Xcode access and report it as a sandbox access retry, not as a code or test failure.
+- Prefer narrow approved command prefixes for trusted repo-local Xcode workflows, such as the canonical AgentSessions build/test commands and `./scripts/xcode_test_stable.sh`. Do not use broad auto-approval rules for arbitrary Xcode-looking commands; if a command falls outside the trusted prefixes, request explicit approved Xcode access for that command.
 
 ## Instructions for Codex CLI
 
