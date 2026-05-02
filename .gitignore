@@ -46,6 +46,7 @@ docs/social/agent-sessions-outreach/
 
 # Claude AI local settings
 .claude/settings.local.json
+.claude/worktrees/
 
 # Letta local settings
 .letta/

@@ -94,6 +94,9 @@ actor IndexDB {
               codex_originator TEXT,
               codex_source TEXT,
               codex_surface TEXT,
+              originator TEXT,
+              origin_source TEXT,
+              surface TEXT,
               reasoning_effort TEXT,
               is_housekeeping INTEGER NOT NULL DEFAULT 0,
               messages INTEGER DEFAULT 0,
@@ -182,6 +185,30 @@ actor IndexDB {
         if !tableHasColumn(db, table: "session_meta", column: "reasoning_effort") {
             do {
                 try exec(db, "ALTER TABLE session_meta ADD COLUMN reasoning_effort TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "originator") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN originator TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "origin_source") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN origin_source TEXT;")
+            } catch {
+                if !isDuplicateColumnError(error) { throw error }
+            }
+        }
+
+        if !tableHasColumn(db, table: "session_meta", column: "surface") {
+            do {
+                try exec(db, "ALTER TABLE session_meta ADD COLUMN surface TEXT;")
             } catch {
                 if !isDuplicateColumnError(error) { throw error }
             }
@@ -663,7 +690,7 @@ actor IndexDB {
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = """
-        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort
+        SELECT session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface
         FROM session_meta
         WHERE source = ?
         ORDER BY COALESCE(end_ts, mtime) DESC
@@ -699,7 +726,10 @@ actor IndexDB {
                 codexOriginator: sqlite3_column_type(stmt, 18) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 18)),
                 codexSource: sqlite3_column_type(stmt, 19) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 19)),
                 codexSurface: sqlite3_column_type(stmt, 20) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 20)),
-                reasoningEffort: sqlite3_column_type(stmt, 21) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 21))
+                reasoningEffort: sqlite3_column_type(stmt, 21) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 21)),
+                originator: sqlite3_column_type(stmt, 22) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 22)),
+                originSource: sqlite3_column_type(stmt, 23) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 23)),
+                surface: sqlite3_column_type(stmt, 24) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 24))
             )
             out.append(row)
         }
@@ -1372,8 +1402,8 @@ actor IndexDB {
 
     func upsertSessionMeta(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
@@ -1381,7 +1411,8 @@ actor IndexDB {
           is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands,
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type, custom_title=excluded.custom_title,
           codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
-          reasoning_effort=excluded.reasoning_effort;
+          reasoning_effort=excluded.reasoning_effort,
+          originator=excluded.originator, origin_source=excluded.origin_source, surface=excluded.surface;
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }
@@ -1407,6 +1438,9 @@ actor IndexDB {
         if let source = m.codexSource { sqlite3_bind_text(stmt, 20, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 20) }
         if let surface = m.codexSurface { sqlite3_bind_text(stmt, 21, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 21) }
         if let effort = m.reasoningEffort { sqlite3_bind_text(stmt, 22, effort, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 22) }
+        if let originator = m.originator { sqlite3_bind_text(stmt, 23, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 23) }
+        if let source = m.originSource { sqlite3_bind_text(stmt, 24, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 24) }
+        if let surface = m.surface { sqlite3_bind_text(stmt, 25, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 25) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta") }
     }
 
@@ -1416,8 +1450,8 @@ actor IndexDB {
     /// while NULL values (from lightweight parses that missed the record) preserve existing data.
     func upsertSessionMetaCore(_ m: SessionMetaRow) throws {
         let sql = """
-        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO session_meta(session_id, source, path, mtime, size, start_ts, end_ts, model, cwd, repo, title, codex_internal_session_id, is_housekeeping, messages, commands, parent_session_id, subagent_type, custom_title, codex_originator, codex_source, codex_surface, reasoning_effort, originator, origin_source, surface)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET
           source=excluded.source, path=excluded.path, mtime=excluded.mtime, size=excluded.size,
           start_ts=excluded.start_ts, end_ts=excluded.end_ts, model=excluded.model, cwd=excluded.cwd,
@@ -1426,6 +1460,9 @@ actor IndexDB {
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type,
           custom_title=COALESCE(excluded.custom_title, session_meta.custom_title),
           codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
+          originator=COALESCE(excluded.originator, session_meta.originator),
+          origin_source=COALESCE(excluded.origin_source, session_meta.origin_source),
+          surface=COALESCE(excluded.surface, session_meta.surface),
           reasoning_effort=COALESCE(excluded.reasoning_effort, session_meta.reasoning_effort),
           codex_internal_session_id=CASE WHEN session_meta.codex_internal_session_id IS NULL THEN excluded.codex_internal_session_id ELSE session_meta.codex_internal_session_id END;
         """
@@ -1453,6 +1490,9 @@ actor IndexDB {
         if let source = m.codexSource { sqlite3_bind_text(stmt, 20, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 20) }
         if let surface = m.codexSurface { sqlite3_bind_text(stmt, 21, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 21) }
         if let effort = m.reasoningEffort { sqlite3_bind_text(stmt, 22, effort, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 22) }
+        if let originator = m.originator { sqlite3_bind_text(stmt, 23, originator, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 23) }
+        if let source = m.originSource { sqlite3_bind_text(stmt, 24, source, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 24) }
+        if let surface = m.surface { sqlite3_bind_text(stmt, 25, surface, -1, SQLITE_TRANSIENT) } else { sqlite3_bind_null(stmt, 25) }
         if sqlite3_step(stmt) != SQLITE_DONE { throw DBError.execFailed("upsert session_meta core") }
     }
 
@@ -2207,6 +2247,9 @@ struct SessionMetaRow {
     let codexSource: String?
     let codexSurface: String?
     let reasoningEffort: String?
+    let originator: String?
+    let originSource: String?
+    let surface: String?
 
     init(sessionID: String,
          source: String,
@@ -2229,7 +2272,10 @@ struct SessionMetaRow {
          codexOriginator: String? = nil,
          codexSource: String? = nil,
          codexSurface: String? = nil,
-         reasoningEffort: String? = nil) {
+         reasoningEffort: String? = nil,
+         originator: String? = nil,
+         originSource: String? = nil,
+         surface: String? = nil) {
         self.sessionID = sessionID
         self.source = source
         self.path = path
@@ -2252,6 +2298,9 @@ struct SessionMetaRow {
         self.codexSource = codexSource
         self.codexSurface = codexSurface
         self.reasoningEffort = reasoningEffort
+        self.originator = originator ?? codexOriginator
+        self.originSource = originSource ?? codexSource
+        self.surface = surface ?? codexSurface
     }
 }
 

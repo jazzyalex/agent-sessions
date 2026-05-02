@@ -393,6 +393,61 @@ final class CoreSessionMetaTests: XCTestCase {
         XCTAssertEqual(row.customTitle, "My Name", "custom_title preserved")
     }
 
+    func testCoreUpsertPreservesOriginFieldsWhenNil() async throws {
+        let analyticsRow = SessionMetaRow(
+            sessionID: "claude-desktop",
+            source: "claude",
+            path: "/desktop.jsonl",
+            mtime: 100,
+            size: 200,
+            startTS: 10,
+            endTS: 20,
+            model: "claude",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Desktop",
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 4,
+            commands: 0,
+            parentSessionID: nil,
+            subagentType: nil,
+            customTitle: nil,
+            originator: "Claude Desktop",
+            originSource: "local-agent-mode",
+            surface: SessionSurface.desktop.rawValue
+        )
+        try await db.upsertSessionMeta(analyticsRow)
+
+        let coreRow = SessionMetaRow(
+            sessionID: "claude-desktop",
+            source: "claude",
+            path: "/desktop.jsonl",
+            mtime: 110,
+            size: 210,
+            startTS: 10,
+            endTS: 25,
+            model: "claude",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Desktop",
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 1,
+            commands: 0,
+            parentSessionID: nil,
+            subagentType: nil,
+            customTitle: nil
+        )
+        try await db.upsertSessionMetaCore(coreRow)
+
+        let rows = try await db.fetchSessionMeta(for: "claude")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].originator, "Claude Desktop")
+        XCTAssertEqual(rows[0].originSource, "local-agent-mode")
+        XCTAssertEqual(rows[0].surface, SessionSurface.desktop.rawValue)
+    }
+
     func testCoreUpsertInsertsNewRowWhenNoneExists() async throws {
         let coreRow = SessionMetaRow(
             sessionID: "new1", source: "claude", path: "/new.jsonl",

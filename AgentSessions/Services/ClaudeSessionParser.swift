@@ -21,7 +21,7 @@ final class ClaudeSessionParser {
             #if DEBUG
             print("✅ LIGHTWEIGHT CLAUDE: \(url.lastPathComponent) estEvents=\(light.eventCount) messageCount=\(light.messageCount)")
             #endif
-            return light
+            return enrichWithDesktopMetadataIfNeeded(light, url: url)
         }
 
         // Fallback: full parse only when lightweight path fails.
@@ -119,7 +119,7 @@ final class ClaudeSessionParser {
         let fileID = forcedID ?? hash(path: url.path)
         let nonMetaCount = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
-        return Session(
+        let session = Session(
             id: fileID,
             source: .claude,
             startTime: tmin,
@@ -138,6 +138,107 @@ final class ClaudeSessionParser {
             subagentType: subagentType,
             customTitle: hasExplicitCustomTitle ? customTitle : nil
         )
+        return enrichWithDesktopMetadataIfNeeded(session, url: url)
+    }
+
+    private static func enrichWithDesktopMetadataIfNeeded(_ session: Session, url: URL) -> Session {
+        guard let metadata = ClaudeDesktopSessionMetadataReader.metadata(
+            forTranscript: url,
+            transcriptSessionID: session.codexInternalSessionIDHint
+        ) else {
+            return session
+        }
+        let title = bestTitle(transcriptTitle: session.lightweightTitle, customTitle: session.customTitle, metadataTitle: metadata.title)
+        let cwd = bestCwd(session.lightweightCwd, metadata: metadata)
+        let fileMtime = fileModificationDate(for: url)
+        let start = metadataDateReplacingMtimeFallback(session.startTime,
+                                                       metadataDate: metadata.createdAt,
+                                                       fileMtime: fileMtime)
+        let end = metadataDateReplacingMtimeFallback(session.endTime,
+                                                     metadataDate: metadata.lastActivityAt,
+                                                     fileMtime: fileMtime)
+        return Session(
+            id: session.id,
+            source: session.source,
+            startTime: start,
+            endTime: end,
+            model: bestModel(transcriptModel: session.model, metadataModel: metadata.model),
+            filePath: session.filePath,
+            fileSizeBytes: session.fileSizeBytes,
+            eventCount: session.eventCount,
+            events: session.events,
+            cwd: cwd,
+            repoName: session.lightweightRepoName,
+            lightweightTitle: title,
+            lightweightCommands: session.lightweightCommands,
+            isHousekeeping: session.isHousekeeping,
+            codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? metadata.cliSessionID,
+            parentSessionID: session.parentSessionID,
+            subagentType: session.subagentType,
+            customTitle: session.customTitle,
+            originator: ClaudeDesktopSessionMetadataReader.desktopOriginator,
+            originSource: metadata.source,
+            surface: .desktop,
+            reasoningEffort: session.reasoningEffort,
+            deletedAt: session.deletedAt
+        )
+    }
+
+    private static func metadataDateReplacingMtimeFallback(_ current: Date?,
+                                                           metadataDate: Date?,
+                                                           fileMtime: Date?) -> Date? {
+        guard let current else { return metadataDate }
+        guard let metadataDate, let fileMtime else { return current }
+        return abs(current.timeIntervalSince(fileMtime)) < 0.001 ? metadataDate : current
+    }
+
+    private static func bestModel(transcriptModel: String?, metadataModel: String?) -> String? {
+        guard let transcript = transcriptModel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transcript.isEmpty else {
+            return metadataModel
+        }
+        if transcript.hasPrefix("Claude Code "),
+           let metadata = metadataModel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !metadata.isEmpty {
+            return metadata
+        }
+        return transcript
+    }
+
+    private static func fileModificationDate(for url: URL) -> Date? {
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        return attrs[.modificationDate] as? Date
+    }
+
+    private static func bestTitle(transcriptTitle: String?, customTitle: String?, metadataTitle: String?) -> String? {
+        if let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            return transcriptTitle
+        }
+        if let transcript = transcriptTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !transcript.isEmpty,
+           transcript != "No prompt" {
+            return transcript
+        }
+        guard let metadata = metadataTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !metadata.isEmpty else {
+            return nil
+        }
+        return metadata
+    }
+
+    private static func bestCwd(_ cwd: String?, metadata: ClaudeDesktopSessionMetadata) -> String? {
+        if let origin = metadata.originCwd, isValidPath(origin) {
+            return origin
+        }
+        if let worktree = metadata.worktreePath, isValidPath(worktree) {
+            return worktree
+        }
+        if let cwd, isValidPath(cwd) {
+            return cwd
+        }
+        if let metadataCwd = metadata.cwd, isValidPath(metadataCwd) {
+            return metadataCwd
+        }
+        return cwd
     }
 
     // MARK: - Event Parsing

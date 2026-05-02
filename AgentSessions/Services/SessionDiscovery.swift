@@ -265,11 +265,135 @@ final class CodexSessionDiscovery: SessionDiscovery {
 
 // MARK: - Claude Code Session Discovery
 
+struct ClaudeDesktopSessionMetadata: Equatable {
+    let sessionID: String
+    let cliSessionID: String?
+    let cwd: String?
+    let originCwd: String?
+    let worktreePath: String?
+    let worktreeName: String?
+    let createdAt: Date?
+    let lastActivityAt: Date?
+    let model: String?
+    let title: String?
+    let isArchived: Bool
+    let source: String
+}
+
+struct ClaudeDesktopSessionMetadataReader {
+    static let desktopOriginator = "Claude Desktop"
+
+    static func metadata(forTranscript url: URL, transcriptSessionID: String? = nil) -> ClaudeDesktopSessionMetadata? {
+        for metadataFile in metadataFileCandidates(forTranscript: url) {
+            guard let metadata = readMetadata(at: metadataFile, source: "local-agent-mode"),
+                  metadataMatchesTranscript(metadata, transcriptURL: url, transcriptSessionID: transcriptSessionID) else {
+                continue
+            }
+            return metadata
+        }
+        return nil
+    }
+
+    static func metadataFile(forTranscript url: URL, transcriptSessionID: String? = nil) -> URL? {
+        for metadataFile in metadataFileCandidates(forTranscript: url) {
+            guard let metadata = readMetadata(at: metadataFile, source: "local-agent-mode"),
+                  metadataMatchesTranscript(metadata, transcriptURL: url, transcriptSessionID: transcriptSessionID) else {
+                continue
+            }
+            return metadataFile
+        }
+        return nil
+    }
+
+    static func hasMetadataCandidates(forTranscript url: URL) -> Bool {
+        !metadataFileCandidates(forTranscript: url).isEmpty
+    }
+
+    static func readMetadata(at url: URL, source: String) -> ClaudeDesktopSessionMetadata? {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sessionID = nonEmptyString(obj["sessionId"] as? String) else {
+            return nil
+        }
+
+        return ClaudeDesktopSessionMetadata(
+            sessionID: sessionID,
+            cliSessionID: nonEmptyString(obj["cliSessionId"] as? String),
+            cwd: nonEmptyString(obj["cwd"] as? String),
+            originCwd: nonEmptyString(obj["originCwd"] as? String),
+            worktreePath: nonEmptyString(obj["worktreePath"] as? String),
+            worktreeName: nonEmptyString(obj["worktreeName"] as? String),
+            createdAt: dateFromMilliseconds(obj["createdAt"]),
+            lastActivityAt: dateFromMilliseconds(obj["lastActivityAt"]),
+            model: nonEmptyString(obj["model"] as? String),
+            title: nonEmptyString(obj["title"] as? String),
+            isArchived: (obj["isArchived"] as? Bool) ?? false,
+            source: source
+        )
+    }
+
+    private static func dateFromMilliseconds(_ raw: Any?) -> Date? {
+        if let number = raw as? NSNumber {
+            return Date(timeIntervalSince1970: number.doubleValue / 1000.0)
+        }
+        if let string = raw as? String, let value = Double(string) {
+            return Date(timeIntervalSince1970: value / 1000.0)
+        }
+        return nil
+    }
+
+    private static func nonEmptyString(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func metadataFileCandidates(forTranscript url: URL) -> [URL] {
+        let components = url.standardizedFileURL.pathComponents
+        guard let localIndex = components.lastIndex(where: { $0.hasPrefix("local_") }) else { return [] }
+
+        let localDirPath = NSString.path(withComponents: Array(components[0...localIndex]))
+        let localDir = URL(fileURLWithPath: localDirPath, isDirectory: true)
+        let localName = localDir.lastPathComponent
+        return [
+            localDir.deletingPathExtension().appendingPathExtension("json"),
+            localDir.deletingLastPathComponent().appendingPathComponent("\(localName).json")
+        ]
+    }
+
+    private static func metadataMatchesTranscript(_ metadata: ClaudeDesktopSessionMetadata,
+                                                  transcriptURL: URL,
+                                                  transcriptSessionID: String?) -> Bool {
+        guard let cliSessionID = metadata.cliSessionID else { return false }
+        if transcriptURL.deletingPathExtension().lastPathComponent == cliSessionID {
+            return true
+        }
+        return transcriptSessionID == cliSessionID
+    }
+}
+
+private struct ClaudeDiscoveryRoot: Hashable {
+    enum Kind: Hashable {
+        case standardConfig
+        case desktopLocalAgent
+    }
+
+    let configRoot: URL
+    let scanRoot: URL
+    let kind: Kind
+}
+
 final class ClaudeSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
+    private let includeDesktopRoots: Bool
+    private let desktopLocalAgentRoot: URL?
 
-    init(customRoot: String? = nil) {
+    init(customRoot: String? = nil,
+         includeDesktopRoots: Bool = true,
+         desktopLocalAgentRoot: URL? = nil) {
         self.customRoot = customRoot
+        self.includeDesktopRoots = includeDesktopRoots
+        self.desktopLocalAgentRoot = desktopLocalAgentRoot
     }
 
     func sessionsRoot() -> URL {
@@ -280,37 +404,23 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
     }
 
     func discoverSessionFiles() -> [URL] {
-        let root = sessionsRoot()
-        let fm = FileManager.default
-
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return []
-        }
-
-        let scanRoot = effectiveScanRoot()
         var found: [URL] = []
-
-        // Scan for .jsonl and .ndjson files (sessions) under scan root
-        if let enumerator = fm.enumerator(at: scanRoot, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-            for case let url as URL in enumerator {
-                let ext = url.pathExtension.lowercased()
-                if ext == "jsonl" || ext == "ndjson" {
-                    found.append(url)
-                }
-            }
+        for root in candidateRoots() {
+            found.append(contentsOf: collectSessionFiles(in: root.scanRoot, fileCap: .max).files)
         }
 
-        // Sort by modification time descending (newest first)
-        return found.sorted { (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast >
-                             (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast }
+        return dedupe(files: found).sorted { Self.mtime($0) > Self.mtime($1) }
+    }
+
+    func hasDiscoverableSessionsRoot() -> Bool {
+        !candidateRoots().isEmpty
     }
 
     func discoverDelta(previousByPath: [String: SessionFileStat], scope: SessionDeltaScope = .recent) -> SessionDiscoveryDelta {
         switch scope {
         case .full:
             let files = discoverSessionFiles()
-            let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
+            let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
             let removed = Array(Set(previousByPath.keys).subtracting(currentByPath.keys))
             return SessionDiscoveryDelta(
                 changedFiles: changedFiles.sorted { Self.mtime($0) > Self.mtime($1) },
@@ -326,12 +436,18 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
     private func discoverRecentDelta(previousByPath: [String: SessionFileStat],
                                      topProjectLimit: Int,
                                      fileCapPerProject: Int) -> SessionDiscoveryDelta {
-        let scanRoot = effectiveScanRoot()
-
-        let selectedProjects = topProjectDirectories(under: scanRoot, limit: topProjectLimit)
-        var selectedRoots = selectedProjects
-        if selectedRoots.isEmpty {
-            selectedRoots = [scanRoot]
+        var selectedRoots: [URL] = []
+        for root in candidateRoots() {
+            if root.kind == .desktopLocalAgent {
+                selectedRoots.append(root.scanRoot)
+                continue
+            }
+            let selectedProjects = topProjectDirectories(under: root.scanRoot, limit: topProjectLimit)
+            if selectedProjects.isEmpty {
+                selectedRoots.append(root.scanRoot)
+            } else {
+                selectedRoots.append(contentsOf: selectedProjects)
+            }
         }
 
         var files: [URL] = []
@@ -343,8 +459,9 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
                 driftDetected = true
             }
         }
+        files = dedupe(files: files)
 
-        let (currentByPath, changedFiles) = SessionFileStat.diff(files, against: previousByPath)
+        let (currentByPath, changedFiles) = diffSessionFiles(files, against: previousByPath)
 
         let removed = previousByPath.keys.filter { oldPath in
             guard currentByPath[oldPath] == nil else { return false }
@@ -357,6 +474,83 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             currentByPath: currentByPath,
             driftDetected: driftDetected
         )
+    }
+
+    private func candidateRoots() -> [ClaudeDiscoveryRoot] {
+        let fm = FileManager.default
+        var roots: [ClaudeDiscoveryRoot] = []
+
+        for configRoot in standardConfigRootCandidates() {
+            guard directoryExists(configRoot) else { continue }
+            guard customRoot != nil || isValidClaudeRoot(configRoot) else { continue }
+            let projectsRoot = configRoot.appendingPathComponent("projects", isDirectory: true)
+            let scanRoot = directoryExists(projectsRoot) ? projectsRoot : configRoot
+            roots.append(ClaudeDiscoveryRoot(configRoot: configRoot, scanRoot: scanRoot, kind: .standardConfig))
+        }
+
+        let defaultDesktopRoot = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
+        if includeDesktopRoots,
+           let desktopRoot = desktopLocalAgentRoot ?? defaultDesktopRoot,
+           directoryExists(desktopRoot) {
+            roots.append(contentsOf: desktopLocalAgentRoots(under: desktopRoot))
+        }
+
+        return dedupe(roots: roots)
+    }
+
+    private func standardConfigRootCandidates() -> [URL] {
+        if let custom = customRoot, !custom.isEmpty {
+            return [expandPath(custom)]
+        }
+
+        var roots: [URL] = []
+        let env = ProcessInfo.processInfo.environment
+        if let multi = env["CLAUDE_CONFIG_DIRS"], !multi.isEmpty {
+            roots.append(contentsOf: multi.split(separator: ":").map { expandPath(String($0)) })
+        }
+        if let single = env["CLAUDE_CONFIG_DIR"], !single.isEmpty {
+            roots.append(expandPath(single))
+        }
+
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        roots.append(home.appendingPathComponent(".claude", isDirectory: true))
+
+        if let siblings = try? FileManager.default.contentsOfDirectory(at: home,
+                                                                       includingPropertiesForKeys: [.isDirectoryKey],
+                                                                       options: []) {
+            roots.append(contentsOf: siblings.filter { $0.lastPathComponent.hasPrefix(".claude") })
+        }
+
+        return roots
+    }
+
+    private func desktopLocalAgentRoots(under root: URL) -> [ClaudeDiscoveryRoot] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(at: root,
+                                             includingPropertiesForKeys: [.isDirectoryKey],
+                                             options: []) else {
+            return []
+        }
+
+        var roots: [ClaudeDiscoveryRoot] = []
+        for case let url as URL in enumerator {
+            let name = url.lastPathComponent
+            if name == "uploads" || name == "outputs" || name == "cowork_plugins" || name == "skills-plugin" {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard name == "projects",
+                  url.deletingLastPathComponent().lastPathComponent == ".claude",
+                  url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent.hasPrefix("local_") else {
+                continue
+            }
+            let configRoot = url.deletingLastPathComponent()
+            roots.append(ClaudeDiscoveryRoot(configRoot: configRoot, scanRoot: url, kind: .desktopLocalAgent))
+            enumerator.skipDescendants()
+        }
+        return roots
     }
 
     private func topProjectDirectories(under root: URL, limit: Int) -> [URL] {
@@ -399,11 +593,69 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         return (out, hitCap)
     }
 
+    private func diffSessionFiles(_ files: [URL],
+                                  against previousByPath: [String: SessionFileStat]) -> (currentByPath: [String: SessionFileStat], changedFiles: [URL]) {
+        var currentByPath: [String: SessionFileStat] = [:]
+        currentByPath.reserveCapacity(files.count)
+        var changedFiles: [URL] = []
+        changedFiles.reserveCapacity(files.count)
+        for file in files {
+            guard let stat = discoveryStat(for: file) else { continue }
+            currentByPath[file.path] = stat
+            if previousByPath[file.path] != stat {
+                changedFiles.append(file)
+            }
+        }
+        return (currentByPath, changedFiles)
+    }
+
+    private func discoveryStat(for file: URL) -> SessionFileStat? {
+        guard let transcriptStat = SessionFileStat.from(file) else { return nil }
+        guard let metadataFile = desktopMetadataFile(forTranscript: file),
+              let metadataStat = SessionFileStat.from(metadataFile) else {
+            return transcriptStat
+        }
+        return SessionFileStat(
+            mtime: max(transcriptStat.mtime, metadataStat.mtime),
+            size: transcriptStat.size + metadataStat.size
+        )
+    }
+
+    private func desktopMetadataFile(forTranscript file: URL) -> URL? {
+        if let metadataFile = ClaudeDesktopSessionMetadataReader.metadataFile(forTranscript: file) {
+            return metadataFile
+        }
+        guard ClaudeDesktopSessionMetadataReader.hasMetadataCandidates(forTranscript: file),
+              let sessionID = transcriptSessionID(in: file) else {
+            return nil
+        }
+        return ClaudeDesktopSessionMetadataReader.metadataFile(forTranscript: file, transcriptSessionID: sessionID)
+    }
+
+    private func transcriptSessionID(in file: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        let readLimit = 64 * 1024
+        guard let data = try? handle.read(upToCount: readLimit),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true).prefix(64) {
+            guard let data = String(line).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessionID = obj["sessionId"] as? String,
+                  !sessionID.isEmpty else {
+                continue
+            }
+            return sessionID
+        }
+        return nil
+    }
+
     private static func mtime(_ url: URL) -> Date {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
 
-    /// Prefer the `projects/` subtree when it exists, to avoid picking up unrelated JSONL.
     private func effectiveScanRoot() -> URL {
         let root = sessionsRoot()
         let projectsRoot = root.appendingPathComponent("projects")
@@ -412,6 +664,47 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             return projectsRoot
         }
         return root
+    }
+
+    private func dedupe(roots: [ClaudeDiscoveryRoot]) -> [ClaudeDiscoveryRoot] {
+        var seen = Set<String>()
+        var out: [ClaudeDiscoveryRoot] = []
+        for root in roots {
+            let key = root.scanRoot.resolvingSymlinksInPath().path
+            if seen.insert(key).inserted {
+                out.append(root)
+            }
+        }
+        return out
+    }
+
+    private func dedupe(files: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var out: [URL] = []
+        for file in files {
+            let key = file.resolvingSymlinksInPath().path
+            if seen.insert(key).inserted {
+                out.append(file)
+            }
+        }
+        return out
+    }
+
+    private func isValidClaudeRoot(_ root: URL) -> Bool {
+        directoryExists(root.appendingPathComponent("projects", isDirectory: true)) ||
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("settings.json").path) ||
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("history.jsonl").path) ||
+        directoryExists(root.appendingPathComponent("todos", isDirectory: true))
+    }
+
+    private func directoryExists(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private func expandPath(_ raw: String) -> URL {
+        let expanded = NSString(string: raw).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
     }
 }
 

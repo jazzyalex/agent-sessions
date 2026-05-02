@@ -223,7 +223,9 @@ enum AgentEnablement {
             root = CodexSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .claude:
             let custom = defaults.string(forKey: "ClaudeSessionsRootOverride") ?? ""
-            root = ClaudeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+            let discovery = ClaudeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
+            if discovery.hasDiscoverableSessionsRoot() { return true }
+            root = discovery.sessionsRoot()
         case .gemini:
             let custom = defaults.string(forKey: "GeminiSessionsRootOverride") ?? ""
             root = GeminiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()

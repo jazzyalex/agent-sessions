@@ -61,6 +61,9 @@ actor SessionMetaRepository {
                 codexOriginator: r.codexOriginator,
                 codexSource: r.codexSource,
                 codexSurface: r.codexSurface.flatMap(CodexSessionSurface.init(rawValue:)),
+                originator: r.originator,
+                originSource: r.originSource,
+                surface: r.surface.flatMap(SessionSurface.init(rawValue:)),
                 reasoningEffort: r.reasoningEffort
             )
             // Augment with commands count from DB for lightweight filtering
@@ -85,6 +88,9 @@ actor SessionMetaRepository {
                                codexOriginator: session.codexOriginator,
                                codexSource: session.codexSource,
                                codexSurface: session.codexSurface,
+                               originator: session.originator,
+                               originSource: session.originSource,
+                               surface: session.surface,
                                reasoningEffort: session.reasoningEffort)
             // Reconstruct with lightweightCommands via Codable? Simpler: extend Session with helper? Keep minimal by using a factory below.
             out.append(Session(id: enriched.id,
@@ -108,6 +114,9 @@ actor SessionMetaRepository {
                                codexOriginator: enriched.codexOriginator,
                                codexSource: enriched.codexSource,
                                codexSurface: enriched.codexSurface,
+                               originator: enriched.originator,
+                               originSource: enriched.originSource,
+                               surface: enriched.surface,
                                reasoningEffort: enriched.reasoningEffort,
                                deletedAt: deletedAt(fromPath: r.path)))
         }

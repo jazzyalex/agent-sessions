@@ -1198,10 +1198,173 @@ final class SessionParserTests: XCTestCase {
         let rootJSONL = root.appendingPathComponent("history.jsonl")
         try writeText(#"{"type":"meta"}"# + "\n", to: rootJSONL)
 
-        let discovery = ClaudeSessionDiscovery(customRoot: root.path)
+        let discovery = ClaudeSessionDiscovery(customRoot: root.path, includeDesktopRoots: false)
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first.map(canonicalPath), canonicalPath(sessionURL))
+    }
+
+    func testClaudeDiscoveryIncludesDesktopRootsWithCustomRoot() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Claude-CustomDesktop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let customProjectsDir = root.appendingPathComponent("custom/.claude/projects/custom", isDirectory: true)
+        try fm.createDirectory(at: customProjectsDir, withIntermediateDirectories: true)
+        let customSessionURL = customProjectsDir.appendingPathComponent("custom.jsonl")
+        try writeText(#"{"type":"user","message":{"content":"custom"}}"# + "\n", to: customSessionURL)
+
+        let desktopRoot = root.appendingPathComponent("Application Support/Claude/local-agent-mode-sessions", isDirectory: true)
+        let desktopProjectsDir = desktopRoot
+            .appendingPathComponent("account/workspace/local_abc/.claude/projects/-desktop", isDirectory: true)
+        try fm.createDirectory(at: desktopProjectsDir, withIntermediateDirectories: true)
+        let desktopSessionURL = desktopProjectsDir.appendingPathComponent("desktop.jsonl")
+        try writeText(#"{"type":"user","message":{"content":"desktop"}}"# + "\n", to: desktopSessionURL)
+
+        let discovery = ClaudeSessionDiscovery(
+            customRoot: root.appendingPathComponent("custom/.claude", isDirectory: true).path,
+            desktopLocalAgentRoot: desktopRoot
+        )
+        let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
+        XCTAssertEqual(found, [canonicalPath(customSessionURL), canonicalPath(desktopSessionURL)])
+
+        let desktopOnly = ClaudeSessionDiscovery(
+            customRoot: root.appendingPathComponent("missing/.claude", isDirectory: true).path,
+            desktopLocalAgentRoot: desktopRoot
+        )
+        XCTAssertTrue(desktopOnly.hasDiscoverableSessionsRoot())
+    }
+
+    func testClaudeParserEnrichesDesktopLocalAgentTranscript() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let localDir = root
+            .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
+        let projectsDir = localDir
+            .appendingPathComponent(".claude/projects/-sessions-demo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+
+        let metadataURL = localDir.deletingPathExtension().appendingPathExtension("json")
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"11111111-1111-4111-8111-111111111111","cwd":"/sessions/demo","originCwd":"/Users/test/Repo","createdAt":1770000000000,"lastActivityAt":1770000100000,"model":"claude-sonnet-test","title":"Desktop metadata title","isArchived":false}"#,
+            to: metadataURL
+        )
+
+        let transcriptURL = projectsDir.appendingPathComponent("11111111-1111-4111-8111-111111111111.jsonl")
+        try writeText(
+            #"{"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"/sessions/demo","version":"2.1.126","message":{"role":"user","content":"hi"}}"# + "\n",
+            to: transcriptURL
+        )
+
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFile(at: transcriptURL))
+        XCTAssertEqual(session.source, .claude)
+        XCTAssertEqual(session.surface, .desktop)
+        XCTAssertEqual(session.originator, "Claude Desktop")
+        XCTAssertEqual(session.originSource, "local-agent-mode")
+        XCTAssertEqual(session.codexInternalSessionIDHint, "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(session.lightweightCwd, "/Users/test/Repo")
+        XCTAssertEqual(session.model, "claude-sonnet-test")
+        XCTAssertEqual(session.lightweightTitle, "hi")
+        XCTAssertEqual(session.startTime?.timeIntervalSince1970, 1770000000)
+        XCTAssertEqual(session.endTime?.timeIntervalSince1970, 1770000100)
+    }
+
+    func testClaudeParserUsesDesktopMetadataTitleWhenTranscriptTitleIsFallback() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopTitle-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let localDir = root
+            .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
+        let projectsDir = localDir
+            .appendingPathComponent(".claude/projects/-sessions-demo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+
+        let metadataURL = localDir.deletingPathExtension().appendingPathExtension("json")
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"11111111-1111-4111-8111-111111111111","title":"Desktop metadata title"}"#,
+            to: metadataURL
+        )
+
+        let transcriptURL = projectsDir.appendingPathComponent("11111111-1111-4111-8111-111111111111.jsonl")
+        try writeText(
+            #"{"type":"system","sessionId":"11111111-1111-4111-8111-111111111111","cwd":"/sessions/demo"}"# + "\n",
+            to: transcriptURL
+        )
+
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFile(at: transcriptURL))
+        XCTAssertEqual(session.surface, .desktop)
+        XCTAssertEqual(session.lightweightTitle, "Desktop metadata title")
+    }
+
+    func testClaudeParserIgnoresDesktopMetadataForDifferentTranscript() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopMismatch-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let localDir = root
+            .appendingPathComponent("local-agent-mode-sessions/account/workspace/local_abc", isDirectory: true)
+        let projectsDir = localDir
+            .appendingPathComponent(".claude/projects/-sessions-demo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+
+        let metadataURL = localDir.deletingPathExtension().appendingPathExtension("json")
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","cwd":"/sessions/demo","originCwd":"/Users/test/Repo","createdAt":1770000000000,"lastActivityAt":1770000100000,"model":"claude-sonnet-test","title":"Wrong metadata","isArchived":false}"#,
+            to: metadataURL
+        )
+
+        let transcriptURL = projectsDir.appendingPathComponent("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl")
+        try writeText(
+            #"{"type":"user","sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","cwd":"/sessions/demo","message":{"role":"user","content":"hi"}}"# + "\n",
+            to: transcriptURL
+        )
+
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFile(at: transcriptURL))
+        XCTAssertNil(session.surface)
+        XCTAssertNil(session.originator)
+        XCTAssertNil(session.originSource)
+        XCTAssertEqual(session.lightweightCwd, "/sessions/demo")
+        XCTAssertNil(session.model)
+    }
+
+    func testClaudeDiscoveryDeltaTracksDesktopMetadataChanges() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopDelta-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let desktopRoot = root.appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
+        let localDir = desktopRoot.appendingPathComponent("account/workspace/local_abc", isDirectory: true)
+        let projectsDir = localDir.appendingPathComponent(".claude/projects/-sessions-demo", isDirectory: true)
+        try fm.createDirectory(at: projectsDir, withIntermediateDirectories: true)
+
+        let metadataURL = localDir.deletingPathExtension().appendingPathExtension("json")
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"11111111-1111-4111-8111-111111111111","title":"Before"}"#,
+            to: metadataURL
+        )
+        let transcriptURL = projectsDir.appendingPathComponent("11111111-1111-4111-8111-111111111111.jsonl")
+        try writeText(
+            #"{"type":"user","sessionId":"11111111-1111-4111-8111-111111111111","message":{"role":"user","content":"hi"}}"# + "\n",
+            to: transcriptURL
+        )
+
+        let discovery = ClaudeSessionDiscovery(
+            customRoot: root.appendingPathComponent("missing/.claude", isDirectory: true).path,
+            desktopLocalAgentRoot: desktopRoot
+        )
+        let initial = discovery.discoverDelta(previousByPath: [:], scope: .full)
+        XCTAssertEqual(initial.changedFiles.map(canonicalPath), [canonicalPath(transcriptURL)])
+
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"11111111-1111-4111-8111-111111111111","title":"After metadata edit with more bytes"}"#,
+            to: metadataURL
+        )
+
+        let delta = discovery.discoverDelta(previousByPath: initial.currentByPath, scope: .full)
+        XCTAssertEqual(delta.changedFiles.map(canonicalPath), [canonicalPath(transcriptURL)])
     }
 
     func testCopilotDiscoveryAcceptsConfigRootOverride() throws {

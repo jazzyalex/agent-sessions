@@ -1076,7 +1076,10 @@ final class SessionIndexer: ObservableObject {
             codexOriginator: s.codexOriginator,
             codexSource: s.codexSource,
             codexSurface: s.codexSurface?.rawValue,
-            reasoningEffort: s.reasoningEffort
+            reasoningEffort: s.reasoningEffort,
+            originator: s.originator,
+            originSource: s.originSource,
+            surface: s.surface?.rawValue
         )
     }
 

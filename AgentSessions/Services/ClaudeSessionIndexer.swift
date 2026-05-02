@@ -377,7 +377,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                         codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
                         subagentType: session.subagentType ?? existing.subagentType,
-                        customTitle: session.customTitle ?? existing.customTitle
+                        customTitle: session.customTitle ?? existing.customTitle,
+                        originator: session.originator ?? existing.originator,
+                        originSource: session.originSource ?? existing.originSource,
+                        surface: session.surface ?? existing.surface
                     )
                     mergedByPath[session.filePath] = merged
                 } else {
@@ -673,7 +676,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 codexInternalSessionIDHint: current.codexInternalSessionIDHint,
                 parentSessionID: current.parentSessionID,
                 subagentType: current.subagentType,
-                customTitle: current.customTitle
+                customTitle: current.customTitle,
+                originator: current.originator,
+                originSource: current.originSource,
+                surface: current.surface
             )
 
             do {
@@ -841,7 +847,10 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                     codexInternalSessionIDHint: fullSession.codexInternalSessionIDHint ?? current.codexInternalSessionIDHint,
                     parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
                     subagentType: fullSession.subagentType ?? current.subagentType,
-                    customTitle: fullSession.customTitle ?? current.customTitle
+                    customTitle: fullSession.customTitle ?? current.customTitle,
+                    originator: fullSession.originator ?? current.originator,
+                    originSource: fullSession.originSource ?? current.originSource,
+                    surface: fullSession.surface ?? current.surface
                 )
                 self.allSessions[idx] = merged
 

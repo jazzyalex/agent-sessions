@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CodexSessionSurface: String, Codable, Sendable {
+public enum SessionSurface: String, Codable, Sendable {
     case cli
     case desktop
     case vscode
@@ -19,6 +19,8 @@ public enum CodexSessionSurface: String, Codable, Sendable {
         }
     }
 }
+
+public typealias CodexSessionSurface = SessionSurface
 
 public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
@@ -45,6 +47,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let codexOriginator: String?
     public let codexSource: String?
     public let codexSurface: CodexSessionSurface?
+    public let originator: String?
+    public let originSource: String?
+    public let surface: SessionSurface?
     public let reasoningEffort: String?
 
     // Subagent hierarchy
@@ -77,6 +82,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
                 codexSurface: CodexSessionSurface? = nil,
+                originator: String? = nil,
+                originSource: String? = nil,
+                surface: SessionSurface? = nil,
                 reasoningEffort: String? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
@@ -97,6 +105,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.codexOriginator = codexOriginator
         self.codexSource = codexSource
         self.codexSurface = codexSurface
+        self.originator = originator ?? codexOriginator
+        self.originSource = originSource ?? codexSource
+        self.surface = surface ?? codexSurface
         self.reasoningEffort = reasoningEffort
         self.lightweightCommands = nil
         self.parentSessionID = parentSessionID
@@ -127,6 +138,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
                 codexSurface: CodexSessionSurface? = nil,
+                originator: String? = nil,
+                originSource: String? = nil,
+                surface: SessionSurface? = nil,
                 reasoningEffort: String? = nil,
                 deletedAt: Date? = nil) {
         self.id = id
@@ -147,6 +161,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.codexOriginator = codexOriginator
         self.codexSource = codexSource
         self.codexSurface = codexSurface
+        self.originator = originator ?? codexOriginator
+        self.originSource = originSource ?? codexSource
+        self.surface = surface ?? codexSurface
         self.reasoningEffort = reasoningEffort
         self.lightweightCommands = lightweightCommands
         self.parentSessionID = parentSessionID
@@ -173,6 +190,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case codexOriginator
         case codexSource
         case codexSurface
+        case originator
+        case originSource
+        case surface
         case reasoningEffort
         case parentSessionID
         case subagentType
