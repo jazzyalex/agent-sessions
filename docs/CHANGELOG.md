@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Session list: Claude rows now use the same Agent-column `cli` and `desk` surface pills as Codex rows.
 - Claude: Desktop local-agent transcripts under Claude's Application Support directory are now discovered, enriched with Desktop metadata, and shown with the `desk` surface pill.
 - Indexing: Session origin metadata now has generic originator/source/surface fields so non-Codex providers can use desktop or IDE surface labels without reusing Codex-specific columns.
 

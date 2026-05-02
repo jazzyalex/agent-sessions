@@ -2071,15 +2071,19 @@ struct UnifiedSessionsView: View {
             guard session.source == .codex else { return nil }
             return .standard(label: "vsc", accessibilityLabel: "VS Code")
         case .cli:
-            guard session.source == .codex else { return nil }
+            guard supportsAgentSurfacePills(session) else { return nil }
             return .standard(label: "cli", accessibilityLabel: "CLI")
         case .subagent:
             guard session.source == .codex else { return nil }
             return codexOriginatorSurfacePill(for: session)
         case .other, .unknown, .none:
-            guard session.source == .codex else { return nil }
+            guard supportsAgentSurfacePills(session) else { return nil }
             return session.isSubagent ? nil : .standard(label: "cli", accessibilityLabel: "CLI")
         }
+    }
+
+    private static func supportsAgentSurfacePills(_ session: Session) -> Bool {
+        session.source == .codex || session.source == .claude
     }
 
     private static func codexOriginatorSurfacePill(for session: Session) -> CodexSurfacePill? {
