@@ -22,7 +22,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7/AgentSessions-3.7.dmg"><b>Download Agent Sessions 3.7 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7.1/AgentSessions-3.7.1.dmg"><b>Download Agent Sessions 3.7.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -56,11 +56,11 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.7
+## What's New in 3.7.1
 
-**TL;DR** - Claude Code Desktop sessions now appear alongside CLI sessions.
+**TL;DR** - Claude Code Desktop sessions now keep the correct Desktop badge.
 
-**Highlights:** Agent Sessions now discovers Claude Code Desktop local-agent transcripts from Claude's Application Support directory, enriches them with Desktop metadata, and labels them with the `desk` surface pill. Claude rows also reuse the same `cli` and `desk` Agent-column surface labels as Codex, backed by generic session-origin metadata for non-Codex providers.
+**Highlights:** This patch fixes Claude Desktop transcript classification for standard `~/.claude` sessions and cached rows, so Desktop-launched Claude sessions keep the `desk` surface pill. It includes the 3.7 Claude Code Desktop support: Agent Sessions discovers Claude Code Desktop local-agent transcripts from Claude's Application Support directory, enriches them with Desktop metadata, and labels Claude rows with consistent `cli` and `desk` surface pills.
 
 ## Core Features
 
@@ -107,7 +107,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.7/AgentSessions-3.7.dmg)
+1. [Download AgentSessions-3.7.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.7.1/AgentSessions-3.7.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
