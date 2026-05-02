@@ -22,7 +22,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.7/AgentSessions-3.6.7.dmg"><b>Download Agent Sessions 3.6.7 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7/AgentSessions-3.7.dmg"><b>Download Agent Sessions 3.7 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -56,16 +56,17 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.6.7
+## What's New in 3.7
 
-**TL;DR** - Menu bar controls now stay in sync without relaunching Agent Sessions.
+**TL;DR** - Claude Code Desktop sessions now appear alongside CLI sessions.
 
-**Highlights:** Preferences changes for Menu Bar now update the status item immediately, and the menu switches Agent Cockpit and Agent Sessions actions between Open and Hide based on whether each window is visible.
+**Highlights:** Agent Sessions now discovers Claude Code Desktop local-agent transcripts from Claude's Application Support directory, enriches them with Desktop metadata, and labels them with the `desk` surface pill. Claude rows also reuse the same `cli` and `desk` Agent-column surface labels as Codex, backed by generic session-origin metadata for non-Codex providers.
 
 ## Core Features
 
 - Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
 - Browse and search local Codex sessions across CLI, Desktop, and VS Code in one place.
+- Browse Claude Code CLI and Desktop local-agent sessions with consistent surface labels.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
@@ -106,7 +107,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Cod
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.6.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.6.7/AgentSessions-3.6.7.dmg)
+1. [Download AgentSessions-3.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.7/AgentSessions-3.7.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
