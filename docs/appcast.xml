@@ -3,32 +3,27 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.7</title>
-            <pubDate>Fri, 01 May 2026 19:43:28 -0700</pubDate>
+            <title>3.7.1</title>
+            <pubDate>Fri, 01 May 2026 20:31:55 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.7</h2>
-<h3>Features</h3>
+<h2>What&#x27;s New in 3.7.1</h2>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Claude: Standard `~/.claude` transcripts launched from Claude Desktop now persist Desktop origin metadata and show the `desk` pill instead of the CLI pill.</li>
+<li>Session list: Claude Desktop rows keep the `desk` pill even when cached rows have not yet hydrated generic surface metadata.</li>
+</ul>
+<h3>Reminder: What You Got in 3.7</h3>
 <ul>
 <li>Claude: Desktop local-agent transcripts under Claude&#x27;s Application Support directory are now discovered, enriched with Desktop metadata, and shown with the `desk` surface pill.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
 <li>Session list: Claude rows now use the same Agent-column `cli` and `desk` surface pills as Codex rows.</li>
 <li>Indexing: Session origin metadata now has generic originator/source/surface fields so non-Codex providers can use desktop or IDE surface labels without reusing Codex-specific columns.</li>
 </ul>
-<h3>Reminder: What You Got in 3.6</h3>
-<ul>
-<li>Cursor: Cursor CLI sessions added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.</li>
-<li>Discoverability: New-provider detection banner appears in the sessions view when a newly supported agent is found on disk but not yet enabled, prompting users to turn it on.</li>
-<li>Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what&#x27;s new without digging into preferences.</li>
-<li>Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.</li>
-</ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7.1</a></p>
             ]]></description>
-            <sparkle:version>44</sparkle:version>
-            <sparkle:shortVersionString>3.7</sparkle:shortVersionString>
+            <sparkle:version>45</sparkle:version>
+            <sparkle:shortVersionString>3.7.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7/AgentSessions-3.7.dmg" length="17213558" type="application/octet-stream" sparkle:edSignature="UCzjDuVOTECQ+wkeZfIrLD4tnYL4XlLVrNZ1HZ5EKAfNJcGwncs15VnRdLubiNjYnF+be+dsoFyafcpVmKpgAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7.1/AgentSessions-3.7.1.dmg" length="17222937" type="application/octet-stream" sparkle:edSignature="FAMKMuOWzsUCDKw5yrSKfpL9MkETODkW5yECuZoQ2yTkTHXa5aEvexFXXymluznWDJVT1y6npfSfqLeYs6n0DQ=="/>
         </item>
     </channel>
 </rss>
