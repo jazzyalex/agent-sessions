@@ -455,23 +455,24 @@ enum FilterEngine {
         if let cache = transcriptCache {
             if FeatureFlags.filterUsesCachedTranscriptOnly || !allowTranscriptGeneration {
                 if let t = cache.getCached(session.id) {
-                    return SearchTextMatcher.hasMatch(in: t, query: q)
+                    if SearchTextMatcher.hasMatch(in: t, query: q) { return true }
                 }
                 // Fall through to raw fields if no cached transcript is present
             } else {
                 let transcript = cache.getOrGenerate(session: session)
-                return SearchTextMatcher.hasMatch(in: transcript, query: q)
+                if SearchTextMatcher.hasMatch(in: transcript, query: q) { return true }
             }
         }
 
-        // Priority 2: Lightweight sessions without cache cannot be searched (no events to search)
-        if session.events.isEmpty { return q.isEmpty }
-
-        // Priority 3: Fallback to raw fields (title, repo, first user, event texts/tool io)
+        // Priority 2: Fallback to indexed metadata that exists even for lightweight DB-hydrated rows.
         if SearchTextMatcher.hasMatch(in: session.title, query: q) { return true }
         if let repo = session.repoName, SearchTextMatcher.hasMatch(in: repo, query: q) { return true }
+
+        // Priority 3: Lightweight sessions without cache cannot search event text.
+        if session.events.isEmpty { return false }
+
+        // Priority 4: Fallback to raw event fields.
         if let first = session.firstUserPreview, SearchTextMatcher.hasMatch(in: first, query: q) { return true }
-        // Fallback to raw event fields (less accurate but works without cache)
         for e in session.events {
             if let t = e.text, !t.isEmpty, SearchTextMatcher.hasMatch(in: t, query: q) { return true }
             if let ti = e.toolInput, !ti.isEmpty, SearchTextMatcher.hasMatch(in: ti, query: q) { return true }

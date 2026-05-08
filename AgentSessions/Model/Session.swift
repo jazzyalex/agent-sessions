@@ -607,21 +607,12 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var modifiedAt: Date {
-        // Codex: Use filename timestamp (session creation), fallback to session end/start
-        // Claude: Use session end/start (no filename timestamp)
+        // Restored Codex sessions can keep an old rollout filename while receiving fresh
+        // state/transcript updates, so sort by the newest known activity timestamp.
         let filenameDate = source == .codex ? codexFilenameTimestamp : nil
-        let endDate = endTime
-        let startDate = startTime
+        let candidates = [endTime, startTime, filenameDate].compactMap { $0 }
 
-        if let filenameDate = filenameDate {
-            return filenameDate
-        } else if let endDate = endDate {
-            return endDate
-        } else if let startDate = startDate {
-            return startDate
-        } else {
-            return .distantPast
-        }
+        return candidates.max() ?? .distantPast
     }
 
     // Best-effort git branch detection

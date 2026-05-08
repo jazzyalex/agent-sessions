@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Bug Fixes
+- Sessions/Search: Restored Codex Desktop sessions with old rollout dates sort by fresh activity, are picked up when their files change, and parse non-large unindexed transcripts during search so content such as email addresses is findable without deep scan.
 
 ## [3.7.1] - 2026-05-01
 ### Bug Fixes

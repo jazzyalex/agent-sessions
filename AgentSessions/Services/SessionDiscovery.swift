@@ -181,7 +181,13 @@ final class CodexSessionDiscovery: SessionDiscovery {
             }
         }
         found.append(contentsOf: discoverRecentArchivedSessionFiles(dayWindow: dayWindow, previousByPath: previousByPath))
-        return found.sorted { $0.lastPathComponent > $1.lastPathComponent }
+        found.append(contentsOf: discoverChangedPreviouslyKnownSessionFiles(previousByPath: previousByPath))
+
+        var seenPaths: Set<String> = []
+        let deduplicated = found.filter { url in
+            seenPaths.insert(url.resolvingSymlinksInPath().path).inserted
+        }
+        return deduplicated.sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
     private func discoverRecentArchivedSessionFiles(dayWindow: Int, previousByPath: [String: SessionFileStat]) -> [URL] {
@@ -217,6 +223,29 @@ final class CodexSessionDiscovery: SessionDiscovery {
                 }
             }
         }
+        return found
+    }
+
+    private func discoverChangedPreviouslyKnownSessionFiles(previousByPath: [String: SessionFileStat]) -> [URL] {
+        guard !previousByPath.isEmpty else { return [] }
+
+        let roots = [sessionsRoot()] + archivedScanRoots(for: sessionsRoot())
+        let rootPaths = roots.map(\.path)
+        var found: [URL] = []
+        found.reserveCapacity(min(previousByPath.count, 64))
+
+        for (path, previousStat) in previousByPath {
+            guard rootPaths.contains(where: { Self.path(path, isWithin: $0) }) else { continue }
+
+            let url = URL(fileURLWithPath: path)
+            guard url.lastPathComponent.hasPrefix("rollout-"),
+                  url.pathExtension.lowercased() == "jsonl" else { continue }
+            guard let currentStat = SessionFileStat.from(url),
+                  currentStat != previousStat else { continue }
+
+            found.append(url)
+        }
+
         return found
     }
 

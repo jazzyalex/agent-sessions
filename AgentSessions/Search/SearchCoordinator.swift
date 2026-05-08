@@ -326,9 +326,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     }
 
                     // Always include Cursor sessions in unindexed candidates (they have no FTS index).
-                    // For other sources, only scan unindexed sessions when deep scan is enabled.
+                    // Also include non-large unindexed rows so restored/lightweight sessions remain
+                    // content-searchable while their FTS rows are still missing or warming.
+                    let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
                     let unindexedCandidates = candidates.filter {
-                        !indexedIDs.contains($0.id) && !seen.contains($0.id) && (enableDeepScan || $0.source == .cursor)
+                        !indexedIDs.contains($0.id)
+                            && !seen.contains($0.id)
+                            && (enableDeepScan || $0.source == .cursor || Self.sizeBytes(for: $0) < smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
                         ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
@@ -447,7 +451,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                                   filters: filters,
                                                   threshold: threshold,
                                                   textScope: .all,
-                                                  allowDeepParse: allowDeepScan,
+                                                  allowDeepParse: true,
                                                   allowTranscriptGeneration: false)
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 

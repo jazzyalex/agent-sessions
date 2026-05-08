@@ -171,6 +171,62 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(filtered.first?.id, s2.id)
     }
 
+    func testSearchMatchesLightweightSessionTitle() throws {
+        let session = Session(
+            id: "codex-desktop-archived",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-codex-desktop-archived.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Bay Area Gold group contacts",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+
+        let filters = Filters(query: "Bay Area Gold",
+                              dateFrom: nil,
+                              dateTo: nil,
+                              model: nil,
+                              kinds: Set(SessionEventKind.allCases))
+
+        XCTAssertTrue(FilterEngine.sessionMatches(session, filters: filters, allowTranscriptGeneration: false))
+
+        let cache = TranscriptCache()
+        cache.set(session.id, transcript: "cached transcript without the title")
+        XCTAssertTrue(FilterEngine.sessionMatches(session,
+                                                  filters: filters,
+                                                  transcriptCache: cache,
+                                                  allowTranscriptGeneration: false))
+    }
+
+    func testCodexModifiedAtUsesFreshEndTimeForRestoredOldRollout() throws {
+        let restoredEnd = Date(timeIntervalSince1970: 1_778_269_498)
+        let session = Session(
+            id: "old-rollout-restored",
+            source: .codex,
+            startTime: Date(timeIntervalSince1970: 1_777_072_254),
+            endTime: restoredEnd,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/24/rollout-2026-04-24T16-10-54-old-rollout-restored.jsonl",
+            eventCount: 1,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Bay Area Gold group contacts",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+
+        XCTAssertEqual(session.modifiedAt, restoredEnd)
+    }
+
     func testCodexPayloadCwdRepoAndBranchExtraction() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex073-\(UUID().uuidString)", isDirectory: true)
@@ -1028,6 +1084,43 @@ final class SessionParserTests: XCTestCase {
         let deletionDelta = CodexSessionDiscovery(customRoot: sessionsRoot.path)
             .discoverDelta(previousByPath: [archivedURL.path: archivedStat], scope: .recent)
         XCTAssertEqual(deletionDelta.removedPaths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }, [normalizedArchivedPath])
+    }
+
+    func testCodexRecentDeltaFindsPreviouslyKnownOldSessionChanges() throws {
+        let fm = FileManager.default
+        let codexHome = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Codex-OldChanged-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: codexHome) }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let oldRolloutDate = try XCTUnwrap(calendar.date(byAdding: .day, value: -10, to: Date()))
+        let comps = calendar.dateComponents([.year, .month, .day], from: oldRolloutDate)
+        let year = try XCTUnwrap(comps.year)
+        let month = try XCTUnwrap(comps.month)
+        let day = try XCTUnwrap(comps.day)
+
+        let sessionsRoot = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        let oldDir = sessionsRoot
+            .appendingPathComponent(String(format: "%04d", year), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", month), isDirectory: true)
+            .appendingPathComponent(String(format: "%02d", day), isDirectory: true)
+        try fm.createDirectory(at: oldDir, withIntermediateDirectories: true)
+
+        let filename = String(format: "rollout-%04d-%02d-%02dT01-00-00-restored.jsonl", year, month, day)
+        let sessionURL = oldDir.appendingPathComponent(filename)
+        try writeText(#"{"type":"session_meta","payload":{"id":"old-restored"}}"# + "\n", to: sessionURL)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -10_000)], ofItemAtPath: sessionURL.path)
+        let previousStat = try XCTUnwrap(SessionFileStat.from(sessionURL))
+
+        try writeText(#"{"type":"event_msg","payload":{"message":"victoroyyb@gmail.com"}}"# + "\n", to: sessionURL)
+        try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: sessionURL.path)
+
+        let delta = CodexSessionDiscovery(customRoot: sessionsRoot.path)
+            .discoverDelta(previousByPath: [sessionURL.path: previousStat], scope: .recent)
+
+        let normalizedPath = sessionURL.resolvingSymlinksInPath().path
+        XCTAssertEqual(delta.changedFiles.map { $0.resolvingSymlinksInPath().path }, [normalizedPath])
+        XCTAssertTrue(delta.removedPaths.isEmpty)
+        XCTAssertTrue(delta.currentByPath.keys.contains { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == normalizedPath })
     }
 
     func testCodexDiscoveryCustomNonSessionsRootDoesNotScanSiblingArchivedSessions() throws {
