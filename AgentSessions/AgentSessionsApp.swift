@@ -727,10 +727,14 @@ extension AgentSessionsApp {
 
     private func handleMenuBarEnabledChange(_ enabled: Bool) {
         guard !AppRuntime.isRunningTests else { return }
+        let effectiveHideDockIcon = enabled ? hideDockIcon : false
+        if !enabled && hideDockIcon {
+            UserDefaults.standard.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
+        }
         lastObservedMenuBarEnabled = enabled
-        lastObservedHideDockIcon = hideDockIcon
+        lastObservedHideDockIcon = effectiveHideDockIcon
         updateUsageModels(menuBarEnabledOverride: enabled)
-        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: enabled)
+        Self.applyActivationPolicy(hideDockIcon: effectiveHideDockIcon, menuBarEnabled: enabled)
     }
 
     private func setupMenuBarDefaultsObserverIfNeeded() {

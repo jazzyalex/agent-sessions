@@ -218,3 +218,5 @@ def test_copilot_config_has_prebump_block():
     pb = cfg["agents"]["copilot"]["prebump"]
     assert pb["driver"] == "copilot_prompt"
     assert pb["sandbox"]["mode"] == "home_override"
+    assert "GH_TOKEN" in pb["env_vars"]
+    assert "COPILOT_GITHUB_TOKEN" in pb["env_vars"]

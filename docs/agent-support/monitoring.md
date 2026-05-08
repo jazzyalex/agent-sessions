@@ -121,6 +121,10 @@ When `installed > verified`, `schema_matches_baseline == true`, and
     && git commit -m "chore(matrix): bump codex_cli / claude_code"
 ```
 
+Auth notes:
+- Copilot prebump accepts `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; `GH_TOKEN=$(gh auth token) ./scripts/agent_watch.py --mode prebump --agent copilot` is the least intrusive local path when GitHub CLI auth is already available.
+- Claude sandbox prebump requires sandbox-visible API/credential auth. If it fails with `Not logged in` but real-home Claude is authenticated, generate a real-home `claude -p --verbose --output-format stream-json ...` sample and cite that weekly evidence instead of treating the sandbox auth failure as session-format drift.
+
 Exit 0 is required. Exit 2 means the fresh session does not match baseline.
 Exit 3 means a driver failed (CLI error, timeout, no headless mode, or
 discovery-contract violation). Exit 4 means a config error (unknown

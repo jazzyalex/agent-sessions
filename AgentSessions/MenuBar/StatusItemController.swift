@@ -260,6 +260,13 @@ final class StatusItemController: NSObject {
 
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openMenuBarPreferences)))
         menu.addItem(makeActionItem(title: "Hide Menu Bar Item", action: #selector(hideMenuBar)))
+        let dockIconHidden = d.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+        menu.addItem(makeActionItem(
+            title: dockIconHidden ? "Show Dock Icon" : "Hide Dock Icon",
+            action: #selector(toggleHideDockIcon)
+        ))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(makeActionItem(title: "Quit", action: #selector(quitApp)))
 
         return menu
     }
@@ -365,8 +372,21 @@ final class StatusItemController: NSObject {
         pb.setString("claude", forType: .string)
     }
     @objc private func hideMenuBar() {
-        UserDefaults.standard.set(false, forKey: "MenuBarEnabled")
+        let d = UserDefaults.standard
+        d.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
+        d.set(false, forKey: PreferencesKey.menuBarEnabled)
         // The App listens to this key and hides the status item.
+    }
+    @objc private func toggleHideDockIcon() {
+        let d = UserDefaults.standard
+        let nextValue = !(d.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false)
+        if nextValue {
+            d.set(true, forKey: PreferencesKey.menuBarEnabled)
+        }
+        d.set(nextValue, forKey: PreferencesKey.Advanced.hideDockIcon)
+    }
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
     // Lightweight replica of reset line
     private func resetLine(label: String, percent: Int, reset: String) -> String {

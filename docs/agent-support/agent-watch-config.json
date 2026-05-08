@@ -246,7 +246,7 @@
         "sandbox": {"mode": "home_override", "subdir": "copilot_sandbox"},
         "prompt": "Run ls.",
         "timeout_seconds": 180,
-        "env_vars": ["GITHUB_TOKEN"],
+        "env_vars": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
         "credential_files": ["~/.copilot/hosts.json"],
         "discover_session": {
           "kind": "jsonl_newest",
