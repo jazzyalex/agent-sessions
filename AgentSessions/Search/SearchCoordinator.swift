@@ -96,6 +96,10 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
+    static func ftsEligibleSources(from allowed: Set<SessionSource>) -> Set<SessionSource> {
+        allowed.filter { $0 != .cursor && $0 != .codebuddy && $0 != .workbuddy }
+    }
+
     func cancel() {
         cancel(clearResults: true)
     }
@@ -173,6 +177,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeDroid: Bool,
                includeOpenClaw: Bool,
                includeCursor: Bool,
+               includeCodebuddy: Bool,
+               includeWorkbuddy: Bool,
                enableDeepScan: Bool,
                all: [Session]) {
         // Cancel any in-flight search
@@ -194,6 +200,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includeDroid { set.insert(.droid) }
             if includeOpenClaw { set.insert(.openclaw) }
             if includeCursor { set.insert(.cursor) }
+            if includeCodebuddy { set.insert(.codebuddy) }
+            if includeWorkbuddy { set.insert(.workbuddy) }
             return set
         }()
         
@@ -208,9 +216,21 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
         // Phase 0: fast path via SQLite FTS if available.
         if FeatureFlags.enableFTSSearch, let db = db {
-            // Cursor sessions are not indexed in the FTS database — exclude from FTS queries
+            // Cursor/Buddy sessions are not indexed in the FTS database — exclude from FTS queries
             // so they fall through to the unindexed/legacy transcript-cache search path.
-            let ftsAllowed = allowed.filter { $0 != .cursor }
+            let ftsAllowed = Self.ftsEligibleSources(from: allowed)
+            if ftsAllowed.isEmpty {
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.startLegacySearch(runID: newRunID,
+                                                 query: query,
+                                                 filters: filters,
+                                                 allowed: allowed,
+                                                 all: all,
+                                                 allowDeepScan: enableDeepScan)
+                }
+                return
+            }
             let allowedRaw = ftsAllowed.map { $0.rawValue }
             let parsed = FilterEngine.parseOperators(filters.query)
             let freeText = parsed.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -332,7 +352,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     let unindexedCandidates = candidates.filter {
                         !indexedIDs.contains($0.id)
                             && !seen.contains($0.id)
-                            && (enableDeepScan || $0.source == .cursor || Self.sizeBytes(for: $0) < smallSearchThreshold)
+                            && (enableDeepScan || Self.ftsEligibleSources(from: [$0.source]).isEmpty || Self.sizeBytes(for: $0) < smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
                         ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }

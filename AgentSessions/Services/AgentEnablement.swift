@@ -1,6 +1,36 @@
 import Foundation
 
 enum AgentEnablement {
+    private static let buddySplitMigrationDefaultsKey = "DidMigrateBuddyAgentSplit_v1"
+
+    /// Copies legacy `AgentEnabledBuddy` / `IncludeBuddySessions` into per-product keys once.
+    static func migrateBuddyAgentSplitIfNeeded(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: buddySplitMigrationDefaultsKey) else { return }
+        defer { defaults.set(true, forKey: buddySplitMigrationDefaultsKey) }
+
+        if defaults.object(forKey: PreferencesKey.Agents.codebuddyEnabled) == nil,
+           defaults.object(forKey: PreferencesKey.Agents.workbuddyEnabled) == nil,
+           let legacy = defaults.object(forKey: PreferencesKey.Agents.buddyEnabled) as? Bool {
+            defaults.set(legacy, forKey: PreferencesKey.Agents.codebuddyEnabled)
+            defaults.set(legacy, forKey: PreferencesKey.Agents.workbuddyEnabled)
+        }
+
+        if defaults.object(forKey: "IncludeCodebuddySessions") == nil,
+           defaults.object(forKey: "IncludeWorkbuddySessions") == nil {
+            let incLegacy = defaults.object(forKey: "IncludeBuddySessions") as? Bool ?? true
+            defaults.set(incLegacy, forKey: "IncludeCodebuddySessions")
+            defaults.set(incLegacy, forKey: "IncludeWorkbuddySessions")
+        }
+
+        if var known = defaults.stringArray(forKey: PreferencesKey.Agents.knownAvailableProviders),
+           let idx = known.firstIndex(of: "buddy") {
+            known.remove(at: idx)
+            if !known.contains(SessionSource.codebuddy.rawValue) { known.append(SessionSource.codebuddy.rawValue) }
+            if !known.contains(SessionSource.workbuddy.rawValue) { known.append(SessionSource.workbuddy.rawValue) }
+            defaults.set(known, forKey: PreferencesKey.Agents.knownAvailableProviders)
+        }
+    }
+
     enum StoredAvailabilityStatus {
         case installed
         case configured
@@ -58,6 +88,10 @@ enum AgentEnablement {
             return isAvailable(.openclaw, defaults: defaults)
         case .cursor:
             return isAvailable(.cursor, defaults: defaults)
+        case .codebuddy:
+            return isAvailable(.codebuddy, defaults: defaults)
+        case .workbuddy:
+            return isAvailable(.workbuddy, defaults: defaults)
         default:
             return true
         }
@@ -74,6 +108,8 @@ enum AgentEnablement {
         case .droid:    return PreferencesKey.Agents.droidEnabled
         case .openclaw: return PreferencesKey.Agents.openClawEnabled
         case .cursor:   return PreferencesKey.Agents.cursorEnabled
+        case .codebuddy: return PreferencesKey.Agents.codebuddyEnabled
+        case .workbuddy: return PreferencesKey.Agents.workbuddyEnabled
         }
     }
 
@@ -153,6 +189,7 @@ enum AgentEnablement {
 
     static func seedIfNeeded(defaults: UserDefaults = .standard) {
         guard !AppRuntime.isHostedByTooling else { return }
+        migrateBuddyAgentSplitIfNeeded(defaults: defaults)
         if defaults.bool(forKey: PreferencesKey.Agents.didSeedEnabledAgents) { return }
 
         // Migration: if the old "show toolbar filter" keys exist, treat them as the initial enabled set.
@@ -177,6 +214,8 @@ enum AgentEnablement {
             setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
             setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
             setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.codebuddy, enabled: isAvailable(.codebuddy, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.workbuddy, enabled: isAvailable(.workbuddy, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -189,6 +228,8 @@ enum AgentEnablement {
             let droid = isAvailable(.droid, defaults: defaults)
             let openclaw = isAvailable(.openclaw, defaults: defaults)
             let cursor = isAvailable(.cursor, defaults: defaults)
+            let codebuddy = isAvailable(.codebuddy, defaults: defaults)
+            let workbuddy = isAvailable(.workbuddy, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -199,6 +240,8 @@ enum AgentEnablement {
             setEnabledInternal(.droid, enabled: droid, defaults: defaults)
             setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
             setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
+            setEnabledInternal(.codebuddy, enabled: codebuddy, defaults: defaults)
+            setEnabledInternal(.workbuddy, enabled: workbuddy, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -218,6 +261,32 @@ enum AgentEnablement {
         var isDir: ObjCBool = false
         let root: URL
         switch source {
+        case .codebuddy:
+            let c = defaults.string(forKey: PreferencesKey.Paths.buddyCodebuddyProjectsRootOverride) ?? ""
+            let disc = BuddySessionDiscovery(
+                codebuddyProjectsRoot: c.isEmpty ? nil : c,
+                workbuddyProjectsRoot: nil,
+                scanCodebuddy: true,
+                scanWorkbuddy: false
+            )
+            for u in disc.projectRoots() {
+                var dir: ObjCBool = false
+                if fm.fileExists(atPath: u.path, isDirectory: &dir), dir.boolValue { return true }
+            }
+            return binaryInstalled(for: .codebuddy)
+        case .workbuddy:
+            let w = defaults.string(forKey: PreferencesKey.Paths.buddyWorkbuddyProjectsRootOverride) ?? ""
+            let disc = BuddySessionDiscovery(
+                codebuddyProjectsRoot: nil,
+                workbuddyProjectsRoot: w.isEmpty ? nil : w,
+                scanCodebuddy: false,
+                scanWorkbuddy: true
+            )
+            for u in disc.projectRoots() {
+                var dir: ObjCBool = false
+                if fm.fileExists(atPath: u.path, isDirectory: &dir), dir.boolValue { return true }
+            }
+            return binaryInstalled(for: .workbuddy)
         case .codex:
             let custom = defaults.string(forKey: "SessionsRootOverride") ?? ""
             root = CodexSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
@@ -291,6 +360,10 @@ enum AgentEnablement {
             return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
         case .cursor:
             return binaryDetectedCached("agent") || binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
+        case .codebuddy:
+            return binaryDetectedCached("codebuddy")
+        case .workbuddy:
+            return binaryDetectedCached("workbuddy")
         }
     }
 
@@ -341,6 +414,8 @@ enum AgentEnablement {
             return nil
         case .cursor:
             return defaults.object(forKey: PreferencesKey.cursorCLIAvailable) as? Bool
+        case .codebuddy, .workbuddy:
+            return nil
         }
     }
 

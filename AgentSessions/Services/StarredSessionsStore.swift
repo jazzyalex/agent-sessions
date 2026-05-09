@@ -14,7 +14,16 @@ struct StarredSessionKey: Hashable {
     init?(persistedString: String) {
         let parts = persistedString.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
-        guard let source = SessionSource(rawValue: String(parts[0])) else { return nil }
+        let rawSource = String(parts[0])
+        let source: SessionSource
+        if let s = SessionSource(rawValue: rawSource) {
+            source = s
+        } else if rawSource == "buddy" {
+            // Legacy starred keys used a single "buddy" lane before CodeBuddy/WorkBuddy split.
+            source = .codebuddy
+        } else {
+            return nil
+        }
         let id = String(parts[1])
         guard !id.isEmpty else { return nil }
         self.source = source

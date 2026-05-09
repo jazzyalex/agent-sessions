@@ -41,6 +41,8 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
     func testEnablementKeyReturnsCorrectKeyForEachSource() {
         XCTAssertEqual(AgentEnablement.enablementKey(for: .codex), "AgentEnabledCodex")
         XCTAssertEqual(AgentEnablement.enablementKey(for: .cursor), "AgentEnabledCursor")
+        XCTAssertEqual(AgentEnablement.enablementKey(for: .codebuddy), "AgentEnabledCodebuddy")
+        XCTAssertEqual(AgentEnablement.enablementKey(for: .workbuddy), "AgentEnabledWorkbuddy")
     }
 
     func testMigrateKnownAvailableProviders_populatesFromExplicitPreferences() {
@@ -58,6 +60,33 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertTrue(known.contains("codex"))
         XCTAssertTrue(known.contains("claude"))
         XCTAssertFalse(known.contains("cursor"), "Cursor has no explicit pref — should not be in known set")
+    }
+
+    func testMigrateKnownAvailableProviders_includesCodebuddyWhenExplicitlyEnabled() {
+        let suite = "test.migrate.codebuddy.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        defaults.set(true, forKey: AgentEnablement.enablementKey(for: .codebuddy))
+        AgentEnablement.migrateKnownAvailableProvidersIfNeeded(defaults: defaults)
+
+        let known = defaults.stringArray(forKey: PreferencesKey.Agents.knownAvailableProviders) ?? []
+        XCTAssertTrue(known.contains("codebuddy"))
+    }
+
+    func testNewlyAvailableProviders_includesWorkbuddyWhenNotInKnownSet() {
+        let suite = "test.detect.workbuddy.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        defaults.set(["codex"], forKey: PreferencesKey.Agents.knownAvailableProviders)
+
+        let candidates = AgentEnablement.newlyAvailableProviders(
+            availableSources: [.codex, .workbuddy],
+            defaults: defaults
+        )
+
+        XCTAssertEqual(candidates, [.workbuddy])
     }
 
     func testMigrateKnownAvailableProviders_isNoOpOnSubsequentRuns() {

@@ -30,13 +30,15 @@ extension SessionEventKind {
         if let t = type?.lowercased() {
             switch t {
             case "tool_call", "tool-call", "toolcall", "tool_use", "tool-use", "function_call", "web_search_call", "custom_tool_call": return .tool_call
-            case "tool_result", "tool-result", "toolresult", "function_result", "function_call_output", "web_search_call_output", "custom_tool_call_output": return .tool_result
+            case "tool_result", "tool-result", "toolresult", "function_result", "function_call_output", "function_call_result", "web_search_call_output", "custom_tool_call_output": return .tool_result
             case "error", "err": return .error
             case "meta",
                  "system",
                  "summary",
                  "file-history-snapshot",
                  "queue-operation",
+                 "reasoning",
+                 "topic",
                  "assistant.turn_start",
                  "assistant.turn_end",
                  "session.truncation",
