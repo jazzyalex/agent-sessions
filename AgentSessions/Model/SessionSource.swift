@@ -1,7 +1,7 @@
 import Foundation
 
 /// Identifies the source/type of a session (Codex CLI vs Claude Code)
-public enum SessionSource: String, Codable, CaseIterable, Sendable {
+public enum SessionSource: String, CaseIterable, Sendable {
     case codex = "codex"
     case claude = "claude"
     case gemini = "gemini"
@@ -11,6 +11,10 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case droid = "droid"
     case openclaw = "openclaw"
     case cursor = "cursor"
+    /// CodeBuddy CLI JSONL transcripts under `~/.codebuddy/projects/...`.
+    case codebuddy = "codebuddy"
+    /// WorkBuddy IDE JSONL transcripts under `~/.workbuddy/projects/...`.
+    case workbuddy = "workbuddy"
 
     public var displayName: String {
         switch self {
@@ -23,6 +27,8 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid: return "Droid"
         case .openclaw: return "OpenClaw"
         case .cursor: return "Cursor"
+        case .codebuddy: return "CodeBuddy"
+        case .workbuddy: return "WorkBuddy"
         }
     }
 
@@ -37,6 +43,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid: return "d.circle"
         case .openclaw: return "pawprint"
         case .cursor: return "cursorarrow.rays"
+        case .codebuddy, .workbuddy: return "bubble.left.and.bubble.right"
         }
     }
 
@@ -50,6 +57,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid:            return "3.0"
         case .openclaw:         return "3.1"
         case .cursor:           return "3.2"
+        case .codebuddy, .workbuddy: return "3.7"
         }
     }
 
@@ -64,6 +72,28 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid:    return "View your Droid agent sessions"
         case .openclaw: return "Explore your OpenClaw conversations"
         case .cursor:   return "Import and search your Cursor AI sessions"
+        case .codebuddy: return "Browse CodeBuddy CLI project transcripts"
+        case .workbuddy: return "Browse WorkBuddy IDE project transcripts"
         }
+    }
+}
+
+extension SessionSource: Codable {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        let raw = try c.decode(String.self)
+        if raw == "buddy" {
+            self = .codebuddy
+            return
+        }
+        guard let v = SessionSource(rawValue: raw) else {
+            throw DecodingError.dataCorruptedError(in: c, debugDescription: "Unknown SessionSource \(raw)")
+        }
+        self = v
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
     }
 }

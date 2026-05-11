@@ -423,6 +423,15 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 return true
             }
             return !meaningfulUser
+        case .codebuddy, .workbuddy:
+            if events.contains(where: { $0.kind == .assistant }) { return false }
+            if events.contains(where: { $0.kind == .tool_call || $0.kind == .tool_result }) { return false }
+            let meaningfulUser = events.contains { e in
+                guard e.kind == .user else { return false }
+                guard let raw = e.text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return false }
+                return !looksLikeAgentsPreamble(raw)
+            }
+            return !meaningfulUser
         default:
             return false
         }

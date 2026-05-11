@@ -447,6 +447,28 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                     map[s.id] = url
                 }
             }
+        case .codebuddy:
+            let c = defaults.string(forKey: PreferencesKey.Paths.buddyCodebuddyProjectsRootOverride) ?? ""
+            let discovery = BuddySessionDiscovery(
+                codebuddyProjectsRoot: c.isEmpty ? nil : c,
+                workbuddyProjectsRoot: nil,
+                scanCodebuddy: true,
+                scanWorkbuddy: false
+            )
+            for url in discovery.discoverSessionFiles() {
+                map[sha256Hex(url.path)] = url
+            }
+        case .workbuddy:
+            let w = defaults.string(forKey: PreferencesKey.Paths.buddyWorkbuddyProjectsRootOverride) ?? ""
+            let discovery = BuddySessionDiscovery(
+                codebuddyProjectsRoot: nil,
+                workbuddyProjectsRoot: w.isEmpty ? nil : w,
+                scanCodebuddy: false,
+                scanWorkbuddy: true
+            )
+            for url in discovery.discoverSessionFiles() {
+                map[sha256Hex(url.path)] = url
+            }
         }
 
         return map
@@ -474,6 +496,10 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return OpenClawSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .cursor:
             return CursorSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .codebuddy:
+            return CodebuddySessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .workbuddy:
+            return WorkbuddySessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         }
     }
 
