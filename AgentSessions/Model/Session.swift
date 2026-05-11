@@ -204,6 +204,47 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var shortID: String { String(id.prefix(6)) }
+
+    public var isCodexDesktopSession: Bool {
+        guard source == .codex else { return false }
+        if (surface ?? codexSurface) == .desktop { return true }
+
+        let normalizedOriginator = (originator ?? codexOriginator)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalizedOriginator == "codex desktop" ||
+            normalizedOriginator?.contains("desktop") == true ||
+            normalizedOriginator?.contains("app") == true
+    }
+
+    public var isClaudeDesktopSession: Bool {
+        guard source == .claude else { return false }
+        if surface == .desktop { return true }
+
+        let normalizedOriginator = originator?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedOriginSource = originSource?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalizedOriginator == "claude desktop" { return true }
+        if normalizedOriginSource == "local-agent-mode" || normalizedOriginSource == "claude-desktop" { return true }
+
+        let components = URL(fileURLWithPath: filePath).standardizedFileURL.pathComponents
+        return components.contains("local-agent-mode-sessions") &&
+            components.contains(".claude") &&
+            components.contains("projects")
+    }
+
+    public var isArchivedCodexDesktopSession: Bool {
+        guard source == .codex else { return false }
+        guard URL(fileURLWithPath: filePath).standardizedFileURL.pathComponents.contains("archived_sessions") else {
+            return false
+        }
+
+        return isCodexDesktopSession
+    }
+
     public var firstUserPreview: String? {
         events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -543,6 +584,19 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return nil
     }
     public var repoName: String? {
+        if let override = CodexDesktopProjectClassifier.projectNameOverride(for: self) {
+            return override
+        }
+        if let override = ClaudeDesktopProjectClassifier.projectNameOverride(for: self) {
+            return override
+        }
+        if let normalized = ProjectPathNormalizer.normalizedProjectName(for: self) {
+            return normalized
+        }
+        if ProjectPathNormalizer.shouldSuppressStoredProjectName(for: self) {
+            return nil
+        }
+
         if let stored = lightweightRepoName?.trimmingCharacters(in: .whitespacesAndNewlines),
            !stored.isEmpty {
             return stored
@@ -556,7 +610,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         let dirName = url.lastPathComponent
 
         // Skip generic directory names that aren't useful
-        let genericNames = ["Documents", "Desktop", "Downloads", "tmp", "temp", "src", "code"]
+        let genericNames = ["Documents", "Desktop", "Downloads", "tmp", "temp", "src", "code", "out", "output", "outputs", "build", "dist", "Repository", "cli", "memories"]
         if !genericNames.contains(dirName) && !dirName.isEmpty && dirName != "." {
             return dirName
         }
@@ -766,6 +820,281 @@ private extension String {
         return parts.joined(separator: " ")
     }
     var trimmedEmpty: Bool { self.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
+final class CodexDesktopProjectlessThreadStore: @unchecked Sendable {
+    static let shared = CodexDesktopProjectlessThreadStore()
+
+    private struct Cache {
+        let mtime: Date?
+        let projectlessThreadIDs: Set<String>
+    }
+
+    private let lock = NSLock()
+    private var cache: Cache?
+    private var stateURLOverrideForTesting: URL?
+
+    func isProjectlessThread(id: String) -> Bool {
+        projectlessThreadIDs().contains(id)
+    }
+
+    func setStateURLOverrideForTesting(_ url: URL?) {
+        lock.lock()
+        stateURLOverrideForTesting = url
+        cache = nil
+        lock.unlock()
+    }
+
+    private func projectlessThreadIDs() -> Set<String> {
+        let url = stateURL()
+        let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
+
+        lock.lock()
+        if let cache, cache.mtime == mtime {
+            let ids = cache.projectlessThreadIDs
+            lock.unlock()
+            return ids
+        }
+        lock.unlock()
+
+        let ids = Self.loadProjectlessThreadIDs(from: url)
+
+        lock.lock()
+        cache = Cache(mtime: mtime, projectlessThreadIDs: ids)
+        lock.unlock()
+        return ids
+    }
+
+    private func stateURL() -> URL {
+        lock.lock()
+        let override = stateURLOverrideForTesting
+        lock.unlock()
+        if let override { return override }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/.codex-global-state.json")
+    }
+
+    private static func loadProjectlessThreadIDs(from url: URL) -> Set<String> {
+        guard let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ids = root["projectless-thread-ids"] as? [String] else {
+            return []
+        }
+        return Set(ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+}
+
+enum CodexDesktopProjectClassifier {
+    static let chatsProjectName = "Codex Desktop Chats"
+
+    static func projectNameOverride(
+        for session: Session,
+        projectlessStore: CodexDesktopProjectlessThreadStore = .shared
+    ) -> String? {
+        guard session.isCodexDesktopSession else { return nil }
+        if let internalID = session.codexInternalSessionID,
+           !internalID.isEmpty,
+           projectlessStore.isProjectlessThread(id: internalID) {
+            return chatsProjectName
+        }
+
+        guard isGeneratedDesktopChatWorkspace(session.cwd) else { return nil }
+        return chatsProjectName
+    }
+
+    private static func isGeneratedDesktopChatWorkspace(_ cwd: String?) -> Bool {
+        guard let cwd, !cwd.isEmpty else { return false }
+        let components = URL(fileURLWithPath: cwd).standardizedFileURL.pathComponents
+        guard components.count >= 5 else { return false }
+
+        let suffix = Array(components.suffix(4))
+        return suffix[0] == "Documents" &&
+            suffix[1] == "Codex" &&
+            isISODateComponent(suffix[2]) &&
+            !suffix[3].isEmpty
+    }
+
+    private static func isISODateComponent(_ value: String) -> Bool {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              parts.allSatisfy({ $0.allSatisfy(\.isNumber) }) else {
+            return false
+        }
+        return true
+    }
+}
+
+enum ClaudeDesktopProjectClassifier {
+    static let chatsProjectName = "Claude Desktop Chats"
+
+    static func projectNameOverride(for session: Session) -> String? {
+        guard session.isClaudeDesktopSession else { return nil }
+        guard isGeneratedDesktopChatWorkspace(session.cwd) else { return nil }
+        return chatsProjectName
+    }
+
+    private static func isGeneratedDesktopChatWorkspace(_ cwd: String?) -> Bool {
+        guard let cwd, !cwd.isEmpty else { return false }
+        let components = URL(fileURLWithPath: cwd).standardizedFileURL.pathComponents
+        return components.count == 3 &&
+            components[0] == "/" &&
+            components[1] == "sessions" &&
+            !components[2].isEmpty
+    }
+}
+
+enum ProjectPathNormalizer {
+    private enum Resolution {
+        case name(String)
+        case suppress
+    }
+
+    static func normalizedProjectName(for session: Session) -> String? {
+        guard case let .name(name) = resolve(cwd: session.cwd) else { return nil }
+        return name
+    }
+
+    static func shouldSuppressStoredProjectName(for session: Session) -> Bool {
+        guard case .suppress = resolve(cwd: session.cwd) else { return false }
+        return true
+    }
+
+    private static func resolve(cwd: String?) -> Resolution? {
+        guard let cwd, !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let components = URL(fileURLWithPath: cwd).standardizedFileURL.pathComponents
+        guard let last = components.last, !last.isEmpty else { return .suppress }
+        if cwd == "/" { return .suppress }
+
+        if let name = projectNameBeforeMarker(in: components, marker: ".worktrees") {
+            return .name(name)
+        }
+        if let name = projectNameBeforeToolWorktrees(in: components) {
+            return .name(name)
+        }
+        if let name = projectNameBeforeHiddenClone(in: components) {
+            return .name(name)
+        }
+        if let name = numberedSiblingWorktreeName(in: components) {
+            return .name(name)
+        }
+        if let name = repositoryProjectName(in: components) {
+            return .name(name)
+        }
+        if isGenericNonProjectName(last) {
+            return .suppress
+        }
+
+        return nil
+    }
+
+    private static func projectNameBeforeMarker(in components: [String], marker: String) -> String? {
+        guard let index = components.lastIndex(of: marker),
+              index > 0,
+              index + 1 < components.count else {
+            return nil
+        }
+        let candidate = components[index - 1]
+        return normalizedProjectComponent(candidate)
+    }
+
+    private static func projectNameBeforeToolWorktrees(in components: [String]) -> String? {
+        guard let index = components.lastIndex(of: "worktrees"),
+              index > 1,
+              index + 1 < components.count else {
+            return nil
+        }
+        let toolDirectory = components[index - 1]
+        guard toolDirectory == ".claude" || toolDirectory == ".codex" else { return nil }
+        return normalizedProjectComponent(components[index - 2])
+    }
+
+    private static func projectNameBeforeHiddenClone(in components: [String]) -> String? {
+        let hiddenCloneNames = [".tennisgroup_repo", ".tennisgroup_repo_fresh"]
+        guard let index = components.lastIndex(where: { hiddenCloneNames.contains($0) }),
+              index > 0 else {
+            return nil
+        }
+        return normalizedProjectComponent(components[index - 1])
+    }
+
+    private static func numberedSiblingWorktreeName(in components: [String]) -> String? {
+        guard let repositoryIndex = components.lastIndex(of: "Repository"),
+              repositoryIndex + 1 < components.count else {
+            return nil
+        }
+        let isNestedScriptsProject = components[repositoryIndex + 1] == "Scripts"
+        let projectIndex = isNestedScriptsProject && repositoryIndex + 2 < components.count
+            ? repositoryIndex + 2
+            : repositoryIndex + 1
+        let last = components[projectIndex]
+        let pattern = #"^(.+)-[0-9]{2}$"#
+        guard let match = last.range(of: pattern, options: .regularExpression) else { return nil }
+        let matched = String(last[match])
+        guard let hyphen = matched.lastIndex(of: "-") else { return nil }
+        let base = String(matched[..<hyphen])
+        if isNestedScriptsProject {
+            return normalizedProjectComponent(base)
+        }
+        return displayName(fromGeneratedWorktreeBase: base)
+    }
+
+    private static func repositoryProjectName(in components: [String]) -> String? {
+        guard let repositoryIndex = components.lastIndex(of: "Repository"),
+              repositoryIndex + 1 < components.count else {
+            return nil
+        }
+
+        let first = components[repositoryIndex + 1]
+        if first == "Scripts", repositoryIndex + 2 < components.count {
+            return normalizedProjectComponent(components[repositoryIndex + 2])
+        }
+        return normalizedProjectComponent(first)
+    }
+
+    private static func normalizedProjectComponent(_ component: String) -> String? {
+        guard !component.isEmpty,
+              component != ".",
+              component != "/",
+              !isGenericNonProjectName(component) else {
+            return nil
+        }
+        return component
+    }
+
+    private static func isGenericNonProjectName(_ name: String) -> Bool {
+        let generic = [
+            "Documents", "Desktop", "Downloads", "tmp", "temp", "src", "code",
+            "out", "output", "outputs", "build", "dist", "Repository", "cli", "memories"
+        ]
+        return generic.contains(name)
+    }
+
+    private static func displayName(fromGeneratedWorktreeBase base: String) -> String? {
+        guard !base.isEmpty, !isGenericNonProjectName(base) else { return nil }
+        let separators = CharacterSet(charactersIn: "-_")
+        let scalars = base.unicodeScalars
+        var result = ""
+        var shouldCapitalize = true
+        for scalar in scalars {
+            let text = String(scalar)
+            if separators.contains(scalar) {
+                result.append(text)
+                shouldCapitalize = true
+            } else if shouldCapitalize {
+                result.append(text.uppercased())
+                shouldCapitalize = false
+            } else {
+                result.append(text)
+            }
+        }
+        return result
+    }
 }
 
 private func extractBranch(fromRawJSON raw: String) -> String? {

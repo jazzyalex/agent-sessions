@@ -205,6 +205,567 @@ final class SessionParserTests: XCTestCase {
                                                   allowTranscriptGeneration: false))
     }
 
+    func testArchivedCodexDesktopPredicateRequiresDesktopCodexArchivedPath() throws {
+        let archivedDesktop = Session(
+            id: "archived-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-archived.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Archived desktop",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let activeDesktop = Session(
+            id: "active-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/24/rollout-2026-04-24T16-10-54-active.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Active desktop",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let archivedCLI = Session(
+            id: "archived-cli",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-cli.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Archived CLI",
+            codexOriginator: "codex_cli_rs",
+            codexSurface: .cli
+        )
+        let archivedClaudeDesktop = Session(
+            id: "archived-claude",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-claude.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Archived Claude",
+            originator: "Claude Desktop",
+            surface: .desktop
+        )
+
+        XCTAssertTrue(archivedDesktop.isArchivedCodexDesktopSession)
+        XCTAssertFalse(activeDesktop.isArchivedCodexDesktopSession)
+        XCTAssertFalse(archivedCLI.isArchivedCodexDesktopSession)
+        XCTAssertFalse(archivedClaudeDesktop.isArchivedCodexDesktopSession)
+    }
+
+    func testArchivedCodexDesktopFilterComposesWithTitleAndContentQueries() throws {
+        let archived = Session(
+            id: "archived-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-archived.jsonl",
+            eventCount: 1,
+            events: [
+                SessionEvent(id: "u1",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "Find the west bay tournament invoice",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Bay Area Gold contacts",
+            customTitle: "Bay Area Gold contacts",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let active = Session(
+            id: "active-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/24/rollout-2026-04-24T16-10-54-active.jsonl",
+            eventCount: 1,
+            events: [
+                SessionEvent(id: "u2",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "Find the west bay tournament invoice",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Bay Area Gold contacts",
+            customTitle: "Bay Area Gold contacts",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let all = [archived, active]
+
+        var filters = Filters(query: "",
+                              dateFrom: nil,
+                              dateTo: nil,
+                              model: nil,
+                              kinds: Set(SessionEventKind.allCases),
+                              archivedCodexDesktopOnly: true)
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+
+        filters.query = "Bay Area Gold"
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+
+        filters.query = "west bay tournament"
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+    }
+
+    func testCodexDesktopSurfacePillsIncludeArchivedMarker() throws {
+        let archived = Session(
+            id: "archived-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-archived.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Archived desktop",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let active = Session(
+            id: "active-desktop",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/24/rollout-2026-04-24T16-10-54-active.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Active desktop",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let archivedOriginatorOnly = Session(
+            id: "archived-originator-only",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-04-24T16-10-54-originator.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Archived desktop metadata",
+            codexOriginator: "Codex Desktop"
+        )
+
+        let archivedPills = UnifiedSessionsView.surfacePills(for: archived)
+        XCTAssertEqual(archivedPills.map(\.label), ["desk"])
+        XCTAssertEqual(archivedPills.map(\.isArchived), [true])
+        XCTAssertEqual(archivedPills.map(\.identity), ["desk-archived"])
+        XCTAssertEqual(archivedPills.map { $0.accessibilityLabel(agentLabel: "Codex") }, ["Codex Desktop archived session"])
+
+        let activePills = UnifiedSessionsView.surfacePills(for: active)
+        XCTAssertEqual(activePills.map(\.label), ["desk"])
+        XCTAssertEqual(activePills.map(\.isArchived), [false])
+        XCTAssertEqual(activePills.map(\.identity), ["desk-standard"])
+        XCTAssertEqual(activePills.map { $0.accessibilityLabel(agentLabel: "Codex") }, ["Codex Desktop app"])
+
+        let archivedOriginatorOnlyPills = UnifiedSessionsView.surfacePills(for: archivedOriginatorOnly)
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.label), ["desk"])
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.isArchived), [true])
+        XCTAssertEqual(archivedOriginatorOnlyPills.map(\.identity), ["desk-archived"])
+    }
+
+    func testCodexDesktopProjectlessThreadsDisplayAsChatsProject() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsProjectless-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let stateURL = dir.appendingPathComponent(".codex-global-state.json")
+        try writeText(#"{"projectless-thread-ids":["thread-chat"]}"#, to: stateURL)
+        CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(stateURL)
+        defer { CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(nil) }
+
+        let session = Session(
+            id: "desktop-chat",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/08/rollout-2026-05-08T13-35-32-thread-chat.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Documents/Codex/2026-05-08/use-computer-send-message",
+            repoName: "use-computer-send-message",
+            lightweightTitle: "Bay Area Gold group contacts",
+            codexInternalSessionIDHint: "thread-chat",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "Codex Desktop Chats")
+        XCTAssertEqual(session.repoDisplay, "Codex Desktop Chats")
+    }
+
+    func testCodexDesktopChatsProjectDoesNotAffectRepoBackedOrNonDesktopSessions() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsProjectless-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let stateURL = dir.appendingPathComponent(".codex-global-state.json")
+        try writeText(#"{"projectless-thread-ids":["thread-chat"]}"#, to: stateURL)
+        CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(stateURL)
+        defer { CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(nil) }
+
+        let repoBackedDesktop = Session(
+            id: "desktop-repo",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/08/rollout-2026-05-08T13-35-32-thread-repo.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Codex-History",
+            repoName: "Codex-History",
+            lightweightTitle: "Repo task",
+            codexInternalSessionIDHint: "thread-repo",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+        let cliWithProjectlessID = Session(
+            id: "cli-chat-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/08/rollout-2026-05-08T13-35-32-thread-chat.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Documents/Codex/2026-05-08/use-computer-send-message",
+            repoName: "use-computer-send-message",
+            lightweightTitle: "CLI task",
+            codexInternalSessionIDHint: "thread-chat",
+            codexOriginator: "codex_cli_rs",
+            codexSurface: .cli
+        )
+
+        XCTAssertEqual(repoBackedDesktop.repoName, "Codex-History")
+        XCTAssertEqual(cliWithProjectlessID.repoName, "use-computer-send-message")
+    }
+
+    func testCodexDesktopGeneratedChatWorkspaceDisplaysAsChatsProjectWithoutStateID() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsProjectless-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let stateURL = dir.appendingPathComponent(".codex-global-state.json")
+        try writeText(#"{"projectless-thread-ids":[]}"#, to: stateURL)
+        CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(stateURL)
+        defer { CodexDesktopProjectlessThreadStore.shared.setStateURLOverrideForTesting(nil) }
+
+        let session = Session(
+            id: "desktop-chat-workspace",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-05-05T11-54-32-thread-old.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Documents/Codex/2026-04-24/use-computer-send-imessage-to-hi",
+            repoName: "use-computer-send-imessage-to-hi",
+            lightweightTitle: "Send iMessage",
+            codexInternalSessionIDHint: "thread-old",
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "Codex Desktop Chats")
+        XCTAssertEqual(session.repoDisplay, "Codex Desktop Chats")
+    }
+
+    func testClaudeDesktopGeneratedChatWorkspaceDisplaysAsClaudeChatsProject() throws {
+        let session = Session(
+            id: "claude-desktop-chat",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/Library/Application Support/Claude/local-agent-mode-sessions/account/workspace/local_abc/.claude/projects/-sessions-peaceful-awesome-bohr/11111111-1111-4111-8111-111111111111.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/sessions/peaceful-awesome-bohr",
+            repoName: "peaceful-awesome-bohr",
+            lightweightTitle: "Redesign junior tennis analytics website",
+            codexInternalSessionIDHint: "11111111-1111-4111-8111-111111111111",
+            originator: "Claude Desktop",
+            originSource: "local-agent-mode",
+            surface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "Claude Desktop Chats")
+        XCTAssertEqual(session.repoDisplay, "Claude Desktop Chats")
+    }
+
+    func testClaudeDesktopChatsProjectDoesNotAffectRepoBackedSessions() throws {
+        let session = Session(
+            id: "claude-desktop-repo",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/Library/Application Support/Claude/local-agent-mode-sessions/account/workspace/local_abc/.claude/projects/-Users-test-Repo/11111111-1111-4111-8111-111111111111.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: "Repo",
+            lightweightTitle: "Repo task",
+            codexInternalSessionIDHint: "11111111-1111-4111-8111-111111111111",
+            originator: "Claude Desktop",
+            originSource: "local-agent-mode",
+            surface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "Repo")
+        XCTAssertEqual(session.repoDisplay, "Repo")
+    }
+
+    func testGeneratedWorktreePathsDisplayParentProject() throws {
+        let tennisWorktree = Session(
+            id: "tennis-worktree",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-Users-test-Repository-Scripts-tennis-scraper/agent.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper/.worktrees/visual-redesign",
+            repoName: "visual-redesign",
+            lightweightTitle: "Visual redesign"
+        )
+        let claudeWorktree = Session(
+            id: "claude-worktree",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-Users-test-Repository-Codex-History--claude-worktrees-flamboyant-elion-309182/session.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Codex-History/.claude/worktrees/flamboyant-elion-309182",
+            repoName: "flamboyant-elion-309182",
+            lightweightTitle: "TEST session",
+            originator: "Claude Desktop",
+            surface: .desktop
+        )
+        let numberedSiblingWorktree = Session(
+            id: "numbered-worktree",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/13/rollout-2026-04-13T15-33-08-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/triada-54",
+            repoName: "triada-54",
+            lightweightTitle: "Triada brush fix"
+        )
+        let numberedSiblingWorktreeSubdir = Session(
+            id: "numbered-worktree-subdir",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/13/rollout-2026-04-13T15-33-08-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/triada-54/Triada",
+            repoName: "Triada",
+            lightweightTitle: "Triada brush fix"
+        )
+        let nestedNumberedSiblingWorktree = Session(
+            id: "nested-numbered-worktree",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/13/rollout-2026-04-13T15-33-08-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper-54",
+            repoName: "tennis-scraper-54",
+            lightweightTitle: "Tennis scraper worktree"
+        )
+        let nestedNumberedSiblingWorktreeSubdir = Session(
+            id: "nested-numbered-worktree-subdir",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/13/rollout-2026-04-13T15-33-08-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper-54/outputs",
+            repoName: "outputs",
+            lightweightTitle: "Tennis scraper worktree output"
+        )
+
+        XCTAssertEqual(tennisWorktree.repoName, "tennis-scraper")
+        XCTAssertEqual(claudeWorktree.repoName, "Codex-History")
+        XCTAssertEqual(numberedSiblingWorktree.repoName, "Triada")
+        XCTAssertEqual(numberedSiblingWorktreeSubdir.repoName, "Triada")
+        XCTAssertEqual(nestedNumberedSiblingWorktree.repoName, "tennis-scraper")
+        XCTAssertEqual(nestedNumberedSiblingWorktreeSubdir.repoName, "tennis-scraper")
+    }
+
+    func testNumericRepositoryNamesDoNotNormalizeAsGeneratedWorktrees() throws {
+        let versionedRepo = Session(
+            id: "versioned-repo",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/04/13/rollout-2026-04-13T15-33-08-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/api-2024",
+            repoName: "api-2024",
+            lightweightTitle: "Versioned repo task"
+        )
+
+        XCTAssertEqual(versionedRepo.repoName, "api-2024")
+    }
+
+    func testNestedRepoPathsDisplayRepoRootProject() throws {
+        let siteSubdir = Session(
+            id: "site-subdir",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-Users-test-Repository-Scripts-tennis-scraper/session.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper/TennisGroupSite",
+            repoName: "TennisGroupSite",
+            lightweightTitle: "Update event page"
+        )
+        let outputSubdir = Session(
+            id: "output-subdir",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-Users-test-Repository-Scripts-tennis-scraper/session.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper/outputs",
+            repoName: "outputs",
+            lightweightTitle: "Inspect generated output"
+        )
+        let publishClone = Session(
+            id: "publish-clone",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-Users-test-Repository-Scripts-tennis-scraper/session.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Scripts/tennis-scraper/.tennisgroup_repo_fresh",
+            repoName: ".tennisgroup_repo_fresh",
+            lightweightTitle: "Publish TennisGroup page"
+        )
+
+        XCTAssertEqual(siteSubdir.repoName, "tennis-scraper")
+        XCTAssertEqual(outputSubdir.repoName, "tennis-scraper")
+        XCTAssertEqual(publishClone.repoName, "tennis-scraper")
+    }
+
+    func testGenericNonProjectPathsDoNotUseStoredDirectoryName() throws {
+        let rootSession = Session(
+            id: "root",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/-/session.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/",
+            repoName: "/",
+            lightweightTitle: "Root task"
+        )
+        let codexMemorySession = Session(
+            id: "codex-memory",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/08/rollout-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/.codex/memories",
+            repoName: "memories",
+            lightweightTitle: "Memory task"
+        )
+
+        XCTAssertNil(rootSession.repoName)
+        XCTAssertNil(codexMemorySession.repoName)
+    }
+
     func testCodexModifiedAtUsesFreshEndTimeForRestoredOldRollout() throws {
         let restoredEnd = Date(timeIntervalSince1970: 1_778_269_498)
         let session = Session(

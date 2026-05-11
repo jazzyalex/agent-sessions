@@ -62,6 +62,7 @@ enum PreferencesKey {
         static let showSizeColumn = "UnifiedShowSizeColumn"
         static let showStarColumn = "UnifiedShowStarColumn"
         static let hasCommandsOnly = "UnifiedHasCommandsOnly"
+        static let showArchivedCodexDesktopOnly = "UnifiedShowArchivedCodexDesktopOnly"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
         static let sessionViewAutoScrollTarget = "UnifiedSessionViewAutoScrollTarget"
         static let showCodexToolbarFilter = "UnifiedShowCodexToolbarFilter"

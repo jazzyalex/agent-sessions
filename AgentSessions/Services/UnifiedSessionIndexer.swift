@@ -464,6 +464,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var showArchivedCodexDesktopOnly: Bool = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedCodexDesktopOnly) {
+        didSet {
+            UserDefaults.standard.set(showArchivedCodexDesktopOnly, forKey: PreferencesKey.Unified.showArchivedCodexDesktopOnly)
+            recomputeNow()
+        }
+    }
 
     // Source filters (persisted with @Published for Combine compatibility)
     @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
@@ -638,6 +644,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             guard let self else { return }
             let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
             if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
+            let archivedOnly = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedCodexDesktopOnly)
+            if archivedOnly != self.showArchivedCodexDesktopOnly { self.showArchivedCodexDesktopOnly = archivedOnly }
             self.syncAgentEnablementFromDefaults()
         })
 
@@ -910,7 +918,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       model: model,
                                       kinds: kinds,
                                       repoName: self.projectFilter,
-                                      pathContains: nil)
+                                      pathContains: nil,
+                                      archivedCodexDesktopOnly: self.showArchivedCodexDesktopOnly)
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
@@ -2291,7 +2300,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
 
         // Apply FilterEngine (query, date, model, kinds, project, path)
-        let filters = Filters(query: query, dateFrom: dateFrom, dateTo: dateTo, model: selectedModel, kinds: selectedKinds, repoName: projectFilter, pathContains: nil)
+        let filters = Filters(query: query,
+                              dateFrom: dateFrom,
+                              dateTo: dateTo,
+                              model: selectedModel,
+                              kinds: selectedKinds,
+                              repoName: projectFilter,
+                              pathContains: nil,
+                              archivedCodexDesktopOnly: showArchivedCodexDesktopOnly)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
         // Optional quick filter: sessions with commands (tool calls)

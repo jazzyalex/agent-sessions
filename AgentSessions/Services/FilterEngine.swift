@@ -399,6 +399,7 @@ struct Filters: Equatable {
     var kinds: Set<SessionEventKind> = Set(SessionEventKind.allCases)
     var repoName: String? = nil
     var pathContains: String? = nil
+    var archivedCodexDesktopOnly: Bool = false
 }
 
 enum FilterEngine {
@@ -423,6 +424,8 @@ enum FilterEngine {
         if let to = filters.dateTo, let t = ref, t > to { return false }
 
         if let m = filters.model, !m.isEmpty, session.model != m { return false }
+
+        if filters.archivedCodexDesktopOnly, !session.isArchivedCodexDesktopSession { return false }
 
         if let repo = effectiveRepo, !repo.isEmpty {
             guard let r = session.repoName?.lowercased() else { return false }

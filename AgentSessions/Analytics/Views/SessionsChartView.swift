@@ -118,14 +118,10 @@ struct SessionsChartView: View {
             .foregroundStyle(by: .value("Agent", item.agentDisplayName))
             .cornerRadius(AnalyticsDesign.chartBarCornerRadius)
         }
-        .chartForegroundStyleScale([
-            SessionSource.codex.displayName: Color.agentColor(for: .codex, monochrome: stripMonochrome),
-            SessionSource.claude.displayName: Color.agentColor(for: .claude, monochrome: stripMonochrome),
-            SessionSource.gemini.displayName: Color.agentColor(for: .gemini, monochrome: stripMonochrome),
-            SessionSource.opencode.displayName: Color.agentColor(for: .opencode, monochrome: stripMonochrome),
-            SessionSource.copilot.displayName: Color.agentColor(for: .copilot, monochrome: stripMonochrome),
-            SessionSource.droid.displayName: Color.agentColor(for: .droid, monochrome: stripMonochrome)
-        ])
+        .chartForegroundStyleScale(
+            domain: Self.foregroundStyleDomain(for: data),
+            range: Self.foregroundStyleRange(for: data, monochrome: stripMonochrome)
+        )
         .chartLegend(.hidden)
         .chartXAxis {
             AxisMarks(values: .automatic) { _ in
@@ -484,6 +480,18 @@ struct SessionsChartView: View {
     }
 
     private var uniqueAgents: [SessionSource] {
+        Array(Set(data.map { $0.agent })).sorted { $0.displayName < $1.displayName }
+    }
+
+    static func foregroundStyleDomain(for data: [AnalyticsTimeSeriesPoint]) -> [String] {
+        foregroundStyleSources(for: data).map(\.displayName)
+    }
+
+    static func foregroundStyleRange(for data: [AnalyticsTimeSeriesPoint], monochrome: Bool) -> [Color] {
+        foregroundStyleSources(for: data).map { Color.agentColor(for: $0, monochrome: monochrome) }
+    }
+
+    private static func foregroundStyleSources(for data: [AnalyticsTimeSeriesPoint]) -> [SessionSource] {
         Array(Set(data.map { $0.agent })).sorted { $0.displayName < $1.displayName }
     }
 }

@@ -236,10 +236,14 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     return
                 }
 
-                let candidates = all.filter { allowed.contains($0.source) }
+                let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
+                let searchableCandidates = Self.metadataFilteredCandidates(candidates,
+                                                                           filters: filters,
+                                                                           effectiveRepo: effectiveRepo,
+                                                                           effectivePath: effectivePath)
                 var byID: [String: Session] = [:]
-                byID.reserveCapacity(candidates.count)
-                for s in candidates { byID[s.id] = s }
+                byID.reserveCapacity(searchableCandidates.count)
+                for s in searchableCandidates { byID[s.id] = s }
 
                 // If there's no free-text component, prefer in-memory filtering for correctness even
                 // when the DB is only partially populated.
@@ -268,16 +272,19 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         return
                     }
 
+                    let dbResultLimit = Self.ftsResultLimit(filters: filters,
+                                                            effectiveRepo: effectiveRepo,
+                                                            totalSessionCount: all.count)
                     let ids = (try? await db.searchSessionIDsFTS(
                         sources: allowedRaw,
                         model: filters.model,
-                        repoSubstr: effectiveRepo,
+                        repoSubstr: nil,
                         pathSubstr: effectivePath,
                         dateFrom: filters.dateFrom,
                         dateTo: filters.dateTo,
                         query: effectiveFTSQuery,
                         includeSystemProbes: includeSystemProbes,
-                        limit: FeatureFlags.ftsSearchLimit
+                        limit: dbResultLimit
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
@@ -294,21 +301,21 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 	                    if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
                     // Append tool I/O FTS hits after the initial UI update to keep Instant responsive.
-                    if self.toolIOIndexEnabled(), mergedIDs.count < FeatureFlags.ftsSearchLimit {
+                    if self.toolIOIndexEnabled(), mergedIDs.count < dbResultLimit {
                         let toolIDs = (try? await db.searchSessionIDsToolIOFTS(
                             sources: allowedRaw,
                             model: filters.model,
-                            repoSubstr: effectiveRepo,
+                            repoSubstr: nil,
                             pathSubstr: effectivePath,
                             dateFrom: filters.dateFrom,
                             dateTo: filters.dateTo,
                             query: effectiveFTSQuery,
                             includeSystemProbes: includeSystemProbes,
-                            limit: FeatureFlags.ftsSearchLimit
+                            limit: dbResultLimit
                         )) ?? []
                         var addedAny = false
                         for id in toolIDs {
-                            if mergedIDs.count >= FeatureFlags.ftsSearchLimit { break }
+                            if mergedIDs.count >= dbResultLimit { break }
                             if mergedSet.insert(id).inserted {
                                 mergedIDs.append(id)
                                 addedAny = true
@@ -329,13 +336,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     // Also include non-large unindexed rows so restored/lightweight sessions remain
                     // content-searchable while their FTS rows are still missing or warming.
                     let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
-                    let unindexedCandidates = candidates.filter {
+                    let unindexedCandidates = searchableCandidates.filter {
                         !indexedIDs.contains($0.id)
                             && !seen.contains($0.id)
                             && (enableDeepScan || $0.source == .cursor || Self.sizeBytes(for: $0) < smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
-                        ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
+                        ? searchableCandidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
                         : []
 
                     let shouldRunUnindexed = !unindexedCandidates.isEmpty
@@ -419,7 +426,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             // Restore pre-index candidate building: all allowed sessions, no DB/hybrid tiers
             let threshold = FeatureFlags.searchSmallSizeBytes
-            let candidates = all.filter { allowed.contains($0.source) }
+            let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
 
             var nonLarge: [Session] = []
             var large: [Session] = []
@@ -627,6 +634,40 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             return term + "*"
         }
         return rewritten.joined(separator: " ")
+    }
+
+    private static func candidates(from all: [Session], allowed: Set<SessionSource>, filters: Filters) -> [Session] {
+        all.filter { session in
+            allowed.contains(session.source) &&
+                (!filters.archivedCodexDesktopOnly || session.isArchivedCodexDesktopSession)
+        }
+    }
+
+    private static func metadataFilteredCandidates(_ candidates: [Session],
+                                                   filters: Filters,
+                                                   effectiveRepo: String?,
+                                                   effectivePath: String?) -> [Session] {
+        let metadataFilters = Filters(query: "",
+                                      dateFrom: filters.dateFrom,
+                                      dateTo: filters.dateTo,
+                                      model: filters.model,
+                                      kinds: filters.kinds,
+                                      repoName: effectiveRepo,
+                                      pathContains: effectivePath,
+                                      archivedCodexDesktopOnly: filters.archivedCodexDesktopOnly)
+        return FilterEngine.filterSessions(candidates,
+                                           filters: metadataFilters,
+                                           transcriptCache: nil,
+                                           allowTranscriptGeneration: false)
+    }
+
+    private static func ftsResultLimit(filters: Filters,
+                                       effectiveRepo: String?,
+                                       totalSessionCount: Int) -> Int {
+        if filters.archivedCodexDesktopOnly || effectiveRepo != nil {
+            return max(FeatureFlags.ftsSearchLimit, totalSessionCount)
+        }
+        return FeatureFlags.ftsSearchLimit
     }
 
     private func startBackgroundDeepScan(runID: UUID,

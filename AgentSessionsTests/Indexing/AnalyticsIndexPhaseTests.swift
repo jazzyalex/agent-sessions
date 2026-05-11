@@ -17,11 +17,23 @@ final class AnalyticsIndexPhaseTests: XCTestCase {
         }
     }
 
-    func testAnalyticsSupportedSourcesExcludesOpenClaw() {
-        // The supported set should be exactly these six (openclaw excluded)
-        let expected: Set<String> = ["codex", "claude", "gemini", "opencode", "copilot", "droid"]
-        XCTAssertEqual(AnalyticsIndexPhase.idle, AnalyticsIndexPhase.idle)
-        XCTAssertNotEqual(AnalyticsIndexPhase.idle, AnalyticsIndexPhase.ready)
-        _ = expected
+    func testSessionsChartForegroundScaleIncludesActualDataSources() {
+        let points = [
+            AnalyticsTimeSeriesPoint(
+                date: Date(timeIntervalSince1970: 0),
+                agent: .codex,
+                sessionCount: 1,
+                messageCount: 2
+            ),
+            AnalyticsTimeSeriesPoint(
+                date: Date(timeIntervalSince1970: 0),
+                agent: .hermes,
+                sessionCount: 1,
+                messageCount: 3
+            ),
+        ]
+
+        let domain = SessionsChartView.foregroundStyleDomain(for: points)
+        XCTAssertEqual(domain, ["Codex CLI", "Hermes"])
     }
 }

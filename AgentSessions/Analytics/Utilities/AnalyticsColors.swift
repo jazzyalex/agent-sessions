@@ -83,12 +83,16 @@ extension Color {
             return .agentGemini
         } else if lower.contains("opencode") {
             return .agentOpenCode
+        } else if lower.contains("hermes") {
+            return .agentHermes
         } else if lower.contains("copilot") {
             return .agentCopilot
         } else if lower.contains("droid") {
             return .agentDroid
         } else if lower.contains("openclaw") || lower.contains("clawdbot") {
             return .agentOpenClaw
+        } else if lower.contains("cursor") {
+            return .agentCursor
         } else {
             return .accentColor
         }
@@ -106,12 +110,16 @@ extension Color {
                 return .agentGeminiGray
             } else if lower.contains("opencode") {
                 return .agentOpenCodeGray
+            } else if lower.contains("hermes") {
+                return .agentHermesGray
             } else if lower.contains("copilot") {
                 return .agentCopilotGray
             } else if lower.contains("droid") {
                 return .agentDroidGray
             } else if lower.contains("openclaw") || lower.contains("clawdbot") {
                 return .agentOpenClawGray
+            } else if lower.contains("cursor") {
+                return .agentCursorGray
             } else {
                 return .secondary
             }

@@ -5,8 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Improvements
 - Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
+- Session list: Added an Archived filter for Codex Desktop sessions and distinct archived styling on the existing `desk` pill.
 
 ### Bug Fixes
+- Analytics: Prevented the time-series chart from crashing when enabled agents such as Hermes appear in the data.
+- Analytics: Claude Desktop local-agent chat sessions now collapse generated `/sessions/...` project names into `Claude Desktop Chats`.
+- Analytics: Project filters now collapse generated worktree, publish-clone, and nested output folder names back to their parent repository.
+- Session list: Codex Desktop projectless chat sessions now show `Codex Desktop Chats` in the Project column instead of generated scratch-folder names.
 - Sessions/Search: Restored Codex Desktop sessions with old rollout dates sort by fresh activity, are picked up when their files change, and parse non-large unindexed transcripts during search so content such as email addresses is findable without deep scan.
 
 ## [3.7.1] - 2026-05-01

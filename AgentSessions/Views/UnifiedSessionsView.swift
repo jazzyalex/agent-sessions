@@ -448,10 +448,12 @@ struct UnifiedSessionsView: View {
 				handleSelectionChange(id)
 			}
 
-		let afterCodex = afterSelection
-			.onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
-		let afterClaude = afterCodex
-			.onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
+        let afterCodex = afterSelection
+            .onChange(of: unified.includeCodex) { _, _ in restartSearchIfRunning() }
+        let afterArchived = afterCodex
+            .onChange(of: unified.showArchivedCodexDesktopOnly) { _, _ in restartSearchForActiveQuery() }
+        let afterClaude = afterArchived
+            .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
 		let afterGemini = afterClaude
 			.onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
 		let afterOpenCode = afterGemini
@@ -1291,6 +1293,9 @@ struct UnifiedSessionsView: View {
                 .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
 
+                ArchivedSessionsOnlyToggle(isOn: $unified.showArchivedCodexDesktopOnly)
+                    .help("Show only archived Codex Desktop sessions")
+
                 if codexAgentEnabled {
                     AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
                         .help("Show or hide Codex sessions in the list (⌘1)")
@@ -1362,7 +1367,8 @@ struct UnifiedSessionsView: View {
                 onSymbol: "star.fill",
                 offSymbol: "star",
                 help: showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions",
-                activeColor: .primary
+                activeColor: .primary,
+                accessibilityLabel: "Saved"
             )
             .disabled(!showStarColumn)
 
@@ -1774,6 +1780,9 @@ struct UnifiedSessionsView: View {
         if unified.showFavoritesOnly {
             unified.showFavoritesOnly = false
         }
+        if unified.showArchivedCodexDesktopOnly, !session.isArchivedCodexDesktopSession {
+            unified.showArchivedCodexDesktopOnly = false
+        }
 
         if !unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !unified.query.isEmpty {
             unified.queryDraft = ""
@@ -2018,7 +2027,7 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
         let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
-        let surfacePill: CodexSurfacePill? = Self.surfacePill(for: session)
+        let surfacePills = Self.surfacePills(for: session)
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -2047,15 +2056,19 @@ struct UnifiedSessionsView: View {
             Text(label)
                 .font(.system(size: 12, weight: isSubagentRow ? .light : .regular, design: .monospaced))
                 .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
-            if let surfacePill {
+            ForEach(surfacePills, id: \.identity) { surfacePill in
                 Text(surfacePill.label)
                     .font(surfacePill.font)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.12))
+                    .background(surfacePill.fill)
                     .foregroundStyle(surfacePill.foreground(isSelected: isSelected))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(surfacePill.stroke(isSelected: isSelected), lineWidth: surfacePill.strokeWidth)
+                    )
                     .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .accessibilityLabel("\(label) \(surfacePill.accessibilityLabel)")
+                    .accessibilityLabel(surfacePill.accessibilityLabel(agentLabel: label))
             }
             Spacer(minLength: 4)
         }
@@ -2063,26 +2076,29 @@ struct UnifiedSessionsView: View {
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
     }
 
-    private static func surfacePill(for session: Session) -> CodexSurfacePill? {
+    static func surfacePills(for session: Session) -> [CodexSurfacePill] {
         if let claudeDesktopPill = claudeDesktopSurfacePill(for: session) {
-            return claudeDesktopPill
+            return [claudeDesktopPill]
         }
 
         switch session.surface ?? session.codexSurface {
         case .desktop:
-            return .desktop(isArchived: isArchivedDesktopSession(session))
+            return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
         case .vscode:
-            guard session.source == .codex else { return nil }
-            return .standard(label: "vsc", accessibilityLabel: "VS Code")
+            guard session.source == .codex else { return [] }
+            return [.standard(label: "vsc", accessibilityLabel: "VS Code")]
         case .cli:
-            guard supportsAgentSurfacePills(session) else { return nil }
-            return .standard(label: "cli", accessibilityLabel: "CLI")
+            guard supportsAgentSurfacePills(session) else { return [] }
+            return [.standard(label: "cli", accessibilityLabel: "CLI")]
         case .subagent:
-            guard session.source == .codex else { return nil }
-            return codexOriginatorSurfacePill(for: session)
+            guard session.source == .codex else { return [] }
+            return codexOriginatorSurfacePill(for: session).map { [$0] } ?? []
         case .other, .unknown, .none:
-            guard supportsAgentSurfacePills(session) else { return nil }
-            return session.isSubagent ? nil : .standard(label: "cli", accessibilityLabel: "CLI")
+            if session.isCodexDesktopSession {
+                return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
+            }
+            guard supportsAgentSurfacePills(session) else { return [] }
+            return session.isSubagent ? [] : [.standard(label: "cli", accessibilityLabel: "CLI")]
         }
     }
 
@@ -2095,7 +2111,7 @@ struct UnifiedSessionsView: View {
         let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let originSource = session.originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if originator == "claude desktop" || originSource == "local-agent-mode" || isClaudeDesktopLocalAgentPath(session.filePath) {
-            return .desktop(isArchived: false)
+            return .desktop()
         }
         return nil
     }
@@ -2113,7 +2129,7 @@ struct UnifiedSessionsView: View {
         if originator == "codex desktop" ||
             originator?.contains("desktop") == true ||
             originator?.contains("app") == true {
-            return .desktop(isArchived: isArchivedDesktopSession(session))
+            return .desktop(isArchived: session.isArchivedCodexDesktopSession)
         }
         if originator == "codex_vscode" {
             return .standard(label: "vsc", accessibilityLabel: "VS Code")
@@ -2124,35 +2140,61 @@ struct UnifiedSessionsView: View {
         return nil
     }
 
-    private static func isArchivedDesktopSession(_ session: Session) -> Bool {
-        if session.source != .codex { return false }
-        return URL(fileURLWithPath: session.filePath).pathComponents.contains("archived_sessions")
-    }
-
-    private struct CodexSurfacePill {
+    struct CodexSurfacePill {
         let label: String
         let accessibilityLabel: String
-        let isItalic: Bool
+        let usesFullAccessibilityLabel: Bool
+        let isArchived: Bool
 
-        static func desktop(isArchived: Bool) -> CodexSurfacePill {
+        var identity: String { "\(label)-\(isArchived ? "archived" : "standard")" }
+
+        static func desktop(isArchived: Bool = false) -> CodexSurfacePill {
             CodexSurfacePill(
                 label: "desk",
-                accessibilityLabel: isArchived ? "Desktop app archived" : "Desktop app",
-                isItalic: isArchived
+                accessibilityLabel: isArchived ? "Codex Desktop archived session" : "Desktop app",
+                usesFullAccessibilityLabel: isArchived,
+                isArchived: isArchived
             )
         }
 
         static func standard(label: String, accessibilityLabel: String) -> CodexSurfacePill {
-            CodexSurfacePill(label: label, accessibilityLabel: accessibilityLabel, isItalic: false)
+            CodexSurfacePill(label: label, accessibilityLabel: accessibilityLabel)
+        }
+
+        init(label: String, accessibilityLabel: String, usesFullAccessibilityLabel: Bool = false, isArchived: Bool = false) {
+            self.label = label
+            self.accessibilityLabel = accessibilityLabel
+            self.usesFullAccessibilityLabel = usesFullAccessibilityLabel
+            self.isArchived = isArchived
+        }
+
+        func accessibilityLabel(agentLabel: String) -> String {
+            usesFullAccessibilityLabel ? accessibilityLabel : "\(agentLabel) \(accessibilityLabel)"
         }
 
         func foreground(isSelected: Bool) -> Color {
+            if isArchived {
+                return isSelected ? Color.white.opacity(0.95) : UnifiedSessionsStyle.selectionAccent
+            }
             return isSelected ? Color.white.opacity(0.85) : Color.secondary
+        }
+
+        var fill: Color {
+            isArchived ? UnifiedSessionsStyle.selectionAccent.opacity(0.14) : Color.secondary.opacity(0.12)
+        }
+
+        func stroke(isSelected: Bool) -> Color {
+            guard isArchived else { return .clear }
+            return isSelected ? Color.white.opacity(0.50) : UnifiedSessionsStyle.selectionAccent.opacity(0.55)
+        }
+
+        var strokeWidth: CGFloat {
+            isArchived ? 1 : 0
         }
 
         var font: Font {
             let base = Font.system(size: 10, weight: .semibold, design: .monospaced)
-            return isItalic ? base.italic() : base
+            return isArchived ? base.italic() : base
         }
     }
 
@@ -2392,31 +2434,40 @@ struct UnifiedSessionsView: View {
         return "~\(count)"
     }
     
-	    private func restartSearchIfRunning() {
-	        guard searchCoordinator.isRunning else { return }
-	        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-	        guard !q.isEmpty else { searchCoordinator.cancel(); return }
+    private func restartSearchIfRunning() {
+        restartSearch(onlyIfRunning: true)
+    }
+
+    private func restartSearchForActiveQuery() {
+        restartSearch(onlyIfRunning: false)
+    }
+
+    private func restartSearch(onlyIfRunning: Bool) {
+        guard !onlyIfRunning || searchCoordinator.isRunning else { return }
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { searchCoordinator.cancel(); return }
         let filters = Filters(query: q,
                               dateFrom: unified.dateFrom,
                               dateTo: unified.dateTo,
                               model: unified.selectedModel,
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
-                              pathContains: nil)
-	        searchCoordinator.start(query: q,
-	                                filters: filters,
-	                                includeCodex: unified.includeCodex && codexAgentEnabled,
-	                                includeClaude: unified.includeClaude && claudeAgentEnabled,
-	                                includeGemini: unified.includeGemini && geminiAgentEnabled,
-	                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
-	                                includeHermes: unified.includeHermes && hermesAgentEnabled,
-	                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
-	                                includeDroid: unified.includeDroid && droidAgentEnabled,
-	                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
-	                                includeCursor: unified.includeCursor && cursorAgentEnabled,
-	                                enableDeepScan: searchCoordinator.deepScanEnabled,
-	                                all: unified.allSessions)
-	    }
+                              pathContains: nil,
+                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
+        searchCoordinator.start(query: q,
+                                filters: filters,
+                                includeCodex: unified.includeCodex && codexAgentEnabled,
+                                includeClaude: unified.includeClaude && claudeAgentEnabled,
+                                includeGemini: unified.includeGemini && geminiAgentEnabled,
+                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
+                                includeHermes: unified.includeHermes && hermesAgentEnabled,
+                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
+                                includeDroid: unified.includeDroid && droidAgentEnabled,
+                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
+                                includeCursor: unified.includeCursor && cursorAgentEnabled,
+                                enableDeepScan: searchCoordinator.deepScanEnabled,
+                                all: unified.allSessions)
+    }
 
     private func flashAgentEnablementNoticeIfNeeded() {
         let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled)
@@ -2723,6 +2774,36 @@ private struct ActiveSessionsOnlyToggle: View {
     }
 }
 
+private struct ArchivedSessionsOnlyToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button(action: { isOn.toggle() }) {
+            HStack(spacing: 5) {
+                Image(systemName: isOn ? "archivebox.fill" : "archivebox")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Archived")
+                    .font(UnifiedSessionsStyle.agentTabFont)
+            }
+            .foregroundStyle(isOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(UnifiedSessionsStyle.agentPillFill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(isOn ? UnifiedSessionsStyle.selectionAccent.opacity(0.55) : UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Archived Codex Desktop sessions"))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+}
+
 private struct ToolbarIcon: View {
     let systemName: String
     var isActive: Bool = false
@@ -2768,6 +2849,7 @@ private struct ToolbarIconToggle: View {
     let offSymbol: String
     let help: String
     var activeColor: Color = UnifiedSessionsStyle.selectionAccent
+    var accessibilityLabel: String = "Toggle"
 
     var body: some View {
         ToolbarIconButton(help: help) { _ in
@@ -2777,7 +2859,7 @@ private struct ToolbarIconToggle: View {
         } action: {
             isOn.toggle()
         }
-        .accessibilityLabel(Text("Saved"))
+        .accessibilityLabel(Text(accessibilityLabel))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
     }
 }
@@ -3104,7 +3186,8 @@ private struct UnifiedSearchFiltersView: View {
                               model: unified.selectedModel,
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
-                              pathContains: nil)
+                              pathContains: nil,
+                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
         search.start(query: q,
                      filters: filters,
                      includeCodex: unified.includeCodex,
@@ -3137,7 +3220,8 @@ private struct UnifiedSearchFiltersView: View {
                                   model: unified.selectedModel,
                                   kinds: unified.selectedKinds,
                                   repoName: unified.projectFilter,
-                                  pathContains: nil)
+                                  pathContains: nil,
+                                  archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
             search.start(query: q,
                          filters: filters,
                          includeCodex: unified.includeCodex,
