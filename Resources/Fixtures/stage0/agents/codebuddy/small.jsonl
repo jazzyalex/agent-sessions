@@ -1,0 +1,6 @@
+{"type":"session_start","sessionId":"codebuddy_stage0_small","timestamp":"2026-05-01T16:00:00.000Z","cwd":"/tmp/as-buddy-fixture/project","model":"deepseek-v3"}
+{"type":"message","sessionId":"codebuddy_stage0_small","timestamp":1777651201,"role":"user","content":"Read hello.py and summarize this tiny project."}
+{"type":"message","sessionId":"codebuddy_stage0_small","timestamp":1777651202500,"role":"assistant","content":[{"type":"text","text":"I will inspect the file."}]}
+{"type":"function_call","sessionId":"codebuddy_stage0_small","timestamp":1777651203000,"name":"read_file","arguments":{"path":"hello.py"}}
+{"type":"function_call_result","sessionId":"codebuddy_stage0_small","timestamp":1777651203500,"name":"read_file","output":"print(\"hello from fixture\")"}
+{"type":"message","sessionId":"codebuddy_stage0_small","timestamp":1777651204,"role":"assistant","content":"The project contains a single Python file that prints a fixture greeting."}

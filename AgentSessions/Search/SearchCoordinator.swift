@@ -350,9 +350,10 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     // content-searchable while their FTS rows are still missing or warming.
                     let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
                     let unindexedCandidates = candidates.filter {
-                        !indexedIDs.contains($0.id)
+                        let size = Self.sizeBytes(for: $0)
+                        return !indexedIDs.contains($0.id)
                             && !seen.contains($0.id)
-                            && (enableDeepScan || Self.ftsEligibleSources(from: [$0.source]).isEmpty || Self.sizeBytes(for: $0) < smallSearchThreshold)
+                            && (enableDeepScan || size < smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
                         ? candidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }

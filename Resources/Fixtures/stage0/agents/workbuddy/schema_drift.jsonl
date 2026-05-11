@@ -1,0 +1,6 @@
+{"kind":"conversation.created","conversation_id":"workbuddy_stage0_drift","time":"2026-05-01T19:00:00.000Z","projectRoot":"/tmp/as-buddy-fixture/project","model":"workbuddy-desktop"}
+{"kind":"message","conversation_id":"workbuddy_stage0_drift","time":1777662001,"author":{"role":"human"},"content":{"text":"Open the small file and summarize it."}}
+{"kind":"tool-call","conversation_id":"workbuddy_stage0_drift","time":1777662002000,"function":{"name":"open_file"},"parameters":{"path":"hello.py"}}
+{"kind":"tool-result","conversation_id":"workbuddy_stage0_drift","time":1777662003000000,"functionName":"open_file","message":{"content":"print(\"hello from fixture\")"}}
+{"kind":"message","conversation_id":"workbuddy_stage0_drift","time":"2026-05-01T19:00:04Z","author":{"role":"assistant"},"message":{"content":[{"text":"hello.py prints a fixture greeting."}]}}
+{"kind":"workspace.snapshot","conversation_id":"workbuddy_stage0_drift","time":"2026-05-01T19:00:05Z","files":["hello.py"]}

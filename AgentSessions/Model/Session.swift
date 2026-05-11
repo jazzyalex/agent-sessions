@@ -509,7 +509,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var cwd: String? {
         // Providers that persist cwd as lightweight metadata should keep using it
         // after full parse as well; transcript event scraping is not authoritative.
-        if (source == .gemini || source == .opencode || source == .copilot || source == .openclaw || source == .hermes),
+        if (source == .gemini || source == .opencode || source == .copilot || source == .openclaw || source == .hermes || source == .codebuddy || source == .workbuddy),
            let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }

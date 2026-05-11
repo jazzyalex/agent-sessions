@@ -1,0 +1,6 @@
+{"event_type":"metadata","session_id":"codebuddy_stage0_drift","createdAt":"2026-05-01T17:00:00.000Z","workspace":{"path":"/tmp/as-buddy-fixture/project"},"metadata":{"model":"hunyuan-code"}}
+{"event_type":"message","session_id":"codebuddy_stage0_drift","created_at":1777654801000000,"message":{"role":"user","content":[{"text":{"value":"List the file you inspected and say done."}}]}}
+{"event_type":"tool_use","session_id":"codebuddy_stage0_drift","created_at":1777654802000000000,"tool":{"name":"list_dir"},"input":{"path":"."}}
+{"event_type":"tool_result","session_id":"codebuddy_stage0_drift","created_at":"1777654803","toolName":"list_dir","result":["hello.py"]}
+{"event_type":"assistant_message","session_id":"codebuddy_stage0_drift","updatedAt":"2026-05-01T17:00:04Z","message":{"content":"Inspected hello.py. done"}}
+{"event_type":"checkpoint.saved","session_id":"codebuddy_stage0_drift","updatedAt":"2026-05-01T17:00:05Z","payload":{"note":"unknown event should survive as meta"}}

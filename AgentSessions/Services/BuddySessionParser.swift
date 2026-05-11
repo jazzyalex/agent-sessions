@@ -39,26 +39,21 @@ enum BuddyJSONLTranscriptParsing {
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return true
                 }
-                if sessionHint == nil, let sid = obj["sessionId"] as? String, !sid.isEmpty {
-                    sessionHint = sid
-                }
-                if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty {
-                    cwd = c
-                }
+                if sessionHint == nil { sessionHint = extractSessionID(from: obj) }
+                if cwd == nil { cwd = extractCWD(from: obj) }
                 if model == nil { model = extractModel(from: obj) }
                 if let ts = extractTimestamp(from: obj) {
                     if tmin == nil || ts < tmin! { tmin = ts }
                     if tmax == nil || ts > tmax! { tmax = ts }
                 }
-                let type = (obj["type"] as? String)?.lowercased() ?? ""
-                switch type {
-                case "message":
-                    let role = (obj["role"] as? String)?.lowercased() ?? ""
-                    if role == "user" || role == "assistant" { messageCount += 1 }
-                    if firstUser == nil, role == "user", let t = stringifyContent(obj["content"]), !t.isEmpty {
+                let kind = eventKind(from: obj)
+                switch kind {
+                case .user, .assistant:
+                    messageCount += 1
+                    if firstUser == nil, kind == .user, let t = extractText(from: obj), !t.isEmpty {
                         firstUser = truncateTitle(t)
                     }
-                case "function_call":
+                case .tool_call:
                     toolCount += 1
                 default:
                     break
@@ -72,6 +67,7 @@ enum BuddyJSONLTranscriptParsing {
         guard messageCount > 0 else { return nil }
 
         let sid = forcedID ?? sha256(path: url.path)
+        if cwd == nil { cwd = inferCWDBestEffort(from: url) }
         let repo = cwd.flatMap { URL(fileURLWithPath: $0).lastPathComponent }
 
         return Session(
@@ -119,12 +115,8 @@ enum BuddyJSONLTranscriptParsing {
                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     return
                 }
-                if sessionHint == nil, let sid = obj["sessionId"] as? String, !sid.isEmpty {
-                    sessionHint = sid
-                }
-                if cwd == nil, let c = obj["cwd"] as? String, !c.isEmpty {
-                    cwd = c
-                }
+                if sessionHint == nil { sessionHint = extractSessionID(from: obj) }
+                if cwd == nil { cwd = extractCWD(from: obj) }
                 if model == nil { model = extractModel(from: obj) }
                 if let ts = extractTimestamp(from: obj) {
                     if tmin == nil || ts < tmin! { tmin = ts }
@@ -138,6 +130,7 @@ enum BuddyJSONLTranscriptParsing {
         }
 
         let sid = forcedID ?? sha256(path: url.path)
+        if cwd == nil { cwd = inferCWDBestEffort(from: url) }
         let repo = cwd.flatMap { URL(fileURLWithPath: $0).lastPathComponent }
         let nonMeta = events.filter { $0.kind != .meta }.count
         let isHousekeeping = Session.computeIsHousekeeping(source: source, events: events)
@@ -171,27 +164,12 @@ enum BuddyJSONLTranscriptParsing {
     private static func parseLineEvents(_ obj: [String: Any], baseEventID: String) -> [SessionEvent] {
         let rawJSON = rawJSONBase64(truncateLargeStrings(in: obj))
         let ts = extractTimestamp(from: obj)
-        guard let typeRaw = obj["type"] as? String else {
-            return [metaEvent(id: baseEventID, ts: ts, text: "(missing type)", raw: rawJSON)]
-        }
-        let type = typeRaw.lowercased()
-        switch type {
-        case "message":
-            let roleRaw = (obj["role"] as? String)?.lowercased() ?? "assistant"
-            let role: String
-            let kind: SessionEventKind
-            switch roleRaw {
-            case "user", "human":
-                role = "user"; kind = .user
-            case "assistant", "model":
-                role = "assistant"; kind = .assistant
-            case "system":
-                role = "system"; kind = .meta
-            default:
-                role = roleRaw
-                kind = .assistant
-            }
-            let text = stringifyContent(obj["content"])
+        let type = extractType(from: obj)
+        let kind = eventKind(from: obj)
+        switch kind {
+        case .user, .assistant:
+            let role = normalizedRole(from: obj) ?? (kind == .user ? "user" : "assistant")
+            let text = extractText(from: obj)
             return [
                 SessionEvent(
                     id: baseEventID,
@@ -202,15 +180,15 @@ enum BuddyJSONLTranscriptParsing {
                     toolName: nil,
                     toolInput: nil,
                     toolOutput: nil,
-                    messageID: obj["id"] as? String,
-                    parentID: obj["parentId"] as? String,
+                    messageID: extractMessageID(from: obj),
+                    parentID: extractParentID(from: obj),
                     isDelta: false,
                     rawJSON: rawJSON
                 )
             ]
-        case "function_call":
-            let name = (obj["name"] as? String) ?? "tool"
-            let input = stringifyJSONValue(obj["arguments"]) ?? stringifyJSONValue(obj["message"])
+        case .tool_call:
+            let name = extractToolName(from: obj) ?? "tool"
+            let input = extractToolInput(from: obj)
             return [
                 SessionEvent(
                     id: baseEventID,
@@ -221,15 +199,15 @@ enum BuddyJSONLTranscriptParsing {
                     toolName: name,
                     toolInput: input,
                     toolOutput: nil,
-                    messageID: obj["id"] as? String,
-                    parentID: obj["parentId"] as? String,
+                    messageID: extractMessageID(from: obj),
+                    parentID: extractParentID(from: obj),
                     isDelta: false,
                     rawJSON: rawJSON
                 )
             ]
-        case "function_call_result":
-            let name = (obj["name"] as? String) ?? "tool"
-            let output = stringifyJSONValue(obj["output"]) ?? stringifyJSONValue(obj["message"])
+        case .tool_result:
+            let name = extractToolName(from: obj) ?? "tool"
+            let output = extractToolOutput(from: obj)
             return [
                 SessionEvent(
                     id: baseEventID,
@@ -240,13 +218,13 @@ enum BuddyJSONLTranscriptParsing {
                     toolName: name,
                     toolInput: nil,
                     toolOutput: output,
-                    messageID: obj["id"] as? String,
-                    parentID: obj["parentId"] as? String,
+                    messageID: extractMessageID(from: obj),
+                    parentID: extractParentID(from: obj),
                     isDelta: false,
                     rawJSON: rawJSON
                 )
             ]
-        case "reasoning":
+        case .meta where type == "reasoning":
             let body = (obj["rawContent"] as? String) ?? stringifyContent(obj["content"])
             return [
                 SessionEvent(
@@ -258,39 +236,38 @@ enum BuddyJSONLTranscriptParsing {
                     toolName: nil,
                     toolInput: nil,
                     toolOutput: nil,
-                    messageID: obj["id"] as? String,
-                    parentID: obj["parentId"] as? String,
+                    messageID: extractMessageID(from: obj),
+                    parentID: extractParentID(from: obj),
                     isDelta: false,
                     rawJSON: rawJSON
                 )
             ]
-        case "topic", "file-history-snapshot":
+        case .meta where type == "topic" || type == "file-history-snapshot":
             let summary: String = {
                 if type == "topic", let t = obj["topic"] as? String { return "[topic] \(t)" }
                 return "[\(type)]"
             }()
             return [metaEvent(id: baseEventID, ts: ts, text: summary, raw: rawJSON)]
-        default:
-            let mapped = SessionEventKind.from(role: nil, type: type)
-            if mapped == .meta {
-                return [metaEvent(id: baseEventID, ts: ts, text: "[\(type)]", raw: rawJSON)]
-            }
+        case .error:
             return [
                 SessionEvent(
                     id: baseEventID,
                     timestamp: ts,
-                    kind: mapped,
-                    role: "meta",
-                    text: nil,
+                    kind: .error,
+                    role: normalizedRole(from: obj) ?? "error",
+                    text: extractText(from: obj) ?? extractToolOutput(from: obj),
                     toolName: nil,
                     toolInput: nil,
                     toolOutput: nil,
-                    messageID: nil,
-                    parentID: nil,
+                    messageID: extractMessageID(from: obj),
+                    parentID: extractParentID(from: obj),
                     isDelta: false,
                     rawJSON: rawJSON
                 )
             ]
+        default:
+            let label = type.isEmpty ? "(missing type)" : "[\(type)]"
+            return [metaEvent(id: baseEventID, ts: ts, text: label, raw: rawJSON)]
         }
     }
 
@@ -314,34 +291,187 @@ enum BuddyJSONLTranscriptParsing {
     // MARK: - Helpers
 
     private static func extractTimestamp(from obj: [String: Any]) -> Date? {
-        if let n = obj["timestamp"] as? NSNumber {
-            return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
-        }
-        if let i = obj["timestamp"] as? Int {
-            return Date(timeIntervalSince1970: Double(i) / 1000.0)
-        }
-        if let s = obj["timestamp"] as? String {
-            return ISO8601DateFormatter().date(from: s)
+        for key in ["timestamp", "createdAt", "created_at", "updatedAt", "updated_at", "time", "ts"] {
+            guard let value = obj[key] else { continue }
+            if let n = value as? NSNumber {
+                return dateFromEpoch(n.doubleValue)
+            }
+            if let s = value as? String {
+                if let numeric = Double(s) {
+                    return dateFromEpoch(numeric)
+                }
+                if let date = isoDate(s) {
+                    return date
+                }
+            }
         }
         return nil
     }
 
     private static func extractModel(from obj: [String: Any]) -> String? {
+        for key in ["model", "modelId", "model_id"] {
+            if let m = obj[key] as? String, !m.isEmpty { return m }
+        }
         if let pd = obj["providerData"] as? [String: Any] {
             if let m = pd["model"] as? String, !m.isEmpty { return m }
             if let m = pd["modelId"] as? String, !m.isEmpty { return m }
+            if let m = pd["model_id"] as? String, !m.isEmpty { return m }
         }
+        if let message = obj["message"] as? [String: Any] {
+            for key in ["model", "modelId", "model_id"] {
+                if let m = message[key] as? String, !m.isEmpty { return m }
+            }
+        }
+        if let metadata = obj["metadata"] as? [String: Any] {
+            for key in ["model", "modelId", "model_id"] {
+                if let m = metadata[key] as? String, !m.isEmpty { return m }
+            }
+        }
+        return nil
+    }
+
+    private static func eventKind(from obj: [String: Any]) -> SessionEventKind {
+        let type = extractType(from: obj)
+        let role = normalizedRole(from: obj)
+        if type == "assistant_message" { return .assistant }
+        if type == "user_message" { return .user }
+        if type == "message" || type == "chat.message" || type == "conversation.message" || type == "assistant_message" || type == "user_message" {
+            return SessionEventKind.from(role: role, type: nil)
+        }
+        let mapped = SessionEventKind.from(role: role, type: type)
+        if mapped != .meta { return mapped }
+        switch type {
+        case "user", "human":
+            return .user
+        case "assistant", "model":
+            return .assistant
+        default:
+            return mapped
+        }
+    }
+
+    private static func extractType(from obj: [String: Any]) -> String {
+        for key in ["type", "event", "eventType", "event_type", "kind"] {
+            if let s = obj[key] as? String, !s.isEmpty { return s.lowercased() }
+        }
+        return ""
+    }
+
+    private static func normalizedRole(from obj: [String: Any]) -> String? {
+        let role = firstString(in: obj, keys: ["role", "authorRole", "author_role", "sender", "speaker"])
+            ?? nestedString(in: obj, path: ["message", "role"])
+            ?? nestedString(in: obj, path: ["author", "role"])
+        guard let role else { return nil }
+        switch role.lowercased() {
+        case "human": return "user"
+        case "model": return "assistant"
+        default: return role.lowercased()
+        }
+    }
+
+    private static func extractSessionID(from obj: [String: Any]) -> String? {
+        let explicit = firstString(in: obj, keys: [
+            "sessionId", "session_id", "conversationId", "conversation_id",
+            "chatId", "chat_id", "threadId", "thread_id"
+        ])
+        if let explicit { return explicit }
+        if let nested = nestedString(in: obj, path: ["session", "id"])
+            ?? nestedString(in: obj, path: ["conversation", "id"])
+            ?? nestedString(in: obj, path: ["chat", "id"]) {
+            return nested
+        }
+        let type = extractType(from: obj)
+        if type.contains("session") || type.contains("conversation") || type == "metadata" {
+            return firstString(in: obj, keys: ["id"])
+        }
+        return nil
+    }
+
+    private static func extractCWD(from obj: [String: Any]) -> String? {
+        firstString(in: obj, keys: [
+            "cwd", "currentWorkingDirectory", "current_working_directory",
+            "workspace", "workspaceRoot", "workspace_root", "projectRoot", "project_root"
+        ])
+        ?? nestedString(in: obj, path: ["session", "cwd"])
+        ?? nestedString(in: obj, path: ["workspace", "path"])
+        ?? nestedString(in: obj, path: ["project", "path"])
+    }
+
+    private static func extractMessageID(from obj: [String: Any]) -> String? {
+        firstString(in: obj, keys: ["messageId", "message_id", "uuid", "id"])
+            ?? nestedString(in: obj, path: ["message", "id"])
+    }
+
+    private static func extractParentID(from obj: [String: Any]) -> String? {
+        firstString(in: obj, keys: ["parentId", "parent_id"])
+            ?? nestedString(in: obj, path: ["message", "parentId"])
+            ?? nestedString(in: obj, path: ["message", "parent_id"])
+    }
+
+    private static func extractText(from obj: [String: Any]) -> String? {
+        for key in ["content", "text", "rawContent", "raw_content", "delta", "summary"] {
+            if let text = stringifyContent(obj[key]), !text.isEmpty { return text }
+        }
+        if let message = obj["message"] as? [String: Any] {
+            for key in ["content", "text", "rawContent", "raw_content", "delta"] {
+                if let text = stringifyContent(message[key]), !text.isEmpty { return text }
+            }
+        }
+        if let parts = obj["parts"], let text = stringifyContent(parts), !text.isEmpty { return text }
+        return nil
+    }
+
+    private static func extractToolName(from obj: [String: Any]) -> String? {
+        firstString(in: obj, keys: ["name", "toolName", "tool_name", "functionName", "function_name"])
+            ?? nestedString(in: obj, path: ["tool", "name"])
+            ?? nestedString(in: obj, path: ["function", "name"])
+            ?? nestedString(in: obj, path: ["message", "name"])
+    }
+
+    private static func extractToolInput(from obj: [String: Any]) -> String? {
+        for key in ["arguments", "args", "input", "parameters", "params", "toolInput", "tool_input"] {
+            if let value = stringifyJSONValue(obj[key]) { return value }
+        }
+        if let message = obj["message"] as? [String: Any] {
+            for key in ["arguments", "args", "input", "parameters", "params", "content"] {
+                if let value = stringifyJSONValue(message[key]) { return value }
+            }
+        }
+        return nil
+    }
+
+    private static func extractToolOutput(from obj: [String: Any]) -> String? {
+        for key in ["output", "result", "toolOutput", "tool_output", "content", "text"] {
+            if let value = stringifyJSONValue(obj[key]) { return value }
+        }
+        if let message = obj["message"] as? [String: Any] {
+            for key in ["output", "result", "content", "text"] {
+                if let value = stringifyJSONValue(message[key]) { return value }
+            }
+        }
+        if let value = stringifyJSONValue(obj["message"]) { return value }
         return nil
     }
 
     private static func stringifyContent(_ value: Any?) -> String? {
         if let s = value as? String { return s }
+        if let d = value as? [String: Any] {
+            for key in ["text", "content", "value", "input", "output"] {
+                if let text = stringifyContent(d[key]), !text.isEmpty { return text }
+            }
+            if let message = d["message"] as? [String: Any],
+               let text = stringifyContent(message["content"]), !text.isEmpty {
+                return text
+            }
+            return stringifyJSONValue(d)
+        }
         if let arr = value as? [Any] {
             var parts: [String] = []
             for item in arr {
                 if let d = item as? [String: Any] {
                     if let t = d["text"] as? String { parts.append(t); continue }
                     if let t = d["content"] as? String { parts.append(t); continue }
+                    if let t = nestedString(in: d, path: ["text", "value"]) { parts.append(t); continue }
                     if let sub = stringifyJSONValue(d) { parts.append(sub) }
                 } else if let s = item as? String {
                     parts.append(s)
@@ -351,6 +481,112 @@ enum BuddyJSONLTranscriptParsing {
             return joined.isEmpty ? nil : joined
         }
         return stringifyJSONValue(value)
+    }
+
+    private static func dateFromEpoch(_ raw: Double) -> Date {
+        let seconds: Double
+        let magnitude = abs(raw)
+        if magnitude > 1_000_000_000_000_000_000 {
+            seconds = raw / 1_000_000_000
+        } else if magnitude > 1_000_000_000_000_000 {
+            seconds = raw / 1_000_000
+        } else if magnitude > 10_000_000_000 {
+            seconds = raw / 1_000
+        } else {
+            seconds = raw
+        }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    private static func isoDate(_ value: String) -> Date? {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: value)
+    }
+
+    private static func firstString(in obj: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let s = obj[key] as? String {
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+            if let n = obj[key] as? NSNumber { return n.stringValue }
+        }
+        return nil
+    }
+
+    private static func nestedString(in obj: [String: Any], path: [String]) -> String? {
+        var current: Any? = obj
+        for key in path {
+            guard let dict = current as? [String: Any] else { return nil }
+            current = dict[key]
+        }
+        if let s = current as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let n = current as? NSNumber { return n.stringValue }
+        return nil
+    }
+
+    private static func inferCWDBestEffort(from url: URL) -> String? {
+        guard let projectName = extractProjectDirName(from: url) else { return nil }
+        if let decoded = percentOrBase64DecodedPath(projectName) { return decoded }
+        return inferHyphenEncodedPath(projectName)
+    }
+
+    private static func extractProjectDirName(from url: URL) -> String? {
+        let components = url.pathComponents
+        for (i, component) in components.enumerated() where component == "projects" {
+            let next = i + 1
+            guard next < components.count else { continue }
+            let projectDir = components[next]
+            if projectDir == "projects" || projectDir == "tool-results" || projectDir.isEmpty { return nil }
+            return projectDir
+        }
+        return nil
+    }
+
+    private static func percentOrBase64DecodedPath(_ projectName: String) -> String? {
+        if let decoded = projectName.removingPercentEncoding, decoded.hasPrefix("/") {
+            return decoded
+        }
+        let urlBase64 = projectName.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        let padded = urlBase64.padding(toLength: ((urlBase64.count + 3) / 4) * 4, withPad: "=", startingAt: 0)
+        if let data = Data(base64Encoded: padded),
+           let decoded = String(data: data, encoding: .utf8),
+           decoded.hasPrefix("/") {
+            return decoded
+        }
+        return nil
+    }
+
+    private static func inferHyphenEncodedPath(_ projectName: String) -> String? {
+        let segments = projectName.components(separatedBy: "-")
+        guard !segments.isEmpty else { return nil }
+
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        var resolvedPrefix = ""
+        var currentComponent = segments[0]
+        var i = 1
+
+        while i < segments.count {
+            let candidateDir = resolvedPrefix + "/" + currentComponent
+            if fm.fileExists(atPath: candidateDir, isDirectory: &isDir), isDir.boolValue {
+                resolvedPrefix = candidateDir
+                currentComponent = segments[i]
+            } else {
+                currentComponent = currentComponent + "-" + segments[i]
+            }
+            i += 1
+        }
+
+        let inferred = resolvedPrefix + "/" + currentComponent
+        return inferred == "/" ? nil : inferred
     }
 
     private static func stringifyJSONValue(_ value: Any?) -> String? {

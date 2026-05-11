@@ -48,6 +48,51 @@ final class BuddySessionParserTests: XCTestCase {
         XCTAssertEqual(preview.model, "buddy-test-model")
     }
 
+    func testParseFile_preview_acceptsSnakeCaseSessionAndSecondTimestamps() throws {
+        let lines = [
+            #"{"event_type":"metadata","session_id":"snake-1","createdAt":"2026-05-01T17:00:00.000Z","projectRoot":"/tmp/snake-project","metadata":{"model":"buddy-snake-model"}}"#,
+            #"{"event_type":"message","session_id":"snake-1","created_at":1777654801,"message":{"role":"user","content":"Find schema drift text"}}"#,
+            #"{"event_type":"assistant_message","session_id":"snake-1","created_at":1777654802000,"message":{"content":"Found it."}}"#
+        ]
+        let url = try writeTempJSONL(lines)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        guard let preview = CodebuddySessionParser.parseFile(at: url) else {
+            return XCTFail("preview parse returned nil")
+        }
+        XCTAssertEqual(preview.codexInternalSessionIDHint, "snake-1")
+        XCTAssertEqual(preview.cwd, "/tmp/snake-project")
+        XCTAssertEqual(preview.model, "buddy-snake-model")
+        XCTAssertEqual(preview.lightweightTitle, "Find schema drift text")
+        XCTAssertEqual(try XCTUnwrap(preview.startTime).timeIntervalSince1970, 1_777_654_800, accuracy: 0.1)
+        XCTAssertEqual(try XCTUnwrap(preview.endTime).timeIntervalSince1970, 1_777_654_802, accuracy: 0.1)
+    }
+
+    func testParseFile_infersCWDFromProjectsDirectoryWhenMissing() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("buddy-project-path-\(UUID().uuidString)", isDirectory: true)
+        let expectedCWD = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("as-buddy-fixture", isDirectory: true)
+            .appendingPathComponent("project", isDirectory: true)
+        try fm.createDirectory(at: expectedCWD, withIntermediateDirectories: true)
+        let projectDir = base
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("tmp-as-buddy-fixture-project", isDirectory: true)
+        try fm.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let url = projectDir.appendingPathComponent("session.jsonl")
+        try Data(#"{"type":"message","sessionId":"cwd-path","timestamp":1777654801000,"role":"user","content":"Hi"}"#.utf8).write(to: url)
+        defer {
+            try? fm.removeItem(at: base)
+            try? fm.removeItem(at: URL(fileURLWithPath: "/tmp/as-buddy-fixture", isDirectory: true))
+        }
+
+        guard let preview = CodebuddySessionParser.parseFile(at: url) else {
+            return XCTFail("preview parse returned nil")
+        }
+        XCTAssertEqual(preview.cwd, expectedCWD.path)
+        XCTAssertEqual(preview.repoName, "project")
+    }
+
     func testParseFile_returnsNilWhenNoUserOrAssistantMessages() throws {
         let lines = [
             #"{"type":"function_call","sessionId":"x","timestamp":1700000000000,"name":"noop","arguments":"{}"}"#

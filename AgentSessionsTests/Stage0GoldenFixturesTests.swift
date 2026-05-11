@@ -156,6 +156,68 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertFalse(full.events.isEmpty)
     }
 
+    func testCodeBuddyFixturesParse() throws {
+        let smallURL = FixturePaths.stage0FixtureURL("agents/codebuddy/small.jsonl")
+        guard let smallPreview = CodebuddySessionParser.parseFile(at: smallURL) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(smallPreview.source, .codebuddy)
+        XCTAssertTrue(smallPreview.events.isEmpty)
+        XCTAssertEqual(smallPreview.codexInternalSessionIDHint, "codebuddy_stage0_small")
+        XCTAssertEqual(smallPreview.model, "deepseek-v3")
+        XCTAssertEqual(smallPreview.cwd, "/tmp/as-buddy-fixture/project")
+        XCTAssertEqual(smallPreview.repoName, "project")
+        XCTAssertGreaterThan(smallPreview.eventCount, 0)
+
+        guard let smallFull = CodebuddySessionParser.parseFileFull(at: smallURL) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(smallFull.source, .codebuddy)
+        XCTAssertEqual(smallFull.cwd, "/tmp/as-buddy-fixture/project")
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .user }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .assistant }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_call }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_result }))
+
+        let driftURL = FixturePaths.stage0FixtureURL("agents/codebuddy/schema_drift.jsonl")
+        guard let driftPreview = CodebuddySessionParser.parseFile(at: driftURL) else { return XCTFail("drift preview parse returned nil") }
+        XCTAssertEqual(driftPreview.codexInternalSessionIDHint, "codebuddy_stage0_drift")
+        XCTAssertEqual(driftPreview.model, "hunyuan-code")
+        XCTAssertEqual(driftPreview.lightweightTitle, "List the file you inspected and say done.")
+
+        guard let driftFull = CodebuddySessionParser.parseFileFull(at: driftURL) else { return XCTFail("drift full parse returned nil") }
+        XCTAssertTrue(driftFull.events.contains(where: { $0.kind == .tool_call }))
+        XCTAssertTrue(driftFull.events.contains(where: { $0.kind == .tool_result }))
+        XCTAssertFalse(metaEvents(withType: "checkpoint.saved", in: driftFull.events).isEmpty)
+    }
+
+    func testWorkBuddyFixturesParse() throws {
+        let smallURL = FixturePaths.stage0FixtureURL("agents/workbuddy/small.jsonl")
+        guard let smallPreview = WorkbuddySessionParser.parseFile(at: smallURL) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(smallPreview.source, .workbuddy)
+        XCTAssertTrue(smallPreview.events.isEmpty)
+        XCTAssertEqual(smallPreview.codexInternalSessionIDHint, "workbuddy_stage0_small")
+        XCTAssertEqual(smallPreview.model, "workbuddy-agent")
+        XCTAssertEqual(smallPreview.cwd, "/tmp/as-buddy-fixture/project")
+        XCTAssertEqual(smallPreview.repoName, "project")
+        XCTAssertGreaterThan(smallPreview.eventCount, 0)
+
+        guard let smallFull = WorkbuddySessionParser.parseFileFull(at: smallURL) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(smallFull.source, .workbuddy)
+        XCTAssertEqual(smallFull.cwd, "/tmp/as-buddy-fixture/project")
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .user }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .assistant }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_call }))
+        XCTAssertTrue(smallFull.events.contains(where: { $0.kind == .tool_result }))
+
+        let driftURL = FixturePaths.stage0FixtureURL("agents/workbuddy/schema_drift.jsonl")
+        guard let driftPreview = WorkbuddySessionParser.parseFile(at: driftURL) else { return XCTFail("drift preview parse returned nil") }
+        XCTAssertEqual(driftPreview.codexInternalSessionIDHint, "workbuddy_stage0_drift")
+        XCTAssertEqual(driftPreview.model, "workbuddy-desktop")
+        XCTAssertEqual(driftPreview.lightweightTitle, "Open the small file and summarize it.")
+
+        guard let driftFull = WorkbuddySessionParser.parseFileFull(at: driftURL) else { return XCTFail("drift full parse returned nil") }
+        XCTAssertTrue(driftFull.events.contains(where: { $0.kind == .tool_call }))
+        XCTAssertTrue(driftFull.events.contains(where: { $0.kind == .tool_result && $0.toolOutput == #"print("hello from fixture")"# }))
+        XCTAssertFalse(metaEvents(withType: "workspace.snapshot", in: driftFull.events).isEmpty)
+    }
+
     func testDroidSessionStoreAndStreamJSONFixturesParse() throws {
         let paths = [
             "agents/droid/session_store_small.jsonl",
@@ -294,7 +356,13 @@ final class Stage0GoldenFixturesTests: XCTestCase {
     // MARK: - Helpers
 
     private func metaEvents(withType type: String, in events: [SessionEvent]) -> [SessionEvent] {
-        metaEvents(containing: "\"type\":\"\(type)\"", in: events)
+        events.filter { event in
+            guard event.kind == .meta, let data = Data(base64Encoded: event.rawJSON),
+                  let decoded = String(data: data, encoding: .utf8) else { return false }
+            return decoded.contains("\"type\":\"\(type)\"")
+                || decoded.contains("\"event_type\":\"\(type)\"")
+                || decoded.contains("\"kind\":\"\(type)\"")
+        }
     }
 
     private func metaEvents(containing needle: String, in events: [SessionEvent]) -> [SessionEvent] {

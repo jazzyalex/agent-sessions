@@ -1,0 +1,6 @@
+{"type":"session_start","sessionId":"workbuddy_stage0_small","timestamp":"2026-05-01T18:00:00.000Z","cwd":"/tmp/as-buddy-fixture/project","providerData":{"modelId":"workbuddy-agent"}}
+{"type":"message","sessionId":"workbuddy_stage0_small","timestamp":1777658401000,"role":"user","content":"Review the tiny project and report the result."}
+{"type":"message","sessionId":"workbuddy_stage0_small","timestamp":1777658402000,"role":"assistant","content":"I will inspect the workspace."}
+{"type":"function_call","sessionId":"workbuddy_stage0_small","timestamp":1777658403000,"name":"workspace_search","arguments":{"query":"hello"}}
+{"type":"function_call_result","sessionId":"workbuddy_stage0_small","timestamp":1777658404000,"name":"workspace_search","output":"hello.py"}
+{"type":"message","sessionId":"workbuddy_stage0_small","timestamp":1777658405000,"role":"assistant","content":"Found hello.py and completed the review."}
