@@ -78,12 +78,6 @@ enum TranscriptColorSystem {
         case .cursor:
             // Teal-ish (Cursor brand).
             return NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0)
-        case .codebuddy:
-            // Blue-violet, distinct from Codex and Cursor.
-            return NSColor(calibratedRed: 0.38, green: 0.36, blue: 0.92, alpha: 1.0)
-        case .workbuddy:
-            // Cyan-green, distinct from Droid and Cursor.
-            return NSColor(calibratedRed: 0.10, green: 0.66, blue: 0.56, alpha: 1.0)
         }
     }
 

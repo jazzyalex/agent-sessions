@@ -48,10 +48,6 @@ enum PreferencesKey {
         static let droidEnabled = "AgentEnabledDroid"
         static let openClawEnabled = "AgentEnabledOpenClaw"
         static let cursorEnabled = "AgentEnabledCursor"
-        /// Legacy single toggle (pre split); read only for migration into CodeBuddy/WorkBuddy keys.
-        static let buddyEnabled = "AgentEnabledBuddy"
-        static let codebuddyEnabled = "AgentEnabledCodebuddy"
-        static let workbuddyEnabled = "AgentEnabledWorkbuddy"
         static let knownAvailableProviders = "KnownAvailableProviders"
     }
 
@@ -101,8 +97,6 @@ enum PreferencesKey {
         static let openClawSessionsRootOverride = "OpenClawSessionsRootOverride"
         static let openClawBinaryOverride = "OpenClawBinaryOverride"
         static let cursorSessionsRootOverride = "CursorSessionsRootOverride"
-        static let buddyCodebuddyProjectsRootOverride = "BuddyCodebuddyProjectsRootOverride"
-        static let buddyWorkbuddyProjectsRootOverride = "BuddyWorkbuddyProjectsRootOverride"
     }
 
     enum Archives {

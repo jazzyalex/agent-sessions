@@ -76,8 +76,6 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
     @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.codebuddyEnabled) var codebuddyAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.workbuddyEnabled) var workbuddyAgentEnabled: Bool = true
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -827,7 +825,6 @@ struct PreferencesView: View {
         case .droid: scheduleDroidProbe()
         case .openclaw: scheduleOpenClawProbe()
         case .cursor: scheduleCursorProbe()
-        case .codebuddy, .workbuddy: break
         }
     }
 
@@ -851,8 +848,6 @@ struct PreferencesView: View {
             return openClawResolvedPath
         case .cursor:
             return cursorResolvedPath
-        case .codebuddy, .workbuddy:
-            return nil
         }
     }
 
@@ -885,8 +880,6 @@ struct PreferencesView: View {
         case .cursor:
             let value = cursorSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
-        case .codebuddy, .workbuddy:
-            return nil
         }
     }
 

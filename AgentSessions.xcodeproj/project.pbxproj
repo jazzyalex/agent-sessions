@@ -115,9 +115,6 @@
 		65EB88B78C3C117848D9BD06 /* SessionFilterShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC3DE188DC2AB5740BACF57 /* SessionFilterShims.swift */; };
 		67886527530D62D0C779167B /* ClaudeOAuthTokenResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 445097A5E6BE27C7176AA8D0 /* ClaudeOAuthTokenResolver.swift */; };
 		6829C28DA0E1BEE5984B8599 /* DroidSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC5DFBBBA1745F69422B117 /* DroidSessionParserTests.swift */; };
-		B0000BUDY0B000100000001 /* BuddySessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000BUDY0A000100000001 /* BuddySessionParserTests.swift */; };
-		B0000BUDY0B000100000002 /* BuddySessionDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000BUDY0A000100000002 /* BuddySessionDiscoveryTests.swift */; };
-		B0000BUDY0B000100000003 /* SearchCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000BUDY0A000100000003 /* SearchCoordinatorTests.swift */; };
 		69FB59BA95065BDD9A8D630A /* ClaudeStatusServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558A02C67774ABC59CE8CC46 /* ClaudeStatusServiceTests.swift */; };
 		6A156D8CF9EAF097967F14E9 /* CopilotResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A9587FF4D9D4B4CAB9167BA /* CopilotResumeCoordinator.swift */; };
 		6BD6D6A2A10EAE1215D091FC /* CursorResumeCommandBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5110A5BF02ABA14BB8B0AE6 /* CursorResumeCommandBuilderTests.swift */; };
@@ -320,10 +317,6 @@
 		EA6B3DE2F27F8FECF6357AAF /* AgentCockpitHUDRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03802C5C096CB36BC86F824C /* AgentCockpitHUDRowView.swift */; };
 		EB107C462E1C34E94A9BE16E /* CrashEmailDraftBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F809F7DFDB78DC70A32C3E /* CrashEmailDraftBuilder.swift */; };
 		EC762372C84091AFA2F77ECD /* CursorSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */; };
-		B7D1A1000001000000000001 /* BuddySessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1A2000001000000000001 /* BuddySessionDiscovery.swift */; };
-		B7D1A1000002000000000001 /* BuddySessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1A2000002000000000001 /* BuddySessionParser.swift */; };
-		B7D1A1000003000000000001 /* BuddySessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1A2000003000000000001 /* BuddySessionIndexer.swift */; };
-		B7D1A1000004000000000001 /* BuddyTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D1A2000004000000000001 /* BuddyTranscriptView.swift */; };
 		EFB738C2A9060852B3E98D4A /* CodexSessionImagesGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */; };
 		F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */; };
 		F0BC877DF9F93DD51B379288 /* GeminiInlineDataImageScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FAA1266E87A642CDA69A762 /* GeminiInlineDataImageScanner.swift */; };
@@ -496,7 +489,6 @@
 		5FAA1266E87A642CDA69A762 /* GeminiInlineDataImageScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/GeminiInlineDataImageScanner.swift; sourceTree = SOURCE_ROOT; };
 		602CE18FB970A465454E6CF7 /* ClaudeProbeProject.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeProject.swift; sourceTree = "<group>"; };
 		60591BB6BB1078FB824B8C96 /* CursorTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CursorTranscriptView.swift; sourceTree = SOURCE_ROOT; };
-		B7D1A2000004000000000001 /* BuddyTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/BuddyTranscriptView.swift; sourceTree = SOURCE_ROOT; };
 		6505213F3D72B128BB972BA3 /* OpenClawBase64ImageScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/OpenClawBase64ImageScanner.swift; sourceTree = SOURCE_ROOT; };
 		653CDA3AC37DFF0D1C2C5530 /* OpenCodeBase64ImageScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/OpenCodeBase64ImageScannerTests.swift; sourceTree = SOURCE_ROOT; };
 		654BD9FEF4DBAEA20EBC1254 /* SessionIndexingEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SessionIndexingEngine.swift; sourceTree = SOURCE_ROOT; };
@@ -678,9 +670,6 @@
 		DDD22D951F7235BCDCB7373C /* AgentImageScannerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/AgentImageScannerTests.swift; sourceTree = SOURCE_ROOT; };
 		DE3233D9D6CE429AB0173B04 /* CodexVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexVersion.swift; path = AgentSessions/Resume/CodexVersion.swift; sourceTree = SOURCE_ROOT; };
 		DEC5DFBBBA1745F69422B117 /* DroidSessionParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/DroidSessionParserTests.swift; sourceTree = SOURCE_ROOT; };
-		B0000BUDY0A000100000001 /* BuddySessionParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/BuddySessionParserTests.swift; sourceTree = SOURCE_ROOT; };
-		B0000BUDY0A000100000002 /* BuddySessionDiscoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/BuddySessionDiscoveryTests.swift; sourceTree = SOURCE_ROOT; };
-		B0000BUDY0A000100000003 /* SearchCoordinatorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SearchCoordinatorTests.swift; sourceTree = SOURCE_ROOT; };
 		DF1EEA498EA54B428BC1AEA8 /* TranscriptCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptCache.swift; sourceTree = "<group>"; };
 		DF308FD04A790E21685E9FFD /* AgentCockpitHUDView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/AgentCockpitHUDView.swift; sourceTree = SOURCE_ROOT; };
 		E17FB1E129787D35D02F800D /* SearchSessionStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchSessionStore.swift; sourceTree = SOURCE_ROOT; };
@@ -701,9 +690,6 @@
 		EC634024CF768951D08698DC /* ClaudeUsageSnapshotStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeUsageSnapshotStoreTests.swift; sourceTree = SOURCE_ROOT; };
 		EE51E91DDB45FF63A7579B6B /* ImageBrowserIndexCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserIndexCache.swift; sourceTree = SOURCE_ROOT; };
 		EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CursorSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
-		B7D1A2000001000000000001 /* BuddySessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/BuddySessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
-		B7D1A2000002000000000001 /* BuddySessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/BuddySessionParser.swift; sourceTree = SOURCE_ROOT; };
-		B7D1A2000003000000000001 /* BuddySessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/BuddySessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/AgentTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
 		F0FEAC403FCBFFD9BC241618 /* TranscriptGoldenFixtureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptGoldenFixtureTests.swift; sourceTree = SOURCE_ROOT; };
 		F14273196C77AAA12FFDF3CE /* PreferencesView+General.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+General.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+General.swift"; sourceTree = SOURCE_ROOT; };
@@ -1185,9 +1171,6 @@
 				DCAF2FBE83AB906E7AE27B14 /* ClaudeProbeProjectTests.swift */,
 				BC926C8029B5DCC347228C98 /* OnboardingCoordinatorTests.swift */,
 				DEC5DFBBBA1745F69422B117 /* DroidSessionParserTests.swift */,
-				B0000BUDY0A000100000001 /* BuddySessionParserTests.swift */,
-				B0000BUDY0A000100000002 /* BuddySessionDiscoveryTests.swift */,
-				B0000BUDY0A000100000003 /* SearchCoordinatorTests.swift */,
 				22E2B6C946DA8195F448959F /* FixturePaths.swift */,
 				C311CBC276711A2955D27C8E /* Stage0GoldenFixturesTests.swift */,
 				812D088A294DD367D06A8842 /* Stage0PerfHarnessTests.swift */,
@@ -1306,9 +1289,6 @@
 				244A406366EFEFF96A75B5DC /* CursorSessionDiscovery.swift */,
 				F907EDC5569C03CA84AC9963 /* CursorSessionParser.swift */,
 				EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */,
-				B7D1A2000001000000000001 /* BuddySessionDiscovery.swift */,
-				B7D1A2000002000000000001 /* BuddySessionParser.swift */,
-				B7D1A2000003000000000001 /* BuddySessionIndexer.swift */,
 				3461C92597A6EC663D5D67EB /* HermesSessionDiscovery.swift */,
 				DC465AC4F3A51868CBF81044 /* HermesSessionParser.swift */,
 				30A71A6F3D66468A840DCEEE /* HermesSessionIndexer.swift */,
@@ -1379,7 +1359,6 @@
 				818D69C24F0559B1CFE37700 /* AgentCockpitHUDWindow.swift */,
 				688EDBBB7C4F356E51BF00B5 /* ClaudeTranscriptView.swift */,
 				60591BB6BB1078FB824B8C96 /* CursorTranscriptView.swift */,
-				B7D1A2000004000000000001 /* BuddyTranscriptView.swift */,
 				A87D9748A4FB1DC0944131E2 /* HermesTranscriptView.swift */,
 			);
 			path = Views;
@@ -2081,12 +2060,8 @@
 				7FB7424C6E9E83DD27243857 /* CursorSessionDiscovery.swift in Sources */,
 				C175836A2966A91207158754 /* CursorSessionParser.swift in Sources */,
 				EC762372C84091AFA2F77ECD /* CursorSessionIndexer.swift in Sources */,
-				B7D1A1000001000000000001 /* BuddySessionDiscovery.swift in Sources */,
-				B7D1A1000002000000000001 /* BuddySessionParser.swift in Sources */,
-				B7D1A1000003000000000001 /* BuddySessionIndexer.swift in Sources */,
 				9C1C91D57A76756AB7386E12 /* PreferencesView+Cursor.swift in Sources */,
 				867937185092A7641F1E1508 /* CursorTranscriptView.swift in Sources */,
-				B7D1A1000004000000000001 /* BuddyTranscriptView.swift in Sources */,
 				C6CE5E7F605CB2847D0B5CB3 /* CursorResumeTypes.swift in Sources */,
 				880E13C9200AB2F4EAC3FC53 /* CursorResumeCommandBuilder.swift in Sources */,
 				C29AFA5FF65A0EFD38A6B4DA /* CursorResumeCoordinator.swift in Sources */,
@@ -2125,9 +2100,6 @@
 				0B8F72366814B2724C5536B3 /* ClaudeProbeProject.swift in Sources */,
 				004565A06D339C3DF6552A18 /* OnboardingCoordinatorTests.swift in Sources */,
 				6829C28DA0E1BEE5984B8599 /* DroidSessionParserTests.swift in Sources */,
-				B0000BUDY0B000100000001 /* BuddySessionParserTests.swift in Sources */,
-				B0000BUDY0B000100000002 /* BuddySessionDiscoveryTests.swift in Sources */,
-				B0000BUDY0B000100000003 /* SearchCoordinatorTests.swift in Sources */,
 				79F61D0D12836CDD2A0CD265 /* FixturePaths.swift in Sources */,
 				9A33A0B24844EAD390958FAF /* Stage0GoldenFixturesTests.swift in Sources */,
 				1B537F76060E9F6BAE9BBF7E /* Stage0PerfHarnessTests.swift in Sources */,

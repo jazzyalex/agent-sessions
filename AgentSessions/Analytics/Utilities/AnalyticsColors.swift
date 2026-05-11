@@ -24,10 +24,6 @@ extension Color {
     static let agentOpenClaw: Color = TranscriptColorSystem.agentBrandAccent(source: .openclaw)
     /// Cursor brand color
     static let agentCursor: Color = TranscriptColorSystem.agentBrandAccent(source: .cursor)
-    /// CodeBuddy brand color
-    static let agentCodeBuddy: Color = TranscriptColorSystem.agentBrandAccent(source: .codebuddy)
-    /// WorkBuddy brand color
-    static let agentWorkBuddy: Color = TranscriptColorSystem.agentBrandAccent(source: .workbuddy)
 
     // MARK: - Monochrome Support
 
@@ -41,8 +37,6 @@ extension Color {
     static let agentDroidGray = Color(white: 0.8)
     static let agentOpenClawGray = Color(white: 0.85)
     static let agentCursorGray = Color(white: 0.9)
-    static let agentCodeBuddyGray = Color(white: 0.56)
-    static let agentWorkBuddyGray = Color(white: 0.62)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -56,8 +50,6 @@ extension Color {
         case .droid: return .agentDroid
         case .openclaw: return .agentOpenClaw
         case .cursor: return .agentCursor
-        case .codebuddy: return .agentCodeBuddy
-        case .workbuddy: return .agentWorkBuddy
         }
     }
 
@@ -74,8 +66,6 @@ extension Color {
             case .droid: return .agentDroidGray
             case .openclaw: return .agentOpenClawGray
             case .cursor: return .agentCursorGray
-            case .codebuddy: return .agentCodeBuddyGray
-            case .workbuddy: return .agentWorkBuddyGray
             }
         } else {
             return agentColor(for: source)
@@ -99,10 +89,6 @@ extension Color {
             return .agentDroid
         } else if lower.contains("openclaw") || lower.contains("clawdbot") {
             return .agentOpenClaw
-        } else if lower.contains("codebuddy") {
-            return .agentCodeBuddy
-        } else if lower.contains("workbuddy") {
-            return .agentWorkBuddy
         } else {
             return .accentColor
         }
@@ -126,10 +112,6 @@ extension Color {
                 return .agentDroidGray
             } else if lower.contains("openclaw") || lower.contains("clawdbot") {
                 return .agentOpenClawGray
-            } else if lower.contains("codebuddy") {
-                return .agentCodeBuddyGray
-            } else if lower.contains("workbuddy") {
-                return .agentWorkBuddyGray
             } else {
                 return .secondary
             }

@@ -59,7 +59,7 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled, codebuddyAgentEnabled, workbuddyAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
@@ -70,8 +70,6 @@ extension PreferencesView {
                 agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenClaw", source: .openclaw, isOn: $openClawAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Cursor", source: .cursor, isOn: $cursorAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "CodeBuddy", source: .codebuddy, isOn: $codebuddyAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "WorkBuddy", source: .workbuddy, isOn: $workbuddyAgentEnabled, enabledCount: enabledCount)
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)

@@ -685,8 +685,6 @@ struct CockpitView: View {
         case .droid: return "Droid"
         case .openclaw: return "OpenClaw"
         case .cursor: return "Cursor"
-        case .codebuddy: return "CodeBuddy"
-        case .workbuddy: return "WorkBuddy"
         }
     }
 }
