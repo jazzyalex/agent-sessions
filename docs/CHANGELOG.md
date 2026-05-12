@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 - Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
-- Session list: Added an Archived filter for Codex Desktop sessions and distinct archived styling on the existing `desk` pill.
+- Session list: Added an Archived control that narrows Codex rows to archived Desktop sessions while leaving other enabled agents visible, plus distinct archived styling on the existing `desk` pill.
 
 ### Bug Fixes
 - Analytics: Prevented the time-series chart from crashing when enabled agents such as Hermes appear in the data.

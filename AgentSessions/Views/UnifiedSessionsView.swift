@@ -1321,13 +1321,18 @@ struct UnifiedSessionsView: View {
                 .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
 
-                ArchivedSessionsOnlyToggle(isOn: $unified.showArchivedCodexDesktopOnly)
-                    .help("Show only archived Codex Desktop sessions")
-
                 if codexAgentEnabled {
-                    AgentTabToggle(title: "Codex", color: Color.agentCodex, isMonochrome: stripMonochrome, isOn: $unified.includeCodex)
-                        .help("Show or hide Codex sessions in the list (⌘1)")
+                    Button("") { unified.includeCodex.toggle() }
                         .keyboardShortcut("1", modifiers: .command)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+
+                    CodexSegmentedPill(
+                        isCodexOn: $unified.includeCodex,
+                        isArchivedOn: $unified.showArchivedCodexDesktopOnly,
+                        isMonochrome: stripMonochrome
+                    )
+                    .help("Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived Desktop sessions; other enabled agents remain visible.")
                 }
 
                 if claudeAgentEnabled {
@@ -1817,7 +1822,7 @@ struct UnifiedSessionsView: View {
         if unified.showFavoritesOnly {
             unified.showFavoritesOnly = false
         }
-        if unified.showArchivedCodexDesktopOnly, !session.isArchivedCodexDesktopSession {
+        if unified.showArchivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession {
             unified.showArchivedCodexDesktopOnly = false
         }
 
@@ -2831,33 +2836,95 @@ private struct ActiveSessionsOnlyToggle: View {
     }
 }
 
-private struct ArchivedSessionsOnlyToggle: View {
+private struct ArchivedCodexDesktopIconToggle: View {
     @Binding var isOn: Bool
+    @Binding var includeCodex: Bool
 
     var body: some View {
-        Button(action: { isOn.toggle() }) {
-            HStack(spacing: 5) {
-                Image(systemName: isOn ? "archivebox.fill" : "archivebox")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Archived")
-                    .font(UnifiedSessionsStyle.agentTabFont)
-            }
-            .foregroundStyle(isOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(UnifiedSessionsStyle.agentPillFill)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(isOn ? UnifiedSessionsStyle.selectionAccent.opacity(0.55) : UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+        Button(action: toggle) {
+            Image(systemName: isOn ? "archivebox.fill" : "archivebox")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
+                .frame(minWidth: 14)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(UnifiedSessionsStyle.agentPillFill)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(isOn ? UnifiedSessionsStyle.selectionAccent.opacity(0.55) : UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("Archived Codex Desktop sessions"))
+        .accessibilityLabel(Text("Narrow Codex to archived Desktop sessions"))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+
+    private func toggle() {
+        let nextValue = !isOn
+        if nextValue, !includeCodex {
+            includeCodex = true
+        }
+        isOn = nextValue
+    }
+}
+
+private struct CodexSegmentedPill: View {
+    @Binding var isCodexOn: Bool
+    @Binding var isArchivedOn: Bool
+    let isMonochrome: Bool
+
+    private var codexAccent: Color { isMonochrome ? .primary : Color.agentCodex }
+    private var codexTextColor: Color {
+        if isCodexOn { return codexAccent }
+        return isMonochrome ? .secondary : .primary
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: { isCodexOn.toggle() }) {
+                Text("Codex")
+                    .font(UnifiedSessionsStyle.agentTabFont)
+                    .foregroundStyle(codexTextColor)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Codex"))
+            .accessibilityValue(Text(isCodexOn ? "On" : "Off"))
+
+            Rectangle()
+                .fill(UnifiedSessionsStyle.agentPillStroke)
+                .frame(width: 1)
+                .padding(.vertical, 4)
+
+            Button(action: archiveToggle) {
+                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
+                    .frame(minWidth: 14)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Narrow Codex to archived Desktop sessions"))
+            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
+        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
+    }
+
+    private func archiveToggle() {
+        let next = !isArchivedOn
+        if next, !isCodexOn { isCodexOn = true }
+        isArchivedOn = next
     }
 }
 

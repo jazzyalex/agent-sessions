@@ -275,7 +275,7 @@ final class SessionParserTests: XCTestCase {
         XCTAssertFalse(archivedClaudeDesktop.isArchivedCodexDesktopSession)
     }
 
-    func testArchivedCodexDesktopFilterComposesWithTitleAndContentQueries() throws {
+    func testArchivedCodexDesktopFilterNarrowsCodexAndLeavesOtherAgentsVisible() throws {
         let archived = Session(
             id: "archived-desktop",
             source: .codex,
@@ -336,7 +336,36 @@ final class SessionParserTests: XCTestCase {
             codexSource: "vscode",
             codexSurface: .desktop
         )
-        let all = [archived, active]
+        let claude = Session(
+            id: "claude-desktop",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.claude/projects/repo/session.jsonl",
+            eventCount: 1,
+            events: [
+                SessionEvent(id: "u3",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "Find the west bay tournament invoice",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Bay Area Gold contacts",
+            customTitle: "Bay Area Gold contacts",
+            originator: "Claude Desktop",
+            surface: .desktop
+        )
+        let all = [archived, active, claude]
 
         var filters = Filters(query: "",
                               dateFrom: nil,
@@ -344,13 +373,13 @@ final class SessionParserTests: XCTestCase {
                               model: nil,
                               kinds: Set(SessionEventKind.allCases),
                               archivedCodexDesktopOnly: true)
-        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop", "claude-desktop"])
 
         filters.query = "Bay Area Gold"
-        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop", "claude-desktop"])
 
         filters.query = "west bay tournament"
-        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop"])
+        XCTAssertEqual(FilterEngine.filterSessions(all, filters: filters).map(\.id), ["archived-desktop", "claude-desktop"])
     }
 
     func testCodexDesktopSurfacePillsIncludeArchivedMarker() throws {

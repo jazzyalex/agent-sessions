@@ -425,7 +425,8 @@ enum FilterEngine {
 
         if let m = filters.model, !m.isEmpty, session.model != m { return false }
 
-        if filters.archivedCodexDesktopOnly, !session.isArchivedCodexDesktopSession { return false }
+        // Archive filter scopes only Codex sessions; other agents pass through unaffected.
+        if filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession { return false }
 
         if let repo = effectiveRepo, !repo.isEmpty {
             guard let r = session.repoName?.lowercased() else { return false }

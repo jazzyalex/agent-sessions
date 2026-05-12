@@ -640,8 +640,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
     private static func candidates(from all: [Session], allowed: Set<SessionSource>, filters: Filters) -> [Session] {
         all.filter { session in
-            allowed.contains(session.source) &&
-                (!filters.archivedCodexDesktopOnly || session.isArchivedCodexDesktopSession)
+            guard allowed.contains(session.source) else { return false }
+            // Archive filter scopes only Codex; other agents pass through unaffected.
+            if filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession {
+                return false
+            }
+            return true
         }
     }
 
