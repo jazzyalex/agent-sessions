@@ -1,0 +1,4 @@
+interface:
+  display_name: "Add Agent Support"
+  short_description: "Gate new provider support before coding"
+  default_prompt: "Use $add-agent-support to research whether a new AgentSessions provider should be supported before implementation."
