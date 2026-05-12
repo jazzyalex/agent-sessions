@@ -2,7 +2,7 @@
 
 ## Hard Gates
 
-Use these gates before adding, accepting, or bumping AgentSessions provider support.
+Use these gates before adding, accepting, or bumping AgentSessions provider support. Passing the gates is not the finish line; it only authorizes the implementation workflow in `agent-support-implementation.md`.
 
 | Gate | Pass condition | Failure action |
 | --- | --- | --- |
@@ -34,6 +34,8 @@ Use these gates before adding, accepting, or bumping AgentSessions provider supp
 - Prebump exit code and report path before any verified-version bump.
 - Discovery contract pass/fail status.
 - Test-session commands and resulting transcript paths.
+- Implementation surface decisions: parser, discovery, search, settings, UI, analytics, resume, live status, usage.
+- QA and review-loop results before release or public claims.
 - Subagent evidence summaries if subagents were used.
 - Tests and build commands run.
 

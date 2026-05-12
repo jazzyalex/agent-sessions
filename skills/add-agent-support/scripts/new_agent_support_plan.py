@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a pre-support research report for a new AgentSessions provider."""
+"""Generate an end-to-end AgentSessions provider support plan."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ Fields to record:
     command_table = markdown_table(command_rows) if command_rows else "_No command probes supplied._"
     root_table = markdown_table(root_rows) if root_rows else "_No storage-root probes supplied._"
 
-    return f"""# {args.agent} Pre-Support Research
+    return f"""# {args.agent} Agent Support Plan
 
 Date: {today}
 Repository: `{args.repo}`
@@ -129,10 +129,25 @@ Required plan path: {args.plan}
 ## Decision
 
 Work type: {args.work_type}
-Status: TODO: ACCEPT / DEFER / REJECT
+Status: TODO: RESEARCH / ACCEPT / IMPLEMENTING / QA / RELEASE-READY / DEFER / REJECT
 
 Summary:
 - TODO: one-sentence maintainer decision.
+
+## Delivery Phase Checklist
+
+| Phase | Status | Evidence / Output |
+| --- | --- | --- |
+| 0. Provider support gates | TODO | Region, language, plan, install/auth, local data, fixture feasibility |
+| 1. Binary/app lifecycle | TODO | Pre-install snapshot, install source, version/help, cleanup path |
+| 2. Real session capture | TODO | Safe `/tmp` sessions, follow-up session, tool events, subagent behavior if applicable |
+| 3. Format evaluation | TODO | Storage layout, schema notes, parser requirements, unsupported surfaces |
+| 4. Fixture creation | TODO | Redacted real fixtures, secret/path scan, raw capture location |
+| 5. Integration | TODO | Parser, discovery, search, settings, UI, analytics/resume/live status decisions |
+| 6. QA | TODO | Focused tests, stable tests, Debug build, UI/rendered checks when needed |
+| 7. Review/fix loop | TODO | Manual or automated review findings and fixes |
+| 8. Docs/support records | TODO | Matrix, ledger, JSON tracking, changelog, monthly summary |
+| 9. PR/release/marketing | TODO | PR text, contributor note, release note, screenshots/social copy only after validation |
 
 ## Official Sources
 
@@ -206,6 +221,7 @@ Required test sessions:
 - Normal read-only session:
 - Follow-up/continued session, if supported:
 - Tool call/tool result producing session, if free plan allows:
+- Subagent/child-session producing session, if supported:
 - Auth/region/plan failure transcript, if full session creation is blocked:
 
 ## Real Format Notes
@@ -240,18 +256,36 @@ Record only verified facts here.
 - Secret scan command:
 - Secret scan result:
 
-## Implementation Scope If Accepted
+## Integration Implementation Plan
 
-- Parser:
-- Discovery:
-- Search:
-- Preferences/settings:
-- Unified sessions UI:
-- Analytics:
-- Resume/copy command:
-- Active/live status:
-- Usage tracking:
-- Docs/public wording:
+Record exactly which surfaces are implemented and which remain unsupported.
+
+- Parser files/functions:
+- Discovery roots and skip rules:
+- Indexing/search integration:
+- Preferences/settings/root overrides:
+- Unified Sessions filters and labels:
+- Transcript rendering for user/assistant/tool/meta events:
+- Analytics support, or explicit exclusion:
+- Resume/copy command support, or explicit exclusion:
+- Active/live status support, or explicit exclusion:
+- Usage/rate-limit tracking support, or explicit exclusion:
+- Performance risks and scan bounds:
+- Backward compatibility / stable app session ID behavior:
+- Docs/public wording constraints:
+
+## Implementation Task List
+
+- Read existing provider patterns:
+- Add fixtures:
+- Add parser/preview parser:
+- Add discovery:
+- Add index/search wiring:
+- Add UI/settings wiring:
+- Add analytics/resume/live/usage wiring only if supported:
+- Add or update tests:
+- Update support records:
+- Update docs:
 
 ## Support Record Updates If Accepted
 
@@ -260,23 +294,41 @@ Record only verified facts here.
 - `docs/agent-json-tracking.md`:
 - `docs/CHANGELOG.md`:
 - `docs/summaries/YYYY-MM.md`:
+- README/support matrix public pages, if applicable:
 
-## Marketing Plan If Accepted
+## QA And Review Loop
 
-- Verified support wording:
-- Unsupported surfaces to avoid mentioning:
-- Screenshot/GIF needed:
-- Contributor credit:
-- Release note:
-- Social copy:
+Run focused validation first, then broaden after integration is stable.
 
-## Validation Plan
+- Focused parser tests:
+- Focused discovery tests:
+- Focused search/index tests:
+- Discoverability/settings tests:
+- Fixture/golden harness tests:
+- Secret/path scan:
+- `git diff --check`:
+- `./scripts/xcode_test_stable.sh`:
+- Debug build:
+- UI/rendered QA, if UI changed:
+- Manual review findings:
+- Automated review findings, if used:
+- Fix-loop reruns after substantive changes:
 
 ```bash
 git diff --check
 ./scripts/xcode_test_stable.sh
 xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' build
 ```
+
+## PR, Release, And Marketing Plan
+
+- Verified support wording:
+- Unsupported surfaces to avoid mentioning:
+- PR title/body:
+- Contributor credit:
+- Release note:
+- Screenshot/GIF needed:
+- Social copy:
 
 ## Rejection/Deferral Note
 
@@ -306,10 +358,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--root", action="append", default=[], help="Expected local storage root. Repeat or comma-separate.")
     parser.add_argument("--work-type", choices=["new_provider", "existing_provider_update", "public_claim"], default="new_provider", help="Kind of provider-support work.")
     parser.add_argument("--agent-key", help="agent_watch.py provider key for existing-provider checks. Defaults to slugified --agent.")
-    parser.add_argument("--output", help="Output Markdown path. Defaults to /tmp/<agent>-presupport-report.md.")
+    parser.add_argument("--output", help="Output Markdown path. Defaults to /tmp/<agent>-agent-support-plan.md.")
     args = parser.parse_args(argv)
 
-    output = Path(args.output or f"/tmp/{slugify(args.agent)}-presupport-report.md")
+    output = Path(args.output or f"/tmp/{slugify(args.agent)}-agent-support-plan.md")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(build_report(args), encoding="utf-8")
     print(output)

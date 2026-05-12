@@ -1,131 +1,131 @@
 ---
 name: add-agent-support
-description: Plan, research, install, test, implement, validate, document, and market new AgentSessions agent/provider support. Use when adding, reviewing, or deciding whether to support a new local AI agent, CLI, IDE, transcript source, session parser, support-matrix entry, verified-version bump, release wording, or provider integration; requires pre-support research for region access, English usability, free-plan testability, approved binary install/auth, real local test-session capture, fixture evidence, format monitoring, discovery contracts, subagent evaluation when useful, implementation validation, and conservative marketing claims.
+description: Create and ship AgentSessions support for a new or changed local AI agent/provider. Use when adding, reviewing, testing, documenting, or marketing a provider integration, session parser, transcript source, support-matrix entry, verified-version bump, or provider UI surface; drives the full loop from pre-support research through binary install, real session capture, fixture redaction, parser/discovery/search/UI integration, QA, review/fix loops, support records, PR/release notes, and conservative marketing claims.
 ---
 
 # Add Agent Support
 
-## Core Rule
+## Mission
 
-Treat provider support as unsupported until proven on this machine. Do not implement, merge, release, bump verified versions, or market a provider from docs, vendor claims, or synthetic fixtures alone.
+Use this skill to deliver maintainable AgentSessions provider support, not just to block bad providers. The gate phase exists to prevent unsupported work from entering the repo; when gates pass, continue through implementation, QA, review, documentation, and release-ready communication.
+
+Do not implement, merge, release, bump verified versions, or market provider support from docs, vendor claims, or synthetic fixtures alone.
 
 Before coding, prove:
 - The provider is usable from the user's region.
-- The product/docs/UI are usable in English.
-- A free or existing plan can create real test sessions.
+- The product/docs/UI are usable in English, unless the user explicitly accepts a non-English support burden.
+- A free or existing plan can create enough real sessions for parser QA.
 - Installation and auth are practical on this Mac.
 - Real local transcript/session data can be generated or obtained.
-- Redacted fixtures preserve real keys, event names, timestamps, and content shape.
+- Redacted fixtures can preserve real keys, event names, timestamps, and content shape.
 
-If a hard gate fails, recommend rejecting or deferring the provider politely.
-
-For an existing supported provider, do not bump verified versions or public claims until the repo's `agent-session-format-check` evidence passes.
-
-If a provider is rejected after installing test binaries or apps, remove the installed binary/app and its test-only support/state paths before finishing.
+If a hard gate fails, reject or defer politely and clean up test-only installs/state before finishing.
 
 ## Required Workflow
 
-1. Create a pre-support report before implementation.
-   - Run `scripts/new_agent_presupport_report.py` to create the report scaffold.
-   - Fill the report with evidence, exact dates, URLs, command output, local paths, and blocker status.
+1. Start a support plan.
+   - Run `scripts/new_agent_support_plan.py` to create the plan scaffold.
+   - Fill it with evidence, exact dates, URLs, command output, local paths, and blocker status.
    - Keep uncertainty labeled as `Hypothesis:` until verified.
+   - Use `references/agent-provider-gates.md` for hard gates and binary lifecycle details.
+   - Use `references/agent-support-implementation.md` for implementation, QA, review, and release details.
 
 2. Classify the work.
-   - `new_provider`: no existing AgentSessions support. Run all pre-support gates before implementation.
-   - `existing_provider_update`: provider already exists. Use `skills/agent-session-format-check/SKILL.md` to prove schema, usage probes, storage layout, and discovery contracts still match before bumping support.
-   - `public_claim`: docs/release/social wording only. Verify implementation and format-check evidence before wording changes.
+   - `new_provider`: no current AgentSessions support. Run all gates, capture real sessions, then implement.
+   - `existing_provider_update`: provider exists. Use `skills/agent-session-format-check/SKILL.md` and `skills/agent-support-matrix/SKILL.md` before parser or version changes.
+   - `public_claim`: docs/release/social wording only. Verify implementation and test evidence before changing wording.
 
-3. Research the environment fit.
-   - Confirm region availability from official docs, live install/auth behavior, or vendor status.
-   - Confirm English usability for docs, CLI help, UI, errors, auth flow, and support pages.
-   - Confirm the free-plan path can create enough data to test parser behavior.
-   - Ask before installing apps, logging in, connecting accounts, or running networked agent tasks.
+3. Prove the provider can be supported.
+   - Confirm region, language, account, plan, install, auth, and local-data availability.
+   - Ask before global installs, GUI app installs, browser extensions, logins, account linking, or networked agent runs.
+   - Snapshot pre-install binary/app/package/state paths before changing anything.
+   - Install or locate the official binary/app only after the research gate is plausible.
+   - Verify binary path, version, help output, app bundle metadata, auth behavior, and cleanup path.
 
-4. Install or locate the agent binary only after the research gate is plausible.
-   - Prefer official install paths and record exact URLs, package names, versions, checksums when available, binary paths, and app bundle IDs.
-   - Ask before installing global packages, desktop apps, browser extensions, or anything requiring login.
-   - Before installing or logging in, snapshot existing binary lookups, app bundles, package-manager ownership, and support/state roots so cleanup never deletes pre-existing user data.
-   - Verify `--version` and `--help` when available.
-   - Record whether uninstall/cleanup is possible and how to perform it.
-   - If region, language, auth, or plan gates fail, stop and clean up test-only installs instead of continuing into parser work.
+4. Generate real test sessions.
+   - Use a disposable project under `/tmp/as-agent-lab/<agent>-project`.
+   - Run safe read-only prompts against harmless files unless edit behavior is explicitly under test.
+   - Capture at least one normal session and one follow-up/continued session when supported.
+   - Capture tool-call/tool-result behavior when the free or existing plan allows it.
+   - If the provider supports subagents or child sessions, create a small session that exercises them.
+   - If auth/region/plan blocks full creation, record the exact failure and do not fake fixture confidence.
 
-5. Run existing-provider format checks when applicable.
-   - In `/Users/alexm/Repository/Codex-History`, run:
-     ```bash
-     ./scripts/agent_watch.py --mode weekly
-     ```
-   - If weekly says `recommendation == run_prebump_validator`, or before staging any `max_verified_version` bump, run:
-     ```bash
-     ./scripts/agent_watch.py --mode prebump --agent <name>
-     ```
-   - Treat exit `0` as format evidence, `2` as schema drift, `3` as driver/auth/discovery failure, and `4` as config/invariant failure.
-   - Inspect `scripts/probe_scan_output/agent_watch/*/report.json` for `schema_matches_baseline`, `sample_freshness.is_stale`, probe health, and `discovery_path_contract`.
+5. Learn the real format.
+   - Locate session storage with scoped paths only; do not scan all of `$HOME` blindly.
+   - Inspect JSONL, JSON, SQLite, or multi-file stores with structured tools.
+   - Record root layout, file patterns, session ID fields, timestamp shapes, event names, role fields, content shapes, model/cwd fields, tool call/result shapes, usage/limits records, artifact-only directories, and subagent relationships.
+   - Decide whether unsupported surfaces should remain unsupported rather than half-wired.
 
-6. Create real test sessions.
-   - Generate a tiny safe project under `/tmp`.
-   - Run the provider against harmless files only, using read-only prompts when possible.
-   - Create at least one normal session and one follow-up/continued session if the provider supports continuation.
-   - Capture auth failures honestly; an auth-required transcript can prove storage shape but not full support.
-   - Locate real session storage using scoped paths, not broad `$HOME` scans.
-   - Inspect JSONL/JSON/SQLite/schema with structured tools.
-   - Record session IDs, timestamp shapes, event names, role fields, content shapes, tool calls/results, cwd/model fields, and artifact directories.
+6. Redact and add fixtures.
+   - Add redacted real fixtures under `Resources/Fixtures/stage0/agents/<agent>/`.
+   - Preserve real schema, event names, timestamps, and representative event families.
+   - Remove names, emails, tokens, cookies, auth headers, private prompts, proprietary content, and absolute user paths.
+   - Keep raw captures private under `scripts/agent_captures/<timestamp>/<agent>/`; do not commit raw sessions.
+   - Run the fixture secret/path scan before review.
 
-7. Evaluate evidence, using subagents when useful.
-   - Use subagents for independent, bounded work only when explicitly allowed by the user or when the current session already authorizes subagent-heavy work.
-   - Good subagent splits: official-doc region/plan research, local format inspection, parser surface audit, fixture secret review, UI/docs claim review.
-   - Do not delegate the immediate blocker if the main task depends on it next.
-   - Ask subagents for evidence and paths, not conclusions alone.
+7. Implement provider support.
+   - Follow existing AgentSessions provider patterns before inventing abstractions.
+   - Wire only surfaces backed by evidence: parser, discovery, search, settings/root overrides, unified sessions UI, analytics, resume/copy command, active/live status, and usage tracking.
+   - Add visible Preferences controls when macOS app execution will not inherit shell environment overrides.
+   - Keep stable app session IDs unless a format demands otherwise.
+   - Treat unknown event types as metadata with raw JSON preserved where the model supports it.
+   - Avoid feature flags unless the user explicitly asks for them.
 
-8. Decide before coding.
-   - `ACCEPT`: all hard gates pass and real fixture-backed parsing is feasible.
-   - `DEFER`: blocked by auth, paid plan, missing fixture data, stale samples, or unclear storage.
-   - `REJECT`: region, language, licensing, support burden, or product fit makes maintenance impractical.
+8. Test and QA the integration.
+   - Add focused parser, discovery, search, and discoverability tests.
+   - Add golden/fixture harness coverage if that harness is intended to cover supported providers.
+   - Run `git diff --check`.
+   - Run focused tests first, then `./scripts/xcode_test_stable.sh` when Swift/project files changed.
+   - Run a Debug build after Swift or project integration changes.
+   - For UI changes, launch or render-check the app surface and verify filters, transcript rendering, settings, and search behavior.
+   - Restore macOS Appearance to `System` if QA changes it.
 
-9. Implement only after `ACCEPT`.
-   - Follow the existing AgentSessions provider patterns.
-   - Add redacted real fixtures, not representative synthetic fixtures.
-   - Add parser, discovery, search, settings, analytics, resume/copy command, active/live status, and UI wiring only for surfaces truly supported.
-   - Make Preferences/root overrides visible when shell environment variables will not reach macOS apps.
-   - Avoid feature flags unless explicitly requested.
-   - Keep public wording limited to verified behavior.
+9. Review and fix until release-ready.
+   - Review the diff findings-first, focusing on fixture evidence, parser drift tolerance, secret leakage, unbounded scans, overclaiming, analytics mismatch, and performance.
+   - If using automated review, run it after tests pass, fix actionable findings, and repeat until clean or only consciously accepted low-risk notes remain.
+   - Re-run focused tests and the Debug build after substantive fixes.
 
-10. Update support records only after evidence passes.
-   - Refresh fixtures under `Resources/Fixtures/stage0/agents/<agent>/`.
+10. Update support records and docs.
    - Update `docs/agent-support/agent-support-matrix.yml` only for verified behavior.
    - Append `docs/agent-support/agent-support-ledger.yml`.
-   - Add `docs/agent-json-tracking.md` upstream-version log entry.
-   - Keep raw captures private under `scripts/agent_captures/<timestamp>/<agent>/`; do not commit raw sessions.
-
-11. Validate before merge.
-   - Run focused parser/discovery/search/provider tests.
-   - Run `git diff --check`.
-   - Run the stable test wrapper when Swift/project files changed: `./scripts/xcode_test_stable.sh`.
-   - Run a Debug build.
-   - Scan fixtures for secrets and absolute user paths.
-
-12. Write docs and marketing only after validation.
+   - Add `docs/agent-json-tracking.md` upstream-version evidence.
    - Add `[Unreleased]` changelog and `docs/summaries/YYYY-MM.md` bullets for user-visible support.
-   - Update README/support matrix only for verified capabilities.
-   - Use wording such as "browse/search local transcripts" unless resume, analytics, live status, or usage tracking are implemented and tested.
-   - Include "transcripts stay local" only when indexing really reads local files and no cloud sync is involved.
-   - Prepare social/release copy after the code and tests land, not before.
+   - Update README/support matrix only for surfaces that tests and fixtures prove.
 
-## AgentSessions-Specific Standards
+11. Prepare PR, release, and marketing wording.
+   - Prefer a follow-up PR for hardening unless the user explicitly wants direct main work.
+   - Credit contributors politely when relevant.
+   - Use "browse/search local transcripts" unless resume, analytics, live status, or usage tracking are implemented and tested.
+   - Say "transcripts stay local" only when indexing really reads local files and no cloud sync is involved.
+   - Prepare release notes, screenshots/GIFs, and social copy only after implementation, fixtures, tests, and build pass.
 
-Use `/Users/alexm/Repository/Codex-History` as the normal AgentSessions repo root unless the user says otherwise.
+12. Clean up rejected or deferred attempts.
+   - Remove only test-created binaries/apps/state proven by the pre-install snapshot.
+   - Close or comment on PRs/issues politely with the verified maintainability blocker.
+   - Remove abandoned worktrees/branches when support is not planned.
+   - Leave the repo clean or clearly report any remaining uncommitted work.
 
-Provider support must be based on real local data. Prior examples showed that repo architecture can host providers, but storage readability and product availability must be proven separately. Do not infer support just because a parser can be written.
+## Subagents
 
-Lessons from prior provider attempts:
-- A mergeable PR and green synthetic tests are not enough. Require real fixture-backed compatibility before release or marketing.
-- If the local machine cannot install/auth/use the provider from the United States, do not claim support.
-- If the product is not realistically usable in English, reject unless the user explicitly accepts that support burden.
-- If an installed test app or CLI is rejected, remove it and its test-only local state.
-- Do not keep experimental provider branches alive after deciding support is not planned; close follow-ups politely.
+Use subagents only when the user explicitly authorizes subagent work or the current task already asks for parallel agents. Good splits are:
+- Official-doc and market/access researcher.
+- Local binary/session capture operator.
+- Format/schema inspector.
+- Parser/discovery implementation worker.
+- Fixture redaction and secret-scan reviewer.
+- UI/search/docs/marketing reviewer.
 
-Use these repo-local skills/docs as supporting inputs when present:
+Do not delegate install/login approval, destructive cleanup approval, or the immediate blocker on the critical path.
+
+## AgentSessions Standards
+
+Use `/Users/alexm/Repository/Codex-History` as the normal repo root unless the user says otherwise.
+
+Provider support must be based on real local data. A mergeable PR, green synthetic tests, or a plausible parser is not enough. If this Mac cannot install/auth/use the provider from the United States, or the product is not realistically usable in English, reject unless the user explicitly accepts that support burden.
+
+Use repo-local skills/docs when present:
 - `skills/agent-session-format-check/SKILL.md`: schema drift, usage/limits probes, storage backends, discovery path contracts, and prebump validation.
-- `skills/agent-support-matrix/SKILL.md`: support matrix, ledger, and version-bump recording workflow.
+- `skills/agent-support-matrix/SKILL.md`: support matrix, ledger, and verified-version recording workflow.
 - `docs/agent-support/monitoring.md`: severity model and monitoring cadence.
 
 Known discovery contracts from the format-check workflow:
@@ -138,13 +138,8 @@ Known discovery contracts from the format-check workflow:
 - OpenClaw: `*/agents/<id>/sessions/*.jsonl`
 - Cursor: `~/.cursor/projects/*/agent-transcripts/*/*.jsonl`
 
-For public closeout, release notes, README, docs, and social copy:
-- Say only what was actually implemented and tested.
-- Prefer "browse/search local transcripts" unless resume, analytics, live status, or usage tracking are implemented.
-- If support is rejected, thank contributors and state the maintainability reason plainly.
-- Avoid "fully supported" unless install, auth, real sessions, parser, discovery, UI, tests, docs, and support matrix all pass.
-
 ## Bundled Resources
 
-- `scripts/new_agent_presupport_report.py`: generates a Markdown research report with local command/root probes, hard-gate sections, format-check evidence fields, and support-record update sections.
-- `references/agent-provider-gates.md`: detailed gate checklist, existing-provider monitoring workflow, discovery contracts, support-record updates, and rejection wording templates.
+- `scripts/new_agent_support_plan.py`: generates an end-to-end support plan with gates, install/session capture, fixture, implementation, QA, review, support-record, PR, and marketing sections.
+- `references/agent-provider-gates.md`: hard gates, evidence checklist, binary lifecycle, existing-provider monitoring, discovery contracts, and rejection wording.
+- `references/agent-support-implementation.md`: implementation surface map, fixture strategy, QA commands, review loops, support records, and marketing/release guidance.
