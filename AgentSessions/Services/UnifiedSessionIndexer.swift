@@ -76,7 +76,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         .copilot: defaultFocusedSessionRefreshIntervals,
         .droid: defaultFocusedSessionRefreshIntervals,
         .openclaw: defaultFocusedSessionRefreshIntervals,
-        .cursor: defaultFocusedSessionRefreshIntervals
+        .cursor: defaultFocusedSessionRefreshIntervals,
+        .pi: defaultFocusedSessionRefreshIntervals
     ]
     private struct FileSignature: Equatable {
         let path: String
@@ -280,6 +281,26 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
                 indexer.cursor.reloadSession(id: context.sessionID, force: force, reason: reason)
             }
+        ),
+        .pi: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.piAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: PiSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.pi.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
         )
     ]
 
@@ -380,6 +401,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let droid: Bool
         let openClaw: Bool
         let cursor: Bool
+        let pi: Bool
     }
 
     struct SessionAggregationWork {
@@ -392,6 +414,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let droidList: [Session]
         let openclawList: [Session]
         let cursorList: [Session]
+        let piList: [Session]
         let favoritesSnapshot: FavoritesStore.Snapshot
         let favoritesVersion: UInt64
         let enablement: AgentEnablementSnapshot
@@ -406,6 +429,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             droidList: [],
             openclawList: [],
             cursorList: [],
+            piList: [],
             favoritesSnapshot: FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 0,
             enablement: AgentEnablementSnapshot(
@@ -417,7 +441,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 copilot: false,
                 droid: false,
                 openClaw: false,
-                cursor: false
+                cursor: false,
+                pi: false
             )
         )
     }
@@ -526,6 +551,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var includePi: Bool = UserDefaults.standard.object(forKey: "IncludePiSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includePi, forKey: "IncludePiSessions")
+            recomputeNow()
+        }
+    }
 
     // Global agent enablement (drives app-wide availability)
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
@@ -537,6 +568,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
     @Published private(set) var openClawAgentEnabled: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? false
     @Published private(set) var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
+    @Published private(set) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -577,6 +609,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let droid: DroidSessionIndexer
     private let openclaw: OpenClawSessionIndexer
     private let cursor: CursorSessionIndexer
+    private let pi: PiSessionIndexer
     private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
     private var notificationObserverTokens: [NSObjectProtocol] = []
@@ -626,7 +659,8 @@ final class UnifiedSessionIndexer: ObservableObject {
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer,
          openclawIndexer: OpenClawSessionIndexer,
-         cursorIndexer: CursorSessionIndexer) {
+         cursorIndexer: CursorSessionIndexer,
+         piIndexer: PiSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
         self.gemini = geminiIndexer
@@ -636,6 +670,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.droid = droidIndexer
         self.openclaw = openclawIndexer
         self.cursor = cursorIndexer
+        self.pi = piIndexer
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
         syncAgentEnablementFromDefaults()
@@ -656,6 +691,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled, $cursorAgentEnabled)
             )
         )
+        .combineLatest($piAgentEnabled)
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest(
@@ -665,15 +701,18 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions, cursor.$allSessions)
             )
         )
+            .combineLatest(pi.$allSessions)
             .combineLatest(agentEnabledFlags, favoritesAggregationVersion)
             .receive(on: DispatchQueue.main)
             .map { [weak self] sourceLists, flags, favoritesVersion -> SessionAggregationWork in
                 guard let self else { return .empty }
-                let (combined, tail) = sourceLists
+                let (sourceListsBase, piList) = sourceLists
+                let (combined, tail) = sourceListsBase
                 let (codexList, claudeList, geminiList, opencodeList) = combined
                 let (hermesList, tailLists) = tail
                 let (copilotList, droidList, openclawList, cursorList) = tailLists
-                let (enabled4, enabledTail) = flags
+                let (baseFlags, piEnabled) = flags
+                let (enabled4, enabledTail) = baseFlags
                 let (codexEnabled, claudeEnabled, geminiEnabled, openCodeEnabled) = enabled4
                 let (hermesEnabled, tailEnabled) = enabledTail
                 let (copilotEnabled, droidEnabled, openClawEnabled, cursorEnabled) = tailEnabled
@@ -687,6 +726,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     droidList: droidList,
                     openclawList: openclawList,
                     cursorList: cursorList,
+                    piList: piList,
                     favoritesSnapshot: self.favorites.snapshot(),
                     favoritesVersion: favoritesVersion,
                     enablement: AgentEnablementSnapshot(
@@ -698,7 +738,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                         copilot: copilotEnabled,
                         droid: droidEnabled,
                         openClaw: openClawEnabled,
-                        cursor: cursorEnabled
+                        cursor: cursorEnabled,
+                        pi: piEnabled
                     )
                 )
             }
@@ -724,17 +765,20 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
             )
         )
+            .combineLatest(pi.$isIndexing)
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
-                let (s4, statesTail) = states
+                let (baseStates, piState) = states
+                let (s4, statesTail) = baseStates
                 let (c, cl, g, o) = s4
                 let (hermesState, tailStates) = statesTail
                 let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (f4, flagsTail) = flags
+                let (baseFlags, piEnabled) = flags
+                let (f4, flagsTail) = baseFlags
                 let (ec, ecl, eg, eo) = f4
                 let (eHermes, tailFlags) = flagsTail
                 let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState)
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -756,25 +800,28 @@ final class UnifiedSessionIndexer: ObservableObject {
                     hermes.$filesProcessed,
                     Publishers.CombineLatest4(copilot.$filesProcessed, droid.$filesProcessed, openclaw.$filesProcessed, cursor.$filesProcessed)
                 )
-            ),
+            ).combineLatest(pi.$filesProcessed),
             Publishers.CombineLatest(
                 Publishers.CombineLatest4(codex.$totalFiles, claude.$totalFiles, gemini.$totalFiles, opencode.$totalFiles),
                 Publishers.CombineLatest(
                     hermes.$totalFiles,
                     Publishers.CombineLatest4(copilot.$totalFiles, droid.$totalFiles, openclaw.$totalFiles, cursor.$totalFiles)
                 )
-            ),
+            ).combineLatest(pi.$totalFiles),
             Publishers.CombineLatest(
                 Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing),
                 Publishers.CombineLatest(
                     hermes.$isIndexing,
                     Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
                 )
-            )
+            ).combineLatest(pi.$isIndexing)
         )
         .combineLatest(agentEnabledFlags)
         .map { metrics, flags in
-            let snapshots = Self.coreProviderSnapshots(metrics: metrics, flags: flags)
+            let (baseFlags, piEnabled) = flags
+            let ((processedBase, piProcessed), (totalsBase, piTotal), (indexingBase, piIndexing)) = metrics
+            var snapshots = Self.coreProviderSnapshots(metrics: (processedBase, totalsBase, indexingBase), flags: baseFlags)
+            snapshots.append(CoreProviderSnapshot(source: .pi, enabled: piEnabled, indexing: piIndexing, processed: piProcessed, total: piTotal))
             return Self.aggregateProgress(from: snapshots)
         }
         .receive(on: DispatchQueue.main)
@@ -793,17 +840,20 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4(copilot.$isProcessingTranscripts, droid.$isProcessingTranscripts, openclaw.$isProcessingTranscripts, cursor.$isProcessingTranscripts)
             )
         )
+            .combineLatest(pi.$isProcessingTranscripts)
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
-                let (s4, statesTail) = states
+                let (baseStates, piState) = states
+                let (s4, statesTail) = baseStates
                 let (c, cl, g, o) = s4
                 let (hermesState, tailStates) = statesTail
                 let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (f4, flagsTail) = flags
+                let (baseFlags, piEnabled) = flags
+                let (f4, flagsTail) = baseFlags
                 let (ec, ecl, eg, eo) = f4
                 let (eHermes, tailFlags) = flagsTail
                 let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState)
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -833,18 +883,21 @@ final class UnifiedSessionIndexer: ObservableObject {
             indexingErrorHead.eraseToAnyPublisher(),
             indexingErrorTail.eraseToAnyPublisher()
         )
+        .combineLatest(pi.$indexingError)
         let indexingErrorFlags = agentEnabledFlags.eraseToAnyPublisher()
         indexingErrors
             .combineLatest(indexingErrorFlags)
             .map { errs, flags in
-                let (errs4, errsTail) = errs
-                let (f4, flagsTail) = flags
+                let (baseErrors, piError) = errs
+                let (errs4, errsTail) = baseErrors
+                let (baseFlags, piEnabled) = flags
+                let (f4, flagsTail) = baseFlags
                 return Self.firstEnabledIndexingError(
                     headErrors: errs4,
                     tailErrors: errsTail,
                     headFlags: f4,
                     tailFlags: flagsTail
-                )
+                ) ?? (piEnabled ? piError : nil)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -868,6 +921,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
             )
         )
+        .combineLatest($includePi)
         Publishers.CombineLatest(
             Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags)),
             $sortDescriptor.removeDuplicates()
@@ -878,11 +932,13 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (input, kinds, all, combinedFlags) = combined
                 let (q, from, to, model) = input
                 let (sources, enabledFlags) = combinedFlags
-                let (src4, tailSources) = sources
+                let (baseSources, incPi) = sources
+                let (src4, tailSources) = baseSources
                 let (incCodex, incClaude, incGemini, incOpenCode) = src4
                 let (incHermes, sourcesTail) = tailSources
                 let (incCopilot, incDroid, incOpenClaw, incCursor) = sourcesTail
-                let (en4, enabledTail) = enabledFlags
+                let (baseEnabled, enPi) = enabledFlags
+                let (en4, enabledTail) = baseEnabled
                 let (enCodex, enClaude, enGemini, enOpenCode) = en4
                 let (enHermes, tailEnabled) = enabledTail
                 let (enCopilot, enDroid, enOpenClaw, enCursor) = tailEnabled
@@ -895,10 +951,11 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let effectiveDroid = incDroid && enDroid
                 let effectiveOpenClaw = incOpenClaw && enOpenClaw
                 let effectiveCursor = incCursor && enCursor
+                let effectivePi = incPi && enPi
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor) {
+                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi) {
                     base = base.filter { s in
                         (s.source == .codex && effectiveCodex) ||
                         (s.source == .claude && effectiveClaude) ||
@@ -908,7 +965,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                         (s.source == .copilot && effectiveCopilot) ||
                         (s.source == .droid && effectiveDroid) ||
                         (s.source == .openclaw && effectiveOpenClaw) ||
-                        (s.source == .cursor && effectiveCursor)
+                        (s.source == .cursor && effectiveCursor) ||
+                        (s.source == .pi && effectivePi)
                     }
                 }
 
@@ -968,8 +1026,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                                     hermes.$launchPhase,
                                     Publishers.CombineLatest4(copilot.$launchPhase, droid.$launchPhase, openclaw.$launchPhase, cursor.$launchPhase)
                                 ))
+            .combineLatest(pi.$launchPhase)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] _ in
                 self?.updateLaunchState()
             }
             .store(in: &cancellables)
@@ -981,8 +1040,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                 Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
             )
         )
+            .combineLatest($includePi)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _ in
+            .sink { [weak self] _ in
                 self?.updateLaunchState()
             }
             .store(in: &cancellables)
@@ -1017,7 +1077,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             .copilot: copilotAgentEnabled,
             .droid: droidAgentEnabled,
             .openclaw: openClawAgentEnabled,
-            .cursor: cursorAgentEnabled
+            .cursor: cursorAgentEnabled,
+            .pi: piAgentEnabled
         ]
         let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
         let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
@@ -1028,6 +1089,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let c7 = AgentEnablement.isEnabled(.droid, defaults: defaults)
         let c8 = AgentEnablement.isEnabled(.openclaw, defaults: defaults)
         let c9 = AgentEnablement.isEnabled(.cursor, defaults: defaults)
+        let c10 = AgentEnablement.isEnabled(.pi, defaults: defaults)
         if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
         if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
         if c3 != geminiAgentEnabled { geminiAgentEnabled = c3 }
@@ -1037,6 +1099,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if c7 != droidAgentEnabled { droidAgentEnabled = c7 }
         if c8 != openClawAgentEnabled { openClawAgentEnabled = c8 }
         if c9 != cursorAgentEnabled { cursorAgentEnabled = c9 }
+        if c10 != piAgentEnabled { piAgentEnabled = c10 }
 
         let afterSources = enabledAnalyticsSources()
         if analyticsLastBuiltAt != nil && !afterSources.subtracting(beforeSources).isEmpty {
@@ -1087,7 +1150,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             copilotAgentEnabled ? .copilot : nil,
             droidAgentEnabled ? .droid : nil,
             openClawAgentEnabled ? .openclaw : nil,
-            cursorAgentEnabled ? .cursor : nil
+            cursorAgentEnabled ? .cursor : nil,
+            piAgentEnabled ? .pi : nil
         ].compactMap { $0 }
         for source in sources {
             requestProviderRefresh(source: source, reason: "unified-refresh", trigger: trigger)
@@ -1781,6 +1845,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .droid: return droidAgentEnabled && !droid.isIndexing
         case .openclaw: return openClawAgentEnabled && !openclaw.isIndexing
         case .cursor: return cursorAgentEnabled && !cursor.isIndexing
+        case .pi: return piAgentEnabled && !pi.isIndexing
         }
     }
 
@@ -1894,6 +1959,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             livePath = openclaw.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .cursor:
             livePath = cursor.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .pi:
+            livePath = pi.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         }
         if let livePath, !livePath.isEmpty { return livePath }
         return context.filePath
@@ -1988,6 +2055,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .droid: droid.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .openclaw: openclaw.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .cursor: cursor.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .pi: pi.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         }
     }
 
@@ -2003,6 +2071,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .droid: return droid.isIndexing
         case .openclaw: return openclaw.isIndexing
         case .cursor: return cursor.isIndexing
+        case .pi: return pi.isIndexing
         }
     }
 
@@ -2211,6 +2280,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         phases[.droid] = (droidAgentEnabled && includeDroid) ? droid.launchPhase : .ready
         phases[.openclaw] = (openClawAgentEnabled && includeOpenClaw) ? openclaw.launchPhase : .ready
         phases[.cursor] = (cursorAgentEnabled && includeCursor) ? cursor.launchPhase : .ready
+        phases[.pi] = (piAgentEnabled && includePi) ? pi.launchPhase : .ready
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -2257,6 +2327,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if work.enablement.droid { merged.append(contentsOf: work.droidList) }
         if work.enablement.openClaw { merged.append(contentsOf: work.openclawList) }
         if work.enablement.cursor { merged.append(contentsOf: work.cursorList) }
+        if work.enablement.pi { merged.append(contentsOf: work.piList) }
         for index in merged.indices {
             merged[index].isFavorite = work.favoritesSnapshot.contains(id: merged[index].id, source: merged[index].source)
         }
@@ -2296,6 +2367,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             case .droid:    return droidAgentEnabled && includeDroid
             case .openclaw: return openClawAgentEnabled && includeOpenClaw
             case .cursor:   return cursorAgentEnabled && includeCursor
+            case .pi:       return piAgentEnabled && includePi
             }
         }
 
@@ -2313,8 +2385,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Optional quick filter: sessions with commands (tool calls)
         if hasCommandsOnly {
             results = results.filter { s in
-                // For Codex, Copilot, and OpenCode, require evidence of commands/tool calls (or lightweightCommands>0).
-                if s.source == .codex || s.source == .opencode || s.source == .hermes || s.source == .copilot || s.source == .droid || s.source == .openclaw || s.source == .cursor {
+                // For command-capable JSONL providers, require evidence of commands/tool calls (or lightweightCommands>0).
+                if s.source == .codex || s.source == .opencode || s.source == .hermes || s.source == .copilot || s.source == .droid || s.source == .openclaw || s.source == .cursor || s.source == .pi {
                     if !s.events.isEmpty {
                         return s.events.contains { $0.kind == .tool_call }
                     } else {

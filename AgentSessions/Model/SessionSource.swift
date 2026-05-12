@@ -11,6 +11,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case droid = "droid"
     case openclaw = "openclaw"
     case cursor = "cursor"
+    case pi = "pi"
 
     public var displayName: String {
         switch self {
@@ -23,6 +24,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid: return "Droid"
         case .openclaw: return "OpenClaw"
         case .cursor: return "Cursor"
+        case .pi: return "Pi"
         }
     }
 
@@ -37,6 +39,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid: return "d.circle"
         case .openclaw: return "pawprint"
         case .cursor: return "cursorarrow.rays"
+        case .pi: return "p.circle"
         }
     }
 
@@ -50,6 +53,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid:            return "3.0"
         case .openclaw:         return "3.1"
         case .cursor:           return "3.2"
+        case .pi:               return "3.8"
         }
     }
 
@@ -64,6 +68,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .droid:    return "View your Droid agent sessions"
         case .openclaw: return "Explore your OpenClaw conversations"
         case .cursor:   return "Import and search your Cursor AI sessions"
+        case .pi:       return "Browse your Pi coding agent sessions"
         }
     }
 }

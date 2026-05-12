@@ -78,6 +78,9 @@ enum TranscriptColorSystem {
         case .cursor:
             // Teal-ish (Cursor brand).
             return NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0)
+        case .pi:
+            // Green-cyan accent, distinct from Gemini and Cursor.
+            return NSColor(calibratedRed: 0.05, green: 0.62, blue: 0.48, alpha: 1.0)
         }
     }
 

@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Features
+- Pi coding agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.
+
 ### Improvements
 - Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
 - Session list: Added an Archived filter for Codex Desktop sessions and distinct archived styling on the existing `desk` pill.

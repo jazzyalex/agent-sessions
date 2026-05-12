@@ -212,6 +212,7 @@ struct UnifiedSessionsView: View {
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
     let cursorIndexer: CursorSessionIndexer
+    let piIndexer: PiSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @EnvironmentObject var activeCodexSessions: CodexActiveSessionsModel
@@ -255,6 +256,7 @@ struct UnifiedSessionsView: View {
 	    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
 	    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
 	    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
+	    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
 	    @State private var autoSelectEnabled: Bool = true
 	    @State private var isDatasetChurning: Bool = false
 	    @State private var isAutoSelectingFromSearch: Bool = false
@@ -303,6 +305,7 @@ struct UnifiedSessionsView: View {
          droidIndexer: DroidSessionIndexer,
          openclawIndexer: OpenClawSessionIndexer,
          cursorIndexer: CursorSessionIndexer,
+         piIndexer: PiSessionIndexer,
          analyticsReady: Bool,
          analyticsPhase: AnalyticsIndexPhase,
          analyticsIsStale: Bool,
@@ -318,6 +321,7 @@ struct UnifiedSessionsView: View {
         self.droidIndexer = droidIndexer
         self.openclawIndexer = openclawIndexer
         self.cursorIndexer = cursorIndexer
+        self.piIndexer = piIndexer
         self.analyticsReady = analyticsReady
         self.analyticsPhase = analyticsPhase
         self.analyticsIsStale = analyticsIsStale
@@ -374,6 +378,11 @@ struct UnifiedSessionsView: View {
                 transcriptCache: cursorIndexer.searchTranscriptCache,
                 update: { cursorIndexer.updateSession($0) },
                 parseFull: { url, forcedID in CursorSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+            ),
+            .pi: .init(
+                transcriptCache: piIndexer.searchTranscriptCache,
+                update: { piIndexer.updateSession($0) },
+                parseFull: { url, _ in PiSessionParser.parseFileFull(at: url) }
             ),
         ])
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
@@ -469,7 +478,10 @@ struct UnifiedSessionsView: View {
 		let afterCursor = afterOpenClaw
 			.onChange(of: unified.includeCursor) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterCursor
+        let afterPi = afterCursor
+            .onChange(of: unified.includePi) { _, _ in restartSearchIfRunning() }
+
+        let afterActiveOnly = afterPi
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -1083,6 +1095,8 @@ struct UnifiedSessionsView: View {
             return true // session.id from session.start; falls back to --continue
         case .cursor:
             return true // session.id from transcript UUID; falls back to --continue
+        case .pi:
+            return true // session file path or id; falls back to --continue
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session)) != nil
         default:
@@ -1172,6 +1186,18 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
+        case .pi:
+            let settings = PiSettings.shared
+            let sid = session.id
+            let wd = settings.effectiveWorkingDirectory(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: sid) else { return }
+            let builder = PiResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary,
+                                                          sessionDirectory: plan.sessionDirectory?.path) else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
         case .gemini:
             let settings = GeminiCLISettings.shared
             guard let sid = geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session) else { return }
@@ -1200,7 +1226,8 @@ struct UnifiedSessionsView: View {
                                copilotIndexer: copilotIndexer,
                                droidIndexer: droidIndexer,
                                openclawIndexer: openclawIndexer,
-                               cursorIndexer: cursorIndexer)
+                               cursorIndexer: cursorIndexer,
+                               piIndexer: piIndexer)
                 .environmentObject(focusCoordinator)
                 .environmentObject(searchState)
                 .id("transcript-host")
@@ -1221,6 +1248,7 @@ struct UnifiedSessionsView: View {
                         case .droid: return "Droid"
                         case .openclaw: return "OpenClaw"
                         case .cursor: return "Cursor"
+                        case .pi: return "Pi"
                         }
                     }()
                     let accent: Color = sourceAccent(s)
@@ -1347,6 +1375,12 @@ struct UnifiedSessionsView: View {
                     AgentTabToggle(title: "Cursor", color: Color.agentCursor, isMonochrome: stripMonochrome, isOn: $unified.includeCursor)
                         .help("Show or hide Cursor sessions in the list (⌘8)")
                         .keyboardShortcut("8", modifiers: .command)
+                }
+
+                if piAgentEnabled {
+                    AgentTabToggle(title: "Pi", color: Color.agentPi, isMonochrome: stripMonochrome, isOn: $unified.includePi)
+                        .help("Show or hide Pi sessions in the list (⌘9)")
+                        .keyboardShortcut("9", modifiers: .command)
                 }
             }
             .controlSize(.small)
@@ -1655,6 +1689,9 @@ struct UnifiedSessionsView: View {
         } else if s.source == .cursor, let exist = cursorIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(exist) {
             cursorIndexer.reloadSession(id: id)
             requestedSelectionReload = true
+        } else if s.source == .pi, let exist = piIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            piIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
         }
 
         searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
@@ -1821,6 +1858,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeOpenClaw { unified.includeOpenClaw = true }
         case .cursor:
             if !unified.includeCursor { unified.includeCursor = true }
+        case .pi:
+            if !unified.includePi { unified.includePi = true }
         }
     }
 
@@ -2038,6 +2077,7 @@ struct UnifiedSessionsView: View {
         case .droid: label = "Droid"
         case .openclaw: label = "OpenClaw"
         case .cursor: label = "Cursor"
+        case .pi: label = "Pi"
         }
         let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
         return HStack(spacing: 6) {
@@ -2271,6 +2311,8 @@ struct UnifiedSessionsView: View {
             return CopilotSettings.shared.effectiveWorkingDirectory(for: session)
         case .cursor:
             return CursorSettings.shared.effectiveWorkingDirectory(for: session)
+        case .pi:
+            return PiSettings.shared.effectiveWorkingDirectory(for: session)
         case .gemini:
             return GeminiCLISettings.shared.effectiveWorkingDirectory(for: session)
         default:
@@ -2306,6 +2348,7 @@ struct UnifiedSessionsView: View {
         case .claude: return "Claude Code"
         case .copilot: return "Copilot CLI"
         case .cursor: return "Cursor CLI"
+        case .pi: return "Pi CLI"
         case .gemini: return "Gemini CLI"
         default: return "CLI"
         }
@@ -2315,7 +2358,7 @@ struct UnifiedSessionsView: View {
         switch s.source {
         case .codex:
             return canResumeCodexInCLI(s)
-        case .claude, .opencode, .hermes, .copilot, .cursor:
+        case .claude, .opencode, .hermes, .copilot, .cursor, .pi:
             return true
         case .gemini:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
@@ -2376,6 +2419,18 @@ struct UnifiedSessionsView: View {
             Task { @MainActor in
                 let launcher: CursorTerminalLaunching = settings.preferITerm ? CursorITermLauncher() : CursorTerminalLauncher()
                 let coord = CursorResumeCoordinator(env: CursorCLIEnvironment(), builder: CursorResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+            }
+        case .pi:
+            let settings = PiSettings.shared
+            let sid = s.id
+            let wd = settings.effectiveWorkingDirectory(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let sessionDirectory = settings.copyCommandPlan(sessionID: sid)?.sessionDirectory
+            let input = PiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin, sessionDirectory: sessionDirectory)
+            Task { @MainActor in
+                let launcher: PiTerminalLaunching = settings.preferITerm ? PiITermLauncher() : PiTerminalLauncher()
+                let coord = PiResumeCoordinator(env: PiCLIEnvironment(), builder: PiResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         case .gemini:
@@ -2465,12 +2520,13 @@ struct UnifiedSessionsView: View {
                                 includeDroid: unified.includeDroid && droidAgentEnabled,
                                 includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
                                 includeCursor: unified.includeCursor && cursorAgentEnabled,
+                                includePi: unified.includePi && piAgentEnabled,
                                 enableDeepScan: searchCoordinator.deepScanEnabled,
                                 all: unified.allSessions)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -2492,7 +2548,8 @@ struct UnifiedSessionsView: View {
         case .copilot: return Color.agentCopilot
         case .droid: return Color.agentDroid
         case .openclaw: return Color.agentOpenClaw
-        case .cursor: return Color(red: 0.20, green: 0.60, blue: 0.70)
+        case .cursor: return Color.agentCursor
+        case .pi: return Color.agentPi
         }
     }
 
@@ -2910,6 +2967,7 @@ private struct TranscriptHostView: View {
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
     let cursorIndexer: CursorSessionIndexer
+    let piIndexer: PiSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -2932,6 +2990,14 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .openclaw ? 1 : 0)
             CursorTranscriptView(indexer: cursorIndexer, sessionID: selection)
                 .opacity(kind == .cursor ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: piIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "Pi",
+                enableCaching: false
+            )
+            .opacity(kind == .pi ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -3065,6 +3131,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
+    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -3199,6 +3266,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeDroid: unified.includeDroid,
                      includeOpenClaw: unified.includeOpenClaw,
                      includeCursor: unified.includeCursor,
+                     includePi: unified.includePi && piAgentEnabled,
                      enableDeepScan: deepScan,
                      all: unified.allSessions)
     }
@@ -3233,6 +3301,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeDroid: unified.includeDroid,
                          includeOpenClaw: unified.includeOpenClaw,
                          includeCursor: unified.includeCursor,
+                         includePi: unified.includePi && piAgentEnabled,
                          enableDeepScan: false,
                          all: unified.allSessions)
         }

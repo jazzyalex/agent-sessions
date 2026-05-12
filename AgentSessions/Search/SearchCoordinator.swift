@@ -173,6 +173,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                includeDroid: Bool,
                includeOpenClaw: Bool,
                includeCursor: Bool,
+               includePi: Bool,
                enableDeepScan: Bool,
                all: [Session]) {
         // Cancel any in-flight search
@@ -194,6 +195,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includeDroid { set.insert(.droid) }
             if includeOpenClaw { set.insert(.openclaw) }
             if includeCursor { set.insert(.cursor) }
+            if includePi { set.insert(.pi) }
             return set
         }()
         
@@ -332,14 +334,14 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         }
                     }
 
-                    // Always include Cursor sessions in unindexed candidates (they have no FTS index).
+                    // Always include Cursor and Pi sessions in unindexed candidates (they have no FTS index).
                     // Also include non-large unindexed rows so restored/lightweight sessions remain
                     // content-searchable while their FTS rows are still missing or warming.
                     let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
                     let unindexedCandidates = searchableCandidates.filter {
                         !indexedIDs.contains($0.id)
                             && !seen.contains($0.id)
-                            && (enableDeepScan || $0.source == .cursor || Self.sizeBytes(for: $0) < smallSearchThreshold)
+                            && (enableDeepScan || $0.source == .cursor || $0.source == .pi || Self.sizeBytes(for: $0) < smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
                         ? searchableCandidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }

@@ -178,6 +178,7 @@ struct AgentSessionsApp: App {
     @StateObject private var droidIndexer = DroidSessionIndexer()
     @StateObject private var openclawIndexer = OpenClawSessionIndexer()
     @StateObject private var cursorIndexer = CursorSessionIndexer()
+    @StateObject private var piIndexer = PiSessionIndexer()
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
@@ -205,6 +206,7 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Advanced.hideDockIcon) private var hideDockIcon: Bool = false
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
     @State private var selectedSessionID: String?
@@ -253,7 +255,8 @@ struct AgentSessionsApp: App {
                 copilotIndexer: copilotIndexer,
                 droidIndexer: droidIndexer,
                 openclawIndexer: openclawIndexer,
-                cursorIndexer: cursorIndexer
+                cursorIndexer: cursorIndexer,
+                piIndexer: piIndexer
             )
             configuredUnifiedWindow(unified: unified)
         }
@@ -273,6 +276,7 @@ struct AgentSessionsApp: App {
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
             cursorIndexer: cursorIndexer,
+            piIndexer: piIndexer,
             analyticsReady: analyticsReady,
             analyticsPhase: analyticsPhase,
             analyticsIsStale: analyticsStale,
@@ -321,6 +325,7 @@ struct AgentSessionsApp: App {
         .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onChange(of: piAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onAppear {
             guard !AppRuntime.isRunningTests else { return }
             Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
@@ -348,6 +353,7 @@ struct AgentSessionsApp: App {
                     droidIndexer: droidIndexer,
                     openclawIndexer: openclawIndexer,
                     cursorIndexer: cursorIndexer,
+                    piIndexer: piIndexer,
                     codexUsageModel: codexUsageModel,
                     claudeUsageModel: claudeUsageModel
                 )
@@ -429,7 +435,8 @@ struct AgentSessionsApp: App {
                         copilotIndexer: copilotIndexer,
                         droidIndexer: droidIndexer,
                         openclawIndexer: openclawIndexer,
-                        cursorIndexer: cursorIndexer
+                        cursorIndexer: cursorIndexer,
+                        piIndexer: piIndexer
                     )
                 )
                 .environmentObject(archiveManager)
@@ -480,7 +487,8 @@ final class _UnifiedHolder: ObservableObject {
                      copilotIndexer: CopilotSessionIndexer,
                      droidIndexer: DroidSessionIndexer,
                      openclawIndexer: OpenClawSessionIndexer,
-                     cursorIndexer: CursorSessionIndexer) -> UnifiedSessionIndexer {
+                     cursorIndexer: CursorSessionIndexer,
+                     piIndexer: PiSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
@@ -490,7 +498,8 @@ final class _UnifiedHolder: ObservableObject {
                                       copilotIndexer: copilotIndexer,
                                       droidIndexer: droidIndexer,
                                       openclawIndexer: openclawIndexer,
-                                      cursorIndexer: cursorIndexer)
+                                      cursorIndexer: cursorIndexer,
+                                      piIndexer: piIndexer)
         unified = u
         return u
     }
@@ -573,7 +582,8 @@ extension AgentSessionsApp {
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
-            cursorIndexer: cursorIndexer
+            cursorIndexer: cursorIndexer,
+            piIndexer: piIndexer
         )
     }
 
@@ -1057,6 +1067,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         droidIndexer: DroidSessionIndexer,
         openclawIndexer: OpenClawSessionIndexer,
         cursorIndexer: CursorSessionIndexer,
+        piIndexer: PiSessionIndexer,
         codexUsageModel: CodexUsageModel,
         claudeUsageModel: ClaudeUsageModel
     ) {
@@ -1073,6 +1084,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             droidIndexer: droidIndexer,
             openclawIndexer: openclawIndexer,
             cursorIndexer: cursorIndexer,
+            piIndexer: piIndexer,
             codexUsageModel: codexUsageModel,
             claudeUsageModel: claudeUsageModel
         )
@@ -1164,6 +1176,7 @@ private struct OnboardingWindowState {
     let droidIndexer: DroidSessionIndexer
     let openclawIndexer: OpenClawSessionIndexer
     let cursorIndexer: CursorSessionIndexer
+    let piIndexer: PiSessionIndexer
     let codexUsageModel: CodexUsageModel
     let claudeUsageModel: ClaudeUsageModel
 }
@@ -1185,6 +1198,7 @@ private struct OnboardingWindowRoot: View {
             droidIndexer: state.droidIndexer,
             openclawIndexer: state.openclawIndexer,
             cursorIndexer: state.cursorIndexer,
+            piIndexer: state.piIndexer,
             codexUsageModel: state.codexUsageModel,
             claudeUsageModel: state.claudeUsageModel
         )

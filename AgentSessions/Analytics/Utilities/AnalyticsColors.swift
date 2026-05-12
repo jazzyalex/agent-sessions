@@ -24,6 +24,8 @@ extension Color {
     static let agentOpenClaw: Color = TranscriptColorSystem.agentBrandAccent(source: .openclaw)
     /// Cursor brand color
     static let agentCursor: Color = TranscriptColorSystem.agentBrandAccent(source: .cursor)
+    /// Pi brand color
+    static let agentPi: Color = TranscriptColorSystem.agentBrandAccent(source: .pi)
 
     // MARK: - Monochrome Support
 
@@ -37,6 +39,7 @@ extension Color {
     static let agentDroidGray = Color(white: 0.8)
     static let agentOpenClawGray = Color(white: 0.85)
     static let agentCursorGray = Color(white: 0.9)
+    static let agentPiGray = Color(white: 0.68)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -50,6 +53,7 @@ extension Color {
         case .droid: return .agentDroid
         case .openclaw: return .agentOpenClaw
         case .cursor: return .agentCursor
+        case .pi: return .agentPi
         }
     }
 
@@ -66,6 +70,7 @@ extension Color {
             case .droid: return .agentDroidGray
             case .openclaw: return .agentOpenClawGray
             case .cursor: return .agentCursorGray
+            case .pi: return .agentPiGray
             }
         } else {
             return agentColor(for: source)
@@ -93,6 +98,8 @@ extension Color {
             return .agentOpenClaw
         } else if lower.contains("cursor") {
             return .agentCursor
+        } else if lower == "pi" || lower.contains("pi coding") {
+            return .agentPi
         } else {
             return .accentColor
         }
@@ -120,6 +127,8 @@ extension Color {
                 return .agentOpenClawGray
             } else if lower.contains("cursor") {
                 return .agentCursorGray
+            } else if lower == "pi" || lower.contains("pi coding") {
+                return .agentPiGray
             } else {
                 return .secondary
             }

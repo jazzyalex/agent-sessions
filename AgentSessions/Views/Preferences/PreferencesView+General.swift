@@ -29,7 +29,7 @@ extension PreferencesView {
                 // Terminal app preference for both Codex and Claude resumes
                 labeledRow("Terminal App") {
                     Picker("", selection: Binding(
-                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm || cursorSettings.preferITerm) ? 1 : 0 },
+                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm || cursorSettings.preferITerm || piSettings.preferITerm) ? 1 : 0 },
                         set: { idx in
                             // Apply to Codex
                             resumeSettings.setLaunchMode(idx == 1 ? .iterm : .terminal)
@@ -43,6 +43,8 @@ extension PreferencesView {
                             geminiSettings.setPreferITerm(idx == 1)
                             // Apply to Cursor
                             cursorSettings.setPreferITerm(idx == 1)
+                            // Apply to Pi
+                            piSettings.setPreferITerm(idx == 1)
                         }
                     )) {
                         Text("Terminal").tag(0)
@@ -59,7 +61,7 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled, piAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
@@ -70,6 +72,7 @@ extension PreferencesView {
                 agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenClaw", source: .openclaw, isOn: $openClawAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Cursor", source: .cursor, isOn: $cursorAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Pi", source: .pi, isOn: $piAgentEnabled, enabledCount: enabledCount)
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)

@@ -447,6 +447,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                     map[s.id] = url
                 }
             }
+        case .pi:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.piSessionsRootOverride)
+            let discovery = PiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                if let s = PiSessionParser.parseFile(at: url), !s.id.isEmpty {
+                    map[s.id] = url
+                }
+            }
         }
 
         return map
@@ -474,6 +482,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return OpenClawSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .cursor:
             return CursorSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .pi:
+            return PiSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         }
     }
 

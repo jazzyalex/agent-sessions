@@ -10,6 +10,31 @@
 #
 entries:
   - agent_sessions_version: "3.7.1"
+    as_of_date_utc: "2026-05-12"
+    as_of_commit: "b0506b98"
+    verified:
+      pi:
+        sessions:
+          max_verified_version: "0.74.0"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, and resume/copy-resume commands"
+          evidence:
+            - "https://pi.dev/docs/latest/quickstart"
+            - "https://pi.dev/docs/latest/usage"
+            - "https://pi.dev/docs/latest/session-format"
+            - "https://pi.dev/docs/latest/settings"
+            - "/tmp/as-agent-lab/pi-cli/package.json"
+            - "/tmp/as-agent-lab/pi-agent/sessions/2026-05-12T01-02-27-657Z_019e19b4-eb48-746a-aa6b-8dfcfa37954b.jsonl"
+            - "Resources/Fixtures/stage0/agents/pi/small.jsonl"
+            - "AgentSessionsTests/PiSessionParserTests.swift"
+            - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
+            - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
+    notes:
+      - "Initial Pi coding-agent record is backed by official docs, a redacted checked-in fixture, focused parser/discovery/probe/resume tests, and a Debug build. Official docs describe JSONL v3 tree sessions under ~/.pi/agent/sessions, and a temporary local package install reported pi --version 0.74.0."
+      - "The local capture was generated in /tmp/as-agent-lab/pi-project with a local OpenAI-compatible mock and contains session/model_change/thinking_level_change/message/compaction entries."
+      - "Pi resume/copy-resume is verified for command construction and launch plumbing via pi --session with --continue fallback."
+      - "No Pi usage limits, live/active status, analytics, subagent hierarchy, or active weekly monitoring support is verified by this ledger entry."
+
+  - agent_sessions_version: "3.7.1"
     as_of_date_utc: "2026-05-07"
     as_of_commit: "68e9f3a1"
     verified:

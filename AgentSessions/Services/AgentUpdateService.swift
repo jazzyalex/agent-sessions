@@ -394,6 +394,8 @@ private extension AgentUpdateService {
             )
         case .cursor:
             return nil
+        case .pi:
+            return nil
         }
     }
 

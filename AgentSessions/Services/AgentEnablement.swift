@@ -58,6 +58,8 @@ enum AgentEnablement {
             return isAvailable(.openclaw, defaults: defaults)
         case .cursor:
             return isAvailable(.cursor, defaults: defaults)
+        case .pi:
+            return isAvailable(.pi, defaults: defaults)
         default:
             return true
         }
@@ -74,6 +76,7 @@ enum AgentEnablement {
         case .droid:    return PreferencesKey.Agents.droidEnabled
         case .openclaw: return PreferencesKey.Agents.openClawEnabled
         case .cursor:   return PreferencesKey.Agents.cursorEnabled
+        case .pi:       return PreferencesKey.Agents.piEnabled
         }
     }
 
@@ -177,6 +180,7 @@ enum AgentEnablement {
             setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
             setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
             setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.pi, enabled: isAvailable(.pi, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -189,6 +193,7 @@ enum AgentEnablement {
             let droid = isAvailable(.droid, defaults: defaults)
             let openclaw = isAvailable(.openclaw, defaults: defaults)
             let cursor = isAvailable(.cursor, defaults: defaults)
+            let pi = isAvailable(.pi, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -199,6 +204,7 @@ enum AgentEnablement {
             setEnabledInternal(.droid, enabled: droid, defaults: defaults)
             setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
             setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
+            setEnabledInternal(.pi, enabled: pi, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -256,6 +262,9 @@ enum AgentEnablement {
             var isChatsDir: ObjCBool = false
             let chatsRoot = disc.chatsRoot()
             if fm.fileExists(atPath: chatsRoot.path, isDirectory: &isChatsDir), isChatsDir.boolValue { return true }
+        case .pi:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.piSessionsRootOverride) ?? ""
+            root = PiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {
@@ -291,6 +300,8 @@ enum AgentEnablement {
             return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
         case .cursor:
             return binaryDetectedCached("agent") || binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
+        case .pi:
+            return binaryDetectedCached("pi")
         }
     }
 
@@ -341,6 +352,8 @@ enum AgentEnablement {
             return nil
         case .cursor:
             return defaults.object(forKey: PreferencesKey.cursorCLIAvailable) as? Bool
+        case .pi:
+            return defaults.object(forKey: PreferencesKey.piCLIAvailable) as? Bool
         }
     }
 

@@ -18,6 +18,7 @@ notes:
   - "2026-05-02 OpenClaw follow-up: OpenClaw 2026.4.29 initially failed during plugin bootstrap because the bundled Telegram plugin could not load ../dist/babel.cjs from the runtime dependency cache. Running the plugin dependency inspection/repair path completed the cache; a fresh local agent session then matched baseline, so OpenClaw is verified at 2026.4.29."
   - "2026-05-07 format checks: bumped Codex 0.128.0->0.129.0, Claude 2.1.126->2.1.132, Gemini 0.40.1->0.41.2, Copilot 1.0.40->1.0.43, OpenCode 1.14.31->1.14.41, and OpenClaw 2026.4.29->2026.5.7. Claude 2.1.132 can add assistant attributionPlugin/attributionSkill metadata; the parser already preserves it as metadata and no UI change is needed. Copilot prebump now accepts COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN auth env vars. OpenClaw 2026.5.7 required migrating legacy Telegram streaming config with openclaw doctor --fix before fresh local session evidence could be generated."
   - "Codex support covers local rollout JSONL sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension; these remain one Codex corpus with per-session surface labels."
+  - "2026-05-12: added Pi coding-agent tier-2 local support. Evidence is official pi.dev session-format docs, a temporary local 0.74.0 capture under /tmp/as-agent-lab, checked-in fixture Resources/Fixtures/stage0/agents/pi/small.jsonl, focused parser/discovery/resume/probe tests, and a successful Debug build. Active monitoring, live status, analytics, and usage tracking remain unsupported."
 agents:
   codex_cli:
     max_verified_version: "0.129.0"
@@ -91,3 +92,25 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
+  pi:
+    max_verified_version: "0.74.0"
+    version_field: "not_logged"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, and resume/copy-resume commands"
+    unsupported_surfaces:
+      - "live/active status"
+      - "analytics"
+      - "usage/rate-limit tracking"
+      - "subagent hierarchy"
+    evidence_docs:
+      - "https://pi.dev/docs/latest/quickstart"
+      - "https://pi.dev/docs/latest/usage"
+      - "https://pi.dev/docs/latest/session-format"
+      - "https://pi.dev/docs/latest/settings"
+    evidence_captures:
+      - "/tmp/as-agent-lab/pi-agent/sessions/2026-05-12T01-02-27-657Z_019e19b4-eb48-746a-aa6b-8dfcfa37954b.jsonl"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/pi/small.jsonl"
+    evidence_tests:
+      - "AgentSessionsTests/PiSessionParserTests.swift"
+      - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
+      - "AgentSessionsTests/PiCLIEnvironmentTests.swift"

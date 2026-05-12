@@ -17,6 +17,7 @@ struct PreferencesView: View {
     @ObservedObject var hermesSettings = HermesSettings.shared
     @ObservedObject var copilotSettings = CopilotSettings.shared
     @ObservedObject var cursorSettings = CursorSettings.shared
+    @ObservedObject var piSettings = PiSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -66,6 +67,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.droidCLIAvailable) var droidCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.cursorCLIAvailable) var cursorCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.piCLIAvailable) var piCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -76,6 +78,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
     @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.piEnabled) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -186,6 +189,10 @@ struct PreferencesView: View {
     @State var cursorVersionString: String? = nil
     @State var cursorResolvedPath: String? = nil
     @State var cursorProbeDebounce: DispatchWorkItem? = nil
+    @State var piProbeState: ProbeState = .idle
+    @State var piVersionString: String? = nil
+    @State var piResolvedPath: String? = nil
+    @State var piProbeDebounce: DispatchWorkItem? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -216,6 +223,9 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Paths.openClawSessionsRootOverride) var openClawSessionsPath: String = ""
     @State var openClawSessionsPathValid: Bool = true
     @State var openClawSessionsPathDebounce: DispatchWorkItem? = nil
+    @AppStorage(PreferencesKey.Paths.piSessionsRootOverride) var piSessionsPath: String = ""
+    @State var piSessionsPathValid: Bool = true
+    @State var piSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -223,7 +233,7 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -232,7 +242,7 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                ForEach([PreferencesTab.openClawCLI, .cursor], id: \.self) { tab in
+                ForEach([PreferencesTab.openClawCLI, .cursor, .pi], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -373,6 +383,8 @@ struct PreferencesView: View {
                 openClawCLITab
             case .cursor:
                 cursorTab
+            case .pi:
+                piTab
             case .about:
                 aboutTab
             }
@@ -686,6 +698,8 @@ struct PreferencesView: View {
         copilotSettings.setBinaryPath("")
         cursorSettings.setBinaryPath("")
         cursorSettings.setResolvedBinaryPath(nil)
+        piSettings.setBinaryPath("")
+        piSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -695,9 +709,11 @@ struct PreferencesView: View {
         droidSessionsPath = ""
         droidProjectsPath = ""
         openClawSessionsPath = ""
+        piSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
+        validatePiSessionsPath()
 
         cockpitReduceTransparency = true
 
@@ -713,6 +729,7 @@ struct PreferencesView: View {
         scheduleCursorProbe()
         scheduleDroidProbe()
         scheduleOpenClawProbe()
+        schedulePiProbe()
     }
 
     func closeWindow() {
@@ -825,6 +842,7 @@ struct PreferencesView: View {
         case .droid: scheduleDroidProbe()
         case .openclaw: scheduleOpenClawProbe()
         case .cursor: scheduleCursorProbe()
+        case .pi: schedulePiProbe()
         }
     }
 
@@ -848,6 +866,8 @@ struct PreferencesView: View {
             return openClawResolvedPath
         case .cursor:
             return cursorResolvedPath
+        case .pi:
+            return piResolvedPath
         }
     }
 
@@ -879,6 +899,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .cursor:
             let value = cursorSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .pi:
+            let value = piSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1012,6 +1035,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case droidCLI
     case openClawCLI
     case cursor
+    case pi
     case about
 
     var id: String { rawValue }
@@ -1034,6 +1058,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .droidCLI: return "Droid"
         case .openClawCLI: return "OpenClaw"
         case .cursor: return "Cursor"
+        case .pi: return "Pi"
         case .about: return "About"
         }
     }
@@ -1056,6 +1081,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .droidCLI: return "d.circle"
         case .openClawCLI: return "o.circle"
         case .cursor: return "cursorarrow.rays"
+        case .pi: return "p.circle"
         case .about: return "info.circle"
         }
     }
@@ -1063,7 +1089,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .about] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .pi, .about] }
 }
 
 // MARK: - Probe helpers
@@ -1210,6 +1236,41 @@ extension PreferencesView {
         }
     }
 
+    func probePi() {
+        if piProbeState == .probing { return }
+        piProbeState = .probing
+        piVersionString = nil
+        piResolvedPath = nil
+        let override = piSettings.binaryPath.isEmpty ? nil : piSettings.binaryPath
+        let isAutoProbe = override == nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = PiCLIEnvironment().probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.piVersionString = res.versionString
+                    self.piResolvedPath = res.binaryURL.path
+                    if isAutoProbe {
+                        self.piSettings.setResolvedBinary(res.binaryURL.path,
+                                                          supportsSession: res.supportsSession,
+                                                          supportsResume: res.supportsResume,
+                                                          supportsContinue: res.supportsContinue)
+                    }
+                    self.piProbeState = .success
+                    self.piCLIAvailable = true
+                case .failure:
+                    self.piVersionString = nil
+                    self.piResolvedPath = nil
+                    if isAutoProbe {
+                        self.piSettings.setResolvedBinaryPath(nil)
+                    }
+                    self.piProbeState = .failure
+                    self.piCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1254,6 +1315,8 @@ extension PreferencesView {
             if openClawVersionString == nil && openClawProbeState != .probing { probeOpenClaw() }
         case .cursor:
             if cursorVersionString == nil && cursorProbeState != .probing { probeCursor() }
+        case .pi:
+            if piVersionString == nil && piProbeState != .probing { probePi() }
         case .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1298,6 +1361,13 @@ extension PreferencesView {
         cursorProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeCursor() }
         cursorProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func schedulePiProbe() {
+        piProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probePi() }
+        piProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
