@@ -1055,7 +1055,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
     fps: list[dict[str, Any]] = []
 
-    if agent_name in ("codex", "claude", "copilot", "droid"):
+    if agent_name in ("codex", "claude", "copilot", "droid", "pi"):
         for p in filtered:
             if not p.endswith(".jsonl"):
                 continue
@@ -1808,7 +1808,7 @@ def _run_prebump(
             matrix_key = {
                 "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
                 "gemini": "gemini_cli", "opencode": "opencode", "hermes": "hermes",
-                "openclaw": "openclaw",
+                "openclaw": "openclaw", "pi": "pi",
             }.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
@@ -1929,6 +1929,7 @@ def main(argv: list[str]) -> int:
         "copilot": matrix_versions.get("copilot_cli"),
         "openclaw": matrix_versions.get("openclaw"),
         "cursor": matrix_versions.get("cursor"),
+        "pi": matrix_versions.get("pi"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -1994,7 +1995,8 @@ def main(argv: list[str]) -> int:
             installed_rc, installed_stdout, installed_stderr = (127, "", "missing installed_version_cmd")
             if isinstance(installed_cmd, list) and all(isinstance(x, str) for x in installed_cmd):
                 installed_rc, installed_stdout, installed_stderr = _run_cmd(installed_cmd, timeout=10)
-            installed = _extract_semver(installed_stdout) or (installed_stdout.split()[0] if installed_stdout else None)
+            installed_text = "\n".join(part for part in (installed_stdout, installed_stderr) if part)
+            installed = _extract_semver(installed_text) or (installed_stdout.split()[0] if installed_stdout else None)
 
         upstream_sources = agent_cfg.get("upstream") or []
         upstream: str | None = None
@@ -2055,6 +2057,7 @@ def main(argv: list[str]) -> int:
                     "hermes": "hermes",
                     "openclaw": "openclaw",
                     "cursor": "cursor",
+                    "pi": "pi",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)

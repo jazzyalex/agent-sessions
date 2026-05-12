@@ -23,7 +23,7 @@ paths, and how we detect upstream session format changes that could break JSON o
    - Use `docs/agent-support/update-checklist.md` to gate the work.
 3. Run monitoring (preferred).
    - Daily: release watch for `codex`, `claude`, `opencode`, `openclaw`.
-   - Weekly: release watch + probes for the eight active providers (`codex`, `claude`, `gemini`, `copilot`, `cursor`, `opencode`, `openclaw`, `hermes`).
+   - Weekly: release watch + probes for the nine active providers (`codex`, `claude`, `gemini`, `copilot`, `cursor`, `opencode`, `openclaw`, `hermes`, `pi`).
    - See `docs/agent-support/monitoring.md`.
 4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
