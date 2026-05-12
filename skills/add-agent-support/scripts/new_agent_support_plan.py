@@ -7,6 +7,7 @@ import argparse
 import datetime as dt
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -28,10 +29,21 @@ def repeated_csv(values: list[str]) -> list[str]:
 
 
 def command_probe(command: str) -> tuple[str, str]:
-    path = shutil.which(command)
+    try:
+        parts = shlex.split(command)
+    except ValueError as exc:
+        return ("invalid", f"could not parse command: {exc}")
+    if not parts:
+        return ("invalid", "empty command")
+    executable = parts[0]
+    path = shutil.which(executable)
     if path:
-        return ("found", path)
-    return ("missing", "")
+        if executable == command:
+            return ("found", path)
+        return ("found", f"{path} (probed executable `{executable}`)")
+    if executable == command:
+        return ("missing", "")
+    return ("missing", f"executable `{executable}` not found")
 
 
 def root_probe(root: str) -> tuple[str, str]:
@@ -64,6 +76,7 @@ def build_report(args: argparse.Namespace) -> str:
     urls = repeated_csv(args.url)
     agent_key = args.agent_key or slugify(args.agent)
     is_new_provider = args.work_type == "new_provider"
+    is_public_claim = args.work_type == "public_claim"
     format_gate_status = "N/A" if is_new_provider else "TODO"
     format_gate_evidence = "No existing AgentSessions provider baseline yet." if is_new_provider else "TODO"
     discovery_gate_status = "N/A" if is_new_provider else "TODO"
@@ -117,6 +130,98 @@ Fields to record:
     test_lines = "\n".join(f"- `{cmd}`" for cmd in test_commands) if test_commands else "- TODO: safe read-only test-session command."
     command_table = markdown_table(command_rows) if command_rows else "_No command probes supplied._"
     root_table = markdown_table(root_rows) if root_rows else "_No storage-root probes supplied._"
+
+    if is_public_claim:
+        return f"""# {args.agent} Public Claim Verification Plan
+
+Date: {today}
+Repository: `{args.repo}`
+Work type: {args.work_type}
+
+## Decision
+
+Status: TODO: VERIFY / REVISE / REMOVE CLAIM / READY
+
+Summary:
+- TODO: one-sentence wording decision.
+
+## Claim Under Review
+
+- Source file / release note / social copy:
+- Exact current claim:
+- Proposed wording:
+- User-visible surfaces mentioned:
+- Unsupported surfaces to avoid:
+
+## Official Sources
+
+{url_lines}
+
+## Existing Evidence To Verify
+
+| Evidence | Status | Path / Result |
+| --- | --- | --- |
+| Provider exists in AgentSessions implementation | TODO | TODO |
+| Real fixtures cover the claimed behavior | TODO | TODO |
+| Parser/discovery/search tests cover the claim | TODO | TODO |
+| Support matrix matches the claim | TODO | TODO |
+| Ledger / JSON tracking evidence exists | TODO | TODO |
+| Analytics/resume/live/usage claims are implemented, or omitted | TODO | TODO |
+| Public wording is limited to validated behavior | TODO | TODO |
+
+## Optional Local Evidence Probes
+
+Command probes:
+
+{command_table}
+
+Storage root probes:
+
+{root_table}
+
+## Existing Provider Format Check
+
+{format_check_section}
+
+## Support Records To Check
+
+- `docs/agent-support/agent-support-matrix.yml`:
+- `docs/agent-support/agent-support-ledger.yml`:
+- `docs/agent-json-tracking.md`:
+- `docs/CHANGELOG.md`:
+- `docs/summaries/YYYY-MM.md`:
+- README/support matrix public pages, if applicable:
+
+## Wording Review
+
+Allowed only when backed by fixtures and tests:
+- "Added local transcript browsing and search for {args.agent} sessions."
+- "Transcripts stay local; AgentSessions indexes local session files."
+
+Do not mention unless implemented and validated:
+- Analytics:
+- Resume/copy command:
+- Live/active status:
+- Usage/rate-limit tracking:
+- Full support:
+
+## QA And Review
+
+- `git diff --check`:
+- Focused parser/discovery/search tests, if wording depends on current code:
+- Stable tests / Debug build, if code changed:
+- Manual review findings:
+- Automated review findings, if used:
+- Final wording approved:
+
+## Rejection/Deferral Note
+
+Use this if the claim is not backed by implementation evidence:
+
+```text
+I am removing or deferring the {args.agent} support claim because the current repo evidence does not prove <specific surface>. I do not want public wording to imply support beyond the fixtures, tests, and implementation that are actually present.
+```
+"""
 
     return f"""# {args.agent} Agent Support Plan
 
