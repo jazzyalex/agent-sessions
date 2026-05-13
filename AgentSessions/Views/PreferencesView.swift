@@ -237,6 +237,10 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
+                Spacer()
+                    .frame(height: 4)
+                Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
+                    .tag(PreferencesTab.about)
                 Divider()
                 ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
@@ -246,9 +250,6 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                Divider()
-                Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
-                    .tag(PreferencesTab.about)
             }
             // Fix the sidebar width to avoid horizontal jumps when switching panes
             .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
@@ -1088,8 +1089,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Agents → About
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .pi, .about] }
+    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Advanced → About → Agents
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .pi] }
 }
 
 // MARK: - Probe helpers

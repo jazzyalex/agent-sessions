@@ -224,7 +224,7 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
                 }
             }
 
-            let parsed = PiSessionParser.parseFileFull(at: url) ?? existing
+            let parsed = PiSessionParser.parseFileFull(at: url, allowLargeFile: true) ?? existing
             self.reloadLock.lock()
             if let preParseStat { self.lastFullReloadFileStatsBySessionID[id] = preParseStat }
             self.reloadLock.unlock()

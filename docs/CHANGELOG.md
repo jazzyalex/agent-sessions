@@ -8,12 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Improvements
 - Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
+- Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.
 - Session list: Added an Archived control that narrows Codex rows to archived Desktop sessions while leaving other enabled agents visible, plus distinct archived styling on the existing `desk` pill.
 
 ### Bug Fixes
 - Analytics: Prevented the time-series chart from crashing when enabled agents such as Hermes appear in the data.
 - Analytics: Claude Desktop local-agent chat sessions now collapse generated `/sessions/...` project names into `Claude Desktop Chats`.
 - Analytics: Project filters now collapse generated worktree, publish-clone, and nested output folder names back to their parent repository.
+- Pi/Search: Large Pi session files stay lightweight during ordinary search and full transcript parsing is size-capped by default, avoiding expensive JSONL reads unless deep scan explicitly opts in.
 - Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line, and hierarchical refreshes no longer force table selection back upward while browsing grouped subagent rows.
 - Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes.
 - Session list: Codex state metadata remains compatible with older state database schemas that do not yet include git origin columns.

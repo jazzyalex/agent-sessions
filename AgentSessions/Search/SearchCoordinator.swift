@@ -334,14 +334,16 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         }
                     }
 
-                    // Always include Cursor and Pi sessions in unindexed candidates (they have no FTS index).
+                    // Always include Cursor sessions in unindexed candidates (they have no FTS index).
                     // Also include non-large unindexed rows so restored/lightweight sessions remain
                     // content-searchable while their FTS rows are still missing or warming.
                     let smallSearchThreshold = FeatureFlags.searchSmallSizeBytes
                     let unindexedCandidates = searchableCandidates.filter {
-                        !indexedIDs.contains($0.id)
-                            && !seen.contains($0.id)
-                            && (enableDeepScan || $0.source == .cursor || $0.source == .pi || Self.sizeBytes(for: $0) < smallSearchThreshold)
+                        Self.shouldIncludeUnindexedCandidate($0,
+                                                             indexedIDs: indexedIDs,
+                                                             seenIDs: seen,
+                                                             enableDeepScan: enableDeepScan,
+                                                             smallSearchThreshold: smallSearchThreshold)
                     }
                     let deepCandidates = deepEnabled
                         ? searchableCandidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
@@ -503,7 +505,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
                 if let parsed = await self.parseFullIfNeeded(session: s,
                                                              threshold: threshold,
-                                                             allowDeepParse: allowDeepScan) {
+                                                             allowDeepParse: allowDeepScan,
+                                                             allowLargePiParse: allowDeepScan) {
                     if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                     // Optionally persist parsed session back to indexers for accuracy outside search
@@ -585,6 +588,17 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             return session.events.filter { $0.kind == .tool_call }.count
         }()
         return estimatedCommands > 0
+    }
+
+    static func shouldIncludeUnindexedCandidate(_ session: Session,
+                                                indexedIDs: Set<String>,
+                                                seenIDs: Set<String>,
+                                                enableDeepScan: Bool,
+                                                smallSearchThreshold: Int) -> Bool {
+        guard !indexedIDs.contains(session.id), !seenIDs.contains(session.id) else { return false }
+        if enableDeepScan { return true }
+        if session.source == .cursor { return true }
+        return sizeBytes(for: session) < smallSearchThreshold
     }
 
     /// Builds an FTS5 query for Instant search.
@@ -805,7 +819,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
             if let parsed = await self.parseFullIfNeeded(session: s,
                                                          threshold: threshold,
-                                                         allowDeepParse: true) {
+                                                         allowDeepParse: true,
+                                                         allowLargePiParse: true) {
                 if Task.isCancelled { await self.finishCanceled(runID: runID); return }
 
                 if !FeatureFlags.disableSessionUpdatesDuringSearch {
@@ -954,9 +969,18 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
     private func parseFullIfNeeded(session s: Session,
                                    threshold: Int,
-                                   allowDeepParse: Bool) async -> Session? {
+                                   allowDeepParse: Bool,
+                                   allowLargePiParse: Bool = false) async -> Session? {
         guard !Task.isCancelled else { return nil }
         guard allowDeepParse else { return s }
+        if s.source == .pi,
+           Self.sizeBytes(for: s) >= threshold,
+           !allowLargePiParse {
+            return s
+        }
+        if s.source == .pi, allowLargePiParse {
+            return PiSessionParser.parseFileFull(at: URL(fileURLWithPath: s.filePath), allowLargeFile: true)
+        }
         return await store.parseFull(session: s)
     }
 

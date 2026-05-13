@@ -33,6 +33,53 @@ final class PiSessionParserTests: XCTestCase {
         XCTAssertTrue(session.events.contains { $0.text?.contains("hello.py prints a fixture greeting.") == true })
     }
 
+    func testParseFileFullSkipsOversizedPiFileUnlessExplicitlyAllowed() throws {
+        let temp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("pi-oversized-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let url = temp.appendingPathComponent("oversized.jsonl")
+        let lines = [
+            #"{"type":"session","version":3,"id":"oversized-root","timestamp":"2026-05-12T01:00:00.000Z","cwd":"/tmp/as-agent-fixture/project"}"#,
+            #"{"type":"message","id":"m1","parentId":"oversized-root","timestamp":"2026-05-12T01:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Keep this lightweight unless explicitly requested."}]}}"#
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(PiSessionParser.defaultFullParseMaxBytes + 1))
+        try handle.close()
+
+        XCTAssertNil(PiSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(PiSessionParser.parseFileFull(at: url, allowLargeFile: true)?.id, "oversized-root")
+    }
+
+    func testUnindexedLargePiSessionRequiresDeepScanForSearchFallback() {
+        let smallPi = makeSearchCandidate(id: "small-pi", source: .pi, fileSizeBytes: FeatureFlags.searchSmallSizeBytes - 1)
+        let largePi = makeSearchCandidate(id: "large-pi", source: .pi, fileSizeBytes: FeatureFlags.searchSmallSizeBytes)
+        let largeCursor = makeSearchCandidate(id: "large-cursor", source: .cursor, fileSizeBytes: FeatureFlags.searchSmallSizeBytes * 2)
+
+        XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(smallPi,
+                                                                        indexedIDs: [],
+                                                                        seenIDs: [],
+                                                                        enableDeepScan: false,
+                                                                        smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
+        XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(largePi,
+                                                                         indexedIDs: [],
+                                                                         seenIDs: [],
+                                                                         enableDeepScan: false,
+                                                                         smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
+        XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(largePi,
+                                                                        indexedIDs: [],
+                                                                        seenIDs: [],
+                                                                        enableDeepScan: true,
+                                                                        smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
+        XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(largeCursor,
+                                                                        indexedIDs: [],
+                                                                        seenIDs: [],
+                                                                        enableDeepScan: false,
+                                                                        smallSearchThreshold: FeatureFlags.searchSmallSizeBytes))
+    }
+
     func testDiscoveryFindsPiJsonlSessionsOnly() throws {
         let temp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("pi-discovery-\(UUID().uuidString)", isDirectory: true)
@@ -138,5 +185,20 @@ final class PiSessionParserTests: XCTestCase {
 
         XCTAssertNil(PiSessionParser.parseFile(at: url))
         XCTAssertNil(PiSessionParser.parseFileFull(at: url))
+    }
+
+    private func makeSearchCandidate(id: String, source: SessionSource, fileSizeBytes: Int) -> Session {
+        Session(id: id,
+                source: source,
+                startTime: nil,
+                endTime: nil,
+                model: nil,
+                filePath: "/tmp/\(id).jsonl",
+                fileSizeBytes: fileSizeBytes,
+                eventCount: 1,
+                events: [],
+                cwd: "/tmp/as-agent-fixture/project",
+                repoName: "project",
+                lightweightTitle: "Search candidate")
     }
 }

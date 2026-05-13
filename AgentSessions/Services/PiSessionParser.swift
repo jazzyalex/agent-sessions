@@ -2,6 +2,7 @@ import Foundation
 
 final class PiSessionParser {
     private static let previewLineLimit = 200
+    static let defaultFullParseMaxBytes = 50 * 1024 * 1024
 
     private enum JSONValue: Codable {
         case string(String)
@@ -144,7 +145,12 @@ final class PiSessionParser {
         )
     }
 
-    static func parseFileFull(at url: URL) -> Session? {
+    static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
+        if !allowLargeFile,
+           let fileSize = fileSize(at: url),
+           fileSize > defaultFullParseMaxBytes {
+            return nil
+        }
         guard let entries = loadEntries(url),
               let header = entries.first(where: { $0.type == "session" }),
               let id = header.id else { return nil }

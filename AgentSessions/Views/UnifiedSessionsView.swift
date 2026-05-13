@@ -397,7 +397,7 @@ struct UnifiedSessionsView: View {
             .pi: .init(
                 transcriptCache: piIndexer.searchTranscriptCache,
                 update: { piIndexer.updateSession($0) },
-                parseFull: { url, _ in PiSessionParser.parseFileFull(at: url) }
+                parseFull: { url, _ in PiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
             ),
         ])
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
