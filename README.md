@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for local Codex sessions, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw.**
+**Unified session browser for Codex, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, OpenClaw, and Pi CLI sessions across CLI and desktop surfaces.**
 Droid histories remain importable for legacy sessions, but Droid is no longer an actively supported provider.
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
@@ -56,17 +56,18 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.7.1
+## What's New in 3.8
 
-**TL;DR** - Claude Code Desktop sessions now keep the correct Desktop badge.
+**TL;DR** - Agent Sessions is expanding beyond CLI-only workflows into a broader session hub, and Pi CLI now joins the supported agent lineup.
 
-**Highlights:** This patch fixes Claude Desktop transcript classification for standard `~/.claude` sessions and cached rows, so Desktop-launched Claude sessions keep the `desk` surface pill. It includes the 3.7 Claude Code Desktop support: Agent Sessions discovers Claude Code Desktop local-agent transcripts from Claude's Application Support directory, enriches them with Desktop metadata, and labels Claude rows with consistent `cli` and `desk` surface pills.
+**Highlights:** Agent Sessions now treats CLI and native-app sessions as part of one growing workspace. Codex Desktop and Claude Desktop sessions are easier to identify and filter, archived Codex Desktop sessions are easier to browse, and desktop chat/worktree rows now preserve clearer project context. Alongside that broader hub direction, Agent Sessions adds tier-2 Pi CLI support with local JSONL discovery, browsing, search, Preferences controls, Pi-specific styling, and Resume/Copy Resume commands via `pi --session`.
 
 ## Core Features
 
 - Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
-- Browse and search local Codex sessions across CLI, Desktop, and VS Code in one place.
-- Browse Claude Code CLI and Desktop local-agent sessions with consistent surface labels.
+- Browse and search Codex sessions across CLI, Desktop, and VS Code in one place.
+- Browse Claude Code sessions across CLI and Desktop surfaces with consistent labels and project context.
+- Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.

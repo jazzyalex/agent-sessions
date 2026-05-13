@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Features
+- Agent Sessions is expanding beyond CLI-only workflows into a broader session hub: Codex Desktop and Claude Desktop sessions are now easier to identify, group, filter, and browse alongside CLI sessions in one place.
 - Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.
 - Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
 
