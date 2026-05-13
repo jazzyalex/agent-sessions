@@ -6,24 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ## [3.8] - 2026-05-12
 ### Features
-- Agent Sessions is expanding beyond CLI-only workflows into a broader session hub: Codex Desktop and Claude Desktop sessions are now easier to identify, group, filter, and browse alongside CLI sessions in one place.
+- Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.
 - Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.
-- Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
-
-### Improvements
-- Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.
 
 ### Bug Fixes
-- Analytics: Prevented the time-series chart from crashing when enabled agents such as Hermes appear in the data.
-- Analytics: Chart coloring now derives from the actual enabled agent data, preventing mismatches or crashes when newer providers appear in the dataset.
-- Analytics: Project filters now collapse generated worktree, publish-clone, and nested output folder names back to their parent repository.
-- Pi/Search: Large Pi session files stay lightweight during ordinary search and full transcript parsing is size-capped by default, avoiding expensive JSONL reads unless deep scan explicitly opts in.
 - Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.
 - Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.
-- Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line, and hierarchical refreshes no longer force table selection back upward while browsing grouped subagent rows.
-- Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes.
-- Session list: Codex state metadata remains compatible with older state database schemas that do not yet include git origin columns.
-- Sessions/Search: Restored Codex Desktop sessions with old rollout dates sort by fresh activity, are picked up when their files change, and parse non-large unindexed transcripts during search so content such as email addresses is findable without deep scan.
+- Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line.
+- Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes, and remain compatible with older Codex state database schemas that do not yet include git origin columns.
+- Sessions/Search: Restored Codex Desktop sessions with old rollout dates now sort by fresh activity, are picked up when their files change, and remain searchable even before full-text indexing has warmed or when only non-large transcripts are available.
+- Analytics: Chart coloring now derives from the actual enabled agent data, preventing mismatches or crashes when newer providers appear in the dataset.
+
+### Improvements
+- Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
+- Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.
 
 ## [3.7.1] - 2026-05-01
 ### Bug Fixes

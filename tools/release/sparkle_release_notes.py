@@ -245,23 +245,14 @@ def _structured_sections(items: Dict[str, List[str]]) -> Tuple[List[str], List[s
 
 def _baseline_version_for(version: str, sections: Dict[str, str]) -> Optional[str]:
     """
+    Only patch releases get a baseline reminder:
     - For A.B.C, baseline is A.B (parent major/minor)
-    - For A.B, baseline is A.(B-1) if present
+    - For A.B, no baseline reminder is shown
     """
     m = re.match(r"^([0-9]+)\.([0-9]+)\.([0-9]+)$", version)
     if m:
         return f"{m.group(1)}.{m.group(2)}"
-
-    m2 = re.match(r"^([0-9]+)\.([0-9]+)$", version)
-    if not m2:
-        return None
-
-    major = int(m2.group(1))
-    minor = int(m2.group(2))
-    if minor <= 0:
-        return None
-    candidate = f"{major}.{minor - 1}"
-    return candidate if candidate in sections else None
+    return None
 
 
 def _baseline_summary(section_body: str, max_items: int = 4) -> List[str]:
@@ -334,13 +325,13 @@ def _render_list(items: List[str]) -> str:
 def render_html(bundle: NotesBundle) -> str:
     parts: List[str] = [f"<h2>{html.escape(bundle.title)}</h2>"]
 
-    if bundle.bug_fixes:
-        parts.append("<h3>Bug Fixes</h3>")
-        parts.append(_render_list(bundle.bug_fixes))
-
     if bundle.features:
         parts.append("<h3>Features</h3>")
         parts.append(_render_list(bundle.features))
+
+    if bundle.bug_fixes:
+        parts.append("<h3>Bug Fixes</h3>")
+        parts.append(_render_list(bundle.bug_fixes))
 
     if bundle.improvements:
         parts.append("<h3>Improvements</h3>")
@@ -367,14 +358,14 @@ def render_html(bundle: NotesBundle) -> str:
 def render_plaintext(bundle: NotesBundle) -> str:
     out: List[str] = [bundle.title, ""]
 
-    if bundle.bug_fixes:
-        out.append("Bug Fixes:")
-        out.extend([f"- {x}" for x in bundle.bug_fixes])
-        out.append("")
-
     if bundle.features:
         out.append("Features:")
         out.extend([f"- {x}" for x in bundle.features])
+        out.append("")
+
+    if bundle.bug_fixes:
+        out.append("Bug Fixes:")
+        out.extend([f"- {x}" for x in bundle.bug_fixes])
         out.append("")
 
     if bundle.improvements:
