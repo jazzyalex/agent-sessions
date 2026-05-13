@@ -695,9 +695,10 @@ final class SessionIndexer: ObservableObject {
             let stateThreads = Self.loadCodexStateThreads(sessionsRoot: self.sessionsRoot())
 
             if presentedHydration {
-                // Apply thread_name overrides early so hydrated sessions show renamed titles immediately.
+                // Apply Codex Desktop state metadata early so hydrated sessions show
+                // renamed titles and state-backed worktree cwd immediately.
                 var hydratedSessions = existingSessions
-                Self.applyCodexStateTitles(&hydratedSessions, from: stateThreads)
+                Self.applyCodexStateMetadata(&hydratedSessions, from: stateThreads)
                 Self.applyCodexThreadNames(&hydratedSessions, from: threadNames)
                 let finalHydratedSessions = hydratedSessions
                 await MainActor.run {
@@ -867,8 +868,8 @@ final class SessionIndexer: ObservableObject {
             }
             var allParsedSessions = Array(mergedByPath.values).filter(fmExists)
 
-            // Reuse thread_name lookup loaded earlier in this refresh cycle.
-            Self.applyCodexStateTitles(&allParsedSessions, from: stateThreads)
+            // Reuse Codex state/thread_name lookups loaded earlier in this refresh cycle.
+            Self.applyCodexStateMetadata(&allParsedSessions, from: stateThreads)
             Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
             let totalParsedCount = allParsedSessions.count
 
@@ -1340,6 +1341,7 @@ final class SessionIndexer: ObservableObject {
     private struct CodexStateThread {
         let id: String
         let rolloutPath: String
+        let cwd: String?
         let title: String?
         let firstUserMessage: String?
 
@@ -1414,7 +1416,7 @@ final class SessionIndexer: ObservableObject {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT id, rollout_path, title,
+        SELECT id, rollout_path, cwd, title,
                CASE WHEN length(trim(title)) > 0 THEN NULL ELSE substr(first_user_message, 1, ?) END
         FROM threads;
         """
@@ -1433,8 +1435,9 @@ final class SessionIndexer: ObservableObject {
             let thread = CodexStateThread(
                 id: String(cString: idCString),
                 rolloutPath: String(cString: pathCString),
-                title: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 2)),
-                firstUserMessage: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3))
+                cwd: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 2)),
+                title: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3)),
+                firstUserMessage: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 4))
             )
             byID[thread.id] = thread
             byPath[normalizeCodexRolloutPath(thread.rolloutPath)] = thread
@@ -1446,20 +1449,25 @@ final class SessionIndexer: ObservableObject {
         URL(fileURLWithPath: NSString(string: path).expandingTildeInPath).standardizedFileURL.path
     }
 
-    private static func applyCodexStateTitles(_ sessions: inout [Session], from lookup: CodexStateThreadLookup) {
+    private static func applyCodexStateMetadata(_ sessions: inout [Session], from lookup: CodexStateThreadLookup) {
         guard !lookup.isEmpty else { return }
         for i in sessions.indices {
-            guard sessions[i].customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
-                continue
-            }
             let thread: CodexStateThread?
             if let hint = sessions[i].codexInternalSessionIDHint {
                 thread = lookup.byID[hint] ?? lookup.byPath[normalizeCodexRolloutPath(sessions[i].filePath)]
             } else {
                 thread = lookup.byPath[normalizeCodexRolloutPath(sessions[i].filePath)]
             }
-            guard let title = thread?.bestTitle,
-                  sessions[i].lightweightTitle != title else { continue }
+            guard let thread else { continue }
+
+            let title = sessions[i].customTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? nil
+                : thread.bestTitle
+            let cwd = nonEmptyCodexStateCwd(thread.cwd) ?? sessions[i].lightweightCwd
+            let titleChanged = title != nil && title != sessions[i].lightweightTitle
+            let cwdChanged = cwd != sessions[i].lightweightCwd
+            guard titleChanged || cwdChanged else { continue }
+
             let wasFavorite = sessions[i].isFavorite
             var rebuilt = Session(
                 id: sessions[i].id,
@@ -1471,9 +1479,9 @@ final class SessionIndexer: ObservableObject {
                 fileSizeBytes: sessions[i].fileSizeBytes,
                 eventCount: sessions[i].eventCount,
                 events: sessions[i].events,
-                cwd: sessions[i].lightweightCwd,
-                repoName: sessions[i].lightweightRepoName,
-                lightweightTitle: title,
+                cwd: cwd,
+                repoName: nil,
+                lightweightTitle: title ?? sessions[i].lightweightTitle,
                 lightweightCommands: sessions[i].lightweightCommands,
                 isHousekeeping: sessions[i].isHousekeeping,
                 codexInternalSessionIDHint: sessions[i].codexInternalSessionIDHint,
@@ -1483,11 +1491,22 @@ final class SessionIndexer: ObservableObject {
                 codexOriginator: sessions[i].codexOriginator,
                 codexSource: sessions[i].codexSource,
                 codexSurface: sessions[i].codexSurface,
+                originator: sessions[i].originator,
+                originSource: sessions[i].originSource,
+                surface: sessions[i].surface,
                 reasoningEffort: sessions[i].reasoningEffort
             )
             rebuilt.isFavorite = wasFavorite
             sessions[i] = rebuilt
         }
+    }
+
+    private static func nonEmptyCodexStateCwd(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 
     /// Read budget: max bytes of `session_index.jsonl` to load per refresh (2 MB).

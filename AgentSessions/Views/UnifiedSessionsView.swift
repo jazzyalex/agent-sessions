@@ -11,6 +11,21 @@ enum UnifiedTableSelectionPolicy {
         guard let currentSelectionID else { return false }
         return visibleRowIDs.contains(currentSelectionID)
     }
+
+    static func shouldExposeCanonicalSelectionToTable(
+        hierarchyBrowsing: Bool,
+        refreshBusy: Bool
+    ) -> Bool {
+        !(hierarchyBrowsing && refreshBusy)
+    }
+
+    static func shouldReplaceMissingSelection(
+        hierarchyBrowsing: Bool,
+        refreshBusy: Bool,
+        hasUserManuallySelected: Bool
+    ) -> Bool {
+        !(hierarchyBrowsing && refreshBusy && hasUserManuallySelected)
+    }
 }
 
 enum UnifiedRowsStabilityPolicy {
@@ -801,7 +816,14 @@ struct UnifiedSessionsView: View {
                         return s.repoDisplay
                     }
                 }()
-                ProjectCellView(id: s.id, display: display)
+                let isNestedHierarchyRow = showSubagentHierarchy
+                    && searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && (hierarchyRowMeta[s.id]?.depth ?? 0) > 0
+                ProjectCellView(
+                    id: s.id,
+                    display: display,
+                    worktree: isNestedHierarchyRow ? nil : s.projectWorktreeDisplayName
+                )
                     .onTapGesture(count: 2) {
                         if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
@@ -1516,6 +1538,12 @@ struct UnifiedSessionsView: View {
 	    private var tableSingleSelection: Binding<String?> {
 	        Binding(
 	            get: {
+                    guard UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
+                        hierarchyBrowsing: isHierarchyBrowsing,
+                        refreshBusy: isRefreshBusyForSelection
+                    ) else {
+                        return nil
+                    }
 	                guard let id = selection, visibleRowIDs.contains(id) else { return nil }
 	                return id
 	            },
@@ -1954,10 +1982,15 @@ struct UnifiedSessionsView: View {
 	            cachedRows = hierarchyResult.sessions
                 hierarchyRowMeta = hierarchyResult.rowMeta
 	        }
-        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
+	        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
 
 	        if let selectedID = selection,
-	           !cachedRows.contains(where: { $0.id == selectedID }) {
+	           !cachedRows.contains(where: { $0.id == selectedID }),
+               UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                   hierarchyBrowsing: isHierarchyBrowsing,
+                   refreshBusy: isRefreshBusyForSelection,
+                   hasUserManuallySelected: hasUserManuallySelected
+               ) {
             if let first = cachedRows.first {
                 setActiveSelection(first.id, source: first.source, userInitiated: false)
             } else {
@@ -1969,6 +2002,14 @@ struct UnifiedSessionsView: View {
 		        refreshSelectionSourceFromCachedRows()
         return heldRows
 	    }
+
+    private var isHierarchyBrowsing: Bool {
+        showSubagentHierarchy && searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isRefreshBusyForSelection: Bool {
+        isDatasetChurning || unified.isIndexing || searchCoordinator.isRunning
+    }
 
     private func scheduleAutoJump(for sessionID: String, immediate: Bool) {
         cancelAutoJump()
@@ -3184,12 +3225,22 @@ private struct TranscriptHostView: View {
 private struct ProjectCellView: View {
     let id: String
     let display: String
+    let worktree: String?
     var body: some View {
-        Text(display)
-            .font(.system(size: 13, weight: .regular, design: .monospaced))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .id("project-cell-\(id)")
+        VStack(alignment: .leading, spacing: 1) {
+            Text(display)
+                .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let worktree, !worktree.isEmpty, worktree != display {
+                Text(worktree)
+                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .id("project-cell-\(id)")
     }
 }
 

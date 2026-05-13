@@ -625,6 +625,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return nil
     }
 
+    public var projectWorktreeDisplayName: String? {
+        ProjectPathNormalizer.worktreeDisplayName(for: self)
+    }
+
     public var repoDisplay: String {
         repoName ?? (cwd != nil ? "Other" : "—")
     }
@@ -947,22 +951,44 @@ enum ClaudeDesktopProjectClassifier {
 }
 
 enum ProjectPathNormalizer {
+    private final class CachedWorktreeBase {
+        let value: String?
+
+        init(_ value: String?) {
+            self.value = value
+        }
+    }
+
+    private static let gitWorktreeBaseCache = NSCache<NSString, CachedWorktreeBase>()
+
     private enum Resolution {
-        case name(String)
+        case name(String, worktree: String?)
         case suppress
     }
 
     static func normalizedProjectName(for session: Session) -> String? {
-        guard case let .name(name) = resolve(cwd: session.cwd) else { return nil }
+        guard case let .name(name, _) = resolve(for: session) else { return nil }
         return name
     }
 
+    static func worktreeDisplayName(for session: Session) -> String? {
+        guard case let .name(_, worktree) = resolve(for: session) else { return nil }
+        return worktree
+    }
+
     static func shouldSuppressStoredProjectName(for session: Session) -> Bool {
-        guard case .suppress = resolve(cwd: session.cwd) else { return false }
+        guard case .suppress = resolve(for: session) else { return false }
         return true
     }
 
-    private static func resolve(cwd: String?) -> Resolution? {
+    private static func resolve(for session: Session) -> Resolution? {
+        resolve(
+            cwd: session.cwd,
+            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession
+        )
+    }
+
+    private static func resolve(cwd: String?, usesDesktopWorktreeHeuristics: Bool = false) -> Resolution? {
         guard let cwd, !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
@@ -971,20 +997,24 @@ enum ProjectPathNormalizer {
         guard let last = components.last, !last.isEmpty else { return .suppress }
         if cwd == "/" { return .suppress }
 
-        if let name = projectNameBeforeMarker(in: components, marker: ".worktrees") {
-            return .name(name)
+        if let resolution = projectNameBeforeMarker(in: components, marker: ".worktrees") {
+            return resolution
         }
-        if let name = projectNameBeforeToolWorktrees(in: components) {
-            return .name(name)
+        if let resolution = projectNameBeforeToolWorktrees(in: components) {
+            return resolution
         }
-        if let name = projectNameBeforeHiddenClone(in: components) {
-            return .name(name)
+        if let resolution = projectNameBeforeHiddenClone(in: components) {
+            return resolution
         }
-        if let name = numberedSiblingWorktreeName(in: components) {
-            return .name(name)
+        if let resolution = numberedSiblingWorktreeName(in: components) {
+            return resolution
+        }
+        if usesDesktopWorktreeHeuristics,
+           let resolution = desktopSiblingWorktreeName(in: components, cwd: cwd) {
+            return resolution
         }
         if let name = repositoryProjectName(in: components) {
-            return .name(name)
+            return .name(name, worktree: nil)
         }
         if isGenericNonProjectName(last) {
             return .suppress
@@ -993,17 +1023,18 @@ enum ProjectPathNormalizer {
         return nil
     }
 
-    private static func projectNameBeforeMarker(in components: [String], marker: String) -> String? {
+    private static func projectNameBeforeMarker(in components: [String], marker: String) -> Resolution? {
         guard let index = components.lastIndex(of: marker),
               index > 0,
               index + 1 < components.count else {
             return nil
         }
         let candidate = components[index - 1]
-        return normalizedProjectComponent(candidate)
+        guard let project = normalizedProjectComponent(candidate) else { return nil }
+        return .name(project, worktree: normalizedWorktreeComponent(components[index + 1]))
     }
 
-    private static func projectNameBeforeToolWorktrees(in components: [String]) -> String? {
+    private static func projectNameBeforeToolWorktrees(in components: [String]) -> Resolution? {
         guard let index = components.lastIndex(of: "worktrees"),
               index > 1,
               index + 1 < components.count else {
@@ -1011,19 +1042,21 @@ enum ProjectPathNormalizer {
         }
         let toolDirectory = components[index - 1]
         guard toolDirectory == ".claude" || toolDirectory == ".codex" else { return nil }
-        return normalizedProjectComponent(components[index - 2])
+        guard let project = normalizedProjectComponent(components[index - 2]) else { return nil }
+        return .name(project, worktree: normalizedWorktreeComponent(components[index + 1]))
     }
 
-    private static func projectNameBeforeHiddenClone(in components: [String]) -> String? {
+    private static func projectNameBeforeHiddenClone(in components: [String]) -> Resolution? {
         let hiddenCloneNames = [".tennisgroup_repo", ".tennisgroup_repo_fresh"]
         guard let index = components.lastIndex(where: { hiddenCloneNames.contains($0) }),
               index > 0 else {
             return nil
         }
-        return normalizedProjectComponent(components[index - 1])
+        guard let project = normalizedProjectComponent(components[index - 1]) else { return nil }
+        return .name(project, worktree: nil)
     }
 
-    private static func numberedSiblingWorktreeName(in components: [String]) -> String? {
+    private static func numberedSiblingWorktreeName(in components: [String]) -> Resolution? {
         guard let repositoryIndex = components.lastIndex(of: "Repository"),
               repositoryIndex + 1 < components.count else {
             return nil
@@ -1038,10 +1071,36 @@ enum ProjectPathNormalizer {
         let matched = String(last[match])
         guard let hyphen = matched.lastIndex(of: "-") else { return nil }
         let base = String(matched[..<hyphen])
+        let worktree = normalizedWorktreeComponent(last)
         if isNestedScriptsProject {
-            return normalizedProjectComponent(base)
+            guard let project = normalizedProjectComponent(base) else { return nil }
+            return .name(project, worktree: worktree)
         }
-        return displayName(fromGeneratedWorktreeBase: base)
+        guard let project = displayName(fromGeneratedWorktreeBase: base) else { return nil }
+        return .name(project, worktree: worktree)
+    }
+
+    private static func desktopSiblingWorktreeName(in components: [String], cwd: String) -> Resolution? {
+        guard let repositoryIndex = components.lastIndex(of: "Repository"),
+              repositoryIndex + 1 < components.count else {
+            return nil
+        }
+        let isNestedScriptsProject = components[repositoryIndex + 1] == "Scripts"
+        let projectIndex = isNestedScriptsProject && repositoryIndex + 2 < components.count
+            ? repositoryIndex + 2
+            : repositoryIndex + 1
+        guard projectIndex < components.count else { return nil }
+
+        let worktree = components[projectIndex]
+        let baseProject = gitWorktreeBaseProjectName(in: components, cwd: cwd, worktreeIndex: projectIndex)
+            ?? capitalizedDesktopWorktreeBase(from: worktree)
+        guard let baseProject,
+              let project = normalizedProjectComponent(baseProject),
+              let worktreeName = normalizedWorktreeComponent(worktree),
+              worktreeName != project else {
+            return nil
+        }
+        return .name(project, worktree: worktreeName)
     }
 
     private static func repositoryProjectName(in components: [String]) -> String? {
@@ -1067,12 +1126,95 @@ enum ProjectPathNormalizer {
         return component
     }
 
+    private static func normalizedWorktreeComponent(_ component: String?) -> String? {
+        guard let component,
+              !component.isEmpty,
+              component != ".",
+              component != "/",
+              !isGenericNonProjectName(component) else {
+            return nil
+        }
+        return component
+    }
+
     private static func isGenericNonProjectName(_ name: String) -> Bool {
         let generic = [
             "Documents", "Desktop", "Downloads", "tmp", "temp", "src", "code",
             "out", "output", "outputs", "build", "dist", "Repository", "cli", "memories"
         ]
         return generic.contains(name)
+    }
+
+    private static func gitWorktreeBaseProjectName(in components: [String], cwd: String, worktreeIndex: Int) -> String? {
+        var worktreeURL = URL(fileURLWithPath: cwd).standardizedFileURL
+        let trailingComponentCount = max(components.count - worktreeIndex - 1, 0)
+        for _ in 0..<trailingComponentCount {
+            worktreeURL.deleteLastPathComponent()
+        }
+
+        let cacheKey = worktreeURL.standardizedFileURL.path as NSString
+        if let cached = gitWorktreeBaseCache.object(forKey: cacheKey) {
+            return cached.value
+        }
+
+        let project = readGitWorktreeBaseProjectName(from: worktreeURL)
+        gitWorktreeBaseCache.setObject(CachedWorktreeBase(project), forKey: cacheKey)
+        return project
+    }
+
+    private static func readGitWorktreeBaseProjectName(from worktreeURL: URL) -> String? {
+        let gitFileURL = worktreeURL.appendingPathComponent(".git", isDirectory: false)
+        guard let gitFile = try? String(contentsOf: gitFileURL, encoding: .utf8) else {
+            return nil
+        }
+        let gitdirPrefix = "gitdir:"
+        guard let line = gitFile
+            .split(whereSeparator: \.isNewline)
+            .first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix(gitdirPrefix) }) else {
+            return nil
+        }
+        let gitdir = line.trimmingCharacters(in: .whitespaces)
+            .dropFirst(gitdirPrefix.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let gitdirURL = URL(fileURLWithPath: gitdir)
+        let gitComponents = gitdirURL.standardizedFileURL.pathComponents
+        guard let gitIndex = gitComponents.lastIndex(of: ".git"), gitIndex > 0 else {
+            return nil
+        }
+        return normalizedProjectComponent(gitComponents[gitIndex - 1])
+    }
+
+    private static func capitalizedDesktopWorktreeBase(from name: String) -> String? {
+        let pieces = name.split(separator: "-", omittingEmptySubsequences: true)
+        guard pieces.count >= 3 else { return nil }
+
+        var basePieces: [Substring] = []
+        for piece in pieces {
+            if isCapitalizedProjectSegment(String(piece)) {
+                basePieces.append(piece)
+            } else {
+                break
+            }
+        }
+
+        guard basePieces.count >= 2, basePieces.count < pieces.count else { return nil }
+        let suffixPieces = pieces.dropFirst(basePieces.count)
+        guard !suffixPieces.allSatisfy({ isVersionLikeSegment(String($0)) }) else { return nil }
+        return basePieces.joined(separator: "-")
+    }
+
+    private static func isCapitalizedProjectSegment(_ segment: String) -> Bool {
+        guard let first = segment.unicodeScalars.first,
+              CharacterSet.uppercaseLetters.contains(first) else {
+            return false
+        }
+        return segment.unicodeScalars.contains { CharacterSet.letters.contains($0) }
+    }
+
+    private static func isVersionLikeSegment(_ segment: String) -> Bool {
+        guard !segment.isEmpty else { return false }
+        let pattern = #"^v?\d+(?:[._]\d+)*$"#
+        return segment.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func displayName(fromGeneratedWorktreeBase base: String) -> String? {

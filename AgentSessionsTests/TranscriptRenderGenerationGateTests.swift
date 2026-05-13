@@ -83,6 +83,44 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
             )
         )
     }
+
+    func testHidesTableSelectionDuringHierarchicalRefreshToAvoidScrollJump() {
+        XCTAssertFalse(
+            UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
+                hierarchyBrowsing: true,
+                refreshBusy: true
+            )
+        )
+    }
+
+    func testExposesTableSelectionWhenHierarchicalRefreshIsIdle() {
+        XCTAssertTrue(
+            UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
+                hierarchyBrowsing: true,
+                refreshBusy: false
+            )
+        )
+    }
+
+    func testDoesNotReplaceManualSelectionDuringHierarchicalRefresh() {
+        XCTAssertFalse(
+            UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                hierarchyBrowsing: true,
+                refreshBusy: true,
+                hasUserManuallySelected: true
+            )
+        )
+    }
+
+    func testCanReplaceMissingAutomaticSelectionOutsideHierarchicalRefresh() {
+        XCTAssertTrue(
+            UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                hierarchyBrowsing: true,
+                refreshBusy: false,
+                hasUserManuallySelected: true
+            )
+        )
+    }
 }
 
 final class UnifiedRowsStabilityPolicyTests: XCTestCase {

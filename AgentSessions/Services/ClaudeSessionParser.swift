@@ -237,11 +237,11 @@ final class ClaudeSessionParser {
     }
 
     private static func bestCwd(_ cwd: String?, metadata: ClaudeDesktopSessionMetadata) -> String? {
-        if let origin = metadata.originCwd, isValidPath(origin) {
-            return origin
-        }
         if let worktree = metadata.worktreePath, isValidPath(worktree) {
             return worktree
+        }
+        if let origin = metadata.originCwd, isValidPath(origin) {
+            return origin
         }
         if let cwd, isValidPath(cwd) {
             return cwd

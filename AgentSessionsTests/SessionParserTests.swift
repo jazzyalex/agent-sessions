@@ -690,6 +690,38 @@ final class SessionParserTests: XCTestCase {
             repoName: "outputs",
             lightweightTitle: "Tennis scraper worktree output"
         )
+        let codexDesktopSiblingWorktree = Session(
+            id: "codex-desktop-sibling-worktree",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Codex-History-pi-support",
+            repoName: "Codex-History-pi-support",
+            lightweightTitle: "Pi support",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: .desktop
+        )
+        let codexDesktopSiblingWorktreeSubdir = Session(
+            id: "codex-desktop-sibling-worktree-subdir",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Codex-History-pi-support/AgentSessions",
+            repoName: "AgentSessions",
+            lightweightTitle: "Pi support source",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: .desktop
+        )
 
         XCTAssertEqual(tennisWorktree.repoName, "tennis-scraper")
         XCTAssertEqual(claudeWorktree.repoName, "Codex-History")
@@ -697,6 +729,47 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(numberedSiblingWorktreeSubdir.repoName, "Triada")
         XCTAssertEqual(nestedNumberedSiblingWorktree.repoName, "tennis-scraper")
         XCTAssertEqual(nestedNumberedSiblingWorktreeSubdir.repoName, "tennis-scraper")
+        XCTAssertEqual(codexDesktopSiblingWorktree.repoName, "Codex-History")
+        XCTAssertEqual(codexDesktopSiblingWorktree.projectWorktreeDisplayName, "Codex-History-pi-support")
+        XCTAssertEqual(codexDesktopSiblingWorktreeSubdir.repoName, "Codex-History")
+        XCTAssertEqual(codexDesktopSiblingWorktreeSubdir.projectWorktreeDisplayName, "Codex-History-pi-support")
+        XCTAssertEqual(tennisWorktree.projectWorktreeDisplayName, "visual-redesign")
+        XCTAssertEqual(claudeWorktree.projectWorktreeDisplayName, "flamboyant-elion-309182")
+        XCTAssertEqual(numberedSiblingWorktree.projectWorktreeDisplayName, "triada-54")
+    }
+
+    func testCodexDesktopSiblingWorktreeUsesGitMetadataWhenNameIsLowercase() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-WorktreeMetadata-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let repo = root.appendingPathComponent("Repository", isDirectory: true)
+        let base = repo.appendingPathComponent("agent-sessions", isDirectory: true)
+        let worktree = repo.appendingPathComponent("agent-sessions-ui", isDirectory: true)
+        let gitWorktreeDir = base.appendingPathComponent(".git/worktrees/agent-sessions-ui", isDirectory: true)
+        try fm.createDirectory(at: gitWorktreeDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try writeText("gitdir: \(gitWorktreeDir.path)\n", to: worktree.appendingPathComponent(".git"))
+
+        let session = Session(
+            id: "codex-desktop-lowercase-git-metadata-worktree",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: worktree.appendingPathComponent("AgentSessions").path,
+            repoName: "agent-sessions-ui",
+            lightweightTitle: "UI worktree",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "agent-sessions")
+        XCTAssertEqual(session.projectWorktreeDisplayName, "agent-sessions-ui")
     }
 
     func testNumericRepositoryNamesDoNotNormalizeAsGeneratedWorktrees() throws {
@@ -2250,6 +2323,34 @@ final class SessionParserTests: XCTestCase {
         let discovery = OpenClawSessionDiscovery(customRoot: root.path)
         let found = discovery.discoverSessionFiles()
         XCTAssertEqual(found.count, 2, "Default discovery should include both active and deleted sessions")
+    }
+
+    func testClaudeDesktopMetadataPrefersWorktreePathForProjectDisplay() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktopWorktree-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let localDir = root
+            .appendingPathComponent("local_abc", isDirectory: true)
+            .appendingPathComponent(".claude/projects/-Users-test-Repository-Codex-History", isDirectory: true)
+        try fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+
+        let transcript = localDir.appendingPathComponent("11111111-1111-4111-8111-111111111111.jsonl")
+        try writeText(
+            #"{"type":"user","sessionId":"local_abc","cwd":"/sessions/demo","message":{"role":"user","content":"hello"},"timestamp":"2026-05-12T18:00:00.000Z"}"# + "\n",
+            to: transcript
+        )
+        let metadata = root.appendingPathComponent("local_abc.json")
+        try writeText(
+            #"{"sessionId":"local_abc","cliSessionId":"11111111-1111-4111-8111-111111111111","cwd":"/sessions/demo","originCwd":"/Users/test/Repository/Codex-History","worktreePath":"/Users/test/Repository/Codex-History/.claude/worktrees/agitated-tu","worktreeName":"agitated-tu","createdAt":1770000000000,"lastActivityAt":1770000100000,"model":"claude-sonnet-test","title":"Desktop metadata title","isArchived":false}"#,
+            to: metadata
+        )
+
+        let session = ClaudeSessionParser.parseFileFull(at: transcript)
+
+        XCTAssertEqual(session?.cwd, "/Users/test/Repository/Codex-History/.claude/worktrees/agitated-tu")
+        XCTAssertEqual(session?.repoName, "Codex-History")
+        XCTAssertEqual(session?.projectWorktreeDisplayName, "agitated-tu")
     }
 
     func testClaudeTitleSkipsLocalCommandCaveatAndUsesTrailingPrompt() {
