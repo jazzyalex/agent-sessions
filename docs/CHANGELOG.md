@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Analytics: Project filters now collapse generated worktree, publish-clone, and nested output folder names back to their parent repository.
 - Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line, and hierarchical refreshes no longer force table selection back upward while browsing grouped subagent rows.
 - Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes.
+- Session list: Codex state metadata remains compatible with older state database schemas that do not yet include git origin columns.
 - Session list: Codex Desktop projectless chat sessions now show `Codex Desktop Chats` in the Project column instead of generated scratch-folder names.
 - Sessions/Search: Restored Codex Desktop sessions with old rollout dates sort by fresh activity, are picked up when their files change, and parse non-large unindexed transcripts during search so content such as email addresses is findable without deep scan.
 

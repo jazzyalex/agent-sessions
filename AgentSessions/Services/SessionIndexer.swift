@@ -1338,7 +1338,7 @@ final class SessionIndexer: ObservableObject {
 
     // MARK: - Codex thread_name side-channel
 
-    private struct CodexStateThread {
+    struct CodexStateThread {
         let id: String
         let rolloutPath: String
         let cwd: String?
@@ -1360,7 +1360,7 @@ final class SessionIndexer: ObservableObject {
         }
     }
 
-    private struct CodexStateThreadLookup {
+    struct CodexStateThreadLookup {
         let byID: [String: CodexStateThread]
         let byPath: [String: CodexStateThread]
 
@@ -1408,7 +1408,7 @@ final class SessionIndexer: ObservableObject {
         return version
     }
 
-    private static func readCodexStateThreads(from url: URL) -> CodexStateThreadLookup {
+    static func readCodexStateThreads(from url: URL) -> CodexStateThreadLookup {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK else {
@@ -1417,8 +1417,11 @@ final class SessionIndexer: ObservableObject {
         }
         defer { sqlite3_close(db) }
 
+        let columns = codexStateThreadColumns(in: db)
+        let gitBranchExpression = columns.contains("git_branch") ? "git_branch" : "NULL"
+        let gitOriginExpression = columns.contains("git_origin_url") ? "git_origin_url" : "NULL"
         let sql = """
-        SELECT id, rollout_path, cwd, git_branch, git_origin_url, title,
+        SELECT id, rollout_path, cwd, \(gitBranchExpression), \(gitOriginExpression), title,
                CASE WHEN length(trim(title)) > 0 THEN NULL ELSE substr(first_user_message, 1, ?) END
         FROM threads;
         """
@@ -1447,6 +1450,21 @@ final class SessionIndexer: ObservableObject {
             byPath[normalizeCodexRolloutPath(thread.rolloutPath)] = thread
         }
         return CodexStateThreadLookup(byID: byID, byPath: byPath)
+    }
+
+    private static func codexStateThreadColumns(in db: OpaquePointer?) -> Set<String> {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(threads);", -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var columns: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let nameCString = sqlite3_column_text(stmt, 1) else { continue }
+            columns.insert(String(cString: nameCString))
+        }
+        return columns
     }
 
     private static func normalizeCodexRolloutPath(_ path: String) -> String {

@@ -12,6 +12,39 @@ final class SessionParserTests: XCTestCase {
         try text.data(using: .utf8)!.write(to: url)
     }
 
+    private func createCodexStateSQLiteFixture(at url: URL, includeGitColumns: Bool) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            return XCTFail("failed to open Codex state SQLite fixture")
+        }
+        defer { sqlite3_close(db) }
+
+        func exec(_ sql: String) throws {
+            var err: UnsafeMutablePointer<Int8>?
+            guard sqlite3_exec(db, sql, nil, nil, &err) == SQLITE_OK else {
+                let message = err.map { String(cString: $0) } ?? "unknown sqlite error"
+                sqlite3_free(err)
+                throw NSError(domain: "CodexStateSQLiteFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+        }
+
+        let gitColumns = includeGitColumns ? ", git_branch TEXT, git_origin_url TEXT" : ""
+        let gitInsertColumns = includeGitColumns ? ", git_branch, git_origin_url" : ""
+        let gitValues = includeGitColumns ? ", 'feature/state-git', 'https://example.test/acme/widgets.git'" : ""
+        try exec("""
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            first_user_message TEXT NOT NULL\(gitColumns)
+        );
+        INSERT INTO threads (id, rollout_path, cwd, title, first_user_message\(gitInsertColumns))
+        VALUES ('thread-state', '/tmp/rollout-state.jsonl', '/tmp/state-worktree', '', 'State title fallback'\(gitValues));
+        """)
+    }
+
     private func makeCodexHierarchySession(
         id: String,
         runtimeID: String,
@@ -872,6 +905,36 @@ final class SessionParserTests: XCTestCase {
 
         XCTAssertEqual(session.repoName, "delta-client-space")
         XCTAssertNil(session.projectWorktreeDisplayName)
+    }
+
+    func testCodexStateThreadsReadCurrentSchemaGitMetadata() throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-StateCurrent-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: dbURL) }
+        try createCodexStateSQLiteFixture(at: dbURL, includeGitColumns: true)
+
+        let lookup = SessionIndexer.readCodexStateThreads(from: dbURL)
+        let thread = try XCTUnwrap(lookup.byID["thread-state"])
+        XCTAssertEqual(thread.rolloutPath, "/tmp/rollout-state.jsonl")
+        XCTAssertEqual(thread.cwd, "/tmp/state-worktree")
+        XCTAssertEqual(thread.gitBranch, "feature/state-git")
+        XCTAssertEqual(thread.gitOriginURL, "https://example.test/acme/widgets.git")
+        XCTAssertEqual(thread.bestTitle, "State title fallback")
+    }
+
+    func testCodexStateThreadsReadOldSchemaWithoutGitColumns() throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessions-StateOld-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: dbURL) }
+        try createCodexStateSQLiteFixture(at: dbURL, includeGitColumns: false)
+
+        let lookup = SessionIndexer.readCodexStateThreads(from: dbURL)
+        let thread = try XCTUnwrap(lookup.byID["thread-state"])
+        XCTAssertEqual(thread.rolloutPath, "/tmp/rollout-state.jsonl")
+        XCTAssertEqual(thread.cwd, "/tmp/state-worktree")
+        XCTAssertNil(thread.gitBranch)
+        XCTAssertNil(thread.gitOriginURL)
+        XCTAssertEqual(thread.bestTitle, "State title fallback")
     }
 
     func testNumericRepositoryNamesDoNotNormalizeAsGeneratedWorktrees() throws {
