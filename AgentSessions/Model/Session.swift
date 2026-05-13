@@ -687,6 +687,15 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return nil
     }
 
+    public var gitRepositoryURL: String? {
+        for e in events {
+            if let repositoryURL = extractRepositoryURL(fromRawJSON: e.rawJSON) {
+                return repositoryURL
+            }
+        }
+        return nil
+    }
+
     /// Claude Code: extract a meaningful prompt tail from the "Caveat + local command transcript" block.
     /// Returns `nil` when the text is not a caveat block or when no real prompt content remains.
     internal static func claudeLocalCommandPromptTail(from raw: String) -> String? {
@@ -960,6 +969,7 @@ enum ProjectPathNormalizer {
     }
 
     private static let gitWorktreeBaseCache = NSCache<NSString, CachedWorktreeBase>()
+    private static let gitOriginBaseCache = NSCache<NSString, CachedWorktreeBase>()
 
     private enum Resolution {
         case name(String, worktree: String?)
@@ -984,11 +994,20 @@ enum ProjectPathNormalizer {
     private static func resolve(for session: Session) -> Resolution? {
         resolve(
             cwd: session.cwd,
-            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession
+            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession,
+            storedProjectName: session.lightweightRepoName,
+            gitRepositoryURL: session.gitRepositoryURL,
+            gitBranch: session.gitBranch
         )
     }
 
-    private static func resolve(cwd: String?, usesDesktopWorktreeHeuristics: Bool = false) -> Resolution? {
+    private static func resolve(
+        cwd: String?,
+        usesDesktopWorktreeHeuristics: Bool = false,
+        storedProjectName: String? = nil,
+        gitRepositoryURL: String? = nil,
+        gitBranch: String? = nil
+    ) -> Resolution? {
         guard let cwd, !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
@@ -1010,7 +1029,16 @@ enum ProjectPathNormalizer {
             return resolution
         }
         if usesDesktopWorktreeHeuristics,
-           let resolution = desktopSiblingWorktreeName(in: components, cwd: cwd) {
+           let resolution = storedDesktopWorktreeName(in: components, storedProjectName: storedProjectName) {
+            return resolution
+        }
+        if usesDesktopWorktreeHeuristics,
+           let resolution = desktopSiblingWorktreeName(
+            in: components,
+            cwd: cwd,
+            gitRepositoryURL: gitRepositoryURL,
+            gitBranch: gitBranch
+           ) {
             return resolution
         }
         if let name = repositoryProjectName(in: components) {
@@ -1080,7 +1108,72 @@ enum ProjectPathNormalizer {
         return .name(project, worktree: worktree)
     }
 
-    private static func desktopSiblingWorktreeName(in components: [String], cwd: String) -> Resolution? {
+    static func codexDesktopProjectNameFromGitMetadata(cwd: String?, gitRepositoryURL: String?, gitBranch: String?) -> String? {
+        guard let cwd,
+              let gitRepositoryURL,
+              normalizedGitOriginURL(gitRepositoryURL) != nil,
+              gitBranch?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return nil
+        }
+        let components = URL(fileURLWithPath: cwd).standardizedFileURL.pathComponents
+        guard let repositoryRoot = repositoryRoot(in: components) else { return nil }
+        guard let baseProject = originMatchedBaseProjectName(
+            cwd: cwd,
+            components: components,
+            repositoryRoot: repositoryRoot,
+            gitRepositoryURL: gitRepositoryURL,
+            gitBranch: gitBranch
+        ) else {
+            return nil
+        }
+        return normalizedProjectComponent(baseProject)
+    }
+
+    private static func storedDesktopWorktreeName(in components: [String], storedProjectName: String?) -> Resolution? {
+        guard let storedProject = normalizedProjectComponent(
+            storedProjectName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        ),
+              let repositoryRoot = repositoryRoot(in: components),
+              storedProject != components.last,
+              let worktreeName = normalizedWorktreeComponent(components[repositoryRoot.projectIndex]),
+              worktreeName != storedProject else {
+            return nil
+        }
+        return .name(storedProject, worktree: worktreeName)
+    }
+
+    private static func desktopSiblingWorktreeName(
+        in components: [String],
+        cwd: String,
+        gitRepositoryURL: String?,
+        gitBranch: String?
+    ) -> Resolution? {
+        guard let repositoryRoot = repositoryRoot(in: components) else { return nil }
+        let projectIndex = repositoryRoot.projectIndex
+        let worktree = components[projectIndex]
+        let baseProject = gitWorktreeBaseProjectName(in: components, cwd: cwd, worktreeIndex: projectIndex)
+            ?? originMatchedBaseProjectName(
+                cwd: cwd,
+                components: components,
+                repositoryRoot: repositoryRoot,
+                gitRepositoryURL: gitRepositoryURL,
+                gitBranch: gitBranch
+            )
+        guard let baseProject,
+              let project = normalizedProjectComponent(baseProject),
+              let worktreeName = normalizedWorktreeComponent(worktree),
+              worktreeName != project else {
+            return nil
+        }
+        return .name(project, worktree: worktreeName)
+    }
+
+    private struct RepositoryRoot {
+        let parentURL: URL
+        let projectIndex: Int
+    }
+
+    private static func repositoryRoot(in components: [String]) -> RepositoryRoot? {
         guard let repositoryIndex = components.lastIndex(of: "Repository"),
               repositoryIndex + 1 < components.count else {
             return nil
@@ -1091,16 +1184,12 @@ enum ProjectPathNormalizer {
             : repositoryIndex + 1
         guard projectIndex < components.count else { return nil }
 
-        let worktree = components[projectIndex]
-        let baseProject = gitWorktreeBaseProjectName(in: components, cwd: cwd, worktreeIndex: projectIndex)
-            ?? capitalizedDesktopWorktreeBase(from: worktree)
-        guard let baseProject,
-              let project = normalizedProjectComponent(baseProject),
-              let worktreeName = normalizedWorktreeComponent(worktree),
-              worktreeName != project else {
-            return nil
+        var parentComponents = Array(components.prefix(projectIndex))
+        if parentComponents.isEmpty {
+            parentComponents = ["/"]
         }
-        return .name(project, worktree: worktreeName)
+        let parentPath = NSString.path(withComponents: parentComponents)
+        return RepositoryRoot(parentURL: URL(fileURLWithPath: parentPath, isDirectory: true), projectIndex: projectIndex)
     }
 
     private static func repositoryProjectName(in components: [String]) -> String? {
@@ -1162,6 +1251,43 @@ enum ProjectPathNormalizer {
         return project
     }
 
+    private static func originMatchedBaseProjectName(
+        cwd: String,
+        components: [String],
+        repositoryRoot: RepositoryRoot,
+        gitRepositoryURL: String?,
+        gitBranch: String? = nil
+    ) -> String? {
+        guard let normalizedTarget = normalizedGitOriginURL(gitRepositoryURL),
+              gitBranch?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              repositoryRoot.projectIndex < components.count else {
+            return nil
+        }
+        let currentRoot = worktreeRootURL(cwd: cwd, components: components, worktreeIndex: repositoryRoot.projectIndex)
+            .standardizedFileURL.path
+        let cacheKey = "\(repositoryRoot.parentURL.standardizedFileURL.path)|\(currentRoot)|\(normalizedTarget)" as NSString
+        if let cached = gitOriginBaseCache.object(forKey: cacheKey) {
+            return cached.value
+        }
+
+        let project = readOriginMatchedBaseProjectName(
+            parentURL: repositoryRoot.parentURL,
+            currentRoot: currentRoot,
+            normalizedTarget: normalizedTarget
+        )
+        gitOriginBaseCache.setObject(CachedWorktreeBase(project), forKey: cacheKey)
+        return project
+    }
+
+    private static func worktreeRootURL(cwd: String, components: [String], worktreeIndex: Int) -> URL {
+        var worktreeURL = URL(fileURLWithPath: cwd).standardizedFileURL
+        let trailingComponentCount = max(components.count - worktreeIndex - 1, 0)
+        for _ in 0..<trailingComponentCount {
+            worktreeURL.deleteLastPathComponent()
+        }
+        return worktreeURL
+    }
+
     private static func readGitWorktreeBaseProjectName(from worktreeURL: URL) -> String? {
         let gitFileURL = worktreeURL.appendingPathComponent(".git", isDirectory: false)
         guard let gitFile = try? String(contentsOf: gitFileURL, encoding: .utf8) else {
@@ -1184,37 +1310,77 @@ enum ProjectPathNormalizer {
         return normalizedProjectComponent(gitComponents[gitIndex - 1])
     }
 
-    private static func capitalizedDesktopWorktreeBase(from name: String) -> String? {
-        let pieces = name.split(separator: "-", omittingEmptySubsequences: true)
-        guard pieces.count >= 3 else { return nil }
+    private static func readOriginMatchedBaseProjectName(
+        parentURL: URL,
+        currentRoot: String,
+        normalizedTarget: String
+    ) -> String? {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: parentURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard entry.standardizedFileURL.path != currentRoot,
+                  (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+                  normalizedProjectComponent(entry.lastPathComponent) != nil,
+                  normalizedGitOriginURL(readGitOriginURL(from: entry, allowWorktreeGitFile: false)) == normalizedTarget else {
+                continue
+            }
+            return entry.lastPathComponent
+        }
+        return nil
+    }
 
-        var basePieces: [Substring] = []
-        for piece in pieces {
-            if isCapitalizedProjectSegment(String(piece)) {
-                basePieces.append(piece)
-            } else {
-                break
+    private static func readGitOriginURL(from repositoryURL: URL, allowWorktreeGitFile: Bool = true) -> String? {
+        let gitURL = repositoryURL.appendingPathComponent(".git")
+        let configURL: URL
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: gitURL.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            configURL = gitURL.appendingPathComponent("config")
+        } else if allowWorktreeGitFile,
+                  let gitFile = try? String(contentsOf: gitURL, encoding: .utf8),
+                  let gitdir = gitFile
+                    .split(whereSeparator: \.isNewline)
+                    .first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("gitdir:") })?
+                    .trimmingCharacters(in: .whitespaces)
+                    .dropFirst("gitdir:".count)
+                    .trimmingCharacters(in: .whitespacesAndNewlines) {
+            configURL = URL(fileURLWithPath: gitdir).appendingPathComponent("config")
+        } else {
+            return nil
+        }
+        guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+        var inOrigin = false
+        for rawLine in config.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                inOrigin = line == #"[remote "origin"]"#
+                continue
+            }
+            guard inOrigin, line.hasPrefix("url") else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            if parts.count == 2, !parts[1].isEmpty {
+                return parts[1]
             }
         }
-
-        guard basePieces.count >= 2, basePieces.count < pieces.count else { return nil }
-        let suffixPieces = pieces.dropFirst(basePieces.count)
-        guard !suffixPieces.allSatisfy({ isVersionLikeSegment(String($0)) }) else { return nil }
-        return basePieces.joined(separator: "-")
+        return nil
     }
 
-    private static func isCapitalizedProjectSegment(_ segment: String) -> Bool {
-        guard let first = segment.unicodeScalars.first,
-              CharacterSet.uppercaseLetters.contains(first) else {
-            return false
+    private static func normalizedGitOriginURL(_ value: String?) -> String? {
+        guard var value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
         }
-        return segment.unicodeScalars.contains { CharacterSet.letters.contains($0) }
-    }
-
-    private static func isVersionLikeSegment(_ segment: String) -> Bool {
-        guard !segment.isEmpty else { return false }
-        let pattern = #"^v?\d+(?:[._]\d+)*$"#
-        return segment.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        if value.hasSuffix(".git") {
+            value.removeLast(4)
+        }
+        return value.lowercased()
     }
 
     private static func displayName(fromGeneratedWorktreeBase base: String) -> String? {
@@ -1249,6 +1415,37 @@ private func extractBranch(fromRawJSON raw: String) -> String? {
            !b.isEmpty { return b }
         if let repo = obj["repo"] as? [String: Any], let b = repo["branch"] as? String { return b }
         if let b = obj["branch"] as? String { return b }
+    }
+    return nil
+}
+
+private func extractRepositoryURL(fromRawJSON raw: String) -> String? {
+    if let data = raw.data(using: .utf8),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        if let value = firstRepositoryURL(in: obj) { return value }
+        if let payload = obj["payload"] as? [String: Any],
+           let value = firstRepositoryURL(in: payload) {
+            return value
+        }
+        if let git = obj["git"] as? [String: Any],
+           let value = firstRepositoryURL(in: git) {
+            return value
+        }
+        if let payload = obj["payload"] as? [String: Any],
+           let git = payload["git"] as? [String: Any],
+           let value = firstRepositoryURL(in: git) {
+            return value
+        }
+    }
+    return nil
+}
+
+private func firstRepositoryURL(in dict: [String: Any]) -> String? {
+    for key in ["git_origin_url", "repository_url", "origin_url", "remote_url", "url"] {
+        if let value = dict[key] as? String,
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return value
+        }
     }
     return nil
 }

@@ -1342,6 +1342,8 @@ final class SessionIndexer: ObservableObject {
         let id: String
         let rolloutPath: String
         let cwd: String?
+        let gitBranch: String?
+        let gitOriginURL: String?
         let title: String?
         let firstUserMessage: String?
 
@@ -1416,7 +1418,7 @@ final class SessionIndexer: ObservableObject {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT id, rollout_path, cwd, title,
+        SELECT id, rollout_path, cwd, git_branch, git_origin_url, title,
                CASE WHEN length(trim(title)) > 0 THEN NULL ELSE substr(first_user_message, 1, ?) END
         FROM threads;
         """
@@ -1436,8 +1438,10 @@ final class SessionIndexer: ObservableObject {
                 id: String(cString: idCString),
                 rolloutPath: String(cString: pathCString),
                 cwd: sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 2)),
-                title: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3)),
-                firstUserMessage: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 4))
+                gitBranch: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 3)),
+                gitOriginURL: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 4)),
+                title: sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 5)),
+                firstUserMessage: sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 6))
             )
             byID[thread.id] = thread
             byPath[normalizeCodexRolloutPath(thread.rolloutPath)] = thread
@@ -1464,9 +1468,15 @@ final class SessionIndexer: ObservableObject {
                 ? nil
                 : thread.bestTitle
             let cwd = nonEmptyCodexStateCwd(thread.cwd) ?? sessions[i].lightweightCwd
+            let repoName = ProjectPathNormalizer.codexDesktopProjectNameFromGitMetadata(
+                cwd: cwd,
+                gitRepositoryURL: thread.gitOriginURL,
+                gitBranch: thread.gitBranch
+            ) ?? sessions[i].lightweightRepoName
             let titleChanged = title != nil && title != sessions[i].lightweightTitle
             let cwdChanged = cwd != sessions[i].lightweightCwd
-            guard titleChanged || cwdChanged else { continue }
+            let repoChanged = repoName != sessions[i].lightweightRepoName
+            guard titleChanged || cwdChanged || repoChanged else { continue }
 
             let wasFavorite = sessions[i].isFavorite
             var rebuilt = Session(
@@ -1480,7 +1490,7 @@ final class SessionIndexer: ObservableObject {
                 eventCount: sessions[i].eventCount,
                 events: sessions[i].events,
                 cwd: cwd,
-                repoName: nil,
+                repoName: repoName,
                 lightweightTitle: title ?? sessions[i].lightweightTitle,
                 lightweightCommands: sessions[i].lightweightCommands,
                 isHousekeeping: sessions[i].isHousekeeping,

@@ -722,6 +722,22 @@ final class SessionParserTests: XCTestCase {
             originSource: "vscode",
             surface: .desktop
         )
+        let codexDesktopCapitalizedRepository = Session(
+            id: "codex-desktop-capitalized-repository",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repository/Junior-Tennis-Academy-map",
+            repoName: "Junior-Tennis-Academy-map",
+            lightweightTitle: "Academy map",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: .desktop
+        )
 
         XCTAssertEqual(tennisWorktree.repoName, "tennis-scraper")
         XCTAssertEqual(claudeWorktree.repoName, "Codex-History")
@@ -729,10 +745,12 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(numberedSiblingWorktreeSubdir.repoName, "Triada")
         XCTAssertEqual(nestedNumberedSiblingWorktree.repoName, "tennis-scraper")
         XCTAssertEqual(nestedNumberedSiblingWorktreeSubdir.repoName, "tennis-scraper")
-        XCTAssertEqual(codexDesktopSiblingWorktree.repoName, "Codex-History")
-        XCTAssertEqual(codexDesktopSiblingWorktree.projectWorktreeDisplayName, "Codex-History-pi-support")
-        XCTAssertEqual(codexDesktopSiblingWorktreeSubdir.repoName, "Codex-History")
-        XCTAssertEqual(codexDesktopSiblingWorktreeSubdir.projectWorktreeDisplayName, "Codex-History-pi-support")
+        XCTAssertEqual(codexDesktopSiblingWorktree.repoName, "Codex-History-pi-support")
+        XCTAssertNil(codexDesktopSiblingWorktree.projectWorktreeDisplayName)
+        XCTAssertEqual(codexDesktopSiblingWorktreeSubdir.repoName, "Codex-History-pi-support")
+        XCTAssertNil(codexDesktopSiblingWorktreeSubdir.projectWorktreeDisplayName)
+        XCTAssertEqual(codexDesktopCapitalizedRepository.repoName, "Junior-Tennis-Academy-map")
+        XCTAssertNil(codexDesktopCapitalizedRepository.projectWorktreeDisplayName)
         XCTAssertEqual(tennisWorktree.projectWorktreeDisplayName, "visual-redesign")
         XCTAssertEqual(claudeWorktree.projectWorktreeDisplayName, "flamboyant-elion-309182")
         XCTAssertEqual(numberedSiblingWorktree.projectWorktreeDisplayName, "triada-54")
@@ -770,6 +788,90 @@ final class SessionParserTests: XCTestCase {
 
         XCTAssertEqual(session.repoName, "agent-sessions")
         XCTAssertEqual(session.projectWorktreeDisplayName, "agent-sessions-ui")
+    }
+
+    func testCodexDesktopArbitrarySiblingWorktreeUsesGitOriginMetadata() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OriginMetadata-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let repo = root.appendingPathComponent("Repository", isDirectory: true)
+        let base = repo.appendingPathComponent("stable-home", isDirectory: true)
+        let worktree = repo.appendingPathComponent("build-lab-seven", isDirectory: true)
+        try fm.createDirectory(at: base.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        try fm.createDirectory(at: worktree.appendingPathComponent("Sources", isDirectory: true), withIntermediateDirectories: true)
+        try writeText(
+            """
+            [remote "origin"]
+            \turl = https://example.test/acme/widgets.git
+            """,
+            to: base.appendingPathComponent(".git/config")
+        )
+
+        let raw = #"{"type":"session_meta","payload":{"cwd":"\#(worktree.appendingPathComponent("Sources").path)","originator":"Codex Desktop","source":"exec","git":{"branch":"feature/blue","repository_url":"https://example.test/acme/widgets.git"}}}"#
+        let event = SessionEvent(
+            id: "origin-meta",
+            timestamp: nil,
+            kind: .meta,
+            role: nil,
+            text: nil,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: raw
+        )
+
+        let session = Session(
+            id: "codex-desktop-arbitrary-origin-worktree",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 1,
+            events: [event],
+            originator: "Codex Desktop",
+            originSource: "exec",
+            surface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "stable-home")
+        XCTAssertEqual(session.projectWorktreeDisplayName, "build-lab-seven")
+    }
+
+    func testCodexDesktopSiblingRepositoryWithoutGitOriginMetadataDoesNotUseBaseDirectoryFallback() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ExistingSiblingRepo-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let repo = root.appendingPathComponent("Repository", isDirectory: true)
+        let base = repo.appendingPathComponent("alpha-control", isDirectory: true)
+        let standalone = repo.appendingPathComponent("delta-client-space", isDirectory: true)
+        try fm.createDirectory(at: base, withIntermediateDirectories: true)
+        try fm.createDirectory(at: standalone, withIntermediateDirectories: true)
+
+        let session = Session(
+            id: "codex-desktop-existing-sibling-repo",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/test/.codex/sessions/2026/05/12/rollout-2026-05-12T18-00-00-thread.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: standalone.path,
+            repoName: "delta-client-space",
+            lightweightTitle: "Standalone repo",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: .desktop
+        )
+
+        XCTAssertEqual(session.repoName, "delta-client-space")
+        XCTAssertNil(session.projectWorktreeDisplayName)
     }
 
     func testNumericRepositoryNamesDoNotNormalizeAsGeneratedWorktrees() throws {
