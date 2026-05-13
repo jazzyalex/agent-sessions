@@ -10,7 +10,6 @@
 <td>
 
 **Unified session browser for Codex, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, OpenClaw, and Pi CLI sessions across CLI and desktop surfaces.**
-Droid histories remain importable for legacy sessions, but Droid is no longer an actively supported provider.
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
 </td>
