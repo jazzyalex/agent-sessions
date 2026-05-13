@@ -92,7 +92,7 @@ Target launch day (T+0): Tuesday or Wednesday, 9:00 AM Pacific.
 - [ ] Launch Product Hunt listing at 12:01 AM Pacific (Thursday)
 - [ ] Post first comment on PH (from product-hunt.md)
 - [ ] Share PH link on X/Twitter
-- [ ] Share PH link in relevant Slack communities (e.g., Claude Code users, Codex users)
+- [ ] Share PH link in relevant Slack communities (e.g., Claude CLI users, Codex CLI users)
 
 ## T+4
 
@@ -127,7 +127,7 @@ Target launch day (T+0): Tuesday or Wednesday, 9:00 AM Pacific.
 
 ### Week 3
 - Mon: X — "Privacy model: what Agent Sessions reads and what it never touches"
-- Wed: Reddit r/ClaudeAI — "How I use Agent Sessions + Claude Code daily" (workflow post, genuine)
+- Wed: Reddit r/ClaudeAI — "How I use Agent Sessions + Claude CLI daily" (workflow post, genuine)
 - Fri: X — Usage tracking feature (menu bar screenshot)
 
 ### Week 4

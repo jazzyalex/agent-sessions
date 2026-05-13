@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for Codex, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, OpenClaw, and Pi CLI sessions across CLI and desktop surfaces.**
+**Unified session browser for Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Hermes CLI, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode CLI, OpenClaw CLI, and Pi CLI sessions across CLI and desktop surfaces.**
 Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
 
 </td>
@@ -40,8 +40,8 @@ Agent Sessions helps you search across large session histories, quickly find the
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
   <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
 
-  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI, Claude Code, and OpenCode sessions</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude Code, and OpenCode sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
+  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI, Claude CLI, and OpenCode CLI sessions</em></p>
+  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude CLI, and OpenCode CLI sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
 ## Security & Privacy
@@ -59,23 +59,24 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 **TL;DR** - Agent Sessions is expanding beyond CLI-only workflows into a broader session hub, and Pi CLI now joins the supported agent lineup.
 
-**Highlights:** Agent Sessions now treats CLI and native-app sessions as part of one growing workspace. Codex Desktop and Claude Desktop sessions are easier to identify and filter, archived Codex Desktop sessions are easier to browse, and desktop chat/worktree rows now preserve clearer project context. Alongside that broader hub direction, Agent Sessions adds tier-2 Pi CLI support with local JSONL discovery, browsing, search, Preferences controls, Pi-specific styling, and Resume/Copy Resume commands via `pi --session`.
+**Highlights:** Agent Sessions now treats CLI and native-app sessions as part of one growing workspace. Codex Desktop and Claude Desktop sessions are easier to identify and filter, archived Codex Desktop sessions are easier to browse, and desktop chat/worktree rows now preserve clearer project context. Hermes CLI is now part of that broader searchable and resumable workspace, and Agent Sessions also adds tier-2 Pi CLI support with local JSONL discovery, browsing, search, Preferences controls, Pi-specific styling, and Resume/Copy Resume commands via `pi --session`.
 
 ## Core Features
 
-- Agent Cockpit live HUD for active Codex CLI, Claude Code, and OpenCode iTerm2 sessions.
-- Browse and search Codex sessions across CLI, Desktop, and VS Code in one place.
-- Browse Claude Code sessions across CLI and Desktop surfaces with consistent labels and project context.
+- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
+- Browse and search Codex CLI, Codex Desktop, and Codex VS Code sessions in one place.
+- Browse Claude CLI and Claude Desktop sessions with consistent labels and project context.
+- Hermes CLI sessions participate in browsing, search, filtering, analytics, and resume workflows.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Right-click Copy Resume Command for Claude, Codex, OpenCode, Copilot, and Gemini sessions.
+- Right-click Copy Resume Command for Claude CLI, Codex CLI, OpenCode CLI, GitHub Copilot CLI, and Gemini CLI sessions.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude Code, and OpenCode sessions, with shared active/waiting summaries and live Claude usage tracking.
+Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode CLI sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
@@ -136,7 +137,7 @@ open "/Applications/Agent Sessions.app"
 
 ## Resume Workflows
 
-- Right-click any Claude, Codex, Cursor, OpenCode, Copilot, or Gemini session and choose **Copy Resume Command** to get the exact CLI command for that session.
+- Right-click any Claude CLI, Codex CLI, Cursor CLI, OpenCode CLI, GitHub Copilot CLI, or Gemini CLI session and choose **Copy Resume Command** to get the exact CLI command for that session.
 - Open a session in your preferred terminal (Terminal.app or iTerm).
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 

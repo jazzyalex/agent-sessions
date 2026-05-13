@@ -12,7 +12,7 @@ Search and resume local AI coding sessions on macOS
 
 ## Description
 
-Agent Sessions is a local-first macOS app that unifies your AI coding history. Browse and search sessions from Codex CLI, Claude Code, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode, and OpenClaw in one native window. Droid import remains available for legacy histories, but Droid is not part of the active support set.
+Agent Sessions is a local-first macOS app that unifies your AI coding history. Browse and search sessions from Codex CLI, Codex Desktop, Codex VS Code, Claude CLI, Claude Desktop, Hermes CLI, Pi CLI, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode CLI, and OpenClaw CLI in one native window.
 
 No telemetry. No cloud account. No session-history uploads. Just your local agent history, searchable and resumable where the underlying CLI supports it.
 
@@ -21,8 +21,10 @@ No telemetry. No cloud account. No session-history uploads. Just your local agen
 - Full-text search across agents and within sessions
 - Formatted transcript view with readable tool calls and navigation between prompts
 - Right-click supported sessions -> Copy Resume Command -> paste into Terminal or iTerm2
-- Codex local history from CLI, Desktop, and VS Code in one searchable view
-- Agent Cockpit: live HUD for active iTerm2 Codex, Claude, and OpenCode sessions
+- Codex CLI, Codex Desktop, and Codex VS Code history in one searchable view
+- Claude Desktop sessions surface alongside CLI history with desktop-specific labels and clearer project context
+- Hermes CLI and Pi CLI sessions join the same unified browser instead of living in separate tools
+- Agent Cockpit: live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode CLI sessions
 
 **Current release focus:**
 - Menu bar controls update immediately when Preferences change
@@ -43,7 +45,7 @@ Developer Tools · macOS · Open Source · Artificial Intelligence · Productivi
 
 Hey PH,
 
-I built Agent Sessions because I was grepping through JSON files trying to find old Claude Code prompts. There had to be a better way.
+I built Agent Sessions because I was grepping through JSON files trying to find old Claude CLI prompts. There had to be a better way.
 
 The core insight: all the major AI coding CLIs store their sessions locally in semi-structured formats, but none of them ship a good history browser. So I built one that works across all of them.
 

@@ -6,9 +6,9 @@ Post all 4 within 2 hours. Space them ~30 minutes apart. Pin post 1.
 
 ## Post 1 — Hook
 
-You use Claude Code, Codex CLI, maybe Gemini. Your sessions are scattered across hidden folders in three different formats.
+You use Claude CLI, Codex CLI, maybe Hermes CLI or Pi CLI. Your sessions are scattered across hidden folders and desktop app storage in different formats.
 
-I built Agent Sessions — a macOS app that puts all your AI coding sessions in one searchable window.
+I built Agent Sessions — a macOS app that puts all your AI coding sessions in one searchable window across CLI tools and desktop apps.
 
 100% local. No telemetry. MIT licensed.
 
@@ -16,13 +16,13 @@ I built Agent Sessions — a macOS app that puts all your AI coding sessions in 
 
 ---
 
-## Post 2 — The 3.4 feature
+## Post 2 — The 3.8 shift
 
-New in 3.4: subagent hierarchy.
+New in 3.8: Agent Sessions stops being just a CLI-history tool.
 
-When Codex CLI spawns worker agents, they now nest under their parent session. No more guessing which subagent did what.
+Codex Desktop and Claude Desktop sessions now fit naturally into the same browser, and Pi CLI joins the supported lineup too.
 
-Agent Cockpit shows live subagent counts per session too.
+That means one place to search, filter, and resume work no matter where the session started.
 
 [attach: screenshot-subagent-hierarchy.png]
 
@@ -45,18 +45,19 @@ No re-explaining. No lost context.
 ## Post 4 — CTA
 
 Agent Sessions supports:
-- Codex CLI
-- Claude Code
+- Codex CLI/Desktop/VS Code
+- Claude CLI/Desktop
+- Hermes CLI
+- Pi CLI
 - Gemini CLI
 - GitHub Copilot CLI
-- Droid (Factory)
-- OpenCode
-- OpenClaw
+- OpenCode CLI
+- OpenClaw CLI
 
 Free, open source, local-first.
 
 GitHub: https://github.com/jazzyalex/agent-sessions
-Download: https://github.com/jazzyalex/agent-sessions/releases/download/v3.4/AgentSessions-3.4.dmg
+Download: https://github.com/jazzyalex/agent-sessions/releases/download/v3.8/AgentSessions-3.8.dmg
 Homebrew: `brew install --cask agent-sessions`
 
 Star if it's useful to you ⭐

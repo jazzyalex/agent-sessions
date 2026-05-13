@@ -13,11 +13,11 @@ Submit these PRs at T-3 (3 days before Show HN). They take time to review and me
 **Entry to add** (find the "Tools" or "Utilities" section):
 
 ```markdown
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Local-first macOS session browser for Claude Code (and 6 other AI coding CLIs). Search, browse, and resume sessions. Agent Cockpit live HUD with token usage tracking. MIT licensed.
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Local-first macOS session browser for Claude CLI and other AI coding agents across CLI and desktop surfaces. Search, browse, and resume sessions. Agent Cockpit live command center with token usage tracking. MIT licensed.
 ```
 
 **PR description:**
-> Agent Sessions is a native macOS app that indexes Claude Code session files locally and provides full-text search, transcript browsing, and a resume command workflow. It also supports Codex CLI, Gemini CLI, Copilot CLI, Droid, OpenCode, and OpenClaw in the same interface. Local-first, no telemetry, MIT licensed.
+> Agent Sessions is a native macOS app that indexes Claude CLI session files locally and provides full-text search, transcript browsing, and a resume command workflow. It also supports Codex CLI/Desktop/VS Code, Hermes CLI, Pi CLI, Gemini CLI, GitHub Copilot CLI, OpenCode CLI, and OpenClaw CLI in the same interface, with growing desktop-session support for Claude Desktop too. Local-first, no telemetry, MIT licensed.
 
 ---
 
@@ -30,11 +30,11 @@ Submit these PRs at T-3 (3 days before Show HN). They take time to review and me
 **Entry to add** (Developer Tools section):
 
 ```markdown
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Unified session browser for AI coding CLIs (Codex CLI, Claude Code, Gemini CLI, Copilot CLI, and more). Local-first, no telemetry. [![Open-Source Software][OSS Icon]](https://github.com/jazzyalex/agent-sessions) ![Freeware][Freeware Icon]
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Unified session browser for AI coding CLIs and desktop-session surfaces (Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Gemini CLI, GitHub Copilot CLI, and more). Local-first, no telemetry. [![Open-Source Software][OSS Icon]](https://github.com/jazzyalex/agent-sessions) ![Freeware][Freeware Icon]
 ```
 
 **PR description:**
-> Agent Sessions is a native macOS app (macOS 14+, signed and notarized) that unifies session history across 7 AI coding CLI tools. Local-first, MIT licensed, no telemetry.
+> Agent Sessions is a native macOS app (macOS 14+, signed and notarized) that unifies session history across multiple AI coding agents and now spans both CLI and desktop-session surfaces. Local-first, MIT licensed, no telemetry.
 
 ---
 
@@ -47,11 +47,11 @@ Submit these PRs at T-3 (3 days before Show HN). They take time to review and me
 **Entry to add:**
 
 ```markdown
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Native macOS session browser with Codex subagent hierarchy, Agent Cockpit live HUD, and usage tracking. Supports 7 agents. Local-first, MIT licensed.
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Native macOS session browser with Codex subagent hierarchy, Agent Cockpit live command center, and usage tracking across a growing set of AI coding agents. Local-first, MIT licensed.
 ```
 
 **PR description:**
-> Agent Sessions is particularly useful for Codex CLI users: it shows subagent sessions nested under their parent (new in v3.4), tracks Codex token usage, and provides a right-click "Copy Resume Command" workflow. Also supports Claude Code, Gemini CLI, Copilot CLI, Droid, and OpenCode.
+> Agent Sessions is particularly useful for Codex CLI users: it shows subagent sessions nested under their parent, tracks Codex token usage, and provides a right-click "Copy Resume Command" workflow. It also supports Claude CLI/Desktop, Hermes CLI, Pi CLI, Gemini CLI, GitHub Copilot CLI, OpenCode CLI, and OpenClaw CLI, with Codex Desktop and Codex VS Code sessions kept in the same searchable corpus.
 
 ---
 
@@ -64,7 +64,7 @@ Submit these PRs at T-3 (3 days before Show HN). They take time to review and me
 **Entry to add:**
 
 ```markdown
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Browse and resume Gemini CLI sessions alongside Claude Code, Codex CLI, and 4 other agents. Native macOS app, local-first, MIT licensed.
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Browse and resume Gemini CLI sessions alongside Claude CLI/Desktop, Codex CLI/Desktop/VS Code, Hermes CLI, Pi CLI, and other AI coding agents. Native macOS app, local-first, MIT licensed.
 ```
 
 **PR description:**
@@ -81,7 +81,7 @@ Submit these PRs at T-3 (3 days before Show HN). They take time to review and me
 **Entry to add** (Workflow Tools or similar section):
 
 ```markdown
-- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Local-first macOS app for searching and resuming AI coding CLI sessions (Codex, Claude, Gemini, Copilot, and more). Useful for cross-session context retrieval.
+- [Agent Sessions](https://github.com/jazzyalex/agent-sessions) - Local-first macOS app for searching and resuming AI coding sessions across CLI tools and desktop apps (Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Hermes CLI, Pi CLI, Gemini CLI, GitHub Copilot CLI, and more). Useful for cross-session context retrieval.
 ```
 
 ---

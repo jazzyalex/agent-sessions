@@ -16,7 +16,7 @@ Opening hook (first person, specific):
 > Last Tuesday I spent 20 minutes grepping through ~/.claude/sessions looking for a prompt where I'd worked out a database migration strategy. I remembered the session existed. I remembered it worked. I couldn't find it.
 
 Expand the pain:
-- You switch between agents (Claude Code for work, Codex for side projects, maybe Gemini for experiments)
+- You switch between agents (Claude CLI for work, Codex CLI for side projects, maybe Gemini CLI for experiments)
 - Each tool stores sessions in a completely different format, in a different hidden directory
 - None of them have a good native history browser
 - When you start a new session on the same problem, you spend the first 10 minutes re-explaining context the agent already knew last week
