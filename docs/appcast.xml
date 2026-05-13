@@ -3,14 +3,28 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.7.1</title>
-            <pubDate>Fri, 01 May 2026 20:31:55 -0700</pubDate>
+            <title>3.8</title>
+            <pubDate>Tue, 12 May 2026 20:17:29 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.7.1</h2>
+<h2>What&#x27;s New in 3.8</h2>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Claude: Standard `~/.claude` transcripts launched from Claude Desktop now persist Desktop origin metadata and show the `desk` pill instead of the CLI pill.</li>
-<li>Session list: Claude Desktop rows keep the `desk` pill even when cached rows have not yet hydrated generic surface metadata.</li>
+<li>Analytics: Prevented the time-series chart from crashing when enabled agents such as Hermes appear in the data.</li>
+<li>Analytics: Chart coloring now derives from the actual enabled agent data, preventing mismatches or crashes when newer providers appear in the dataset.</li>
+<li>Analytics: Project filters now collapse generated worktree, publish-clone, and nested output folder names back to their parent repository.</li>
+<li>Pi/Search: Large Pi session files stay lightweight during ordinary search and full transcript parsing is size-capped by default, avoiding expensive JSONL reads unless deep scan explicitly opts in.</li>
+<li>Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.</li>
+<li>Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li>Agent Sessions is expanding beyond CLI-only workflows into a broader session hub: Codex Desktop and Claude Desktop sessions are now easier to identify, group, filter, and browse alongside CLI sessions in one place.</li>
+<li>Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.</li>
+<li>Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li>Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.</li>
 </ul>
 <h3>Reminder: What You Got in 3.7</h3>
 <ul>
@@ -18,12 +32,12 @@
 <li>Session list: Claude rows now use the same Agent-column `cli` and `desk` surface pills as Codex rows.</li>
 <li>Indexing: Session origin metadata now has generic originator/source/surface fields so non-Codex providers can use desktop or IDE surface labels without reusing Codex-specific columns.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.7.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8</a></p>
             ]]></description>
-            <sparkle:version>45</sparkle:version>
-            <sparkle:shortVersionString>3.7.1</sparkle:shortVersionString>
+            <sparkle:version>46</sparkle:version>
+            <sparkle:shortVersionString>3.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.7.1/AgentSessions-3.7.1.dmg" length="17222937" type="application/octet-stream" sparkle:edSignature="FAMKMuOWzsUCDKw5yrSKfpL9MkETODkW5yECuZoQ2yTkTHXa5aEvexFXXymluznWDJVT1y6npfSfqLeYs6n0DQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8/AgentSessions-3.8.dmg" length="17626302" type="application/octet-stream" sparkle:edSignature="h2FiTSydI6bxVlME98TQr84zvSpklf/7gkKsT7PizPGn6VheFDxMgMobs/oDIms2FRD+L4Xp8NUkEVLMTa/VDA=="/>
         </item>
     </channel>
 </rss>
