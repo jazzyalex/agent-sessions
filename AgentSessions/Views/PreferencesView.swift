@@ -237,16 +237,15 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                Spacer()
-                    .frame(height: 4)
                 Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
+                    .padding(.top, 1)
                     .tag(PreferencesTab.about)
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                ForEach([PreferencesTab.openClawCLI, .cursor, .pi], id: \.self) { tab in
+                ForEach([PreferencesTab.cursor, .pi, .hermesCLI, .openClawCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -1090,7 +1089,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .hermesCLI, .copilotCLI, .openClawCLI, .cursor, .pi] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
 }
 
 // MARK: - Probe helpers
