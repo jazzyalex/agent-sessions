@@ -22,9 +22,15 @@ enum CodexLiveState: String, Sendable, CaseIterable {
 struct CodexActivePresence: Codable, Equatable, Sendable {
     struct Terminal: Codable, Equatable, Sendable {
         var termProgram: String?
+        var cfBundleIdentifier: String?
         var itermSessionId: String?
+        var warpFocusURL: String?
         var revealUrl: String?
         var tabTitle: String?
+
+        var terminalKind: TerminalKind {
+            TerminalKind.infer(termProgram: termProgram, cfBundleIdentifier: cfBundleIdentifier)
+        }
     }
 
     var schemaVersion: Int?
@@ -995,6 +1001,8 @@ final class CodexActiveSessionsModel: ObservableObject {
                 if let envMeta = envByPID[info.pid] {
                     info.termProgram = envMeta.termProgram
                     info.itermSessionId = envMeta.itermSessionId
+                    info.cfBundleIdentifier = envMeta.cfBundleIdentifier
+                    info.warpFocusURL = envMeta.warpFocusURL
                 }
                 var presence = CodexActivePresence()
                 presence.schemaVersion = 1
@@ -1025,6 +1033,8 @@ final class CodexActiveSessionsModel: ObservableObject {
                 var terminal = CodexActivePresence.Terminal()
                 terminal.termProgram = info.termProgram
                 terminal.itermSessionId = info.itermSessionId
+                terminal.cfBundleIdentifier = info.cfBundleIdentifier
+                terminal.warpFocusURL = info.warpFocusURL
                 presence.terminal = terminal
                 out.append(presence)
             }
@@ -1090,7 +1100,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             sessionLogFD: preferredSessionLogFD,
             openSessionLogPaths: openSessionLogPaths,
             termProgram: incoming.termProgram ?? existing.termProgram,
-            itermSessionId: incoming.itermSessionId ?? existing.itermSessionId
+            itermSessionId: incoming.itermSessionId ?? existing.itermSessionId,
+            cfBundleIdentifier: incoming.cfBundleIdentifier ?? existing.cfBundleIdentifier,
+            warpFocusURL: incoming.warpFocusURL ?? existing.warpFocusURL
         )
     }
 
@@ -1579,7 +1591,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         if var t = merged.terminal {
             let other = loser.terminal
             t.termProgram = prefer(t.termProgram, other?.termProgram)
+            t.cfBundleIdentifier = prefer(t.cfBundleIdentifier, other?.cfBundleIdentifier)
             t.itermSessionId = prefer(t.itermSessionId, other?.itermSessionId)
+            t.warpFocusURL = prefer(t.warpFocusURL, other?.warpFocusURL)
             t.revealUrl = prefer(t.revealUrl, other?.revealUrl)
             t.tabTitle = prefer(t.tabTitle, other?.tabTitle)
             merged.terminal = t
@@ -3796,6 +3810,8 @@ final class CodexActiveSessionsModel: ObservableObject {
                 if infos[pid] != nil {
                     infos[pid]?.termProgram = meta.termProgram
                     infos[pid]?.itermSessionId = meta.itermSessionId
+                    infos[pid]?.cfBundleIdentifier = meta.cfBundleIdentifier
+                    infos[pid]?.warpFocusURL = meta.warpFocusURL
                 }
             }
         }
@@ -3818,6 +3834,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             var t = CodexActivePresence.Terminal()
             t.termProgram = info.termProgram
             t.itermSessionId = info.itermSessionId
+            t.cfBundleIdentifier = info.cfBundleIdentifier
+            t.warpFocusURL = info.warpFocusURL
             // Don't precompute revealUrl; CodexActivePresence will synthesize from itermSessionId.
             p.terminal = t
             out.append(p)
@@ -3842,7 +3860,9 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     struct PSProcessEnvMeta: Equatable, Sendable {
         var termProgram: String?
+        var cfBundleIdentifier: String?
         var itermSessionId: String?
+        var warpFocusURL: String?
     }
 
     struct PSCommandInfo: Equatable, Sendable {
@@ -3860,7 +3880,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         var sessionLogFD: Int = Int.max       // Numeric FD of sessionLogPath (for lowest-FD selection)
         var openSessionLogPaths: [String] = []  // All JSONL files open by this PID
         var termProgram: String?
+        var cfBundleIdentifier: String?
         var itermSessionId: String?
+        var warpFocusURL: String?
     }
 
     struct ITermSessionInfo: Equatable, Sendable {
@@ -4326,8 +4348,15 @@ final class CodexActiveSessionsModel: ObservableObject {
 
             let iterm = extract("ITERM_SESSION_ID") ?? extract("TERM_SESSION_ID")
             let termProgram = extract("TERM_PROGRAM")
-            if iterm == nil && termProgram == nil { continue }
-            out[pid] = PSProcessEnvMeta(termProgram: termProgram, itermSessionId: iterm)
+            let cfBundle = extract("__CFBundleIdentifier")
+            let warpFocusURL = extract("WARP_FOCUS_URL")
+            if iterm == nil && termProgram == nil && cfBundle == nil { continue }
+            out[pid] = PSProcessEnvMeta(
+                termProgram: termProgram,
+                cfBundleIdentifier: cfBundle,
+                itermSessionId: iterm,
+                warpFocusURL: warpFocusURL
+            )
         }
         return out
     }
