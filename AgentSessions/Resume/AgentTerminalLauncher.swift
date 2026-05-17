@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Shared terminal launcher used by all agent resume flows.
 /// Runs a shell command in Terminal.app or iTerm2 via AppleScript.
@@ -43,6 +44,45 @@ enum AgentTerminalLauncher {
         ]
 
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
+    }
+
+    /// Opens a new tab in Warp or WarpPreview via URL scheme, then types the shell command.
+    /// `kind` must be `.warp` or `.warpPreview`.
+    @MainActor
+    static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) throws {
+        guard let url = kind.newTabURL(cwd: cwd) else {
+            throw NSError(domain: "AgentTerminalLauncher", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No URL scheme for \(kind.displayName)"])
+        }
+        NSWorkspace.shared.open(url)
+
+        // Wait for the new tab to be ready, then type the command
+        let appName: String
+        switch kind {
+        case .warpPreview: appName = "WarpPreview"
+        case .warp:        appName = "Warp"
+        default:
+            throw NSError(domain: "AgentTerminalLauncher", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Unsupported kind for Warp launch"])
+        }
+
+        let scriptLines = [
+            "on run argv",
+            "set shellCommand to \"\"",
+            "if (count of argv) >= 1 then set shellCommand to item 1 of argv",
+            "delay 0.4",
+            "tell application \"System Events\"",
+            "  tell process \"\(appName)\"",
+            "    set frontmost to true",
+            "    keystroke shellCommand",
+            "    key code 36",
+            "  end tell",
+            "end tell",
+            "end run"
+        ]
+        try runAppleScript(scriptLines, arguments: [shellCommand],
+                          domain: "AgentTerminalLauncher",
+                          fallbackMessage: "\(appName) launch failed.")
     }
 
     private static func runAppleScript(_ lines: [String], arguments: [String], domain: String, fallbackMessage: String) throws {
