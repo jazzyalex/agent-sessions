@@ -69,10 +69,12 @@ enum AgentTerminalLauncher {
         let scriptLines = [
             "on run argv",
             "set shellCommand to \"\"",
+            "set appName to \"WarpPreview\"",
             "if (count of argv) >= 1 then set shellCommand to item 1 of argv",
+            "if (count of argv) >= 2 then set appName to item 2 of argv",
             "delay 0.4",
             "tell application \"System Events\"",
-            "  tell process \"\(appName)\"",
+            "  tell process appName",
             "    set frontmost to true",
             "    keystroke shellCommand",
             "    key code 36",
@@ -80,7 +82,7 @@ enum AgentTerminalLauncher {
             "end tell",
             "end run"
         ]
-        try runAppleScript(scriptLines, arguments: [shellCommand],
+        try runAppleScript(scriptLines, arguments: [shellCommand, appName],
                           domain: "AgentTerminalLauncher",
                           fallbackMessage: "\(appName) launch failed.")
     }
