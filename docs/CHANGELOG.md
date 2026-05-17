@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Add Warp and WarpPreview as terminal options for Resume and Cockpit focus
+- Terminal picker in Preferences now dynamically shows only installed terminals
+- Cockpit focus button label reflects the terminal kind of each session
+- Warp tab focus uses title-matching tab cycle; upgrades automatically to deep link when Warp exposes WARP_FOCUS_URL
 
 ## [3.8] - 2026-05-12
 ### Features
