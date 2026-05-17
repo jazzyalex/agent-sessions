@@ -67,6 +67,9 @@ struct CockpitView: View {
         let termProgram: String?
         let focusURL: URL?
         let itermSessionId: String?
+        let warpFocusURL: String?
+        let terminalKind: TerminalKind
+        let tabTitle: String?
         let tty: String?
         let focusHelp: String
         let sessionID: String?
@@ -198,6 +201,9 @@ struct CockpitView: View {
                 termProgram: p.terminal?.termProgram,
                 focusURL: p.revealURL,
                 itermSessionId: p.terminal?.itermSessionId,
+                warpFocusURL: p.terminal?.warpFocusURL,
+                terminalKind: p.terminal?.terminalKind ?? .unknown,
+                tabTitle: p.terminal?.tabTitle,
                 tty: p.tty,
                 focusHelp: focusHelp,
                 sessionID: authoritativeSessionID(for: p, resolvedSession: session),
@@ -302,7 +308,7 @@ struct CockpitView: View {
                         .foregroundStyle(rowSecondaryForeground(for: row))
                 }
                 TableColumn("Focus") { row in
-                    Button("Focus") { focus(row) }
+                    Button(row.terminalKind.focusButtonLabel) { focus(row) }
                         .buttonStyle(.bordered)
                         .disabled(!canFocus(row))
                         .help(row.focusHelp)
@@ -317,7 +323,7 @@ struct CockpitView: View {
             .disabled(!activeEnabled)
             .contextMenu(forSelectionType: String.self) { ids in
                 if ids.count == 1, let id = ids.first, let row = snapshot.filteredRows.first(where: { $0.id == id }) {
-                    Button("Focus in iTerm2") { focus(row) }
+                    Button(row.terminalKind.focusButtonLabel) { focus(row) }
                         .disabled(!activeEnabled || !canFocus(row))
                         .help(row.focusHelp)
                     Divider()
@@ -404,11 +410,33 @@ struct CockpitView: View {
     }
 
     private func focus(_ row: Row) {
-        if CodexActiveSessionsModel.tryFocusITerm2(itermSessionId: row.itermSessionId, tty: row.tty) {
-            return
-        }
-        if let url = row.focusURL {
-            NSWorkspace.shared.open(url)
+        switch row.terminalKind {
+        case .iterm2:
+            if CodexActiveSessionsModel.tryFocusITerm2(itermSessionId: row.itermSessionId, tty: row.tty) {
+                return
+            }
+            if let url = row.focusURL {
+                NSWorkspace.shared.open(url)
+            }
+        case .warp, .warpPreview:
+            Task { @MainActor in
+                _ = CodexActiveSessionsModel.focusWarpTab(
+                    sessionName: row.tabTitle,
+                    warpFocusURL: row.warpFocusURL,
+                    kind: row.terminalKind
+                )
+            }
+        default:
+            if let url = row.focusURL {
+                NSWorkspace.shared.open(url)
+            } else if let bundle = row.terminalKind.bundleIdentifier {
+                NSWorkspace.shared.launchApplication(
+                    withBundleIdentifier: bundle,
+                    options: .default,
+                    additionalEventParamDescriptor: nil,
+                    launchIdentifier: nil
+                )
+            }
         }
     }
 
@@ -451,6 +479,8 @@ struct CockpitView: View {
             tty: row.tty,
             termProgram: row.termProgram
         ) || row.focusURL != nil
+          || row.terminalKind == .warp
+          || row.terminalKind == .warpPreview
     }
 
     private func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
