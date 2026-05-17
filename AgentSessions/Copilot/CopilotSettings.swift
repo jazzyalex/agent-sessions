@@ -14,6 +14,11 @@ final class CopilotSettings: ObservableObject {
 
     @Published var binaryPath: String
     @Published var preferITerm: Bool
+
+    var terminalKind: TerminalKind {
+        ResumePreferenceHelpers.resolveTerminalKind()
+    }
+
     @Published var fallbackPolicy: CopilotFallbackPolicy
     @Published var defaultWorkingDirectory: String
 

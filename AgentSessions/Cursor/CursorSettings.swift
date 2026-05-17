@@ -20,6 +20,11 @@ final class CursorSettings: ObservableObject {
     @Published var resolvedSupportsResume: Bool
     @Published var resolvedSupportsContinue: Bool
     @Published var preferITerm: Bool
+
+    var terminalKind: TerminalKind {
+        ResumePreferenceHelpers.resolveTerminalKind()
+    }
+
     @Published var fallbackPolicy: CursorFallbackPolicy
     @Published var defaultWorkingDirectory: String
 
