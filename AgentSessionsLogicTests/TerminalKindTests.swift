@@ -69,4 +69,30 @@ final class TerminalKindTests: XCTestCase {
         let url = TerminalKind.warpPreview.newTabURL(cwd: nil)
         XCTAssertNil(url?.query)
     }
+
+    // MARK: - stripWarpTabSpinners
+
+    func testStripSpinnerPrefix() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners("⠐ agent-sessions"), "agent-sessions")
+    }
+
+    func testStripCheckmarkPrefix() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners("✳ pulse-tool"), "pulse-tool")
+    }
+
+    func testStripMultipleSpinnerChars() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners("⠂ dhi"), "dhi")
+    }
+
+    func testNoSpinnerUnchanged() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners("plain-title"), "plain-title")
+    }
+
+    func testEmptyString() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners(""), "")
+    }
+
+    func testLeadingSpaceOnly() {
+        XCTAssertEqual(CodexActiveSessionsModel.stripWarpTabSpinners(" agent-sessions"), "agent-sessions")
+    }
 }

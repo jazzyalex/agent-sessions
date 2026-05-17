@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 import Darwin
@@ -2819,6 +2820,111 @@ final class CodexActiveSessionsModel: ObservableObject {
         let outData = stdout.fileHandleForReading.readDataToEndOfFile()
         let out = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return out == "ok"
+    }
+
+    /// Strips leading Warp spinner/status Unicode characters from a window title.
+    /// Warp prefixes tab titles with characters like ⠐ ⠂ ✳ ⠸ ● ○ ◉ followed by a space.
+    nonisolated static func stripWarpTabSpinners(_ title: String) -> String {
+        let spinners: Set<Character> = ["⠐","⠂","✳","⠸","●","○","◉","⠁","⠃","⠇","⠏","⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+        var s = title
+        while let first = s.first, spinners.contains(first) || first == " " {
+            s.removeFirst()
+        }
+        return s
+    }
+
+    /// Focuses a specific Warp/WarpPreview tab by session name using title matching.
+    /// Strategy:
+    ///   1. If warpFocusURL is provided (Warp PR #11130+), open it directly.
+    ///   2. Otherwise activate the app and cycle tabs via Cmd+Shift+] until title matches.
+    /// Returns .exact on success, .appOnly if tab not found, .unavailable if app not running.
+    @MainActor
+    static func focusWarpTab(
+        sessionName: String?,
+        warpFocusURL: String?,
+        kind: TerminalKind
+    ) -> TerminalFocusResult {
+        let appName: String
+        switch kind {
+        case .warpPreview: appName = "WarpPreview"
+        case .warp:        appName = "Warp"
+        default:           return .unavailable
+        }
+
+        // Tier 1: WARP_FOCUS_URL deep link (post Warp PR #11130)
+        if let urlString = warpFocusURL, let url = URL(string: urlString) {
+            NSWorkspace.shared.open(url)
+            return .exact
+        }
+
+        // Tier 2: Tab cycling by title match
+        let activateScript = """
+            tell application "System Events"
+                set frontmost of process "\(appName)" to true
+            end tell
+            """
+        _ = runAppleScriptString(activateScript)
+        Thread.sleep(forTimeInterval: 0.3)
+
+        guard let target = sessionName, !target.isEmpty else {
+            return .appOnly
+        }
+
+        let getTitleScript = """
+            tell application "System Events"
+                tell process "\(appName)"
+                    return name of first window
+                end tell
+            end tell
+            """
+
+        let cycleScript = """
+            tell application "System Events"
+                tell process "\(appName)"
+                    keystroke "]" using {command down, shift down}
+                end tell
+            end tell
+            """
+
+        // Record starting title for full-circle detection
+        let startTitle = runAppleScriptString(getTitleScript) ?? ""
+        let startStripped = stripWarpTabSpinners(startTitle)
+
+        if startStripped.contains(target) {
+            return .exact
+        }
+
+        let maxSteps = 20
+        for _ in 0..<maxSteps {
+            _ = runAppleScriptString(cycleScript)
+            Thread.sleep(forTimeInterval: 0.08)
+            let title = runAppleScriptString(getTitleScript) ?? ""
+            let stripped = stripWarpTabSpinners(title)
+            if stripped.contains(target) {
+                return .exact
+            }
+            // Full circle: back to start
+            if stripped == startStripped && !startStripped.isEmpty {
+                break
+            }
+        }
+        return .appOnly
+    }
+
+    /// Runs an AppleScript string and returns stdout, or nil on error.
+    nonisolated private static func runAppleScriptString(_ script: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        guard (try? process.run()) != nil else { return nil }
+        process.waitForExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Live State Classification
