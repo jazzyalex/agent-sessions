@@ -3,8 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- Add Warp and WarpPreview as Resume launch targets (Terminal.app and iTerm2 remain default options)
+- Add Warp and WarpPreview as Resume launch targets for all non-Codex CLI agents (Claude, Gemini, OpenCode, Copilot, Cursor, Pi, Hermes)
 - Terminal picker in Preferences dynamically shows only installed terminals
+- Migrate from per-agent preferITerm boolean to shared TerminalKind preference
 
 ## [3.8] - 2026-05-12
 ### Features
