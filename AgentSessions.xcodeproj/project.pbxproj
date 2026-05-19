@@ -349,6 +349,7 @@
 		FAECE68F3FD9BC86B24B54BF /* HermesResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE850504C7022449FBE19AC /* HermesResumeCoordinator.swift */; };
 		FC2C4C588AF83ABE67FB8868 /* DroidSessionParserLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E51A0ABB67AB9DE07F0F87 /* DroidSessionParserLogicTests.swift */; };
 		TKND000040000000000000001 /* TerminalKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TKND000030000000000000001 /* TerminalKindTests.swift */; };
+		A2194A5500D8403D98861182 /* ResumeTerminalDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04E9D60655B74801B6B002E5 /* ResumeTerminalDispatchTests.swift */; };
 		FDB4C35A20219D597A6358A9 /* DroidSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44619A4C965B379AD2122BB /* DroidSessionParser.swift */; };
 		FDE7AC41BA36202E4BA5067E /* ToolTextBlockNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5138EDB01FF036310A5A28AC /* ToolTextBlockNormalizerTests.swift */; };
 		FF2C85FB9791FCC4D6636DFE /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000113A0A000100000001 /* Session.swift */; };
@@ -651,6 +652,7 @@
 		C35D0B28960656D80B562067 /* CursorSessionParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CursorSessionParserTests.swift; sourceTree = SOURCE_ROOT; };
 		C4E51A0ABB67AB9DE07F0F87 /* DroidSessionParserLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsLogicTests/DroidSessionParserLogicTests.swift; sourceTree = SOURCE_ROOT; };
 		TKND000030000000000000001 /* TerminalKindTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsLogicTests/TerminalKindTests.swift; sourceTree = SOURCE_ROOT; };
+		04E9D60655B74801B6B002E5 /* ResumeTerminalDispatchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsLogicTests/ResumeTerminalDispatchTests.swift; sourceTree = SOURCE_ROOT; };
 		C5981003758B9226E65BA31D /* NewProviderDiscoverabilityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/NewProviderDiscoverabilityTests.swift; sourceTree = SOURCE_ROOT; };
 		C6523776A36C69A0BA161B86 /* InlineSessionImageMappingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/InlineSessionImageMappingTests.swift; sourceTree = SOURCE_ROOT; };
 		C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
@@ -1111,6 +1113,7 @@
 				9BC3DE188DC2AB5740BACF57 /* SessionFilterShims.swift */,
 				D832D30A468FD46C1CD688F9 /* OpenClawBase64ImageScannerLogicTests.swift */,
 				TKND000030000000000000001 /* TerminalKindTests.swift */,
+				04E9D60655B74801B6B002E5 /* ResumeTerminalDispatchTests.swift */,
 			);
 			name = AgentSessionsLogicTests;
 			sourceTree = "<group>";
@@ -2235,6 +2238,7 @@
 				9364F5F9CC8AAC31F06A5067 /* DroidSessionParser.swift in Sources */,
 				FC2C4C588AF83ABE67FB8868 /* DroidSessionParserLogicTests.swift in Sources */,
 				TKND000040000000000000001 /* TerminalKindTests.swift in Sources */,
+				A2194A5500D8403D98861182 /* ResumeTerminalDispatchTests.swift in Sources */,
 				65EB88B78C3C117848D9BD06 /* SessionFilterShims.swift in Sources */,
 				737095531A6FC85653F3453C /* OpenClawBase64ImageScannerLogicTests.swift in Sources */,
 				CE0584557635EEC1CAA0FD2E /* Base64ImageDataURLScanner.swift in Sources */,
