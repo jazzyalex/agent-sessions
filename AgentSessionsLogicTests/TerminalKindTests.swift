@@ -30,11 +30,6 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(kind, .terminalApp)
     }
 
-    func testInferGhostty() {
-        let kind = TerminalKind.infer(termProgram: "ghostty", cfBundleIdentifier: nil)
-        XCTAssertEqual(kind, .ghostty)
-    }
-
     func testInferUnknownWhenBothNil() {
         let kind = TerminalKind.infer(termProgram: nil, cfBundleIdentifier: nil)
         XCTAssertEqual(kind, .unknown)

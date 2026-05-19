@@ -5,7 +5,6 @@ enum TerminalKind: String, CaseIterable, Sendable {
     case warp
     case warpPreview
     case terminalApp
-    case ghostty
     case unknown
 
     /// Infer from process environment variables.
@@ -22,7 +21,6 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case "iTerm.app":       return .iterm2
         case "Apple_Terminal":  return .terminalApp
         case "WarpTerminal":    return .warpPreview  // fallback if bundle ID missing
-        case "ghostty":         return .ghostty
         default:                return .unknown
         }
     }
@@ -33,7 +31,6 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .warp:        return "Warp"
         case .warpPreview: return "WarpPreview"
         case .terminalApp: return "Terminal"
-        case .ghostty:     return "Ghostty"
         case .unknown:     return "Unknown"
         }
     }
@@ -44,7 +41,6 @@ enum TerminalKind: String, CaseIterable, Sendable {
         case .warp:        return "dev.warp.Warp"
         case .warpPreview: return "dev.warp.Warp-Preview"
         case .terminalApp: return "com.apple.Terminal"
-        case .ghostty:     return "com.mitchellh.ghostty"
         case .unknown:     return nil
         }
     }
@@ -66,30 +62,4 @@ enum TerminalKind: String, CaseIterable, Sendable {
         }
         return components.url
     }
-
-    var focusButtonLabel: String {
-        switch self {
-        case .iterm2:      return "Focus in iTerm2"
-        case .warp:        return "Focus in Warp"
-        case .warpPreview: return "Focus in Warp"
-        case .terminalApp: return "Focus in Terminal"
-        case .ghostty:     return "Focus"
-        case .unknown:     return "Focus"
-        }
-    }
-
-    var processName: String? {
-        switch self {
-        case .warp, .warpPreview: return "preview"
-        case .iterm2:             return "iTerm2"
-        case .terminalApp:        return "Terminal"
-        default:                  return nil
-        }
-    }
-}
-
-enum TerminalFocusResult {
-    case exact
-    case appOnly
-    case unavailable
 }
