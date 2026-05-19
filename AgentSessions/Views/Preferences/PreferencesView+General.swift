@@ -460,7 +460,7 @@ struct DetectedTerminal: Identifiable {
 }
 
 private func detectInstalledTerminals() -> [DetectedTerminal] {
-    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview, .ghostty]
+    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview]
     return candidates.filter { kind in
         guard let bundle = kind.bundleIdentifier else { return false }
         return isTerminalInstalled(bundleId: bundle)
