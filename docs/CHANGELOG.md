@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Improvements
+- Website: Replaced the social preview card with a product screenshot-led banner and tightened Open Graph/Twitter copy for clearer X link previews.
 
 ## [3.8] - 2026-05-12
 ### Features
