@@ -121,7 +121,7 @@ struct PreferencesView: View {
     }
 
     // General tab state
-    @State private var detectedTerminals: [DetectedTerminal] = []
+    @State var detectedTerminals: [DetectedTerminal] = []
     @State var modifiedDisplay: SessionIndexer.ModifiedDisplay = .relative
 
     // Codex CLI tab state
