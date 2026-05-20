@@ -76,13 +76,13 @@ final class CodexResumeCoordinator {
                 case .warp:
                     try AgentTerminalLauncher.launchInWarp(
                         shellCommand: package.shellCommand,
-                        cwd: package.workingDirectory,
+                        cwd: package.workingDirectory?.path,
                         kind: .warp
                     )
                 case .warpPreview:
                     try AgentTerminalLauncher.launchInWarp(
                         shellCommand: package.shellCommand,
-                        cwd: package.workingDirectory,
+                        cwd: package.workingDirectory?.path,
                         kind: .warpPreview
                     )
                 default:
