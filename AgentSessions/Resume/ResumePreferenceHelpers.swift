@@ -24,7 +24,9 @@ enum ResumePreferenceHelpers {
         // Migration: if any agent had preferITerm=true, default to .iterm2; else .terminalApp
         let claudeITerm = defaults.object(forKey: ClaudeResumeSettings.Keys.preferITerm) as? Bool ?? false
         let codexITerm = defaults.string(forKey: CodexResumeSettings.Keys.defaultLaunchMode) == CodexLaunchMode.iterm.rawValue
-        return (claudeITerm || codexITerm) ? .iterm2 : .terminalApp
+        let result: TerminalKind = (claudeITerm || codexITerm) ? .iterm2 : .terminalApp
+        setTerminalKind(result, defaults: defaults)
+        return result
     }
 
     static func setTerminalKind(_ kind: TerminalKind, defaults: UserDefaults = .standard) {
