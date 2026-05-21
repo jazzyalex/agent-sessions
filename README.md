@@ -38,10 +38,10 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
-  <img src="docs/assets/screenshot-H.png" alt="Transcript view with search (Dark Mode)" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  <img src="docs/assets/screenshot-H.png" alt="Main Sessions window with active search and transcript preview in Dark Mode" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
 
-  <p style="margin:0 0 0px 0;"><em>Resume Codex CLI, Claude CLI, and OpenCode CLI sessions</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Resume Codex CLI, Claude CLI, and OpenCode CLI sessions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
+  <p style="margin:0 0 0px 0;"><em>Saved Sessions with restore actions</em></p>
+  <img src="docs/assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
 </div>
 
 ## Security & Privacy
@@ -80,7 +80,7 @@ Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude CLI
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
-  <img src="docs/assets/screenshot-cockpit-light.png" alt="Agent Cockpit in light mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
+  <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
 </div>
 
 ## Agent Cockpit Setup
