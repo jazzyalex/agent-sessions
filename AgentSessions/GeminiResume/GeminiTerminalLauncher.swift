@@ -22,13 +22,13 @@ final class GeminiITermLauncher: GeminiTerminalLaunching {
 @MainActor
 final class GeminiWarpLauncher: GeminiTerminalLaunching {
     func launchInTerminal(_ package: GeminiResumeCommandBuilder.CommandPackage) throws {
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path, kind: .warp)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warp)
     }
 }
 
 @MainActor
 final class GeminiWarpPreviewLauncher: GeminiTerminalLaunching {
     func launchInTerminal(_ package: GeminiResumeCommandBuilder.CommandPackage) throws {
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }

@@ -102,12 +102,12 @@ final class CodexResumeLauncher: ObservableObject {
 
     func launchInWarp(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
         let cwd = package.workingDirectory?.path
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: cwd, kind: .warp)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warp)
     }
 
     func launchInWarpPreview(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
         let cwd = package.workingDirectory?.path
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: cwd, kind: .warpPreview)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warpPreview)
     }
 
     private func appendConsole(text: String, kind: ConsoleLine.Kind) {

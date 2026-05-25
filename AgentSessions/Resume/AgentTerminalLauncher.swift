@@ -46,46 +46,79 @@ enum AgentTerminalLauncher {
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
     }
 
-    /// Opens a new tab in Warp or WarpPreview via URL scheme, then types the shell command.
-    /// `kind` must be `.warp` or `.warpPreview`.
-    @MainActor
+    /// Opens a new Claude Code agent tab in Warp or WarpPreview using a temporary tab config.
+    /// Uses the TOML tab config format with `type = "agent"` so Warp creates a proper
+    /// Claude Code tab (avatar icon) rather than a plain terminal tab.
     static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) throws {
-        guard let url = kind.newTabURL(cwd: cwd) else {
-            throw NSError(domain: "AgentTerminalLauncher", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "No URL scheme for \(kind.displayName)"])
-        }
-        NSWorkspace.shared.open(url)
-
-        // Wait for the new tab to be ready, then type the command
-        let appName: String
+        let scheme: String
+        let tabConfigDir: URL
         switch kind {
-        case .warpPreview: appName = "WarpPreview"
-        case .warp:        appName = "Warp"
+        case .warpPreview:
+            scheme = "warppreview"
+            tabConfigDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".warp-preview/tab_configs")
+        case .warp:
+            scheme = "warp"
+            tabConfigDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".warp/tab_configs")
         default:
-            throw NSError(domain: "AgentTerminalLauncher", code: 2,
+            throw NSError(domain: "AgentTerminalLauncher", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Unsupported kind for Warp launch"])
         }
 
-        let scriptLines = [
-            "on run argv",
-            "set shellCommand to \"\"",
-            "set appName to \"WarpPreview\"",
-            "if (count of argv) >= 1 then set shellCommand to item 1 of argv",
-            "if (count of argv) >= 2 then set appName to item 2 of argv",
-            "delay 0.4",
-            "tell application \"System Events\"",
-            "  tell process appName",
-            "    set frontmost to true",
-            "    keystroke shellCommand",
-            "    key code 36",
-            "  end tell",
-            "end tell",
-            "end run"
-        ]
-        try runAppleScript(scriptLines, arguments: [shellCommand, appName],
-                          domain: "AgentTerminalLauncher",
-                          fallbackMessage: "\(appName) launch failed.")
+        try FileManager.default.createDirectory(at: tabConfigDir, withIntermediateDirectories: true)
+
+        let configName = "agent-sessions-resume-\(UUID().uuidString.prefix(8).lowercased())"
+        let configFile = tabConfigDir.appendingPathComponent("\(configName).toml")
+        let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
+
+        let toml = """
+name = "\(configName)"
+
+[[panes]]
+id = "main"
+type = "agent"
+directory = "\(directory)"
+commands = ["\(shellCommand)"]
+[params]
+"""
+
+        try toml.write(to: configFile, atomically: true, encoding: .utf8)
+
+        guard let url = URL(string: "\(scheme)://tab_config/\(configName)") else {
+            throw NSError(domain: "AgentTerminalLauncher", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to build tab config URL"])
+        }
+
+        // If Warp is already running, open the tab config URL directly.
+        // If not, launch the app first and wait for it to initialize.
+        let appRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == kind.bundleIdentifier
+        }
+
+        if appRunning {
+            NSWorkspace.shared.open(url)
+        } else {
+            let configURL = url
+            Task.detached {
+                if let bundleID = kind.bundleIdentifier {
+                    NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
+                        options: .default, additionalEventParamDescriptor: nil, launchIdentifier: nil)
+                }
+                // Wait for app to initialize before opening the tab config
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                NSWorkspace.shared.open(configURL)
+            }
+        }
+
+        // Clean up the temp config after Warp has had time to read it
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? FileManager.default.removeItem(at: configFile)
+        }
     }
+
+    // MARK: - Helpers
 
     private static func runAppleScript(_ lines: [String], arguments: [String], domain: String, fallbackMessage: String) throws {
         let process = Process()

@@ -10,13 +10,13 @@ final class ClaudeTerminalLauncher: ClaudeTerminalLaunching {
 @MainActor
 final class ClaudeWarpLauncher: ClaudeTerminalLaunching {
     func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws {
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path, kind: .warp)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warp)
     }
 }
 
 @MainActor
 final class ClaudeWarpPreviewLauncher: ClaudeTerminalLaunching {
     func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws {
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.shellCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
+        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: package.workingDirectory?.path, kind: .warpPreview)
     }
 }
