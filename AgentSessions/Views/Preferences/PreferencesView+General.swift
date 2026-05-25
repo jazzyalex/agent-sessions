@@ -86,7 +86,12 @@ extension PreferencesView {
         }
         .onAppear {
             if detectedTerminals.isEmpty {
-                detectedTerminals = detectInstalledTerminals()
+                Task.detached {
+                    let terminals = detectInstalledTerminals()
+                    await MainActor.run {
+                        detectedTerminals = terminals
+                    }
+                }
             }
         }
     }
