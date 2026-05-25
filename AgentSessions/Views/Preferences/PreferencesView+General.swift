@@ -30,7 +30,13 @@ extension PreferencesView {
                 // Terminal app preference for both Codex and Claude resumes
                 labeledRow("Terminal App") {
                     Picker("", selection: Binding(
-                        get: { ResumePreferenceHelpers.resolveTerminalKind() },
+                        get: {
+                            let kind = ResumePreferenceHelpers.resolveTerminalKind()
+                            if detectedTerminals.contains(where: { $0.kind == kind }) {
+                                return kind
+                            }
+                            return detectedTerminals.first?.kind ?? .terminalApp
+                        },
                         set: { kind in
                             ResumePreferenceHelpers.setTerminalKind(kind)
                             let preferITerm = (kind == .iterm2)
