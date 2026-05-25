@@ -117,7 +117,7 @@ commands = ["\(tomlEscape(shellCommand))"]
 
         // Clean up the temp config after Warp has had time to read it
         Task.detached {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
             try? FileManager.default.removeItem(at: configFile)
         }
     }
