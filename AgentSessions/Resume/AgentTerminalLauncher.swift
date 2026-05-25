@@ -78,8 +78,8 @@ name = "\(configName)"
 [[panes]]
 id = "main"
 type = "agent"
-directory = "\(directory)"
-commands = ["\(shellCommand)"]
+directory = "\(tomlEscape(directory))"
+commands = ["\(tomlEscape(shellCommand))"]
 [params]
 """
 
@@ -119,6 +119,11 @@ commands = ["\(shellCommand)"]
     }
 
     // MARK: - Helpers
+
+    private static nonisolated func tomlEscape(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
 
     private static func runAppleScript(_ lines: [String], arguments: [String], domain: String, fallbackMessage: String) throws {
         let process = Process()
