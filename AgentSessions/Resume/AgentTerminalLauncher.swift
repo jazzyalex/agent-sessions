@@ -101,13 +101,17 @@ commands = ["\(tomlEscape(shellCommand))"]
         } else {
             let configURL = url
             Task.detached {
-                if let bundleID = kind.bundleIdentifier {
-                    NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
-                        options: .default, additionalEventParamDescriptor: nil, launchIdentifier: nil)
+                await MainActor.run {
+                    if let bundleID = kind.bundleIdentifier {
+                        NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
+                            options: .default, additionalEventParamDescriptor: nil, launchIdentifier: nil)
+                    }
                 }
                 // Wait for app to initialize before opening the tab config
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                NSWorkspace.shared.open(configURL)
+                await MainActor.run {
+                    NSWorkspace.shared.open(configURL)
+                }
             }
         }
 
