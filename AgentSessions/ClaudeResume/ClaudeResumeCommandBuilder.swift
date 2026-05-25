@@ -19,7 +19,13 @@ struct ClaudeResumeCommandBuilder {
     func makeCommand(strategy: Strategy,
                      binaryURL: URL,
                      workingDirectory: URL?) throws -> CommandPackage {
-        let binaryName = binaryURL.lastPathComponent.isEmpty ? "claude" : shellQuote(binaryURL.lastPathComponent)
+        let binaryName: String
+        let fullPath = binaryURL.path
+        if fullPath.isEmpty || fullPath == "claude" {
+            binaryName = "claude"
+        } else {
+            binaryName = shellQuote(fullPath)
+        }
         let command: String
 
         switch strategy {
