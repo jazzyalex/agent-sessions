@@ -127,6 +127,9 @@ commands = ["\(tomlEscape(shellCommand))"]
     private static nonisolated func tomlEscape(_ value: String) -> String {
         value.replacingOccurrences(of: "\\", with: "\\\\")
              .replacingOccurrences(of: "\"", with: "\\\"")
+             .replacingOccurrences(of: "\n", with: "\\n")
+             .replacingOccurrences(of: "\r", with: "\\r")
+             .replacingOccurrences(of: "\t", with: "\\t")
     }
 
     private static func runAppleScript(_ lines: [String], arguments: [String], domain: String, fallbackMessage: String) throws {
