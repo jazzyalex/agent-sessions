@@ -68,11 +68,24 @@ final class CodexResumeCoordinator {
                                                               binaryURL: data.binaryURL,
                                                               fallbackPath: fallbackURL,
                                                               attemptResumeFirst: true)
-                if settings.launchMode == .iterm {
+                switch settings.launchMode {
+                case .iterm:
                     // Use a temporary launcher that targets iTerm2
                     let iterm = CodexResumeLauncher()
                     try iterm.launchInITerm(package)
-                } else {
+                case .warp:
+                    try AgentTerminalLauncher.launchInWarp(
+                        shellCommand: package.shellCommand,
+                        cwd: package.workingDirectory?.path,
+                        kind: .warp
+                    )
+                case .warpPreview:
+                    try AgentTerminalLauncher.launchInWarp(
+                        shellCommand: package.shellCommand,
+                        cwd: package.workingDirectory?.path,
+                        kind: .warpPreview
+                    )
+                default:
                     try terminalLauncher.launchInTerminal(package)
                 }
                 return .launched

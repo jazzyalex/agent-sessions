@@ -15,6 +15,11 @@ final class OpenCodeSettings: ObservableObject {
     @Published var binaryPath: String
     @Published var defaultWorkingDirectory: String
     @Published var preferITerm: Bool
+
+    var terminalKind: TerminalKind {
+        ResumePreferenceHelpers.resolveTerminalKind()
+    }
+
     @Published var fallbackPolicy: OpenCodeFallbackPolicy
 
     private let defaults: UserDefaults

@@ -19,16 +19,22 @@ struct ClaudeResumeCommandBuilder {
     func makeCommand(strategy: Strategy,
                      binaryURL: URL,
                      workingDirectory: URL?) throws -> CommandPackage {
-        let claudePath = shellQuote(binaryURL.path)
+        let binaryName: String
+        let fullPath = binaryURL.path
+        if fullPath.isEmpty || fullPath == "claude" {
+            binaryName = "claude"
+        } else {
+            binaryName = shellQuote(fullPath)
+        }
         let command: String
 
         switch strategy {
         case .resumeByID(let id):
             guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw BuildError.missingSessionID }
             let quotedID = shellQuote(id)
-            command = "\(claudePath) --resume \(quotedID)"
+            command = "\(binaryName) --resume \(quotedID)"
         case .continueMostRecent:
-            command = "\(claudePath) --continue"
+            command = "\(binaryName) --continue"
         }
 
         let shell: String

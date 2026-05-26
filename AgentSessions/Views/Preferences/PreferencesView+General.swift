@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreServices
 
 extension PreferencesView {
 
@@ -29,28 +30,36 @@ extension PreferencesView {
                 // Terminal app preference for both Codex and Claude resumes
                 labeledRow("Terminal App") {
                     Picker("", selection: Binding(
-                        get: { (resumeSettings.launchMode == .iterm || claudeSettings.preferITerm || opencodeSettings.preferITerm || copilotSettings.preferITerm || geminiSettings.preferITerm || cursorSettings.preferITerm || piSettings.preferITerm) ? 1 : 0 },
-                        set: { idx in
-                            // Apply to Codex
-                            resumeSettings.setLaunchMode(idx == 1 ? .iterm : .terminal)
-                            // Apply to Claude
-                            claudeSettings.setPreferITerm(idx == 1)
-                            // Apply to OpenCode
-                            opencodeSettings.setPreferITerm(idx == 1)
-                            // Apply to Copilot
-                            copilotSettings.setPreferITerm(idx == 1)
-                            // Apply to Gemini
-                            geminiSettings.setPreferITerm(idx == 1)
-                            // Apply to Cursor
-                            cursorSettings.setPreferITerm(idx == 1)
-                            // Apply to Pi
-                            piSettings.setPreferITerm(idx == 1)
+                        get: {
+                            let kind = ResumePreferenceHelpers.resolveTerminalKind()
+                            if detectedTerminals.contains(where: { $0.kind == kind }) {
+                                return kind
+                            }
+                            return detectedTerminals.first?.kind ?? .terminalApp
+                        },
+                        set: { kind in
+                            ResumePreferenceHelpers.setTerminalKind(kind)
+                            let preferITerm = (kind == .iterm2)
+                            let codexMode: CodexLaunchMode
+                            switch kind {
+                            case .iterm2:      codexMode = .iterm
+                            case .warp:        codexMode = .warp
+                            case .warpPreview: codexMode = .warpPreview
+                            default:           codexMode = .terminal
+                            }
+                            resumeSettings.setLaunchMode(codexMode)
+                            claudeSettings.setPreferITerm(preferITerm)
+                            opencodeSettings.setPreferITerm(preferITerm)
+                            copilotSettings.setPreferITerm(preferITerm)
+                            geminiSettings.setPreferITerm(preferITerm)
+                            cursorSettings.setPreferITerm(preferITerm)
+                            piSettings.setPreferITerm(preferITerm)
                         }
                     )) {
-                        Text("Terminal").tag(0)
-                        Text("iTerm2").tag(1)
+                        ForEach(detectedTerminals) { terminal in
+                            Text(terminal.displayName).tag(terminal.kind)
+                        }
                     }
-                    .pickerStyle(.segmented)
                     .frame(maxWidth: 260)
                     .help("Choose which terminal application handles Resume for all CLI agents")
                 }
@@ -80,6 +89,16 @@ extension PreferencesView {
                     .padding(.top, 2)
             }
 
+        }
+        .onAppear {
+            if detectedTerminals.isEmpty {
+                Task.detached {
+                    let terminals = detectInstalledTerminals()
+                    await MainActor.run {
+                        detectedTerminals = terminals
+                    }
+                }
+            }
         }
     }
 
@@ -441,4 +460,32 @@ private extension PreferencesView {
         }
         .disabled(!(canDisable && canEnable))
     }
+}
+
+// MARK: - Terminal detection helpers
+
+struct DetectedTerminal: Identifiable {
+    let kind: TerminalKind
+    var id: String { kind.rawValue }
+    var displayName: String { kind.displayName }
+}
+
+private func detectInstalledTerminals() -> [DetectedTerminal] {
+    let candidates: [TerminalKind] = [.terminalApp, .iterm2, .warp, .warpPreview]
+    return candidates.filter { kind in
+        guard let bundle = kind.bundleIdentifier else { return false }
+        return isTerminalInstalled(bundleId: bundle)
+    }.map { DetectedTerminal(kind: $0) }
+}
+
+private func isTerminalInstalled(bundleId: String) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+    process.arguments = ["kMDItemCFBundleIdentifier == '\(bundleId)'"]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try? process.run()
+    process.waitForExit()
+    let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 }

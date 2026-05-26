@@ -2430,7 +2430,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = OpenCodeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: OpenCodeTerminalLaunching = settings.preferITerm ? OpenCodeITermLauncher() : OpenCodeTerminalLauncher()
+                let launcher: OpenCodeTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return OpenCodeITermLauncher()
+                    case .warp:                    return OpenCodeWarpLauncher()
+                    case .warpPreview:             return OpenCodeWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return OpenCodeTerminalLauncher()
+                    }
+                }()
                 let coord = OpenCodeResumeCoordinator(env: OpenCodeCLIEnvironment(), builder: OpenCodeResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
@@ -2441,7 +2448,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = HermesResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: HermesTerminalLaunching = settings.preferITerm ? HermesITermLauncher() : HermesTerminalLauncher()
+                let launcher: HermesTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return HermesITermLauncher()
+                    case .warp:                    return HermesWarpLauncher()
+                    case .warpPreview:             return HermesWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return HermesTerminalLauncher()
+                    }
+                }()
                 let coord = HermesResumeCoordinator(env: HermesCLIEnvironment(), builder: HermesResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
@@ -2452,7 +2466,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = CopilotResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: CopilotTerminalLaunching = settings.preferITerm ? CopilotITermLauncher() : CopilotTerminalLauncher()
+                let launcher: CopilotTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return CopilotITermLauncher()
+                    case .warp:                    return CopilotWarpLauncher()
+                    case .warpPreview:             return CopilotWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return CopilotTerminalLauncher()
+                    }
+                }()
                 let coord = CopilotResumeCoordinator(env: CopilotCLIEnvironment(), builder: CopilotResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
@@ -2463,7 +2484,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = CursorResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: CursorTerminalLaunching = settings.preferITerm ? CursorITermLauncher() : CursorTerminalLauncher()
+                let launcher: CursorTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return CursorITermLauncher()
+                    case .warp:                    return CursorWarpLauncher()
+                    case .warpPreview:             return CursorWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return CursorTerminalLauncher()
+                    }
+                }()
                 let coord = CursorResumeCoordinator(env: CursorCLIEnvironment(), builder: CursorResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
@@ -2475,7 +2503,14 @@ struct UnifiedSessionsView: View {
             let sessionDirectory = settings.copyCommandPlan(sessionID: sid)?.sessionDirectory
             let input = PiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin, sessionDirectory: sessionDirectory)
             Task { @MainActor in
-                let launcher: PiTerminalLaunching = settings.preferITerm ? PiITermLauncher() : PiTerminalLauncher()
+                let launcher: PiTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return PiITermLauncher()
+                    case .warp:                    return PiWarpLauncher()
+                    case .warpPreview:             return PiWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return PiTerminalLauncher()
+                    }
+                }()
                 let coord = PiResumeCoordinator(env: PiCLIEnvironment(), builder: PiResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
@@ -2486,7 +2521,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryOverride.isEmpty ? nil : settings.binaryOverride
             let input = GeminiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: GeminiTerminalLaunching = settings.preferITerm ? GeminiITermLauncher() : GeminiTerminalLauncher()
+                let launcher: GeminiTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return GeminiITermLauncher()
+                    case .warp:                    return GeminiWarpLauncher()
+                    case .warpPreview:             return GeminiWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return GeminiTerminalLauncher()
+                    }
+                }()
                 let coord = GeminiResumeCoordinator(env: GeminiCLIEnvironment(), builder: GeminiResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, dryRun: false)
             }
@@ -2497,7 +2539,14 @@ struct UnifiedSessionsView: View {
             let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
             let input = ClaudeResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: ClaudeTerminalLaunching = settings.preferITerm ? ClaudeITermLauncher() : ClaudeTerminalLauncher()
+                let launcher: ClaudeTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return ClaudeITermLauncher()
+                    case .warp:                    return ClaudeWarpLauncher()
+                    case .warpPreview:             return ClaudeWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return ClaudeTerminalLauncher()
+                    }
+                }()
                 let coord = ClaudeResumeCoordinator(env: ClaudeCLIEnvironment(), builder: ClaudeResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }

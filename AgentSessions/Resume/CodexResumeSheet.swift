@@ -364,7 +364,7 @@ struct CodexResumeSheet: View {
 
     private var visibleLaunchModes: [CodexLaunchMode] {
         // Embedded mode disabled to simplify UX
-        return [.terminal, .iterm]
+        return [.terminal, .iterm, .warp, .warpPreview]
     }
 
     @MainActor
@@ -381,6 +381,18 @@ struct CodexResumeSheet: View {
         case .iterm:
             do {
                 try launcher.launchInITerm(package)
+            } catch {
+                launcher.lastError = error.localizedDescription
+            }
+        case .warp:
+            do {
+                try launcher.launchInWarp(package)
+            } catch {
+                launcher.lastError = error.localizedDescription
+            }
+        case .warpPreview:
+            do {
+                try launcher.launchInWarpPreview(package)
             } catch {
                 launcher.lastError = error.localizedDescription
             }

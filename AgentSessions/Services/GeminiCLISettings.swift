@@ -13,6 +13,10 @@ final class GeminiCLISettings: ObservableObject {
     @Published var binaryOverride: String
     @Published var preferITerm: Bool
 
+    var terminalKind: TerminalKind {
+        ResumePreferenceHelpers.resolveTerminalKind()
+    }
+
     private let defaults: UserDefaults
 
     fileprivate init(defaults: UserDefaults = .standard) {

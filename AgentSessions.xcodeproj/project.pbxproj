@@ -15,6 +15,7 @@
 		02B27526B61B881A4B2C4853 /* AnalyticsIndexPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968353D7561F00D75E9BF06B /* AnalyticsIndexPhaseTests.swift */; };
 		0359DC9D84CB049A40D01A32 /* ToolTextBlockNormalizerRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E469E2BCF3958C701DBFEBFF /* ToolTextBlockNormalizerRegressionTests.swift */; };
 		03BDFF835F9143C3EBF01DEC /* HermesSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE7B30494D96E4126CE07B7 /* HermesSettings.swift */; };
+		041A42D3A4AB688C27C72431 /* ResumeTerminalDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B052D38BAE27EF89F8E4D9B /* ResumeTerminalDispatchTests.swift */; };
 		0422F5CD85576F5A7193A15F /* OpenCodeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27A1CB8D054EBD47772E5C0B /* OpenCodeSettings.swift */; };
 		05625C624091572B992770F4 /* PiCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69E3D47CFDBE3865D4451F94 /* PiCLIEnvironment.swift */; };
 		058A5BF45C6B3E1CF77F5EC3 /* CodexSessionImagePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B14E8BFD378E6311D3E2F55 /* CodexSessionImagePayload.swift */; };
@@ -347,6 +348,7 @@
 		FA83A7F3900C27BEF4EC5938 /* ClaudeProbeProjectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAF2FBE83AB906E7AE27B14 /* ClaudeProbeProjectTests.swift */; };
 		FAECE68F3FD9BC86B24B54BF /* HermesResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FE850504C7022449FBE19AC /* HermesResumeCoordinator.swift */; };
 		FC2C4C588AF83ABE67FB8868 /* DroidSessionParserLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E51A0ABB67AB9DE07F0F87 /* DroidSessionParserLogicTests.swift */; };
+		FCD400CC00A21391B30D6B32 /* TerminalKindTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827D113F4E69DE9468EC31AC /* TerminalKindTests.swift */; };
 		FDB4C35A20219D597A6358A9 /* DroidSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44619A4C965B379AD2122BB /* DroidSessionParser.swift */; };
 		FDE7AC41BA36202E4BA5067E /* ToolTextBlockNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5138EDB01FF036310A5A28AC /* ToolTextBlockNormalizerTests.swift */; };
 		FF2C85FB9791FCC4D6636DFE /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000113A0A000100000001 /* Session.swift */; };
@@ -381,6 +383,7 @@
 		STALE000020000000000000001 /* UsageStaleCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = STALE000010000000000000001 /* UsageStaleCheck.swift */; };
 		SUPF000020000000000000001 /* FeatureFlags.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPF000010000000000000001 /* FeatureFlags.swift */; };
 		SUPT000020000000000000001 /* TypingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = SUPT000010000000000000001 /* TypingActivity.swift */; };
+		TKND000020000000000000001 /* TerminalKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = TKND000010000000000000001 /* TerminalKind.swift */; };
 		UTILS00002000000000000001 /* SplitViewAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILS00001000000000000001 /* SplitViewAutosave.swift */; };
 		UTILW00002000000000000001 /* WindowAutosave.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTILW00001000000000000001 /* WindowAutosave.swift */; };
 /* End PBXBuildFile section */
@@ -422,6 +425,7 @@
 		18536FCC7C346E874E56738E /* DroidCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Droid/DroidCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		18D4968D6F4CB649CC369EC2 /* ClaudeDelegatedTokenRefresh.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeDelegatedTokenRefresh.swift; sourceTree = SOURCE_ROOT; };
 		19FAC728A9C11A666680AF44 /* PreferencesView+Copilot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AgentSessions/Views/Preferences/PreferencesView+Copilot.swift"; sourceTree = SOURCE_ROOT; };
+		1B052D38BAE27EF89F8E4D9B /* ResumeTerminalDispatchTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ResumeTerminalDispatchTests.swift; sourceTree = SOURCE_ROOT; };
 		1B2BFBE4B73D06DDE72A35FF /* SessionSearchTextBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SessionSearchTextBuilder.swift; sourceTree = SOURCE_ROOT; };
 		1C059ADA7DDB56B1F086FE99 /* AgentBinaryDetectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/AgentBinaryDetectionTests.swift; sourceTree = SOURCE_ROOT; };
 		1CEF79B7E9C647086B5CC323 /* OpenCodeTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeTranscriptView.swift; path = AgentSessions/Views/OpenCodeTranscriptView.swift; sourceTree = SOURCE_ROOT; };
@@ -532,6 +536,7 @@
 		815DCA7C60A7B56BC748C548 /* CopilotTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CopilotTranscriptView.swift; sourceTree = SOURCE_ROOT; };
 		818D69C24F0559B1CFE37700 /* AgentCockpitHUDWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/AgentCockpitHUDWindow.swift; sourceTree = SOURCE_ROOT; };
 		823FEF6C68602B417D574A96 /* ClaudeBase64ImageScannerLineIndexTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeBase64ImageScannerLineIndexTests.swift; sourceTree = SOURCE_ROOT; };
+		827D113F4E69DE9468EC31AC /* TerminalKindTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TerminalKindTests.swift; sourceTree = SOURCE_ROOT; };
 		8431CEA965334A1FBAA18358 /* AgentBreakdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentBreakdownView.swift; sourceTree = "<group>"; };
 		86F70ABEE84B40237C7EAE5E /* ClaudeTmuxUsageFallbackAdapter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeTmuxUsageFallbackAdapter.swift; sourceTree = SOURCE_ROOT; };
 		877C439473252C9A12E66380 /* PreferencesView+Pi.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AgentSessions/Views/Preferences/PreferencesView+Pi.swift"; sourceTree = SOURCE_ROOT; };
@@ -765,6 +770,7 @@
 		STALE000010000000000000001 /* UsageStaleCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStaleCheck.swift; path = AgentSessions/CodexStatus/UsageStaleCheck.swift; sourceTree = SOURCE_ROOT; };
 		SUPF000010000000000000001 /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/FeatureFlags.swift; sourceTree = SOURCE_ROOT; };
 		SUPT000010000000000000001 /* TypingActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/TypingActivity.swift; sourceTree = SOURCE_ROOT; };
+		TKND000010000000000000001 /* TerminalKind.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalKind.swift; path = AgentSessions/Services/TerminalKind.swift; sourceTree = SOURCE_ROOT; };
 		UTILS00001000000000000001 /* SplitViewAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/SplitViewAutosave.swift; sourceTree = SOURCE_ROOT; };
 		UTILW00001000000000000001 /* WindowAutosave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/WindowAutosave.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -1256,6 +1262,8 @@
 				272F49F814CE6F5E50E505A5 /* PiSessionParserTests.swift */,
 				CA7C1756682652197ECE7DC2 /* PiResumeCommandBuilderTests.swift */,
 				5BD500046BEA41C5240F61E3 /* PiCLIEnvironmentTests.swift */,
+				827D113F4E69DE9468EC31AC /* TerminalKindTests.swift */,
+				1B052D38BAE27EF89F8E4D9B /* ResumeTerminalDispatchTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -1309,6 +1317,7 @@
 				IDXGRP000010000000000001 /* Indexing */,
 				53A7DBE9280787FB4D64FBD6 /* SessionViewMode.swift */,
 				CDA913FF55A1E3CE8A9586FF /* TerminalModels.swift */,
+				TKND000010000000000000001 /* TerminalKind.swift */,
 				CF23433C19A198F51A627A65 /* OpenCodeSessionDiscovery.swift */,
 				9A35FF4EC89DCD3987AD16BB /* OpenCodeSessionParser.swift */,
 				05D72F56F8E9EB0484E4361C /* OpenCodeSessionIndexer.swift */,
@@ -1988,6 +1997,7 @@
 				BD469FC1E97B1CF3CF477114 /* UsageDisplayFormatter.swift in Sources */,
 				767434CE7D92B9BFF2BE0734 /* SessionViewMode.swift in Sources */,
 				7BEB14926470151C9681D7EA /* TerminalModels.swift in Sources */,
+				TKND000020000000000000001 /* TerminalKind.swift in Sources */,
 				D662565D3A2F3454DABDD3A7 /* SessionTerminalView.swift in Sources */,
 				7B42161617C8C080455AAD80 /* OpenCodeSessionDiscovery.swift in Sources */,
 				C2934FC2DB0295E9D61B678E /* OpenCodeSessionParser.swift in Sources */,
@@ -2210,6 +2220,8 @@
 				1A0C43BD559DF9822AF1242D /* PiSessionParserTests.swift in Sources */,
 				E3DA26AE092940CC73B60E81 /* PiResumeCommandBuilderTests.swift in Sources */,
 				F7F13A98DCC4F80109D57E29 /* PiCLIEnvironmentTests.swift in Sources */,
+				FCD400CC00A21391B30D6B32 /* TerminalKindTests.swift in Sources */,
+				041A42D3A4AB688C27C72431 /* ResumeTerminalDispatchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

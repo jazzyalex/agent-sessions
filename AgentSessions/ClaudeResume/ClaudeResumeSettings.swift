@@ -17,6 +17,10 @@ final class ClaudeResumeSettings: ObservableObject {
     @Published var defaultWorkingDirectory: String
     @Published var preferITerm: Bool
 
+    var terminalKind: TerminalKind {
+        ResumePreferenceHelpers.resolveTerminalKind()
+    }
+
     private let defaults: UserDefaults
 
     fileprivate init(defaults: UserDefaults = .standard) {

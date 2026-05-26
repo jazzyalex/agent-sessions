@@ -4,6 +4,8 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
     case embedded
     case terminal
     case iterm
+    case warp
+    case warpPreview
 
     var id: String { rawValue }
 
@@ -26,6 +28,10 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "Terminal"
         case .iterm:
             return "iTerm2"
+        case .warp:
+            return "Warp"
+        case .warpPreview:
+            return "WarpPreview"
         }
     }
 
@@ -37,6 +43,10 @@ enum CodexLaunchMode: String, CaseIterable, Identifiable {
             return "Open Codex in Terminal.app and continue the session there."
         case .iterm:
             return "Open Codex in iTerm2 and continue the session there."
+        case .warp:
+            return "Open in Warp and continue the session there."
+        case .warpPreview:
+            return "Open in WarpPreview and continue the session there."
         }
     }
 }

@@ -4327,7 +4327,10 @@ final class CodexActiveSessionsModel: ObservableObject {
             let iterm = extract("ITERM_SESSION_ID") ?? extract("TERM_SESSION_ID")
             let termProgram = extract("TERM_PROGRAM")
             if iterm == nil && termProgram == nil { continue }
-            out[pid] = PSProcessEnvMeta(termProgram: termProgram, itermSessionId: iterm)
+            out[pid] = PSProcessEnvMeta(
+                termProgram: termProgram,
+                itermSessionId: iterm
+            )
         }
         return out
     }
