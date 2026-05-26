@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Improvements
+- Website: Replaced the social preview card with a product screenshot-led banner and tightened Open Graph/Twitter copy for clearer X link previews.
 - Add Warp and WarpPreview as Resume launch targets for all non-Codex CLI agents (Claude, Gemini, OpenCode, Copilot, Cursor, Pi, Hermes)
 - Terminal picker in Preferences dynamically shows only installed terminals
 - Migrate from per-agent preferITerm boolean to shared TerminalKind preference

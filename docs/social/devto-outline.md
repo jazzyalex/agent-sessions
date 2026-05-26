@@ -6,7 +6,7 @@
 
 **Tags:** `productivity`, `devtools`, `ai`, `macos`
 
-**Cover image:** `docs/assets/AS-social-media.png`
+**Cover image:** `docs/assets/agent-sessions-social-card.png`
 
 ---
 

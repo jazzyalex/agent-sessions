@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Banner preview — agent-sessions-social-card</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #6e6e73;
+    --hair: rgba(0, 0, 0, 0.08);
+    --accent: #0a84ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    background: #d0d2d6;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px 80px;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #555;
+  }
+
+  /* The banner — exact 1200x630 og:image dimensions */
+  .banner {
+    width: 1200px;
+    height: 630px;
+    background:
+      radial-gradient(ellipse 70% 80% at 50% -10%, #ffffff 0%, #f5f5f7 55%, #ececef 100%);
+    color: var(--ink);
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    padding: 56px 72px 0;
+    isolation: isolate;
+  }
+
+  /* subtle vignette ring */
+  .banner::after {
+    content: "";
+    position: absolute; inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 -180px 160px -120px rgba(0,0,0,0.06);
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .icon {
+    width: 64px; height: 64px;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
+    display: block;
+  }
+  .wordmark {
+    font-size: 40px;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .tag {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid var(--hair);
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.6);
+    backdrop-filter: blur(6px);
+  }
+
+  .body {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-content: start;
+    padding-top: 28px;
+    position: relative;
+  }
+
+  .headline {
+    font-size: 56px;
+    line-height: 1.04;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    max-width: 880px;
+  }
+  .headline em {
+    font-style: normal;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .sub {
+    margin-top: 14px;
+    font-size: 20px;
+    line-height: 1.4;
+    color: var(--muted);
+    max-width: 760px;
+  }
+
+  .agents {
+    margin-top: 22px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-size: 13px;
+    color: var(--ink);
+    background: #ffffff;
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    padding: 7px 13px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 2px rgba(0,0,0,0.03);
+  }
+  .pill b { font-weight: 600; }
+  .pill .dim { color: var(--muted); font-weight: 500; }
+
+  /* Floating screenshot card, anchored bottom-right */
+  .shot {
+    position: absolute;
+    right: -56px;
+    bottom: -180px;
+    width: 760px;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.7) inset,
+      0 30px 60px -22px rgba(0,0,0,0.28),
+      0 12px 28px -10px rgba(0,0,0,0.14),
+      0 0 0 1px rgba(0,0,0,0.06);
+    transform: rotate(-1.4deg);
+    background: #fff;
+  }
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .foot {
+    position: absolute;
+    left: 72px;
+    bottom: 36px;
+    font-size: 14px;
+    color: var(--muted);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+  .foot .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--muted); display: inline-block; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="label">og:image preview — 1200 × 630</div>
+
+    <div class="banner" id="banner">
+      <div class="head">
+        <img class="icon" src="icon.png" alt="">
+        <div class="wordmark">Agent Sessions</div>
+        <div class="tag">macOS · open source</div>
+      </div>
+
+      <div class="body">
+        <div class="headline">
+          Local history for<br>AI coding agents.
+        </div>
+        <div class="sub">
+          Search, inspect, and recover sessions across the agents you actually use — without leaving your Mac.
+        </div>
+
+        <div class="agents">
+          <span class="pill"><b>Codex</b> <span class="dim">CLI · Desktop</span></span>
+          <span class="pill"><b>Claude</b> <span class="dim">CLI · Desktop</span></span>
+          <span class="pill"><b>Cursor</b></span>
+          <span class="pill"><b>Gemini</b></span>
+          <span class="pill"><b>Copilot</b></span>
+        </div>
+
+        <div class="shot">
+          <img src="screenshot.png" alt="">
+        </div>
+      </div>
+
+      <div class="foot">
+        <span>jazzyalex.github.io/agent-sessions</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

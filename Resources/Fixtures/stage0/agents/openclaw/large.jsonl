@@ -2,6 +2,7 @@
 {"type":"model_change","id":"mc2","parentId":"openclaw-stage0-large","modelId":"openclaw-large","provider":"openclaw-model","timestamp":"2026-02-24T10:00:01Z"}
 {"type":"thinking_level_change","id":"tc2","thinkingLevel":"high","parentId":"mc2","timestamp":"2026-02-24T10:00:02Z"}
 {"type":"custom","id":"oc-custom-1","customType":"ui_state","data":{"phase":"analysis"},"parentId":"mc2","timestamp":"2026-02-24T10:00:02.500Z"}
+{"type":"custom_message","customType":"openclaw.runtime-context","content":"System context injected before the turn.","display":false,"details":{"source":"openclaw-runtime-context"},"id":"oc-custom-message-1","parentId":"oc-custom-1","timestamp":"2026-05-19T18:12:00Z"}
 {"type":"message","id":"m1","parentId":"openclaw-stage0-large","timestamp":"2026-02-24T10:00:03Z","message":{"role":"user","content":[{"type":"text","text":"Open /tmp/large and run status"}]}}
 {"type":"message","id":"m2","parentId":"m1","timestamp":"2026-02-24T10:00:04Z","message":{"role":"assistant","model":"openclaw-large","content":[{"type":"text","text":"Gathering files and git status."},{"type":"toolCall","id":"tc-status","name":"run_terminal","arguments":{"command":"git status --short","cwd":"/tmp/large"}}]}}
 {"type":"message","id":"m3","parentId":"tc-status","timestamp":"2026-02-24T10:00:05Z","message":{"role":"toolResult","toolCallId":"tc-status","toolName":"run_terminal","content":"M file1\nM file2","isError":false}}
