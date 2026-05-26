@@ -3,7 +3,7 @@
 Date: 2026-05-19
 Repository: `/Users/alexm/Repository/Codex-History`
 Work type: new provider support planning
-Status: PRD only. Do not claim Grok Build support until real local sessions are captured, redacted, fixture-backed, and tested.
+Status: PRD plus initial local install/auth probe. Do not claim Grok Build support until a successful local session is captured, redacted, fixture-backed, and tested.
 
 ## Decision
 
@@ -36,17 +36,21 @@ Official xAI Build docs establish the product shape:
 - `https://x.ai/cli`: Grok Build Beta is described as early beta for SuperGrok Heavy subscribers and highlights skills, plan mode, plugins, Q&A, and subagents.
 
 Local facts from this machine:
-- `command -v grok` produced no path.
-- `~/.grok` does not exist.
-- `https://x.ai/cli/stable` returned `0.1.212`.
-- The official installer script links the binary into `~/.grok/bin/grok` and `~/.grok/bin/agent`, writes completions under `~/.grok/completions`, persists installer metadata in `~/.grok/config.toml`, may read `~/.grok/auth.json`, and may modify the user's shell config to add `~/.grok/bin` to PATH.
+- Pre-install on 2026-05-19: `command -v grok` produced no path; `~/.grok` did not exist; `https://x.ai/cli/stable` returned `0.1.212`; `/Users/alexm/.local/bin/agent` already existed before install.
+- System-wide install completed with `curl -fsSL https://x.ai/cli/install.sh | bash`.
+- Installed binary: `/Users/alexm/.grok/bin/grok`; `grok --version` returned `grok 0.1.212 (b7b8204a484)`.
+- Installer linked `/Users/alexm/.grok/bin/grok` and `/Users/alexm/.grok/bin/agent` to `../downloads/grok-macos-aarch64`, repointed `/Users/alexm/.local/bin/grok` and `/Users/alexm/.local/bin/agent` to those shims, wrote completions, created `~/.grok/config.toml`, and added `/Users/alexm/.grok/bin` to `/Users/alexm/.zshrc`.
+- Auth completed through browser OAuth and created `~/.grok/auth.json`, but the test request failed with `403 Forbidden: SuperGrok Heavy subscription required` for model `grok-build`.
+- A failed headless test still created local session scaffolding under `~/.grok/sessions/%2Fprivate%2Ftmp%2Fas-agent-lab%2Fgrok-build-project/019e418e-5bac-7353-b499-6bfe0a19e51e/`.
+- Observed session files from the failed run: `summary.json`, `updates.jsonl`, `events.jsonl`, `chat_history.jsonl`, `prompt_context.json`, `rewind_points.jsonl`, `hunk_records.jsonl`, `system_prompt.txt`, plus workspace `prompt_history.jsonl`.
+- Observed search DB: `~/.grok/sessions/session_search.sqlite` with `session_docs` and FTS5 `session_docs_fts` tables.
 
-Unknown until local capture:
-- The durable transcript/session storage format.
-- Whether storage is JSONL, JSON, SQLite, multiple files, or cloud-only.
-- Whether headless `streaming-json` events are also persisted locally.
-- Whether persisted session IDs match `--session-id`, `--resume`, `/session-info`, ACP `sessionId`, or another internal ID.
-- Whether subagents create separate files, in-file parent/child records, or only live TUI state.
+Unknown until a successful local capture:
+- Whether successful assistant/tool events add fields not present in the failed 403 session.
+- Whether headless `streaming-json` output exactly matches persisted `updates.jsonl` / `events.jsonl`.
+- Whether named `--session-id`, `--resume`, `/session-info`, and ACP `sessionId` map to the same persisted directory ID in all modes.
+- Whether subagents create separate directories under `subagents/`, in-file parent/child records, or both.
+- Whether usage data is persisted after a successful response.
 
 ## Product Goals
 
@@ -58,8 +62,8 @@ Unknown until local capture:
 
 ## Non-Goals
 
-- No global install, login, or paid account use inside this PRD.
-- No implementation until a real local Grok session capture exists.
+- No further global install changes, paid plan changes, or account upgrades inside this PRD.
+- No implementation until a successful local Grok session capture exists.
 - No parsing from docs or synthetic output alone.
 - No support for unofficial community `grok-cli` packages.
 - No use of hook-created logs as the primary transcript source unless no first-party local transcript exists and the support decision explicitly accepts a reduced capture contract.
@@ -68,13 +72,13 @@ Unknown until local capture:
 
 | Gate | Required result | Current status |
 | --- | --- | --- |
-| Region and plan availability | A maintainer can use Grok Build from the United States with SuperGrok Heavy or an existing xAI API key. | Not verified locally. |
-| English usability | Docs, CLI output, and auth flow are usable in English. | Docs verified in English; CLI not installed. |
-| Install is reversible | Installer effects, binary path, auth path, PATH edits, and cleanup path are recorded before install. | Installer script inspected; no install run. |
-| Real local data exists | At least one normal session, one continued/resumed session, and one tool-use session produce durable local state. | Blocked until install/auth/test. |
-| Format is maintainable | Session storage has stable fields for ID, time, cwd, role/content, model, tool calls/results, and enough metadata for search. | Unknown. |
+| Region and plan availability | A maintainer can use Grok Build from the United States with SuperGrok Heavy or an existing xAI API key. | Blocked locally: browser auth completed, but model request returned `403 Forbidden: SuperGrok Heavy subscription required`. |
+| English usability | Docs, CLI output, and auth flow are usable in English. | Passed for docs/help/auth flow. |
+| Install is reversible | Installer effects, binary path, auth path, PATH edits, and cleanup path are recorded before install. | Passed. Installer effects are recorded above. |
+| Real local data exists | At least one normal session, one continued/resumed session, and one tool-use session produce durable local state. | Partial. A failed headless request created real local session scaffolding, but no successful assistant/tool transcript. |
+| Format is maintainable | Session storage has stable fields for ID, time, cwd, role/content, model, tool calls/results, and enough metadata for search. | Partial. Session root, ID, cwd, model, user prompt, events, and chat history are visible; successful assistant/tool events remain unverified. |
 | Fixture is safe | Redacted fixture can preserve schema without secrets, tokens, account IDs, private prompts, or absolute user paths. | Unknown. |
-| Resume is grounded | `grok --resume`, `--session-id`, `--continue`, `/resume`, or ACP IDs can be mapped to persisted sessions. | Unknown. |
+| Resume is grounded | `grok --resume`, `--session-id`, `--continue`, `/resume`, or ACP IDs can be mapped to persisted sessions. | Partial. Help/docs expose resume flags and session IDs; successful resume behavior is blocked by the subscription gate. |
 | Marketing language is bounded | Public wording names only verified surfaces. | Must remain tier-2 until proven otherwise. |
 
 ## User Stories
@@ -119,6 +123,14 @@ grok inspect
 find "$HOME/.grok" -maxdepth 5 -type f -print | sort
 ```
 
+Observed install result on 2026-05-19:
+```text
+/Users/alexm/.grok/bin/grok
+grok 0.1.212 (b7b8204a484)
+/Users/alexm/.local/bin/grok -> /Users/alexm/.grok/bin/grok
+/Users/alexm/.local/bin/agent -> /Users/alexm/.grok/bin/agent
+```
+
 Disposable project:
 ```bash
 rm -rf /tmp/as-agent-lab/grok-build-project
@@ -159,6 +171,20 @@ grok -p "List the files in this directory, read hello.py, and report the functio
   --output-format streaming-json
 ```
 
+Observed result on 2026-05-19:
+```text
+Signing in with Grok...
+Browser OAuth completed.
+API error (status 403 Forbidden): SuperGrok Heavy subscription required
+Request URL: https://cli-chat-proxy.grok.com/v1/responses
+model_id=grok-build
+```
+
+The failed request still wrote a session directory:
+```text
+~/.grok/sessions/%2Fprivate%2Ftmp%2Fas-agent-lab%2Fgrok-build-project/019e418e-5bac-7353-b499-6bfe0a19e51e/
+```
+
 Optional TUI probes, only after headless capture works:
 - Start `grok` in the disposable project.
 - Run `/session-info`, `/rename as-fixture-tui`, `/usage`, `/plan`, `/sessions`, `/resume`, and `/fork`.
@@ -191,6 +217,22 @@ For every candidate session file or database, record:
 - Whether headless `streaming-json` is equivalent to persisted transcript events.
 - Whether ACP `session/update` chunks are persisted or only streamed.
 - Whether hook environment IDs match persisted session IDs.
+
+## Observed Local Format From Failed 403 Session
+
+These are verified local facts from the 2026-05-19 failed headless request. They are enough to guide parser design, but not enough to ship support because successful assistant/tool events are still missing.
+
+- Storage layout: `~/.grok/sessions/<url-encoded-cwd>/<session-id>/` with `summary.json`, `updates.jsonl`, `events.jsonl`, `chat_history.jsonl`, `prompt_context.json`, `rewind_points.jsonl`, `hunk_records.jsonl`, `system_prompt.txt`; workspace-level `prompt_history.jsonl`; root search DB at `~/.grok/sessions/session_search.sqlite`.
+- Session ID fields: session directory name is UUID-like. `summary.json` stores `info.id`, and `events.jsonl` `turn_started` stores `session_id`.
+- Timestamp shapes: `summary.json` stores ISO-8601 UTC strings such as `2026-05-19T18:45:09.331130Z`; `events.jsonl` stores millisecond ISO-8601 UTC strings such as `2026-05-19T18:45:10.046Z`; `updates.jsonl` stores numeric `timestamp`.
+- Event type names observed from failed request: `turn_started`, `loop_started`, `phase_changed`, `turn_ended` in `events.jsonl`; `available_commands_update` and `user_message_chunk` in `updates.jsonl`.
+- Role fields observed: `chat_history.jsonl` records `type=system` and `type=user`, with synthetic user entries for `project_instructions` and `system_reminder`.
+- Content shapes observed: `chat_history.jsonl` has string system content and array user content; `updates.jsonl` user chunks have `update.content.type=text`.
+- Tool call/result shapes: not verified because request stopped before model/tool execution.
+- cwd/model fields: `summary.json` has `info.cwd`, `git_root_dir`, `grok_home`, `current_model_id=grok-build`, `generated_title`, `session_summary`, `request_id`, `num_chat_messages`, and `num_messages`.
+- Search DB: `session_search.sqlite` has `session_docs(session_id, cwd, updated_at, title, content, content_hash, last_indexed_offset)` and FTS5 table `session_docs_fts`.
+- Artifact-only directories to skip: `~/.grok/downloads`, `~/.grok/completions`, `~/.grok/docs`, `~/.grok/bundled`, `~/.grok/skills`, `~/.grok/logs`, auth/config files, and plugin/marketplace content unless future evidence says they contain session transcripts.
+- Subagent/session hierarchy behavior: docs say subagent sessions live under `subagents/`, but no local subagent evidence exists yet.
 
 ## Fixture Requirements
 
@@ -481,17 +523,17 @@ Do not use:
 
 ## Open Questions
 
-1. Does Grok persist every TUI/headless session locally, or only enough state for `/resume`?
-2. Where are sessions stored: `~/.grok`, project `.grok`, a SQLite database, JSONL files, or another app data root?
+1. Does Grok persist successful assistant/tool events in the same files observed from the failed 403 session?
+2. Are sessions always stored under `~/.grok/sessions/<url-encoded-cwd>/<session-id>/`, including TUI, named headless, resumed, and ACP sessions?
 3. Are `--session-id`, `--resume`, `/session-info`, and ACP `sessionId` the same stable identifier?
 4. Does `streaming-json` contain the same event families as persisted files?
 5. Are tool calls/results persisted with command output, redacted summaries, or separate artifacts?
 6. Does `/usage` write local usage data, and is it safe/non-sensitive?
 7. Do subagents produce child session records that can be linked to a parent session?
-8. Can validation run on an xAI API key without a SuperGrok Heavy web subscription?
-9. Can a disposable `GROK_BIN_DIR` install avoid modifying `~/.zshrc`, or does the installer always modify shell config?
+8. Can validation run on an xAI API key without a SuperGrok Heavy web subscription, or is SuperGrok Heavy required for all `grok-build` requests?
+9. Can a disposable `GROK_BIN_DIR` install avoid modifying `~/.zshrc`, or does the installer always modify shell config unless patched/wrapped?
 10. Is there a supported environment variable for state/session root override, or only `~/.grok/config.toml`?
 
 ## Recommendation
 
-Proceed with an evidence-capture branch before implementation. The docs show Grok Build is a real, official xAI coding agent with install, headless, resume, ACP, skills, plugins, hooks, and subagent surfaces. The blocker is not product legitimacy; it is the missing local transcript contract. The next session should install/auth only with explicit approval, generate disposable Grok sessions, locate the durable local format, and then decide whether tier-2 support is maintainable.
+Proceed with an evidence-capture branch before implementation, but unblock the account/plan first. The docs and local install show Grok Build is a real, official xAI coding agent with install, headless, resume, ACP, skills, plugins, hooks, and subagent surfaces. The local failed request also proves there is a concrete on-disk session contract under `~/.grok/sessions`. The remaining blocker is the `SuperGrok Heavy subscription required` 403, which prevents capturing successful assistant/tool/resume/subagent records. After plan access is available, generate the disposable sessions in this PRD, redact fixtures, and then decide whether tier-2 support is maintainable.
