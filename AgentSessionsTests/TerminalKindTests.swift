@@ -11,6 +11,11 @@ final class TerminalKindTests: XCTestCase {
     }
 
     func testInferWarpStableFromBundleID() {
+        let kind = TerminalKind.infer(termProgram: "WarpTerminal", cfBundleIdentifier: "dev.warp.Warp-Stable")
+        XCTAssertEqual(kind, .warp)
+    }
+
+    func testInferWarpLegacyBundleID() {
         let kind = TerminalKind.infer(termProgram: "WarpTerminal", cfBundleIdentifier: "dev.warp.Warp")
         XCTAssertEqual(kind, .warp)
     }
@@ -41,27 +46,33 @@ final class TerminalKindTests: XCTestCase {
         XCTAssertEqual(kind, .warpPreview)
     }
 
-    // MARK: - newTabURL
-
-    func testWarpPreviewNewTabURL() {
-        let url = TerminalKind.warpPreview.newTabURL(cwd: "/Users/test/project")
-        XCTAssertEqual(url?.scheme, "warppreview")
-        XCTAssertEqual(url?.host, "action")
-        XCTAssertEqual(url?.path, "/new_tab")
-        XCTAssertEqual(url?.query, "path=/Users/test/project")
+    func testWarpStableBundleIdentifierMatchesInstalledApp() {
+        XCTAssertEqual(TerminalKind.warp.bundleIdentifier, "dev.warp.Warp-Stable")
     }
 
-    func testWarpNewTabURL() {
-        let url = TerminalKind.warp.newTabURL(cwd: "/Users/test")
-        XCTAssertEqual(url?.scheme, "warp")
+    // MARK: - Warp tab config TOML
+
+    func testWarpTabConfigUsesTerminalPane() {
+        let toml = AgentTerminalLauncher.warpTabConfigTOML(
+            configName: "agent-sessions-test",
+            command: "'/usr/local/bin/codex' resume 'abc123'",
+            directory: "/Users/test/project"
+        )
+
+        XCTAssertTrue(toml.contains(#"name = "agent-sessions-test""#))
+        XCTAssertTrue(toml.contains(#"type = "terminal""#))
+        XCTAssertTrue(toml.contains(#"directory = "/Users/test/project""#))
+        XCTAssertTrue(toml.contains(#"commands = ["'/usr/local/bin/codex' resume 'abc123'"]"#))
     }
 
-    func testITerm2NewTabURLIsNil() {
-        XCTAssertNil(TerminalKind.iterm2.newTabURL(cwd: "/tmp"))
-    }
+    func testWarpTabConfigEscapesTomlStrings() {
+        let toml = AgentTerminalLauncher.warpTabConfigTOML(
+            configName: "agent-sessions-escape",
+            command: "echo \"hi\" && printf 'a\\b\nc\td\r'",
+            directory: #"/tmp/dir "quote"\slash"#
+        )
 
-    func testNewTabURLWithNilCwdOmitsQueryParam() {
-        let url = TerminalKind.warpPreview.newTabURL(cwd: nil)
-        XCTAssertNil(url?.query)
+        XCTAssertTrue(toml.contains(#"directory = "/tmp/dir \"quote\"\\slash""#))
+        XCTAssertTrue(toml.contains(#"commands = ["echo \"hi\" && printf 'a\\b\nc\td\r'"]"#))
     }
 }

@@ -46,9 +46,7 @@ enum AgentTerminalLauncher {
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "iTerm2 launch failed.")
     }
 
-    /// Opens a new Claude Code agent tab in Warp or WarpPreview using a temporary tab config.
-    /// Uses the TOML tab config format with `type = "agent"` so Warp creates a proper
-    /// Claude Code tab (avatar icon) rather than a plain terminal tab.
+    /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.
     static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) throws {
         let scheme: String
         let tabConfigDir: URL
@@ -72,16 +70,7 @@ enum AgentTerminalLauncher {
         let configFile = tabConfigDir.appendingPathComponent("\(configName).toml")
         let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser.path
 
-        let toml = """
-name = "\(configName)"
-
-[[panes]]
-id = "main"
-type = "agent"
-directory = "\(tomlEscape(directory))"
-commands = ["\(tomlEscape(shellCommand))"]
-[params]
-"""
+        let toml = warpTabConfigTOML(configName: configName, command: shellCommand, directory: directory)
 
         try toml.write(to: configFile, atomically: true, encoding: .utf8)
 
@@ -103,7 +92,7 @@ commands = ["\(tomlEscape(shellCommand))"]
             Task.detached {
                 await MainActor.run {
                     if let bundleID = kind.bundleIdentifier {
-                        NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
+                        _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
                             options: .default, additionalEventParamDescriptor: nil, launchIdentifier: nil)
                     }
                 }
@@ -123,6 +112,18 @@ commands = ["\(tomlEscape(shellCommand))"]
     }
 
     // MARK: - Helpers
+
+    static nonisolated func warpTabConfigTOML(configName: String, command: String, directory: String) -> String {
+        """
+        name = "\(configName)"
+
+        [[panes]]
+        id = "main"
+        type = "terminal"
+        directory = "\(tomlEscape(directory))"
+        commands = ["\(tomlEscape(command))"]
+        """
+    }
 
     private static nonisolated func tomlEscape(_ value: String) -> String {
         value.replacingOccurrences(of: "\\", with: "\\\\")

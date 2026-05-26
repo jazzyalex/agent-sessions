@@ -13,6 +13,7 @@ enum TerminalKind: String, CaseIterable, Sendable {
         if let bundle = cfBundleIdentifier {
             switch bundle {
             case "dev.warp.Warp-Preview": return .warpPreview
+            case "dev.warp.Warp-Stable":  return .warp
             case "dev.warp.Warp":         return .warp
             default: break
             }
@@ -38,28 +39,11 @@ enum TerminalKind: String, CaseIterable, Sendable {
     var bundleIdentifier: String? {
         switch self {
         case .iterm2:      return "com.googlecode.iterm2"
-        case .warp:        return "dev.warp.Warp"
+        case .warp:        return "dev.warp.Warp-Stable"
         case .warpPreview: return "dev.warp.Warp-Preview"
         case .terminalApp: return "com.apple.Terminal"
         case .unknown:     return nil
         }
     }
 
-    /// URL scheme for opening a new tab at a given path.
-    func newTabURL(cwd: String?) -> URL? {
-        let scheme: String
-        switch self {
-        case .warp:        scheme = "warp"
-        case .warpPreview: scheme = "warppreview"
-        default:           return nil
-        }
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = "action"
-        components.path = "/new_tab"
-        if let cwd, !cwd.isEmpty {
-            components.queryItems = [URLQueryItem(name: "path", value: cwd)]
-        }
-        return components.url
-    }
 }
