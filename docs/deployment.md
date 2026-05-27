@@ -391,12 +391,14 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - **Verifies EdDSA private key exists in Keychain (service: "https://sparkle-project.org")**
    - Fixes DMG URL to point to GitHub Releases (not GitHub Pages)
    - Inserts **structured Sparkle release notes** into `<description><![CDATA[...]]></description>`
-     - Starts with highlights for the current release, then a short “Other Changes” summary
+     - Starts with the headline user-facing change for the current release, then a short “Other Changes” summary
+     - Must omit internal implementation cleanup and pre-release stabilization that users never experienced as released bugs
      - For patch releases `A.B.C`, includes a short reminder from the baseline release `A.B` (TL;DR if available)
      - If the current release section has no structured bullets, adds a fallback highlight: `Small bug fixes and stability improvements.`
      - Fails hard with a clear error if no notes are found (prevents Sparkle UI hang)
    - Copies appcast.xml to docs/ for GitHub Pages
    - Prints a Sparkle release notes preview and asks for approval before publishing (unless `SKIP_CONFIRM=1`)
+   - Agents must still inspect the preview before using unattended mode; a syntactically valid preview is not enough if the copy is misleading
    - Commits and pushes appcast to main branch
 
 6. **Update Documentation**

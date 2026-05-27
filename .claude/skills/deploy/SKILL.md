@@ -78,12 +78,16 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 ## Sparkle Release Notes (Approval Gate)
 
 - The release pipeline generates **structured Sparkle notes** from `docs/CHANGELOG.md`:
-  - Highlights (current release)
+  - Highlights or grouped current-release changes
   - Other changes (summary)
   - Reminder from the baseline release (for patch releases: `A.B`)
 - During `tools/release/deploy release <VERSION>`, the deploy script prints a **Sparkle release notes preview** after build/sign/notarization and appcast validation.
+- Treat the preview as user-facing product copy, not raw commit history:
+  - Lead with the headline change the user should care about.
+  - Do not include internal cleanup, validation fixes, or pre-release stabilization as “Bug Fixes” if users never received that broken behavior.
+  - If the preview is misleading, stop and edit `docs/CHANGELOG.md` before publishing.
 - If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing (pushing appcast, updating Homebrew, updating the GitHub release).
-- If you want fully unattended deploys, set `SKIP_CONFIRM=1` (skips the notes prompt).
+- Use `SKIP_CONFIRM=1` only after manually inspecting the Sparkle preview or for a rerun whose notes were already reviewed.
 - If the current release has no structured bullets, the generator adds a fallback highlight: `Small bug fixes and stability improvements.`
 
 ## Standard Workflow (Use the Unified Tool)

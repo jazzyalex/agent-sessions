@@ -100,6 +100,7 @@ xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration
 ## 5. Release Content and Packaging Readiness (Required)
 
 - [ ] `docs/CHANGELOG.md` has accurate user-visible notes under `[Unreleased]` (or release section after bump).
+- [ ] Sparkle release notes preview is reviewed as user-facing product copy: lead with the release headline, omit internal implementation cleanup, and avoid presenting pre-release stabilization as a shipped bug fix.
 - [ ] `docs/summaries/YYYY-MM.md` includes concise bullets for user-visible changes.
 - [ ] Deployment prerequisites in `docs/deployment.md` are satisfied.
 

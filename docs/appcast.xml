@@ -7,14 +7,10 @@
             <pubDate>Wed, 27 May 2026 11:32:55 -0700</pubDate>
             <description><![CDATA[
 <h2>What&#x27;s New in 3.8.1</h2>
-<h3>Bug Fixes</h3>
+<h3>Highlights</h3>
 <ul>
-<li>Resume: Hardened Warp tab config generation, binary path handling, and terminal preference migration so Resume opens the intended command more reliably.</li>
-</ul>
-<h3>Improvements</h3>
-<ul>
-<li>Resume: Warp and WarpPreview are now launch targets for every supported CLI-agent Resume workflow, using Warp terminal tab configs for new tabs.</li>
-<li>Preferences: Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.</li>
+<li>Resume workflows can now open every supported CLI agent in Warp or WarpPreview, using Warp terminal tab configs for new tabs.</li>
+<li>Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.</li>
 </ul>
 <h3>Reminder: What You Got in 3.8</h3>
 <ul>

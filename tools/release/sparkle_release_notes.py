@@ -329,13 +329,13 @@ def render_html(bundle: NotesBundle) -> str:
         parts.append("<h3>Features</h3>")
         parts.append(_render_list(bundle.features))
 
-    if bundle.bug_fixes:
-        parts.append("<h3>Bug Fixes</h3>")
-        parts.append(_render_list(bundle.bug_fixes))
-
     if bundle.improvements:
         parts.append("<h3>Improvements</h3>")
         parts.append(_render_list(bundle.improvements))
+
+    if bundle.bug_fixes:
+        parts.append("<h3>Bug Fixes</h3>")
+        parts.append(_render_list(bundle.bug_fixes))
 
     if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
         parts.append("<h3>Highlights</h3>")
@@ -363,14 +363,14 @@ def render_plaintext(bundle: NotesBundle) -> str:
         out.extend([f"- {x}" for x in bundle.features])
         out.append("")
 
-    if bundle.bug_fixes:
-        out.append("Bug Fixes:")
-        out.extend([f"- {x}" for x in bundle.bug_fixes])
-        out.append("")
-
     if bundle.improvements:
         out.append("Improvements:")
         out.extend([f"- {x}" for x in bundle.improvements])
+        out.append("")
+
+    if bundle.bug_fixes:
+        out.append("Bug Fixes:")
+        out.extend([f"- {x}" for x in bundle.bug_fixes])
         out.append("")
 
     if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
@@ -412,7 +412,7 @@ def update_appcast_description(appcast_path: str, version: str, description_html
     desc_block = "            <description><![CDATA[\n" + description_html + "            ]]></description>"
 
     if "<description" in item:
-        item2 = re.sub(r"\s*<description>.*?</description>\s*", "\n" + desc_block + "\n", item, flags=re.DOTALL)
+        item2 = re.sub(r"\s*<description>.*?</description>", "\n" + desc_block, item, flags=re.DOTALL)
     else:
         if "</pubDate>" in item:
             item2 = item.replace("</pubDate>", "</pubDate>\n" + desc_block, 1)
