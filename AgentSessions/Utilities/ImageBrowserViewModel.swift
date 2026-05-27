@@ -3,6 +3,11 @@ import AppKit
 
 @MainActor
 final class ImageBrowserViewModel: ObservableObject {
+    private struct SessionCacheKey: Hashable {
+        let source: SessionSource
+        let id: String
+    }
+
     enum LoadState: Equatable {
         case idle
         case loadingSelected
@@ -25,7 +30,7 @@ final class ImageBrowserViewModel: ObservableObject {
         let payload: SessionImagePayload
         let fileSignature: ImageBrowserFileSignature
 
-        var id: String { "\(sessionID)-\(payload.stableID)" }
+        var id: String { "\(sessionSource.rawValue):\(sessionID)-\(payload.stableID)" }
 
         var approxSizeText: String {
             ByteCountFormatter.string(fromByteCount: Int64(payload.approxBytes), countStyle: .file)
@@ -71,11 +76,11 @@ final class ImageBrowserViewModel: ObservableObject {
     private let thumbnailCache: ImageBrowserThumbnailCache
 
     private var allSessions: [Session] = []
-    private var sessionByID: [String: Session] = [:]
+    private var sessionByKey: [SessionCacheKey: Session] = [:]
 
-    // Indexed items per sessionID (for incremental updates without resetting from zero)
-    private var itemsBySessionID: [String: [Item]] = [:]
-    private var sessionSignatureBySessionID: [String: ImageBrowserFileSignature] = [:]
+    // Indexed items per source-scoped session key (for incremental updates without resetting from zero)
+    private var itemsBySessionKey: [SessionCacheKey: [Item]] = [:]
+    private var sessionSignatureBySessionKey: [SessionCacheKey: ImageBrowserFileSignature] = [:]
     private var backgroundTask: Task<Void, Never>?
     private var selectedTask: Task<Void, Never>?
     private var firstThumbnailLogged = false
@@ -91,7 +96,16 @@ final class ImageBrowserViewModel: ObservableObject {
     func updateSessions(allSessions: [Session], seedSession: Session) {
         ImageBrowserPerfMetrics.markOpenTapped()
         self.allSessions = allSessions
-        self.sessionByID = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+        var byKey: [SessionCacheKey: Session] = [:]
+        byKey.reserveCapacity(allSessions.count)
+        for session in allSessions {
+            let key = sessionKey(for: session)
+            if byKey[key] == nil {
+                byKey[key] = session
+            }
+        }
+        byKey[sessionKey(for: seedSession)] = seedSession
+        self.sessionByKey = byKey
         self.seedSessionID = seedSession.id
         firstThumbnailLogged = false
 
@@ -142,7 +156,7 @@ final class ImageBrowserViewModel: ObservableObject {
     }
 
     func loadedUserPromptText(for item: Item) -> String? {
-        guard let session = sessionByID[item.sessionID] else { return nil }
+        guard let session = sessionByKey[sessionKey(source: item.sessionSource, id: item.sessionID)] else { return nil }
         guard !session.events.isEmpty else { return nil }
         guard session.events.indices.contains(item.lineIndex) else { return nil }
         guard session.events[item.lineIndex].kind == .user else { return nil }
@@ -196,13 +210,22 @@ final class ImageBrowserViewModel: ObservableObject {
 }
 
 private extension ImageBrowserViewModel {
+    private func sessionKey(for session: Session) -> SessionCacheKey {
+        sessionKey(source: session.source, id: session.id)
+    }
+
+    private func sessionKey(source: SessionSource, id: String) -> SessionCacheKey {
+        SessionCacheKey(source: source, id: id)
+    }
+
     func loadSelectedSessionFirst(_ seedSession: Session) {
         selectedTask?.cancel()
         selectedTask = Task { [weak self] in
             guard let self else { return }
-            if itemsBySessionID[seedSession.id] != nil,
+            let seedKey = sessionKey(for: seedSession)
+            if itemsBySessionKey[seedKey] != nil,
                let currentSig = fileSignature(forPath: seedSession.filePath),
-               sessionSignatureBySessionID[seedSession.id] == currentSig {
+               sessionSignatureBySessionKey[seedKey] == currentSig {
                 recomputeVisibleItems()
                 state = .loaded
                 if selectedItemID == nil, let first = items.first {
@@ -218,8 +241,8 @@ private extension ImageBrowserViewModel {
             if Task.isCancelled { return }
 
             let newItems = buildItems(for: seedSession, index: index)
-            itemsBySessionID[seedSession.id] = newItems
-            sessionSignatureBySessionID[seedSession.id] = index.signature
+            itemsBySessionKey[seedKey] = newItems
+            sessionSignatureBySessionKey[seedKey] = index.signature
             recomputeVisibleItems()
 
             ImageBrowserPerfMetrics.markSelectedIndexReady(imageCount: newItems.count)
@@ -237,7 +260,7 @@ private extension ImageBrowserViewModel {
         backgroundTask?.cancel()
 
         let scopeSessions = sessionsMatchingCurrentFilters()
-        let missing = scopeSessions.filter { itemsBySessionID[$0.id] == nil }
+        let missing = scopeSessions.filter { itemsBySessionKey[sessionKey(for: $0)] == nil }
         guard !missing.isEmpty else {
             state = .loaded
             return
@@ -253,8 +276,9 @@ private extension ImageBrowserViewModel {
                 if Task.isCancelled { break }
                 let built = await MainActor.run { self.buildItems(for: session, index: index) }
                 await MainActor.run {
-                    self.itemsBySessionID[session.id] = built
-                    self.sessionSignatureBySessionID[session.id] = index.signature
+                    let key = self.sessionKey(for: session)
+                    self.itemsBySessionKey[key] = built
+                    self.sessionSignatureBySessionKey[key] = index.signature
                     self.recomputeVisibleItems()
                 }
                 scanned += 1
@@ -285,12 +309,12 @@ private extension ImageBrowserViewModel {
 
     func recomputeVisibleItems() {
         let sessions = sessionsMatchingCurrentFilters()
-        let sessionIDs = Set(sessions.map(\.id))
+        let sessionKeys = Set(sessions.map { sessionKey(for: $0) })
 
         var merged: [Item] = []
         merged.reserveCapacity(256)
-        for sid in sessionIDs {
-            if let list = itemsBySessionID[sid] {
+        for key in sessionKeys {
+            if let list = itemsBySessionKey[key] {
                 merged.append(contentsOf: list)
             }
         }

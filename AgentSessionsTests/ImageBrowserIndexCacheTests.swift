@@ -2,6 +2,92 @@ import XCTest
 @testable import AgentSessions
 
 final class ImageBrowserIndexCacheTests: XCTestCase {
+    @MainActor
+    func testImageBrowserUpdateSessionsAllowsDuplicateRawSessionIDs() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("AgentSessionsTests", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+
+        let codexURL = tmp.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
+        let claudeURL = tmp.appendingPathComponent(UUID().uuidString).appendingPathExtension("jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: codexURL)
+            try? FileManager.default.removeItem(at: claudeURL)
+        }
+        try Data().write(to: codexURL)
+        try Data().write(to: claudeURL)
+
+        let codex = Session(
+            id: "shared-session-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: codexURL.path,
+            eventCount: 1,
+            events: [makeEvent(id: "codex-0", text: "seed prompt")]
+        )
+        let duplicateCodex = Session(
+            id: "shared-session-id",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: codexURL.path,
+            eventCount: 1,
+            events: [makeEvent(id: "codex-duplicate-0", text: "duplicate prompt")]
+        )
+        let claude = Session(
+            id: "shared-session-id",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: claudeURL.path,
+            eventCount: 0,
+            events: []
+        )
+
+        let viewModel = ImageBrowserViewModel()
+        viewModel.updateSessions(allSessions: [duplicateCodex, claude, codex], seedSession: codex)
+        viewModel.cancelBackgroundWork()
+        let item = ImageBrowserViewModel.Item(
+            sessionID: "shared-session-id",
+            sessionTitle: "Shared",
+            sessionModifiedAt: Date(),
+            sessionFileURL: codexURL,
+            sessionSource: .codex,
+            sessionProject: nil,
+            sessionImageIndex: 1,
+            lineIndex: 0,
+            eventID: "codex-0",
+            userPromptIndex: 0,
+            payload: .file(fileURL: codexURL, mediaType: "image/png", fileSizeBytes: 0),
+            fileSignature: ImageBrowserFileSignature(filePath: codexURL.path, fileSizeBytes: 0, modifiedAtUnixSeconds: 0)
+        )
+
+        XCTAssertEqual(viewModel.seedSessionID, "shared-session-id")
+        XCTAssertEqual(viewModel.selectedSources, [.codex])
+        XCTAssertEqual(Set(viewModel.availableSources), [.codex, .claude])
+        XCTAssertEqual(viewModel.loadedUserPromptText(for: item), "seed prompt")
+    }
+
+    private func makeEvent(id: String, text: String) -> SessionEvent {
+        SessionEvent(
+            id: id,
+            timestamp: nil,
+            kind: .user,
+            role: "user",
+            text: text,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: "{}"
+        )
+    }
+
     func testGetOrBuildIndex_Codex_CachesBySignature() async throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("AgentSessionsTests", isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -47,4 +133,3 @@ final class ImageBrowserIndexCacheTests: XCTestCase {
         XCTAssertEqual(built.spans.first?.mediaType, "image/png")
     }
 }
-

@@ -142,6 +142,30 @@ These are useful for Reddit, X/Twitter, newsletters, and devtool communities bec
 - “What Codex subagents actually did during a complex task”
 - “Stop losing useful terminal agent transcripts”
 
+## X/Twitter reply rule
+
+X replies must be drafted for the real 280-character composer limit, not for a Markdown packet.
+
+Hard rule:
+- Every final X reply must be <= 280 effective characters before posting.
+- Count each URL or bare domain as 23 characters, because X shortens links.
+- Include `X effective length: N/280` in approval packets for every postable X draft.
+- Approval packets must include affected tool, source evidence phrase, comparison tools, Agent Sessions support state, direct capability match, failure class, link destination, and screenshot decision.
+- Prefer 250-270 effective characters when X will auto-add `Replying to @...` context or when a link card may appear.
+- If the screenshot carries the proof, the text should get shorter, not longer.
+- Drop the star-count footer before dropping the core claim. An honest, direct reply plus link is better than an over-limit promo footer.
+- Until a new dedicated social banner exists, do not rely on the default Agent Sessions link card for X replies. Attach a relevant product screenshot when posting a linked reply.
+- Verify the affected agent/tool from the source post before posting. Do not treat a comparison baseline as the affected product. Rendering/performance bugs and vendor regressions should stay hold/no-link unless the author asks for history/search/recovery tooling.
+- Use GitHub links when the goal is stars/source review; use website links when the reader needs product context, screenshots, install path, or release notes.
+
+Local helper:
+
+```js
+function xEffectiveLength(text) {
+  return text.replace(/https?:\/\/\S+|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/\S*)?/g, "xxxxxxxxxxxxxxxxxxxxxxx").length
+}
+```
+
 ## Content strategy (repeatable, not exhausting)
 
 Weekly cadence (example):

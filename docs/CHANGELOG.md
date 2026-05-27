@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.
+- Website: Open Graph and Twitter previews now use the main Sessions screenshot directly until a dedicated social banner is ready.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights
