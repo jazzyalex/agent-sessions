@@ -77,5 +77,6 @@ __pycache__/
 
 # Local test derived data
 .deriveddata-tests/
+.deriveddata-manual-test/
 .deriveddata-cpu-*/
 .deriveddata-review/
