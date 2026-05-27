@@ -30,7 +30,6 @@ TAG=${TAG:-v$VERSION}
 TEAM_ID=${TEAM_ID:-}
 NOTARY_PROFILE=${NOTARY_PROFILE:-AgentSessionsNotary}
 DEV_ID_APP=${DEV_ID_APP:-}
-NOTES_FILE=${NOTES_FILE:-}
 UPDATE_CASK=${UPDATE_CASK:-1}
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 COMMIT_TOOL=${COMMIT_TOOL:-Codex}
@@ -841,45 +840,37 @@ CASK
 fi
 
 green "==> Creating or updating GitHub Release"
-# Build release notes if none provided. Use the same curated/linted notes as
-# Sparkle so GitHub Release copy cannot drift back to raw changelog internals.
-TMP_NOTES=""
-if [[ -z "${NOTES_FILE}" ]]; then
-  STRUCTURED_NOTES="$REPO_ROOT/dist/updates/release-notes-${VERSION}.txt"
-  if [[ -s "$STRUCTURED_NOTES" ]]; then
-    TMP_NOTES="$STRUCTURED_NOTES"
-  elif [[ -f "$REPO_ROOT/docs/CHANGELOG.md" ]]; then
-    TMP_NOTES=$(mktemp)
-    python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
-      --version "$VERSION" \
-      --changelog "$REPO_ROOT/docs/CHANGELOG.md" \
-      --github-url "https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}" \
-      --out-text "$TMP_NOTES" \
-      --lint >/dev/null
-  fi
-  if [[ -z "$TMP_NOTES" ]] || [[ ! -s "$TMP_NOTES" ]]; then
-    red "ERROR: Could not generate curated GitHub release notes for ${VERSION}"
-    red "Add user-facing notes to docs/CHANGELOG.md and rerun."
-    exit 2
-  fi
-  NOTES_FILE="$TMP_NOTES"
+# Use the same generated, linted notes as Sparkle so GitHub Release copy cannot
+# drift back to raw changelog internals or ad-hoc override files.
+if [[ -n "${NOTES_FILE:-}" ]]; then
+  red "ERROR: NOTES_FILE override is no longer supported for deploy release."
+  red "Edit docs/CHANGELOG.md so Sparkle and GitHub Release notes stay aligned."
+  exit 2
 fi
+
+RELEASE_NOTES_FILE=$(mktemp)
+python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
+  --version "$VERSION" \
+  --changelog "$REPO_ROOT/docs/CHANGELOG.md" \
+  --github-url "https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}" \
+  --out-text "$RELEASE_NOTES_FILE" \
+  --lint >/dev/null
+if [[ ! -s "$RELEASE_NOTES_FILE" ]]; then
+  red "ERROR: Could not generate curated GitHub release notes for ${VERSION}"
+  red "Add user-facing notes to docs/CHANGELOG.md and rerun."
+  exit 2
+fi
+
 if gh release view "$TAG" >/dev/null 2>&1; then
   log INFO "Release $TAG already exists, updating assets"
   yellow "Release $TAG already exists, updating assets..."
   retry gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
-  if [[ -n "${NOTES_FILE}" ]]; then
-    log INFO "Updating release notes"
-    retry gh release edit "$TAG" --notes-file "$NOTES_FILE"
-  fi
+  log INFO "Updating release notes"
+  retry gh release edit "$TAG" --notes-file "$RELEASE_NOTES_FILE"
   green "✓ Release $TAG updated (idempotent)"
 else
   log INFO "Creating new release $TAG"
-  if [[ -n "${NOTES_FILE}" ]]; then
-    retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$NOTES_FILE"
-  else
-    retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes "Release ${VERSION}"
-  fi
+  retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$RELEASE_NOTES_FILE"
   green "✓ Release $TAG created"
 fi
 

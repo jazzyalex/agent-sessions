@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "release" / "sparkle_release_notes.py"
+DEPLOY_SCRIPT_PATH = ROOT / "tools" / "release" / "deploy-agent-sessions.sh"
 
 spec = importlib.util.spec_from_file_location("sparkle_release_notes", MODULE_PATH)
 sparkle_release_notes = importlib.util.module_from_spec(spec)
@@ -67,3 +68,12 @@ def test_update_appcast_description_preserves_following_field_indent(tmp_path):
     updated = appcast.read_text(encoding="utf-8")
     assert "<h2>What's New in 3.8.1</h2>" in updated
     assert "\n            <sparkle:version>47</sparkle:version>" in updated
+
+
+def test_deploy_rejects_notes_file_override():
+    script = DEPLOY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "NOTES_FILE=${NOTES_FILE:-}" not in script
+    assert "NOTES_FILE override is no longer supported" in script
+    assert 'gh release edit "$TAG" --notes-file "$RELEASE_NOTES_FILE"' in script
+    assert 'gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$RELEASE_NOTES_FILE"' in script
