@@ -4,10 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Improvements
-- Website: Replaced the social preview card with a product screenshot-led banner and tightened Open Graph/Twitter copy for clearer X link previews.
-- Add Warp and WarpPreview as Resume launch targets for CLI agents using Warp terminal tab configs.
-- Terminal picker in Preferences dynamically shows only installed terminals
-- Migrate from per-agent preferITerm boolean to shared TerminalKind preference
+- Resume: Warp and WarpPreview are now launch targets for every supported CLI-agent Resume workflow, using Warp terminal tab configs for new tabs.
+- Preferences: Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.
+
+### Bug Fixes
+- Resume: Hardened Warp tab config generation, binary path handling, and terminal preference migration so Resume opens the intended command more reliably.
 
 ## [3.8] - 2026-05-12
 ### Features

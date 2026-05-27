@@ -55,11 +55,11 @@ Agent Sessions helps you search across large session histories, quickly find the
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.8
+## What's New in 3.8.1
 
-**TL;DR** - Agent Sessions is expanding beyond CLI-only workflows into a broader session hub, and Pi CLI now joins the supported agent lineup.
+**TL;DR** - Resume workflows now support Warp and WarpPreview across every supported CLI agent.
 
-**Highlights:** Agent Sessions now treats CLI and native-app sessions as part of one growing workspace. Codex Desktop and Claude Desktop sessions are easier to identify and filter, archived Codex Desktop sessions are easier to browse, and desktop chat/worktree rows now preserve clearer project context. Hermes CLI is now part of that broader searchable and resumable workspace, and Agent Sessions also adds tier-2 Pi CLI support with local JSONL discovery, browsing, search, Preferences controls, Pi-specific styling, and Resume/Copy Resume commands via `pi --session`.
+**Highlights:** Choose Terminal.app, iTerm2, Warp, or WarpPreview once in Preferences, and Agent Sessions uses that shared terminal preference for supported Resume launches. Warp and WarpPreview launches use Warp terminal tab configs so Claude, Codex, Cursor, Gemini, GitHub Copilot, Hermes, OpenCode, and Pi Resume commands open in the intended terminal tab.
 
 ## Core Features
 
@@ -71,7 +71,7 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Right-click Copy Resume Command for Claude CLI, Codex CLI, OpenCode CLI, GitHub Copilot CLI, and Gemini CLI sessions.
+- Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, Warp, and WarpPreview launch targets.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
@@ -137,8 +137,8 @@ open "/Applications/Agent Sessions.app"
 
 ## Resume Workflows
 
-- Right-click any Claude CLI, Codex CLI, Cursor CLI, OpenCode CLI, GitHub Copilot CLI, or Gemini CLI session and choose **Copy Resume Command** to get the exact CLI command for that session.
-- Open a session in your preferred terminal (Terminal.app or iTerm).
+- Right-click any supported CLI session and choose **Copy Resume Command** to get the exact CLI command for that session.
+- Open supported Resume sessions in your preferred terminal: Terminal.app, iTerm2, Warp, or WarpPreview.
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 
 ## Privacy & Security
