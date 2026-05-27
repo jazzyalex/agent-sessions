@@ -26,4 +26,3 @@ Limitations:
 - `docs/deep-dive/30-vibe-workflow-blueprint.md` — what “modern vibe coding” needs and how this product can win
 - `docs/deep-dive/40-ballast-audit.md` — what to remove/hide, and why
 - `docs/deep-dive/50-growth-plan.md` — distribution plan, partnerships, and launch strategy
-- `docs/deep-dive/56-promotion-playbook.md` — templates and checklists to promote without guessing
