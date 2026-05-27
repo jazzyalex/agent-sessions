@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.8.1] - 2026-05-27
 ### Improvements
 - Resume: Warp and WarpPreview are now launch targets for every supported CLI-agent Resume workflow, using Warp terminal tab configs for new tabs.
 - Preferences: Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.
