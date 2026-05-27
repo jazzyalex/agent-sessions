@@ -67,7 +67,9 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
   - Do not include internal cleanup, validation fixes, or pre-release stabilization as “Bug Fixes” if users never received that broken behavior.
   - If the preview is misleading, stop and edit `docs/CHANGELOG.md` before publishing.
 - If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing (pushing appcast, updating Homebrew, updating the GitHub release).
-- Use `SKIP_CONFIRM=1` only after manually inspecting the Sparkle preview or for a rerun whose notes were already reviewed.
+- `SKIP_CONFIRM=1` requires `RELEASE_NOTES_REVIEWED=1` at the appcast publish gate; set it only after manually inspecting the Sparkle preview or for a rerun whose notes were already reviewed.
+- The notes generator fails before publishing if notes contain obvious internal/process wording or put Bug Fixes ahead of a headline section.
+- GitHub Release notes must use the same curated/linted notes as Sparkle, not raw commit history or raw changelog extraction.
 - If the current release has no structured bullets, the generator adds a fallback highlight: `Small bug fixes and stability improvements.`
 
 ## Standard Workflow (Use the Unified Tool)

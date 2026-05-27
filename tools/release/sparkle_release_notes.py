@@ -394,6 +394,42 @@ def render_plaintext(bundle: NotesBundle) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def lint_plaintext_notes(text: str) -> List[str]:
+    """
+    Catch release-note copy that is syntactically valid but not suitable for
+    Sparkle's user-facing update dialog.
+    """
+    errors: List[str] = []
+    lowered = text.lower()
+
+    internal_patterns = [
+        r"\binternal\b",
+        r"\bimplementation\b",
+        r"\bpre-release\b",
+        r"\bvalidation fix(?:es)?\b",
+        r"\bcleanup\b",
+        r"\bhardened\b",
+        r"\bhardening\b",
+    ]
+    for pattern in internal_patterns:
+        if re.search(pattern, lowered):
+            errors.append(
+                "release notes include internal/process wording; keep Sparkle notes focused on user-facing shipped behavior"
+            )
+            break
+
+    headline_positions = [
+        idx
+        for heading in ("Highlights:", "Features:", "Improvements:")
+        if (idx := text.find(heading)) >= 0
+    ]
+    bug_fix_pos = text.find("Bug Fixes:")
+    if bug_fix_pos >= 0 and headline_positions and bug_fix_pos < min(headline_positions):
+        errors.append("Bug Fixes appears before the headline user-facing change")
+
+    return errors
+
+
 def update_appcast_description(appcast_path: str, version: str, description_html: str) -> None:
     xml = _read_file(appcast_path)
 
@@ -438,11 +474,21 @@ def main() -> int:
     ap.add_argument("--github-url", default=None)
     ap.add_argument("--out-html", default=None)
     ap.add_argument("--out-text", default=None)
+    ap.add_argument("--lint", action="store_true", help="Fail if the generated notes look unsuitable for user-facing Sparkle copy.")
     args = ap.parse_args()
 
     bundle = build_notes_bundle(args.version, args.changelog, args.github_url)
     html_out = render_html(bundle)
     text_out = render_plaintext(bundle)
+
+    if args.lint:
+        errors = lint_plaintext_notes(text_out)
+        if errors:
+            for error in errors:
+                print(f"ERROR: {error}", file=sys.stderr)
+            print("", file=sys.stderr)
+            print(text_out, file=sys.stderr)
+            return 2
 
     if args.out_html:
         _write_file(args.out_html, html_out)

@@ -489,7 +489,8 @@ else
 	    --appcast "$UPDATES_DIR/appcast.xml" \
 	    --github-url "$GITHUB_URL" \
 	    --out-text "$NOTES_PREVIEW_TXT" \
-	    --out-html "$NOTES_PREVIEW_HTML" >/dev/null
+	    --out-html "$NOTES_PREVIEW_HTML" \
+	    --lint >/dev/null
 
 	  if grep -q '<description>' "$UPDATES_DIR/appcast.xml"; then
 	    green "Added structured release notes from CHANGELOG.md to appcast"
@@ -606,7 +607,13 @@ else
 	        exit 0
 	      fi
 	    else
-	      green "Proceeding automatically (SKIP_CONFIRM=1): publishing without release-notes prompt"
+	      if [[ "${RELEASE_NOTES_REVIEWED:-0}" != "1" ]]; then
+	        red "ERROR: SKIP_CONFIRM=1 requires RELEASE_NOTES_REVIEWED=1 after inspecting the Sparkle notes preview."
+	        red "This prevents unattended deploys from publishing misleading user-facing release notes."
+	        red "Edit docs/CHANGELOG.md if needed, then rerun with RELEASE_NOTES_REVIEWED=1."
+	        exit 2
+	      fi
+	      green "Proceeding automatically (SKIP_CONFIRM=1, RELEASE_NOTES_REVIEWED=1): publishing reviewed release notes"
 	    fi
 
 	    save_state "appcast_generated"
@@ -834,29 +841,26 @@ CASK
 fi
 
 green "==> Creating or updating GitHub Release"
-# Build release notes if none provided
+# Build release notes if none provided. Use the same curated/linted notes as
+# Sparkle so GitHub Release copy cannot drift back to raw changelog internals.
 TMP_NOTES=""
 if [[ -z "${NOTES_FILE}" ]]; then
-  if [[ -f "$REPO_ROOT/docs/CHANGELOG.md" ]]; then
+  STRUCTURED_NOTES="$REPO_ROOT/dist/updates/release-notes-${VERSION}.txt"
+  if [[ -s "$STRUCTURED_NOTES" ]]; then
+    TMP_NOTES="$STRUCTURED_NOTES"
+  elif [[ -f "$REPO_ROOT/docs/CHANGELOG.md" ]]; then
     TMP_NOTES=$(mktemp)
-    awk -v ver="$VERSION" '
-      BEGIN{insec=0}
-      /^##[ ]*\[?'"$VERSION"'\]?([ )-]|$)/ {insec=1; next}
-      /^##[ ]/ && insec==1 {insec=0}
-      insec==1 {print}
-    ' "$REPO_ROOT/docs/CHANGELOG.md" > "$TMP_NOTES" || true
-    if [[ ! -s "$TMP_NOTES" ]]; then rm -f "$TMP_NOTES"; TMP_NOTES=""; fi
+    python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
+      --version "$VERSION" \
+      --changelog "$REPO_ROOT/docs/CHANGELOG.md" \
+      --github-url "https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}" \
+      --out-text "$TMP_NOTES" \
+      --lint >/dev/null
   fi
-  if [[ -z "$TMP_NOTES" ]]; then
-    TMP_NOTES=$(mktemp)
-    prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]+' | grep -v "^$TAG$" | head -n1 || true)
-    if [[ -n "$prev" ]]; then
-      echo "Changes since $prev:" > "$TMP_NOTES"
-      git log --pretty='- %s' "$prev..HEAD" >> "$TMP_NOTES"
-    else
-      echo "Recent changes:" > "$TMP_NOTES"
-      git log -n 50 --pretty='- %s' >> "$TMP_NOTES"
-    fi
+  if [[ -z "$TMP_NOTES" ]] || [[ ! -s "$TMP_NOTES" ]]; then
+    red "ERROR: Could not generate curated GitHub release notes for ${VERSION}"
+    red "Add user-facing notes to docs/CHANGELOG.md and rerun."
+    exit 2
   fi
   NOTES_FILE="$TMP_NOTES"
 fi

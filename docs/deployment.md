@@ -36,7 +36,8 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 
 **Key environment flags**:
 - `SKIP_CONFIRM=1` — make bump and release flows unattended (suppresses confirmation prompts where supported).
-- In unattended mode, manual smoke checks are reported as post-deploy reminders rather than blocking prompts.
+- `RELEASE_NOTES_REVIEWED=1` — required with `SKIP_CONFIRM=1` before publishing Sparkle appcast notes; set it only after inspecting the printed Sparkle notes preview.
+- In unattended mode, manual smoke checks are reported as post-deploy reminders rather than blocking prompts, but Sparkle release notes still require explicit review.
 - `NOTARIZE_SYNC=1` — use legacy blocking notarization instead of background polling.
 - `UPDATE_CASK=1` — update the Homebrew tap via GitHub API.
 - Notary auth is resolved in this order:
@@ -393,12 +394,13 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Inserts **structured Sparkle release notes** into `<description><![CDATA[...]]></description>`
      - Starts with the headline user-facing change for the current release, then a short “Other Changes” summary
      - Must omit internal implementation cleanup and pre-release stabilization that users never experienced as released bugs
+     - Fails if generated notes contain internal/process wording or put Bug Fixes ahead of a headline section
      - For patch releases `A.B.C`, includes a short reminder from the baseline release `A.B` (TL;DR if available)
      - If the current release section has no structured bullets, adds a fallback highlight: `Small bug fixes and stability improvements.`
      - Fails hard with a clear error if no notes are found (prevents Sparkle UI hang)
    - Copies appcast.xml to docs/ for GitHub Pages
    - Prints a Sparkle release notes preview and asks for approval before publishing (unless `SKIP_CONFIRM=1`)
-   - Agents must still inspect the preview before using unattended mode; a syntactically valid preview is not enough if the copy is misleading
+   - `SKIP_CONFIRM=1` is not enough to publish appcast notes; unattended release runs must also set `RELEASE_NOTES_REVIEWED=1` after the preview has been inspected
    - Commits and pushes appcast to main branch
 
 6. **Update Documentation**
@@ -414,7 +416,7 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Commits directly to main branch
 
 8. **Create GitHub Release**
-   - Extracts release notes from CHANGELOG.md
+   - Uses the same curated/linted notes generated for Sparkle instead of raw commit history or raw changelog extraction
    - Creates or updates GitHub Release
    - Uploads DMG and SHA256 checksum
 
