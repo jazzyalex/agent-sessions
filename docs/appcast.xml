@@ -3,35 +3,32 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.8</title>
-            <pubDate>Tue, 12 May 2026 20:17:29 -0700</pubDate>
+            <title>3.8.1</title>
+            <pubDate>Wed, 27 May 2026 11:32:55 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.8</h2>
-<h3>Features</h3>
-<ul>
-<li>Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.</li>
-<li>Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.</li>
-</ul>
+<h2>What&#x27;s New in 3.8.1</h2>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.</li>
-<li>Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.</li>
-<li>Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line.</li>
-<li>Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes, and remain compatible with older Codex state database schemas that do not yet include git origin columns.</li>
-<li>Sessions/Search: Restored Codex Desktop sessions with old rollout dates now sort by fresh activity, are picked up when their files change, and remain searchable even before full-text indexing has warmed or when only non-large transcripts are available.</li>
-<li>Analytics: Chart coloring now derives from the actual enabled agent data, preventing mismatches or crashes when newer providers appear in the dataset.</li>
+<li>Resume: Hardened Warp tab config generation, binary path handling, and terminal preference migration so Resume opens the intended command more reliably.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li>Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.</li>
-<li>Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.</li>
+<li>Resume: Warp and WarpPreview are now launch targets for every supported CLI-agent Resume workflow, using Warp terminal tab configs for new tabs.</li>
+<li>Preferences: Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8</a></p>
+<h3>Reminder: What You Got in 3.8</h3>
+<ul>
+<li>Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.</li>
+<li>Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.</li>
+<li>Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.</li>
+<li>Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.</li>
+</ul>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.1</a></p>
             ]]></description>
-<sparkle:version>46</sparkle:version>
-            <sparkle:shortVersionString>3.8</sparkle:shortVersionString>
+            <sparkle:version>47</sparkle:version>
+            <sparkle:shortVersionString>3.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8/AgentSessions-3.8.dmg" length="17626302" type="application/octet-stream" sparkle:edSignature="h2FiTSydI6bxVlME98TQr84zvSpklf/7gkKsT7PizPGn6VheFDxMgMobs/oDIms2FRD+L4Xp8NUkEVLMTa/VDA=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg" length="17659363" type="application/octet-stream" sparkle:edSignature="V9Lpto1t4gPgWNto/Uj/MKCspSb6eML9PYIZwluWMtyx6yGN9AXOY+gm9J0sCthMaQLPCrAfM6hdEmbtoYQ4BQ=="/>
         </item>
     </channel>
 </rss>
