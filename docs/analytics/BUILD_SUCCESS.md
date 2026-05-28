@@ -153,7 +153,7 @@ The Analytics feature will calculate metrics from your existing sessions:
 
 **Current Session Data:**
 - Codex CLI sessions from `~/.codex/sessions/`
-- Claude Code sessions from `~/.claude/sessions/`
+- Claude Code sessions from `~/.claude/projects/`
 - Gemini sessions from `~/.gemini/sessions/`
 
 **If you have sessions, you should see:**

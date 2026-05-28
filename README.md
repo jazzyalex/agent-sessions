@@ -146,7 +146,7 @@ open "/Applications/Agent Sessions.app"
 - Local-only. No telemetry.
 - Reads agent session directories in read-only mode:
   - `~/.codex/sessions`
-  - `~/.claude/sessions`
+  - `~/.claude/projects`
   - `~/.gemini/tmp`
   - `~/.copilot/session-state`
   - `~/.cursor/projects` and `~/.cursor/chats`
