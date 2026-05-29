@@ -14,13 +14,13 @@
   <meta property="og:title" content="Agent Sessions — Local History for AI Coding Agents">
   <meta property="og:description"
     content="Browse, search, inspect, and resume local Codex, Cursor Agent, Hermes, OpenClaw, Claude, OpenCode, Gemini, Copilot, and Pi sessions on macOS.">
-  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/screenshot-H.png">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-history-light.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@jazzyalex">
   <meta name="twitter:title" content="Agent Sessions — Local History for AI Coding Agents">
   <meta name="twitter:description"
     content="Browse, search, inspect, and resume local Codex, Cursor Agent, Hermes, OpenClaw, Claude, OpenCode, Gemini, Copilot, and Pi sessions on macOS.">
-  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/screenshot-H.png">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-history-light.png">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/">
   <link rel="icon" href="assets/app-icon-32.png" />
   <style>
@@ -231,7 +231,7 @@
   </header>
   <div class="container">
     <h1 style="font-size: 24px;">Local History Hub for Cursor Agent, Hermes, OpenClaw, Codex, Claude, OpenCode, Gemini, Copilot & Pi</h1>
-    <p><strong>Agent Cockpit</strong> is the live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions. Beyond live CLI monitoring, Agent Sessions is a broader local-first hub for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>, with searchable histories and Resume workflows that can launch supported agents in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, <strong>Warp</strong>, or <strong>WarpPreview</strong>.</p>
+    <p><strong>Agent Sessions</strong> is a broader local-first hub for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>, with searchable histories and Resume workflows that can launch supported agents in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, or <strong>Warp</strong>. <strong>Agent Cockpit</strong> adds a live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions.</p>
     <div class="hero-row" style="margin-bottom: 20px;">
       <span
         style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
@@ -262,6 +262,15 @@
 
     <pre><code style="font-size: 12px;">brew tap jazzyalex/agent-sessions
 brew install --cask agent-sessions</code></pre>
+
+    <p style="text-align:center; color:#586069; font-size:14px; margin-top:22px; margin-bottom:0px;"><em>Sessions search
+        with transcript preview
+      </em></p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/session-all-agents-dark.png">
+      <img src="assets/session-history-light.png" alt="Main Sessions window with local agent history and transcript preview"
+        style="width:100%; max-width:960px; margin:5px auto 28px; display:block;" />
+    </picture>
 
     <div class="features">
 
@@ -311,7 +320,7 @@ brew install --cask agent-sessions</code></pre>
       </div>
       <div class="card">
         <h3>Resume Any Session</h3>
-        <p>Right-click a supported CLI session to copy the exact resume command or open it directly in Terminal.app, iTerm2, Warp, or WarpPreview.</p>
+        <p>Right-click a supported CLI session to copy the exact resume command or open it directly in Terminal.app, iTerm2, or Warp.</p>
       </div>
       <div class="card">
         <h3>Saved Sessions</h3>
@@ -361,11 +370,6 @@ brew install --cask agent-sessions</code></pre>
 
   </div>
 
-  <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Sessions search
-      with transcript preview (Dark Mode)
-    </em></p>
-  <img src="assets/screenshot-H.png" alt="Main Sessions window with active search and transcript preview in Dark Mode"
-    style="width:100%; max-width:960px; margin:5px auto; display:block;" />
   <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Saved Sessions with restore actions</em></p>
   <img src="assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions"
     style="width:100%; max-width:960px; margin:5px auto; display:block;" />

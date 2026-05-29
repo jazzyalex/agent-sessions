@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Local-history guide pages now reuse the main product-page header style and show unframed agent-specific marketing screenshots.
 - README agent names and product-page guide cards now link directly to local-history guides.
 - Product page supported-agent card now wraps long agent names cleanly instead of overflowing.
+- Product page now moves the main Sessions screenshot above Agent Cockpit, switches between light/dark screenshots, and removes WarpPreview from visible page copy.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
   opt-in `--mode prebump` path with per-agent drivers for codex, claude,
