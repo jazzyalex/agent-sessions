@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Docs/Website: Linked README agent names and product-page guide cards directly to local-history guides.
 - Website: Fixed the product page supported-agent card so long agent names wrap instead of spilling out of the card.
 - Website: Moved the main Sessions screenshot above Agent Cockpit, added light/dark screenshot selection, and removed WarpPreview from the product-page copy.
+- Website: Replaced the expanded menu bar dropdown screenshot with a plain menu bar status strip on the product page.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights
