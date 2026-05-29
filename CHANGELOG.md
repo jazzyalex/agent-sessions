@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Product page now uses light-mode menu bar and Analytics screenshots with dark-mode fallbacks.
 - Product page now captions the menu bar status strip consistently with the other screenshots.
 - Product page now includes light/dark Image Browser screenshots for visual session outputs.
+- Product page headline now focuses on session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi, and Gemini.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
   opt-in `--mode prebump` path with per-agent drivers for codex, claude,

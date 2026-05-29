@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Website: Added light-mode menu bar and Analytics screenshots with dark-mode fallbacks on the product page.
 - Website: Added a caption to the menu bar status strip so it matches the surrounding screenshot sections.
 - Website: Added light/dark Image Browser screenshots to the product page.
+- Website: Updated the product-page headline to focus on session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi, and Gemini.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights
