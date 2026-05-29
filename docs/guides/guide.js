@@ -16,6 +16,7 @@ async function loadGitHubStars() {
     const repo = await response.json();
     starCount.textContent = repo.stargazers_count ?? 0;
     starContainer.hidden = false;
+    starContainer.style.display = "inline";
   } catch {
     // Star count is decorative; never block the page.
   }

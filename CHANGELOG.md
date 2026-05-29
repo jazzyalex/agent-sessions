@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Documentation and website copy now position Agent Sessions as a local-history hub for CLI tools, desktop apps, and app-bundled agents, with dedicated full HTML SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
-- Local-history guide pages now match the main product-page header style and use agent-specific marketing screenshots.
+- Local-history guide pages now reuse the main product-page header style and show unframed agent-specific marketing screenshots.
 - README and product-page agent names now link directly to their local-history guides.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
