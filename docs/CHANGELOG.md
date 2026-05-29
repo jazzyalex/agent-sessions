@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Website: Open Graph and Twitter previews now use the main Sessions screenshot directly until a dedicated social banner is ready.
 - Docs/Website: Repositioned Agent Sessions around local history for CLI tools, desktop apps, and app-bundled agents, with full HTML SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
 - Docs/Website: Updated local-history guide pages to match the main product-page header style and use agent-specific marketing screenshots.
+- Docs/Website: Linked agent names in README and the product page directly to their local-history guides.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights

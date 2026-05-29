@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Unified session browser for Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Cursor Agent, Hermes Agent, Gemini CLI, GitHub Copilot CLI, OpenCode, OpenClaw, and Pi CLI sessions across CLI and desktop agent surfaces.**
+**Unified session browser for [Codex CLI/Desktop/VS Code](docs/guides/codex-local-history.html), [Claude CLI/Desktop](docs/guides/claude-code-jsonl-history.html), [Cursor Agent](docs/guides/cursor-agent-local-history.html), [Hermes Agent](docs/guides/hermes-agent-state-db-history.html), Gemini CLI, GitHub Copilot CLI, [OpenCode](docs/guides/opencode-sqlite-history.html), [OpenClaw](docs/guides/openclaw-local-agent-history.html), and Pi CLI sessions across CLI and desktop agent surfaces.**
 Search, browse, and resume your past AI-coding sessions from local agent apps and CLIs in a local-first macOS app.
 
 </td>
@@ -64,11 +64,11 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 ## Core Features
 
 - Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
-- Browse and search Codex CLI, Codex Desktop, and Codex VS Code sessions in one place.
-- Browse Claude CLI and Claude Desktop sessions with consistent labels and project context.
-- Browse Cursor Agent transcripts from Cursor's local storage, enriched with Cursor chat metadata when available.
-- Hermes Agent sessions participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
-- OpenClaw sessions participate in browsing, search, filtering, deleted-session visibility, and resume workflows while ignoring trajectory traces.
+- Browse and search [Codex CLI, Codex Desktop, and Codex VS Code sessions](docs/guides/codex-local-history.html) in one place.
+- Browse [Claude CLI and Claude Desktop sessions](docs/guides/claude-code-jsonl-history.html) with consistent labels and project context.
+- Browse [Cursor Agent transcripts](docs/guides/cursor-agent-local-history.html) from Cursor's local storage, enriched with Cursor chat metadata when available.
+- [Hermes Agent sessions](docs/guides/hermes-agent-state-db-history.html) participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
+- [OpenClaw sessions](docs/guides/openclaw-local-agent-history.html) participate in browsing, search, filtering, deleted-session visibility, and resume workflows while ignoring trajectory traces.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
@@ -78,7 +78,7 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode CLI sessions, with shared active/waiting summaries and live Claude usage tracking.
+Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
