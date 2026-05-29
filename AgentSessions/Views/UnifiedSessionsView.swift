@@ -1432,11 +1432,10 @@ struct UnifiedSessionsView: View {
                 isOn: $unified.showFavoritesOnly,
                 onSymbol: "star.fill",
                 offSymbol: "star",
-                help: showStarColumn ? "Show only saved sessions" : "Enable the Save column in Preferences to use saved sessions",
+                help: "Show only saved sessions",
                 activeColor: .primary,
                 accessibilityLabel: "Saved"
             )
-            .disabled(!showStarColumn)
 
             AnalyticsButtonView(
                 isReady: analyticsReady,
