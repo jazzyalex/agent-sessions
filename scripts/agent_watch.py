@@ -281,6 +281,17 @@ def _pick_severity(
     return "low", "monitor"
 
 
+def _upstream_fetch_degraded(errors: list[dict[str, Any]]) -> bool:
+    if not errors:
+        return False
+    for err in errors:
+        detail = str(err.get("detail") or err.get("error") or "").lower()
+        if "rate limit" in detail or "too many requests" in detail or "http error 429" in detail:
+            continue
+        return False
+    return True
+
+
 def _compare_semver(a: str | None, b: str | None) -> int | None:
     """
     Returns -1/0/1 for a<b, a==b, a>b. None if either is not semver.
@@ -704,6 +715,103 @@ def _hermes_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
         "parsed_messages": parsed_messages,
         "parsed_tool_calls": parsed_tool_calls,
         "parsed_tools": parsed_tools,
+        "parse_errors": 0,
+    }
+
+
+def _hermes_state_db_latest_session_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parsed_messages = 0
+    parsed_tool_calls = 0
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, value in obj.items():
+            if value is not None:
+                ks.add(k)
+
+    try:
+        conn = sqlite3.connect(str(path))
+        conn.row_factory = sqlite3.Row
+    except Exception:
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 1}
+    try:
+        row = conn.execute(
+            """
+            SELECT id, source, model, model_config, system_prompt, started_at, ended_at, message_count
+            FROM sessions
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+        if row is None:
+            return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": 0, "parsed_tool_calls": 0, "parsed_tools": 0, "parse_errors": 0}
+        root = {
+            "session_id": row["id"],
+            "platform": row["source"],
+            "model": row["model"],
+            "model_config": row["model_config"],
+            "system_prompt": row["system_prompt"],
+            "session_start": row["started_at"],
+            "last_updated": row["ended_at"] or row["started_at"],
+            "message_count": row["message_count"],
+            "messages": [],
+        }
+        _add("root", root)
+
+        for msg in conn.execute(
+            """
+            SELECT role, content, tool_call_id, tool_calls, tool_name, finish_reason, reasoning, reasoning_content, codex_reasoning_items
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY timestamp, id
+            LIMIT ?;
+            """,
+            (row["id"], max(0, int(max_messages))),
+        ):
+            item = {
+                "role": msg["role"],
+                "content": msg["content"],
+                "tool_call_id": msg["tool_call_id"],
+                "tool_calls": msg["tool_calls"],
+                "tool_name": msg["tool_name"],
+                "finish_reason": msg["finish_reason"],
+                "reasoning": msg["reasoning"],
+                "reasoning_content": msg["reasoning_content"],
+                "codex_reasoning_items": msg["codex_reasoning_items"],
+            }
+            role = item.get("role")
+            event_type = f"message.{role}" if isinstance(role, str) and role else "message"
+            _add(event_type, item)
+            parsed_messages += 1
+            raw_calls = item.get("tool_calls")
+            if isinstance(raw_calls, str) and raw_calls.strip():
+                try:
+                    calls = json.loads(raw_calls)
+                except Exception:
+                    calls = []
+                if isinstance(calls, list):
+                    for call in calls:
+                        if not isinstance(call, dict):
+                            continue
+                        call_type = call.get("type")
+                        bucket = f"tool_call.{call_type}" if isinstance(call_type, str) and call_type else "tool_call"
+                        _add(bucket, call)
+                        parsed_tool_calls += 1
+    except Exception:
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parsed_messages": parsed_messages, "parsed_tool_calls": parsed_tool_calls, "parsed_tools": 0, "parse_errors": 1}
+    finally:
+        conn.close()
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_messages": parsed_messages,
+        "parsed_tool_calls": parsed_tool_calls,
+        "parsed_tools": 0,
         "parse_errors": 0,
     }
 
@@ -1322,6 +1430,51 @@ def _apply_stale_override(
     if sample_freshness.get("is_stale") is not True:
         return severity, recommendation
     return "medium", "run_prebump_validator"
+
+
+def _latest_successful_prebump_evidence(
+    *,
+    agent_name: str,
+    reports_root: Path,
+    cli_binary_mtime: float | None,
+) -> dict[str, Any] | None:
+    candidates: list[tuple[float, Path, dict[str, Any]]] = []
+    for report_path in reports_root.glob("*-prebump/report.json"):
+        try:
+            report_mtime = report_path.stat().st_mtime
+        except OSError:
+            continue
+        if cli_binary_mtime is not None and report_mtime < cli_binary_mtime:
+            continue
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        results = report.get("results")
+        if not isinstance(results, dict):
+            continue
+        entry = results.get(agent_name)
+        if not isinstance(entry, dict) or entry.get("ok") is not True:
+            continue
+        evidence = entry.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        if evidence.get("fresh_session_matches_baseline") is not True:
+            continue
+        sample_freshness = evidence.get("sample_freshness")
+        if not isinstance(sample_freshness, dict) or sample_freshness.get("is_stale") is True:
+            continue
+        candidates.append((report_mtime, report_path, entry))
+
+    if not candidates:
+        return None
+
+    _, report_path, entry = max(candidates, key=lambda item: item[0])
+    evidence = dict(entry.get("evidence") or {})
+    evidence["source"] = "latest_prebump_report"
+    evidence["report"] = _safe_relpath(report_path)
+    evidence["session_path"] = entry.get("session_path")
+    return evidence
 
 
 def _format_summary_line(
@@ -2032,7 +2185,7 @@ def main(argv: list[str]) -> int:
 
         monitoring_failed = False
         if not args.skip_update and upstream_sources and upstream is None:
-            monitoring_failed = True
+            monitoring_failed = not _upstream_fetch_degraded(upstream_errors)
 
         weekly_details: dict[str, Any] | None = None
         probe_failed = False
@@ -2088,6 +2241,19 @@ def main(argv: list[str]) -> int:
                     newest = _newest_file(roots, glob)
                     if newest:
                         local_fp = _hermes_session_json_schema_fingerprint(newest, max_messages=max_messages)
+                elif kind == "hermes_latest_session":
+                    max_messages = int(local_schema_cfg.get("max_messages") or 2500)
+                    db_roots_cfg = local_schema_cfg.get("db_roots") or []
+                    db_roots = [_expand_path(p) for p in db_roots_cfg if isinstance(p, str)]
+                    for db_path in db_roots:
+                        if db_path.exists():
+                            newest = db_path
+                            local_fp = _hermes_state_db_latest_session_schema_fingerprint(db_path, max_messages=max_messages)
+                            break
+                    if local_fp is None:
+                        newest = _newest_file(roots, glob)
+                        if newest:
+                            local_fp = _hermes_session_json_schema_fingerprint(newest, max_messages=max_messages)
                 elif kind == "opencode_storage_latest_session":
                     max_messages = int(local_schema_cfg.get("max_messages") or 250)
                     max_parts = int(local_schema_cfg.get("max_parts") or 2500)
@@ -2181,6 +2347,9 @@ def main(argv: list[str]) -> int:
         )
 
         sample_freshness: dict[str, Any] | None = None
+        fresh_evidence_available = False
+        fresh_evidence_source: str | None = None
+        prebump_evidence: dict[str, Any] | None = None
         if args.mode == "weekly":
             window_days_cfg = int(((agent_cfg.get("weekly") or {}).get("freshness_window_days") or 14))
             window_seconds = window_days_cfg * 86400
@@ -2208,6 +2377,22 @@ def main(argv: list[str]) -> int:
                 mode_context=mode_context,
                 force_fresh=bool(getattr(args, "force_fresh", False)),
             )
+            if sample_freshness.get("is_stale") is True:
+                prebump_evidence = _latest_successful_prebump_evidence(
+                    agent_name=agent_name,
+                    reports_root=report_dir.parent,
+                    cli_binary_mtime=cli_mtime,
+                )
+                if prebump_evidence is not None:
+                    prebump_sample = prebump_evidence.get("sample_freshness")
+                    if isinstance(prebump_sample, dict):
+                        sample_freshness = dict(prebump_sample)
+                        sample_freshness["mode_context"] = "latest_prebump_report"
+                    if prebump_evidence.get("schema_matches_baseline") is True:
+                        schema_matches_baseline = True
+                        schema_diff = prebump_evidence.get("schema_diff") if isinstance(prebump_evidence.get("schema_diff"), dict) else schema_diff
+                    fresh_evidence_available = True
+                    fresh_evidence_source = "latest_prebump_report"
 
         # If we have concrete evidence that the newest local schema matches our fixture baseline,
         # downgrade "installed newer" to low and suggest bumping verified version.
@@ -2267,7 +2452,9 @@ def main(argv: list[str]) -> int:
                 "schema_matches_baseline": schema_matches_baseline,
                 "schema_diff": schema_diff,
                 "sample_freshness": sample_freshness,
-                "fresh_evidence_available": False,
+                "fresh_evidence_available": fresh_evidence_available,
+                "fresh_evidence_source": fresh_evidence_source,
+                "prebump_evidence": prebump_evidence,
             },
             "severity": severity,
             "recommendation": recommendation,

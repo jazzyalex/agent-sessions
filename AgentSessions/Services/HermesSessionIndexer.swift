@@ -73,6 +73,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     }
 
     var canAccessRootDirectory: Bool {
+        if discovery.hasStateDB() { return true }
         let root = discovery.sessionsRoot()
         var isDir: ObjCBool = false
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
@@ -105,36 +106,52 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         Task.detached(priority: prio) { [weak self, token, executionProfile] in
             guard let self else { return }
 
-            let config = SessionIndexingEngine.ScanConfig(
-                source: .hermes,
-                discoverFiles: { self.discovery.discoverSessionFiles() },
-                parseLightweight: { HermesSessionParser.parseFile(at: $0) },
-                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
-                throttler: self.progressThrottler,
-                shouldContinue: { self.refreshToken == token },
-                workerCount: executionProfile.workerCount,
-                sliceSize: executionProfile.sliceSize,
-                interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
-                onProgress: { processed, total in
-                    guard self.refreshToken == token else { return }
-                    self.totalFiles = total
-                    self.filesProcessed = processed
-                    self.hasEmptyDirectory = (total == 0)
-                    if processed > 0 { self.progressText = "Indexed \(processed)/\(total)" }
-                    if self.launchPhase == .hydrating { self.launchPhase = .scanning }
+            let result: SessionIndexingEngine.Result
+            if self.discovery.hasStateDB() {
+                let sessions = HermesStateDBReader.listSessions(dbURL: self.discovery.stateDBURL())
+                if sessions.isEmpty {
+                    result = await self.scanLegacyJSONSessions(token: token, executionProfile: executionProfile)
+                } else {
+                    result = SessionIndexingEngine.Result(kind: .scanned, sessions: sessions, totalFiles: sessions.count)
                 }
-            )
-
-            let result = await SessionIndexingEngine.hydrateOrScan(config: config)
+            } else {
+                result = await self.scanLegacyJSONSessions(token: token, executionProfile: executionProfile)
+            }
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.allSessions = result.sessions
                 self.isIndexing = false
-                self.filesProcessed = self.totalFiles
+                self.totalFiles = result.totalFiles
+                self.filesProcessed = result.totalFiles
+                self.hasEmptyDirectory = result.totalFiles == 0
                 self.progressText = "Ready"
                 self.launchPhase = .ready
             }
         }
+    }
+
+    private func scanLegacyJSONSessions(token: UUID,
+                                        executionProfile: IndexRefreshExecutionProfile) async -> SessionIndexingEngine.Result {
+        let config = SessionIndexingEngine.ScanConfig(
+            source: .hermes,
+            discoverFiles: { self.discovery.discoverSessionFiles() },
+            parseLightweight: { HermesSessionParser.parseFile(at: $0) },
+            shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
+            throttler: self.progressThrottler,
+            shouldContinue: { self.refreshToken == token },
+            workerCount: executionProfile.workerCount,
+            sliceSize: executionProfile.sliceSize,
+            interSliceYieldNanoseconds: executionProfile.interSliceYieldNanoseconds,
+            onProgress: { processed, total in
+                guard self.refreshToken == token else { return }
+                self.totalFiles = total
+                self.filesProcessed = processed
+                self.hasEmptyDirectory = (total == 0)
+                if processed > 0 { self.progressText = "Indexed \(processed)/\(total)" }
+                if self.launchPhase == .hydrating { self.launchPhase = .scanning }
+            }
+        )
+        return await SessionIndexingEngine.hydrateOrScan(config: config)
     }
 
     func applySearch() {
@@ -222,7 +239,9 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 }
             }
 
-            let parsed = HermesSessionParser.parseFileFull(at: url) ?? existing
+            let parsed = url.pathExtension.lowercased() == "db"
+                ? (HermesStateDBReader.loadFullSession(dbURL: url, sessionID: id) ?? existing)
+                : (HermesSessionParser.parseFileFull(at: url) ?? existing)
             self.reloadLock.lock()
             if let preParseStat { self.lastFullReloadFileStatsBySessionID[id] = preParseStat }
             self.reloadLock.unlock()

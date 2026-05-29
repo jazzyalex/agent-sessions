@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 final class HermesSessionParser {
     private struct SessionJSON: Codable {
@@ -370,5 +371,257 @@ final class HermesSessionParser {
     private static func rawJSONBase64<T: Encodable>(_ value: T) -> String {
         guard let data = try? JSONEncoder().encode(value) else { return "" }
         return data.base64EncodedString()
+    }
+}
+
+struct HermesStateDBReader {
+    static func listSessions(dbURL: URL) -> [Session] {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT id, source, model, model_config, started_at, ended_at, message_count, tool_call_count, title
+            FROM sessions
+            ORDER BY started_at DESC;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var sessions: [Session] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = text(stmt, 0)
+            guard !id.isEmpty else { continue }
+            let source = text(stmt, 1)
+            let model = optionalText(stmt, 2)
+            let modelConfig = optionalText(stmt, 3)
+            let startedAt = sqlite3_column_double(stmt, 4)
+            let endedAt = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? 0 : sqlite3_column_double(stmt, 5)
+            let messageCount = Int(sqlite3_column_int64(stmt, 6))
+            let toolCount = Int(sqlite3_column_int64(stmt, 7))
+            let title = optionalText(stmt, 8) ?? firstUserMessage(db: db, sessionID: id)
+            let cwd = cwdFromModelConfig(modelConfig)
+            sessions.append(Session(
+                id: id,
+                source: .hermes,
+                startTime: startedAt > 0 ? Date(timeIntervalSince1970: startedAt) : nil,
+                endTime: endedAt > 0 ? Date(timeIntervalSince1970: endedAt) : nil,
+                model: model,
+                filePath: dbURL.path,
+                fileSizeBytes: nil,
+                eventCount: messageCount,
+                events: [],
+                cwd: cwd,
+                repoName: source.isEmpty ? nil : source,
+                lightweightTitle: title,
+                lightweightCommands: toolCount > 0 ? toolCount : nil,
+                customTitle: title
+            ))
+        }
+        return sessions
+    }
+
+    static func loadFullSession(dbURL: URL, sessionID: String) -> Session? {
+        guard let base = listSessions(dbURL: dbURL).first(where: { $0.id == sessionID }) else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT id, role, content, tool_call_id, tool_calls, tool_name, timestamp, finish_reason, reasoning, reasoning_content, codex_reasoning_items
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY timestamp, id;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return base }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        var events: [SessionEvent] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let rowID = sqlite3_column_int64(stmt, 0)
+            let role = text(stmt, 1).lowercased()
+            let content = optionalText(stmt, 2)
+            let toolCallID = optionalText(stmt, 3)
+            let toolCalls = optionalText(stmt, 4)
+            let toolName = optionalText(stmt, 5)
+            let timestamp = sqlite3_column_double(stmt, 6)
+            let finishReason = optionalText(stmt, 7)
+            let reasoning = optionalText(stmt, 8) ?? optionalText(stmt, 9)
+            let codexReasoning = optionalText(stmt, 10)
+            let date = timestamp > 0 ? Date(timeIntervalSince1970: timestamp) : nil
+            let raw = rawJSONBase64([
+                "id": rowID,
+                "role": role,
+                "content": jsonValue(content),
+                "tool_call_id": jsonValue(toolCallID),
+                "tool_calls": jsonValue(toolCalls),
+                "tool_name": jsonValue(toolName),
+                "timestamp": timestamp,
+                "finish_reason": jsonValue(finishReason)
+            ])
+
+            if let reasoning, !reasoning.isEmpty {
+                events.append(SessionEvent(id: "hermes-\(rowID)-reasoning",
+                                           timestamp: date,
+                                           kind: .meta,
+                                           role: role,
+                                           text: reasoning,
+                                           toolName: nil,
+                                           toolInput: nil,
+                                           toolOutput: nil,
+                                           messageID: nil,
+                                           parentID: nil,
+                                           isDelta: false,
+                                           rawJSON: raw))
+            }
+            if let codexReasoning, !codexReasoning.isEmpty {
+                events.append(SessionEvent(id: "hermes-\(rowID)-codex-reasoning",
+                                           timestamp: date,
+                                           kind: .meta,
+                                           role: role,
+                                           text: codexReasoning,
+                                           toolName: nil,
+                                           toolInput: nil,
+                                           toolOutput: nil,
+                                           messageID: nil,
+                                           parentID: nil,
+                                           isDelta: false,
+                                           rawJSON: raw))
+            }
+
+            switch role {
+            case "user":
+                if let content, !content.isEmpty {
+                    events.append(event(id: "hermes-\(rowID)", timestamp: date, kind: .user, role: "user", text: content, rawJSON: raw))
+                }
+            case "assistant":
+                if let content, !content.isEmpty {
+                    events.append(event(id: "hermes-\(rowID)", timestamp: date, kind: .assistant, role: "assistant", text: content, rawJSON: raw))
+                }
+                events.append(contentsOf: toolCallEvents(rowID: rowID, timestamp: date, toolCalls: toolCalls, rawJSON: raw))
+            case "tool":
+                events.append(SessionEvent(id: "hermes-\(rowID)-tool",
+                                           timestamp: date,
+                                           kind: .tool_result,
+                                           role: "tool",
+                                           text: nil,
+                                           toolName: toolName,
+                                           toolInput: nil,
+                                           toolOutput: content,
+                                           messageID: toolCallID,
+                                           parentID: nil,
+                                           isDelta: false,
+                                           rawJSON: raw))
+            default:
+                if let content, !content.isEmpty {
+                    events.append(event(id: "hermes-\(rowID)-meta", timestamp: date, kind: .meta, role: role, text: content, rawJSON: raw))
+                }
+            }
+        }
+
+        return Session(id: base.id,
+                       source: base.source,
+                       startTime: base.startTime,
+                       endTime: base.endTime,
+                       model: base.model,
+                       filePath: base.filePath,
+                       fileSizeBytes: base.fileSizeBytes,
+                       eventCount: events.filter { $0.kind != .meta }.count,
+                       events: events,
+                       cwd: base.cwd,
+                       repoName: base.repoName,
+                       lightweightTitle: base.lightweightTitle,
+                       lightweightCommands: base.lightweightCommands,
+                       customTitle: base.customTitle)
+    }
+
+    private static func event(id: String, timestamp: Date?, kind: SessionEventKind, role: String, text: String, rawJSON: String) -> SessionEvent {
+        SessionEvent(id: id,
+                     timestamp: timestamp,
+                     kind: kind,
+                     role: role,
+                     text: text,
+                     toolName: nil,
+                     toolInput: nil,
+                     toolOutput: nil,
+                     messageID: nil,
+                     parentID: nil,
+                     isDelta: false,
+                     rawJSON: rawJSON)
+    }
+
+    private static func toolCallEvents(rowID: Int64, timestamp: Date?, toolCalls: String?, rawJSON: String) -> [SessionEvent] {
+        guard let toolCalls,
+              let data = toolCalls.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return array.enumerated().map { index, call in
+            let function = call["function"] as? [String: Any]
+            return SessionEvent(id: "hermes-\(rowID)-tool-\(index)",
+                                timestamp: timestamp,
+                                kind: .tool_call,
+                                role: "assistant",
+                                text: nil,
+                                toolName: function?["name"] as? String,
+                                toolInput: function?["arguments"] as? String,
+                                toolOutput: nil,
+                                messageID: call["id"] as? String,
+                                parentID: nil,
+                                isDelta: false,
+                                rawJSON: rawJSON)
+        }
+    }
+
+    private static func firstUserMessage(db: OpaquePointer?, sessionID: String) -> String? {
+        let sql = "SELECT content FROM messages WHERE session_id = ? AND role = 'user' ORDER BY timestamp LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return optionalText(stmt, 0)
+    }
+
+    private static func cwdFromModelConfig(_ raw: String?) -> String? {
+        guard let raw,
+              let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cwd = obj["cwd"] as? String,
+              !cwd.isEmpty else {
+            return nil
+        }
+        return (cwd as NSString).expandingTildeInPath
+    }
+
+    private static func text(_ stmt: OpaquePointer?, _ idx: Int32) -> String {
+        sqlite3_column_text(stmt, idx).map { String(cString: $0) } ?? ""
+    }
+
+    private static func optionalText(_ stmt: OpaquePointer?, _ idx: Int32) -> String? {
+        guard sqlite3_column_type(stmt, idx) != SQLITE_NULL else { return nil }
+        let value = text(stmt, idx)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func rawJSONBase64(_ obj: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(obj),
+              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else {
+            return ""
+        }
+        return data.base64EncodedString()
+    }
+
+    private static func jsonValue(_ value: String?) -> Any {
+        value ?? NSNull()
     }
 }

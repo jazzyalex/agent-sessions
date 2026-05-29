@@ -124,6 +124,7 @@ When `installed > verified`, `schema_matches_baseline == true`, and
 Auth notes:
 - Copilot prebump accepts `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; `GH_TOKEN=$(gh auth token) ./scripts/agent_watch.py --mode prebump --agent copilot` is the least intrusive local path when GitHub CLI auth is already available.
 - Claude sandbox prebump requires sandbox-visible API/credential auth. If it fails with `Not logged in` but real-home Claude is authenticated, generate a real-home `claude -p --verbose --output-format stream-json ...` sample and cite that weekly evidence instead of treating the sandbox auth failure as session-format drift.
+- Pi prebump runs `pi --print --mode json` with sandboxed `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`, copying `~/.pi/agent/auth.json` and `settings.json` when env-var auth is not used. The fresh session must land under `.pi/agent/sessions/**/*.jsonl` and include `session` and `message` events.
 
 Exit 0 is required. Exit 2 means the fresh session does not match baseline.
 Exit 3 means a driver failed (CLI error, timeout, no headless mode, or

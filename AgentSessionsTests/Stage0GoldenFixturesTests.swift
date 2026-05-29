@@ -193,6 +193,32 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testCursorFixturesParse() throws {
+        for name in ["agents/cursor/small.jsonl", "agents/cursor/large.jsonl", "agents/cursor/schema_drift.jsonl"] {
+            let url = FixturePaths.stage0FixtureURL(name)
+            guard let preview = CursorSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil: \(name)") }
+            XCTAssertEqual(preview.source, .cursor)
+            XCTAssertTrue(preview.events.isEmpty)
+            XCTAssertGreaterThan(preview.eventCount, 0)
+
+            guard let full = CursorSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
+            XCTAssertEqual(full.source, .cursor)
+            XCTAssertFalse(full.events.isEmpty)
+        }
+    }
+
+    func testCursorSchemaDriftBlocksMapToExpectedEvents() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/cursor/schema_drift.jsonl")
+        guard let full = CursorSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+
+        XCTAssertTrue(full.events.contains { $0.kind == .meta && ($0.text ?? "").contains("inspect the build log") })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "read_file" && ($0.toolInput ?? "").contains("build.log") })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_result && $0.toolName == "read_file" && ($0.toolOutput ?? "").contains("Example.swift:42") })
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("unknown block with visible text") })
+    }
+
     func testGeminiFixturesParse() throws {
         for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json", "agents/gemini/jsonl_v040.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)

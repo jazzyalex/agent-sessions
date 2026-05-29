@@ -240,6 +240,8 @@ def _iter_openclaw_session_files() -> list[Path]:
             for p in scan_root.rglob("*.jsonl"):
                 if p.name.endswith(".jsonl.lock"):
                     continue
+                if p.name.endswith(".trajectory.jsonl"):
+                    continue
                 if ".jsonl.deleted." in p.name:
                     continue
                 if ".jsonl.reset." in p.name:

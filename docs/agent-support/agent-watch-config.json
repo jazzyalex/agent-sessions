@@ -153,15 +153,16 @@
       },
       "weekly": {
         "local_schema": {
-          "kind": "hermes_session_json_newest",
+          "kind": "hermes_latest_session",
+          "db_roots": ["~/.hermes/state.db"],
           "roots": ["~/.hermes/sessions"],
           "glob": "session_*.json",
           "max_messages": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "Hermes sessions should be canonical JSON files under ~/.hermes/sessions.",
-          "patterns": ["/\\.hermes/sessions/session_[^/]+\\.json$"]
+          "description": "Hermes sessions should come from ~/.hermes/state.db, with legacy canonical JSON files under ~/.hermes/sessions as fallback.",
+          "patterns": ["/\\.hermes/state\\.db$", "/\\.hermes/sessions/session_[^/]+\\.json$"]
         }
       }
     },
@@ -283,13 +284,14 @@
             "*/backup/*",
             "*.jsonl.reset.*",
             "*.jsonl.deleted.*",
+            "*.trajectory.jsonl",
             "*.jsonl.lock"
           ]
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
           "description": "OpenClaw sessions should resolve to agents/<id>/sessions/*.jsonl.",
-          "patterns": ["/agents/[^/]+/sessions/[^/]+\\.jsonl$"]
+          "patterns": ["/agents/[^/]+/sessions/(?![^/]+\\.trajectory\\.jsonl$)[^/]+\\.jsonl$"]
         },
         "probes": [
           {
@@ -358,6 +360,44 @@
             "/\\.pi/agent/sessions/.+\\.jsonl$",
             "/pi-agent/sessions/.+\\.jsonl$"
           ]
+        }
+      },
+      "prebump": {
+        "driver": "pi_prompt",
+        "sandbox": {"mode": "home_override", "subdir": "pi_sandbox"},
+        "prompt": "Say hello in one sentence.",
+        "timeout_seconds": 180,
+        "env_vars": [
+          "ANTHROPIC_API_KEY",
+          "ANTHROPIC_OAUTH_TOKEN",
+          "OPENAI_API_KEY",
+          "AZURE_OPENAI_API_KEY",
+          "DEEPSEEK_API_KEY",
+          "GEMINI_API_KEY",
+          "GROQ_API_KEY",
+          "CEREBRAS_API_KEY",
+          "XAI_API_KEY",
+          "FIREWORKS_API_KEY",
+          "TOGETHER_API_KEY",
+          "OPENROUTER_API_KEY",
+          "AI_GATEWAY_API_KEY",
+          "ZAI_API_KEY",
+          "MISTRAL_API_KEY",
+          "MINIMAX_API_KEY",
+          "MOONSHOT_API_KEY",
+          "OPENCODE_API_KEY",
+          "KIMI_API_KEY",
+          "CLOUDFLARE_API_KEY",
+          "XIAOMI_API_KEY",
+          "AWS_BEARER_TOKEN_BEDROCK"
+        ],
+        "credential_files": ["~/.pi/agent/auth.json"],
+        "support_files": ["~/.pi/agent/settings.json"],
+        "discover_session": {
+          "kind": "jsonl_newest",
+          "roots": [".pi/agent/sessions"],
+          "globs": ["**/*.jsonl"],
+          "required_types": ["session", "message"]
         }
       }
     }

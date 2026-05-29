@@ -1,6 +1,7 @@
 # scripts/tests/test_freshness.py
 import json as _json
 import os
+import sqlite3
 from pathlib import Path as _Path
 from unittest import mock
 
@@ -13,6 +14,144 @@ def test_freshness_module_under_test_is_importable():
     # Phase 1 builds out is now reachable from this test module.
     assert callable(_resolve_cli_binary_mtime)
     assert hasattr(agent_watch, "main")
+
+
+def test_upstream_fetch_rate_limit_is_degraded_not_monitoring_failure():
+    assert agent_watch._upstream_fetch_degraded([
+        {"error": "fetch_failed", "detail": "HTTP Error 403: rate limit exceeded"}
+    ])
+    assert not agent_watch._upstream_fetch_degraded([
+        {"error": "fetch_failed", "detail": "HTTP Error 403: forbidden"}
+    ])
+    assert agent_watch._upstream_fetch_degraded([
+        {"error": "fetch_failed", "detail": "HTTP Error 429: too many requests"}
+    ])
+    assert not agent_watch._upstream_fetch_degraded([
+        {"error": "fetch_failed", "detail": "HTTP Error 500: server error"}
+    ])
+
+
+def test_hermes_state_db_latest_session_schema_fingerprint(tmp_path):
+    db_path = tmp_path / "state.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT,
+                model TEXT,
+                model_config TEXT,
+                system_prompt TEXT,
+                started_at REAL,
+                ended_at REAL,
+                message_count INTEGER
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT,
+                content TEXT,
+                tool_call_id TEXT,
+                tool_calls TEXT,
+                tool_name TEXT,
+                timestamp REAL,
+                finish_reason TEXT,
+                reasoning TEXT,
+                reasoning_content TEXT,
+                codex_reasoning_items TEXT
+            );
+            INSERT INTO sessions (id, source, model, model_config, system_prompt, started_at, ended_at, message_count)
+            VALUES ('hermes_sqlite_demo', 'cli', 'qwen3.5-9b', '{"cwd":"/tmp/hermes"}', 'system', 1780000000.0, 1780000002.0, 2);
+            INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, finish_reason, reasoning, reasoning_content, codex_reasoning_items)
+            VALUES (1, 'hermes_sqlite_demo', 'user', 'hello', NULL, NULL, NULL, 1780000000.1, NULL, NULL, NULL, NULL);
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, finish_reason, reasoning, reasoning_content, codex_reasoning_items)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2,
+                "hermes_sqlite_demo",
+                "assistant",
+                "done",
+                None,
+                _json.dumps([
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "shell", "arguments": "{\"cmd\":\"pwd\"}"},
+                    }
+                ]),
+                None,
+                1780000001.0,
+                None,
+                "thinking",
+                None,
+                None,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    fingerprint = agent_watch._hermes_state_db_latest_session_schema_fingerprint(db_path, max_messages=10)
+    assert fingerprint["parse_errors"] == 0
+    assert fingerprint["parsed_messages"] == 2
+    assert fingerprint["parsed_tool_calls"] == 1
+    assert fingerprint["type_counts"]["root"] == 1
+    assert fingerprint["type_counts"]["message.user"] == 1
+    assert fingerprint["type_counts"]["message.assistant"] == 1
+    assert fingerprint["type_counts"]["tool_call.function"] == 1
+    assert "tool_calls" in fingerprint["type_keys"]["message.assistant"]
+
+
+def test_latest_successful_prebump_evidence_requires_fresh_matching_report(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    report_dir = reports_root / "20260528-120000Z-prebump"
+    report_dir.mkdir(parents=True)
+    report_path = report_dir / "report.json"
+    report_path.write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "gemini": {
+                "ok": True,
+                "session_path": "/tmp/session.jsonl",
+                "evidence": {
+                    "schema_matches_baseline": True,
+                    "fresh_session_matches_baseline": True,
+                    "fresh_evidence_available": True,
+                    "schema_diff": {"unknown_types": []},
+                    "sample_freshness": {
+                        "is_stale": False,
+                        "stale_reason": None,
+                        "sample_older_than_cli": False,
+                    },
+                },
+            }
+        },
+    }))
+    os.utime(report_path, (2_000.0, 2_000.0))
+
+    evidence = agent_watch._latest_successful_prebump_evidence(
+        agent_name="gemini",
+        reports_root=reports_root,
+        cli_binary_mtime=1_500.0,
+    )
+
+    assert evidence is not None
+    assert evidence["source"] == "latest_prebump_report"
+    assert evidence["session_path"] == "/tmp/session.jsonl"
+    assert evidence["sample_freshness"]["is_stale"] is False
+
+    stale_to_cli = agent_watch._latest_successful_prebump_evidence(
+        agent_name="gemini",
+        reports_root=reports_root,
+        cli_binary_mtime=2_500.0,
+    )
+    assert stale_to_cli is None
 
 
 def test_resolve_cli_binary_mtime_returns_path_and_mtime(tmp_path):
@@ -152,7 +291,7 @@ def test_config_freshness_windows_per_agent():
         (repo / "docs" / "agent-support" / "agent-watch-config.json").read_text()
     )
     hot = {"codex", "claude", "copilot"}
-    cold = {"gemini", "droid", "opencode", "openclaw"}
+    cold = {"gemini", "opencode", "openclaw"}
     for name in hot:
         w = cfg["agents"][name]["weekly"].get("freshness_window_days")
         assert w == 14, f"{name}: want 14, got {w}"

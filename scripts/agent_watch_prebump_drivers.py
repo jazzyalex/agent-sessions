@@ -504,3 +504,70 @@ class CopilotPromptDriver:
 
 
 DRIVERS["copilot_prompt"] = CopilotPromptDriver()
+
+
+class PiPromptDriver:
+    name = "pi_prompt"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        pi_home = sandbox / ".pi" / "agent"
+        sessions_root = pi_home / "sessions"
+        sessions_root.mkdir(parents=True, exist_ok=True)
+        env = dict(env)
+        env["PI_CODING_AGENT_DIR"] = str(pi_home)
+        env["PI_CODING_AGENT_SESSION_DIR"] = str(sessions_root)
+        stdout_file = sandbox / "pi.stdout.txt"
+        stderr_file = sandbox / "pi.stderr.txt"
+        session_id = str(_uuid.uuid4())
+        try:
+            proc = subprocess.run(
+                [
+                    "pi",
+                    "--print",
+                    "--mode", "json",
+                    "--session-dir", str(sessions_root),
+                    "--session-id", session_id,
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-context-files",
+                    "--no-tools",
+                    prompt,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            stdout_file.write_text(proc.stdout or "")
+            stderr_file.write_text(proc.stderr or "")
+            rc = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            stdout_file.write_text("")
+            stderr_file.write_text(f"timeout after {timeout}s: {exc}")
+            return DriverResult(False, None, stdout_file, stderr_file, 124, f"timeout:{timeout}")
+        except FileNotFoundError as exc:
+            stderr_file.write_text(f"pi not found: {exc}")
+            return DriverResult(False, None, stdout_file, stderr_file, 127, "pi_not_found")
+
+        newest: Path | None = None
+        newest_m = -1.0
+        if sessions_root.exists():
+            for p in sessions_root.rglob("*.jsonl"):
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m > newest_m:
+                    newest = p
+                    newest_m = m
+
+        if rc != 0 or newest is None:
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"pi_prompt_failed rc={rc}")
+        return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
+
+
+DRIVERS["pi_prompt"] = PiPromptDriver()

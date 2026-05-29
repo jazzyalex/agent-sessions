@@ -132,15 +132,19 @@ after re-authentication. The Swift side silently retains the last known good sna
 
 ## 3  OpenCode Storage Changes
 
-OpenCode uses a **multi-file JSON tree** (`storage/session/`, `storage/message/`,
-`storage/part/`) — not JSONL. The monitoring fingerprints this tree structure.
+OpenCode's current local backend is SQLite at `~/.local/share/opencode/opencode.db`.
+Legacy installs may still have a multi-file JSON tree (`storage/session/`,
+`storage/message/`, `storage/part/`). Monitoring is SQLite-first and falls back to
+the legacy JSON tree when no database is present.
 
 ### Current layout
 ```
-~/.local/share/opencode/storage/
-  session/<project>/ses_*.json
-  message/<sessionId>/msg_*.json
-  part/<messageId>/*.json
+~/.local/share/opencode/opencode.db
+
+# legacy fallback
+~/.local/share/opencode/storage/session/<project>/ses_*.json
+~/.local/share/opencode/storage/message/<sessionId>/msg_*.json
+~/.local/share/opencode/storage/part/<messageId>/*.json
 ```
 
 ### What to watch for
@@ -155,15 +159,12 @@ OpenCode uses a **multi-file JSON tree** (`storage/session/`, `storage/message/`
   session records or new migration files in the OpenCode repo.
 
 ### Detection in agent_watch.py
-- `opencode_storage_latest_session` kind scans the full tree (session + messages + parts).
-- `_opencode_storage_session_tree_schema_fingerprint()` walks messages and parts for a
-  session and reports keys per record kind.
-- If a `.db`, `.sqlite`, or `.bolt` file appears under the storage root, the current
-  scanner will **not** detect it. Risk keywords in `agent-watch-config.json` will flag
-  release notes mentioning these backends, but a file-extension scan of the storage root
-  is not yet implemented.
-- **TODO:** add a file-extension probe to `agent_watch.py` that checks for `*.db`,
-  `*.sqlite`, `*.bolt` files under the OpenCode storage root during weekly scans.
+- `opencode_storage_latest_session` checks `db_roots` first and fingerprints
+  `session`, `message`, and `part` rows from `opencode.db`.
+- If no database is present, `_opencode_storage_session_tree_schema_fingerprint()`
+  walks the legacy JSON tree for a session and reports keys per record kind.
+- Risk keywords in `agent-watch-config.json` still flag release notes mentioning
+  storage migrations such as SQLite, BoltDB/bbolt, Badger, or database changes.
 
 ---
 

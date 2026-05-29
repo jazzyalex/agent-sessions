@@ -96,6 +96,7 @@ final class OpenClawSessionDiscovery: SessionDiscovery {
                     for case let file as URL in sessionEnum {
                         let name = file.lastPathComponent
                         if name.hasSuffix(".jsonl.lock") { continue }
+                        if name.hasSuffix(".trajectory.jsonl") { continue }
                         if name.hasSuffix(".jsonl") {
                             found.append(file)
                             continue
@@ -119,4 +120,3 @@ final class OpenClawSessionDiscovery: SessionDiscovery {
         return fm.fileExists(atPath: agents.path, isDirectory: &isAgents) && isAgents.boolValue
     }
 }
-

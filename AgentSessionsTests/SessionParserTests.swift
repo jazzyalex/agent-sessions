@@ -149,6 +149,82 @@ final class SessionParserTests: XCTestCase {
         """)
     }
 
+    private func createHermesStateDBFixture(at url: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            return XCTFail("failed to open Hermes state SQLite fixture")
+        }
+        defer { sqlite3_close(db) }
+
+        func exec(_ sql: String) throws {
+            var err: UnsafeMutablePointer<Int8>?
+            guard sqlite3_exec(db, sql, nil, nil, &err) == SQLITE_OK else {
+                let message = err.map { String(cString: $0) } ?? "unknown sqlite error"
+                sqlite3_free(err)
+                throw NSError(domain: "HermesStateSQLiteFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+        }
+
+        func sqlString(_ value: String) -> String {
+            "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
+        }
+
+        try exec("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT,
+            user_id TEXT,
+            model TEXT,
+            model_config TEXT,
+            system_prompt TEXT,
+            parent_session_id TEXT,
+            started_at REAL,
+            ended_at REAL,
+            end_reason TEXT,
+            message_count INTEGER,
+            tool_call_count INTEGER,
+            input_tokens INTEGER,
+            output_tokens INTEGER,
+            total_tokens INTEGER,
+            cost REAL,
+            title TEXT
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT,
+            content TEXT,
+            tool_call_id TEXT,
+            tool_calls TEXT,
+            tool_name TEXT,
+            timestamp REAL,
+            token_count INTEGER,
+            finish_reason TEXT,
+            reasoning TEXT,
+            reasoning_content TEXT,
+            reasoning_details TEXT,
+            codex_reasoning_items TEXT,
+            codex_message_items TEXT,
+            platform_message_id TEXT,
+            observed INTEGER
+        );
+        """)
+
+        let modelConfig = #"{"cwd":"/tmp/hermes-repo"}"#
+        let toolCalls = #"[{"id":"call_hermes_1","type":"function","function":{"name":"shell","arguments":"{\"cmd\":\"pwd\"}"}}]"#
+        try exec("""
+        INSERT INTO sessions (id, source, user_id, model, model_config, system_prompt, parent_session_id, started_at, ended_at, end_reason, message_count, tool_call_count, input_tokens, output_tokens, total_tokens, cost, title)
+        VALUES ('hermes_sqlite_demo', 'cli', 'user_1', 'qwen3.5-9b', \(sqlString(modelConfig)), 'system', NULL, 1780000000.0, 1780000004.0, 'complete', 3, 1, 10, 20, 30, 0.01, 'Hermes SQLite demo');
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+        VALUES (1, 'hermes_sqlite_demo', 'user', 'Hello from Hermes SQLite', NULL, NULL, NULL, 1780000000.1, 4, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+        VALUES (2, 'hermes_sqlite_demo', 'assistant', 'Running pwd.', NULL, \(sqlString(toolCalls)), NULL, 1780000001.0, 8, NULL, 'brief reasoning', NULL, NULL, NULL, NULL, NULL, 1);
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+        VALUES (3, 'hermes_sqlite_demo', 'tool', '/tmp/hermes-repo', 'call_hermes_1', NULL, 'shell', 1780000002.0, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+        """)
+    }
+
     private func canonicalPath(_ url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
     }
@@ -2460,9 +2536,11 @@ final class SessionParserTests: XCTestCase {
         try fm.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
 
         let live = sessionsDir.appendingPathComponent("live.jsonl")
+        let trajectory = sessionsDir.appendingPathComponent("live.trajectory.jsonl")
         let lock = sessionsDir.appendingPathComponent("live.jsonl.lock")
         let deleted = sessionsDir.appendingPathComponent("live.jsonl.deleted.1")
         try writeText(#"{"type":"session"}"# + "\n", to: live)
+        try writeText(#"{"type":"trajectory"}"# + "\n", to: trajectory)
         try writeText("", to: lock)
         try writeText("", to: deleted)
 
@@ -3001,6 +3079,42 @@ final class SessionParserTests: XCTestCase {
         XCTAssertFalse(session.events.isEmpty)
         XCTAssertEqual(session.cwd, nestedDir.path)
         XCTAssertEqual(session.repoName, "cli")
+    }
+
+    func testHermesStateDBReaderLoadsCurrentDatabaseLayout() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Hermes-StateDB-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("state.db")
+        try createHermesStateDBFixture(at: dbURL)
+
+        let discovery = HermesSessionDiscovery(customRoot: root.path)
+        XCTAssertTrue(discovery.hasStateDB())
+        XCTAssertEqual(discovery.stateDBURL().path, dbURL.path)
+
+        let sessions = HermesStateDBReader.listSessions(dbURL: dbURL)
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions.first?.id, "hermes_sqlite_demo")
+        XCTAssertEqual(sessions.first?.source, .hermes)
+        XCTAssertEqual(sessions.first?.cwd, "/tmp/hermes-repo")
+        XCTAssertEqual(sessions.first?.repoName, "cli")
+        XCTAssertEqual(sessions.first?.model, "qwen3.5-9b")
+        XCTAssertEqual(sessions.first?.eventCount, 3)
+        XCTAssertEqual(sessions.first?.lightweightCommands, 1)
+        XCTAssertEqual(sessions.first?.title, "Hermes SQLite demo")
+
+        guard let full = HermesStateDBReader.loadFullSession(dbURL: dbURL, sessionID: "hermes_sqlite_demo") else {
+            return XCTFail("full Hermes state DB parse returned nil")
+        }
+        XCTAssertEqual(full.eventCount, 4)
+        XCTAssertEqual(full.customTitle, "Hermes SQLite demo")
+        XCTAssertTrue(full.events.contains { $0.kind == .user && ($0.text ?? "").contains("Hello from Hermes SQLite") })
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("Running pwd.") })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "shell" && $0.messageID == "call_hermes_1" })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_result && $0.toolName == "shell" && ($0.toolOutput ?? "").contains("/tmp/hermes-repo") })
+        XCTAssertTrue(full.events.contains { $0.kind == .meta && ($0.text ?? "").contains("brief reasoning") })
     }
 
     func testHermesParserKeepsOfflinePathMetadata() throws {

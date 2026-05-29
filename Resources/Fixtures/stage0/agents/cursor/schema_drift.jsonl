@@ -1,0 +1,4 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Use the repo context and explain the latest build issue."}]},"metadata":{"workspaceId":"cursor-stage0","requestId":"cursor-drift-1"}}
+{"role":"assistant","message":{"content":[{"type":"thinking","thinking":"I should inspect the build log before answering."},{"type":"tool_call","name":"read_file","input":{"path":"build.log"},"metadata":{"source":"cursor-tools","callKind":"read"}},{"type":"custom_block","text":"Cursor added an unknown block with visible text."}]},"model":"cursor-auto","conversation":{"branchId":"branch-stage0"}}
+{"role":"user","message":{"content":[{"type":"tool-result","name":"read_file","content":[{"type":"text","text":"Compile failed in Example.swift:42"}]}]},"metadata":{"toolResultStatus":"success"}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The build issue is in Example.swift:42."}]},"annotations":[{"type":"status","value":"complete"}]}

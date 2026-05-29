@@ -372,7 +372,12 @@ struct UnifiedSessionsView: View {
             .hermes: .init(
                 transcriptCache: hermesIndexer.searchTranscriptCache,
                 update: { hermesIndexer.updateSession($0) },
-                parseFull: { url, _ in HermesSessionParser.parseFileFull(at: url) }
+                parseFull: { url, forcedID in
+                    if url.pathExtension.lowercased() == "db", !forcedID.isEmpty {
+                        return HermesStateDBReader.loadFullSession(dbURL: url, sessionID: forcedID)
+                    }
+                    return HermesSessionParser.parseFileFull(at: url)
+                }
             ),
             .copilot: .init(
                 transcriptCache: copilotIndexer.searchTranscriptCache,
@@ -1709,6 +1714,9 @@ struct UnifiedSessionsView: View {
             requestedSelectionReload = true
         } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             opencodeIndexer.reloadSession(id: id)
+            requestedSelectionReload = true
+        } else if s.source == .hermes, let exist = hermesIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            hermesIndexer.reloadSession(id: id)
             requestedSelectionReload = true
         } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             copilotIndexer.reloadSession(id: id)

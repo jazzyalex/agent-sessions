@@ -18,6 +18,27 @@ final class HermesSessionDiscovery: SessionDiscovery {
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
+    func stateDBURL() -> URL {
+        if let customRoot, !customRoot.isEmpty {
+            let expanded = (customRoot as NSString).expandingTildeInPath
+            let url = URL(fileURLWithPath: expanded)
+            if url.pathExtension.lowercased() == "db" {
+                return url
+            }
+            if url.lastPathComponent == "sessions" {
+                return url.deletingLastPathComponent().appendingPathComponent("state.db")
+            }
+            return url.appendingPathComponent("state.db")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".hermes", isDirectory: true)
+            .appendingPathComponent("state.db")
+    }
+
+    func hasStateDB() -> Bool {
+        FileManager.default.fileExists(atPath: stateDBURL().path)
+    }
+
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
         let fm = FileManager.default
