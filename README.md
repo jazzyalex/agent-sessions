@@ -129,6 +129,9 @@ open "/Applications/Agent Sessions.app"
 
 ## Documentation
 
+- Guides:
+  - [OpenCode SQLite history: browsing old runs](docs/guides/opencode-sqlite-history.md)
+  - [Claude Code JSONL history: what you can recover locally](docs/guides/claude-code-jsonl-history.md)
 - Release notes: `docs/CHANGELOG.md`
 - Monthly summaries: `docs/summaries/`
 - Privacy: `docs/PRIVACY.md`
