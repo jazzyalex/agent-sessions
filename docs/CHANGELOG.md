@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Website: Moved the main Sessions screenshot above Agent Cockpit, added light/dark screenshot selection, and removed WarpPreview from the product-page copy.
 - Website: Replaced the expanded menu bar dropdown screenshot with a plain menu bar status strip on the product page.
 - Website: Added light-mode menu bar and Analytics screenshots with dark-mode fallbacks on the product page.
+- Website: Added a caption to the menu bar status strip so it matches the surrounding screenshot sections.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights

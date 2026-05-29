@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Product page now moves the main Sessions screenshot above Agent Cockpit, switches between light/dark screenshots, and removes WarpPreview from visible page copy.
 - Product page now shows the plain menu bar status strip instead of the expanded menu bar dropdown.
 - Product page now uses light-mode menu bar and Analytics screenshots with dark-mode fallbacks.
+- Product page now captions the menu bar status strip consistently with the other screenshots.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
   opt-in `--mode prebump` path with per-agent drivers for codex, claude,
