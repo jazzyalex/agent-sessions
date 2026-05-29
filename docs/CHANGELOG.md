@@ -3,22 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.8.2] - 2026-05-28
+- Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.
 - Session list: Fixed the toolbar Saved filter so it toggles saved-only sessions even when the Save column is hidden.
 - Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.
-- Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.
-- Website: Open Graph and Twitter previews now use the main Sessions screenshot directly until a dedicated social banner is ready.
-- Docs/Website: Repositioned Agent Sessions around local history for CLI tools, desktop apps, and app-bundled agents, with full HTML SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
-- Docs/Website: Updated local-history guide pages to reuse the main product-page header style and show unframed agent-specific marketing screenshots.
-- Docs/Website: Linked README agent names and product-page guide cards directly to local-history guides.
-- Website: Fixed the product page supported-agent card so long agent names wrap instead of spilling out of the card.
-- Website: Moved the main Sessions screenshot above Agent Cockpit, added light/dark screenshot selection, and removed WarpPreview from the product-page copy.
-- Website: Replaced the expanded menu bar dropdown screenshot with a plain menu bar status strip on the product page.
-- Website: Added light-mode menu bar and Analytics screenshots with dark-mode fallbacks on the product page.
-- Website: Added a caption to the menu bar status strip so it matches the surrounding screenshot sections.
-- Website: Added light/dark Image Browser screenshots to the product page.
-- Website: Updated the product-page headline to focus on session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi, and Gemini.
-- Website: Added dark-mode Saved Sessions and refreshed Image Browser screenshots, and switched the product page background and text to follow system dark mode.
-- Docs/Website: Tightened the product-page copy, mobile header, GitHub stars label, and README positioning/screenshots to match the current local session-management focus.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights
