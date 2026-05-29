@@ -132,6 +132,7 @@ open "/Applications/Agent Sessions.app"
 ## Documentation
 
 - Guides:
+  - [Codex local history: search Codex CLI, Desktop, and VS Code sessions](docs/guides/codex-local-history.md)
   - [OpenCode SQLite history: browsing old runs](docs/guides/opencode-sqlite-history.md)
   - [Claude Code JSONL history: what you can recover locally](docs/guides/claude-code-jsonl-history.md)
   - [Cursor Agent local history: search Cursor Agent transcripts](docs/guides/cursor-agent-local-history.md)

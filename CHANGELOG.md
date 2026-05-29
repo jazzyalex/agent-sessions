@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Documentation and website copy now position Agent Sessions as a local-history hub for CLI tools, desktop apps, and app-bundled agents, with dedicated SEO guides for Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
+- Documentation and website copy now position Agent Sessions as a local-history hub for CLI tools, desktop apps, and app-bundled agents, with dedicated SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
   opt-in `--mode prebump` path with per-agent drivers for codex, claude,
