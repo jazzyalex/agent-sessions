@@ -3,14 +3,15 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.8.1</title>
-            <pubDate>Wed, 27 May 2026 11:32:55 -0700</pubDate>
+            <title>3.8.2</title>
+            <pubDate>Thu, 28 May 2026 20:55:14 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.8.1</h2>
-<h3>Highlights</h3>
+<h2>What&#x27;s New in 3.8.2</h2>
+<h3>Improvements</h3>
 <ul>
-<li>Resume workflows can now open every supported CLI agent in Warp or WarpPreview, using Warp terminal tab configs for new tabs.</li>
-<li>Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.</li>
+<li>Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.</li>
+<li>Session list: Fixed the toolbar Saved filter so it toggles saved-only sessions even when the Save column is hidden.</li>
+<li>Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.</li>
 </ul>
 <h3>Reminder: What You Got in 3.8</h3>
 <ul>
@@ -19,12 +20,12 @@
 <li>Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.</li>
 <li>Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.1</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.2</a></p>
             ]]></description>
-            <sparkle:version>47</sparkle:version>
-            <sparkle:shortVersionString>3.8.1</sparkle:shortVersionString>
+            <sparkle:version>48</sparkle:version>
+            <sparkle:shortVersionString>3.8.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg" length="17659363" type="application/octet-stream" sparkle:edSignature="V9Lpto1t4gPgWNto/Uj/MKCspSb6eML9PYIZwluWMtyx6yGN9AXOY+gm9J0sCthMaQLPCrAfM6hdEmbtoYQ4BQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.2/AgentSessions-3.8.2.dmg" length="17680366" type="application/octet-stream" sparkle:edSignature="swejULvDOG7Z4Ab2e35e1mhZJeQoNs1nn0N8c+fO1y+O19vdnOJaEC9ZUv1EwYuPFoIXfwN4qYtslJ3ZiogwDw=="/>
         </item>
     </channel>
 </rss>
