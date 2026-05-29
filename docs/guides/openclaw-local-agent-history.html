@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenClaw Local Agent History - Browse OpenClaw Sessions on macOS</title>
   <meta name="description" content="Browse and search OpenClaw JSONL session history on macOS. Agent Sessions reads ~/.openclaw agent sessions, supports legacy Clawdbot paths, and excludes trajectory traces.">
-  <meta name="keywords" content="OpenClaw history, OpenClaw sessions, OpenClaw JSONL, Clawdbot history, ~/.openclaw agents sessions, macOS AI coding agent history, Agent Sessions">
+  <meta name="keywords" content="OpenClaw history, OpenClaw sessions, OpenClaw JSONL, OpenClaw local history, Clawdbot history, ~/.openclaw agents sessions, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html">
+  <link rel="icon" href="../assets/app-icon-32.png">
+  <link rel="stylesheet" href="guide.css">
   <meta property="og:type" content="article">
   <meta property="og:title" content="OpenClaw Local Agent History">
   <meta property="og:description" content="Browse OpenClaw JSONL session history locally while excluding trajectory traces.">
@@ -15,58 +17,77 @@
   <meta name="twitter:title" content="OpenClaw Local Agent History">
   <meta name="twitter:description" content="Search OpenClaw JSONL sessions locally with Agent Sessions.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
-  <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
-    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
-    a { color: #0969da; }
-    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
-    h2 { margin-top: 34px; }
-    p, li { line-height: 1.65; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
-    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
-    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
-  </style>
+  <script defer src="guide.js"></script>
 </head>
 <body>
-<main>
-  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
-  <h1>OpenClaw Local Agent History: Browse OpenClaw Sessions on macOS</h1>
-  <p>OpenClaw sessions can contain the practical audit trail of a coding task: the prompt, assistant response, tool call, tool result, model change, compaction, and project path. Agent Sessions reads that local history and makes OpenClaw sessions searchable beside the other coding agents you use on macOS.</p>
-  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+  <header class="site-header">
+    <a class="brand" href="../index.html">
+      <img src="../assets/app-icon-512.png" alt="Agent Sessions app icon">
+      <span>Agent Sessions</span>
+    </a>
+    <nav class="nav-links" aria-label="Guide navigation">
+      <a href="../index.html">Home</a>
+      <a href="https://github.com/jazzyalex/agent-sessions">GitHub</a>
+      <span class="stars" id="github-stars-container" hidden>Stars: <span id="github-stars">0</span></span>
+      <a href="https://github.com/jazzyalex/agent-sessions/releases">Releases</a>
+      <a class="primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg">Download</a>
+    </nav>
+  </header>
 
-  <h2>Where OpenClaw Stores Local Data</h2>
-  <p>Agent Sessions discovers OpenClaw sessions under:</p>
-  <pre><code>~/.openclaw/agents/&lt;agent-id&gt;/sessions/*.jsonl</code></pre>
-  <p>It also supports the legacy Clawdbot location:</p>
-  <pre><code>~/.clawdbot/agents/&lt;agent-id&gt;/sessions/*.jsonl</code></pre>
-  <p>If <code>OPENCLAW_STATE_DIR</code> is set, Agent Sessions uses that state root instead. Deleted transcript files can still be shown when the OpenClaw deleted-session preference is enabled.</p>
-  <p>Trajectory files are excluded from normal session history:</p>
-  <pre><code>*.trajectory.jsonl</code></pre>
+  <main class="guide-shell">
+    <p class="eyebrow">Local History Guide / OpenClaw</p>
+    <h1>OpenClaw Local Agent History: Browse OpenClaw Sessions on macOS</h1>
+    <p class="lede">OpenClaw sessions can contain the practical audit trail of a coding task: the prompt, assistant response, tool call, tool result, model change, compaction, and project path. Agent Sessions reads that local history and makes OpenClaw sessions searchable beside the other coding agents you use on macOS.</p>
+    <p class="note">Agent Sessions indexes normal OpenClaw session files and deliberately excludes trajectory traces from the user-facing session list.</p>
+    <img class="hero-image" src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
 
-  <h2>What Agent Sessions Does</h2>
-  <ul>
-    <li>Lists OpenClaw sessions across agent IDs.</li>
-    <li>Full-text searches transcript content.</li>
-    <li>Shows user prompts, assistant text, tool calls, tool results, and metadata events.</li>
-    <li>Preserves deleted-session visibility for OpenClaw transcript files when enabled.</li>
-    <li>Supports OpenClaw resume workflows when the installed command exposes the required session flags.</li>
-  </ul>
-  <p>OpenClaw session-format support is verified through OpenClaw 2026.5.27 with normal session-file evidence.</p>
+    <section class="meta-grid" aria-label="OpenClaw support summary">
+      <div class="meta-card"><strong>Primary storage</strong><code>~/.openclaw/agents/.../sessions/*.jsonl</code></div>
+      <div class="meta-card"><strong>Legacy storage</strong><code>~/.clawdbot/agents/.../sessions/*.jsonl</code></div>
+      <div class="meta-card"><strong>Excluded traces</strong><code>*.trajectory.jsonl</code> files are not normal sessions.</div>
+    </section>
 
-  <h2>What This Does Not Do</h2>
-  <ul>
-    <li>Treat trajectory traces as user-facing sessions.</li>
-    <li>Write into OpenClaw state.</li>
-    <li>Restore deleted OpenClaw files that no longer exist locally.</li>
-    <li>Upload OpenClaw transcripts to a hosted search service.</li>
-  </ul>
+    <h2>Where OpenClaw Stores Local Data</h2>
+    <p>Agent Sessions discovers OpenClaw sessions under:</p>
+    <pre><code>~/.openclaw/agents/&lt;agent-id&gt;/sessions/*.jsonl</code></pre>
+    <p>It also supports the legacy Clawdbot location:</p>
+    <pre><code>~/.clawdbot/agents/&lt;agent-id&gt;/sessions/*.jsonl</code></pre>
+    <p>If <code>OPENCLAW_STATE_DIR</code> is set, Agent Sessions uses that state root instead. Deleted transcript files can still be shown when the OpenClaw deleted-session preference is enabled.</p>
+    <p>Trajectory files are excluded from normal session history:</p>
+    <pre><code>*.trajectory.jsonl</code></pre>
 
-  <h2>Sources</h2>
-  <ul>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/OpenClawSessionDiscovery.swift">OpenClaw discovery</a></li>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/OpenClawSessionParser.swift">OpenClaw parser</a></li>
-  </ul>
-</main>
+    <h2>What Agent Sessions Does</h2>
+    <ul>
+      <li>Lists OpenClaw sessions across agent IDs.</li>
+      <li>Full-text searches transcript content, tool results, metadata, and file paths.</li>
+      <li>Shows user prompts, assistant text, tool calls, tool results, and metadata events.</li>
+      <li>Preserves deleted-session visibility for OpenClaw transcript files when enabled.</li>
+      <li>Supports OpenClaw resume workflows when the installed command exposes the required session flags.</li>
+    </ul>
+    <p>OpenClaw session-format support has been verified through OpenClaw 2026.5.27 with normal session-file evidence.</p>
+
+    <h2>What This Does Not Do</h2>
+    <ul>
+      <li>Treat trajectory traces as user-facing sessions.</li>
+      <li>Write into OpenClaw state.</li>
+      <li>Restore deleted OpenClaw files that no longer exist locally.</li>
+      <li>Upload OpenClaw transcripts to a hosted search service.</li>
+    </ul>
+
+    <h2>Related Guides</h2>
+    <ul>
+      <li><a href="codex-local-history.html">Codex local history</a></li>
+      <li><a href="opencode-sqlite-history.html">OpenCode SQLite history</a></li>
+      <li><a href="hermes-agent-state-db-history.html">Hermes state database history</a></li>
+    </ul>
+
+    <h2>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/OpenClawSessionDiscovery.swift">OpenClaw discovery</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/OpenClawSessionParser.swift">OpenClaw parser</a></li>
+    </ul>
+  </main>
+
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
 </body>
 </html>

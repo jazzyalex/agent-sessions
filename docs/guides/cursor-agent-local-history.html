@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cursor Agent Local History - Search Cursor Agent Sessions on macOS</title>
   <meta name="description" content="Search local Cursor Agent transcripts on macOS with Agent Sessions. Learn where Cursor stores agent-transcripts JSONL files, what store.db metadata is used for, and what is not full Cursor IDE chat history.">
-  <meta name="keywords" content="Cursor Agent history, Cursor agent transcripts, Cursor local history, Cursor agent-transcripts, Cursor store.db, macOS AI coding agent history, Agent Sessions">
+  <meta name="keywords" content="Cursor Agent history, Cursor agent transcripts, Cursor local history, Cursor Desktop sessions, Cursor agent-transcripts, Cursor store.db, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html">
+  <link rel="icon" href="../assets/app-icon-32.png">
+  <link rel="stylesheet" href="guide.css">
   <meta property="og:type" content="article">
   <meta property="og:title" content="Cursor Agent Local History">
   <meta property="og:description" content="Search local Cursor Agent transcripts on macOS without claiming full Cursor IDE chat history.">
@@ -15,60 +17,77 @@
   <meta name="twitter:title" content="Cursor Agent Local History">
   <meta name="twitter:description" content="Search local Cursor Agent transcripts and metadata with Agent Sessions.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
-  <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
-    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
-    a { color: #0969da; }
-    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
-    h2 { margin-top: 34px; }
-    p, li { line-height: 1.65; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
-    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
-    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
-    .note { background: #fff; border-left: 4px solid #0969da; padding: 12px 16px; }
-  </style>
+  <script defer src="guide.js"></script>
 </head>
 <body>
-<main>
-  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
-  <h1>Cursor Agent Local History: Search Cursor Agent Sessions on macOS</h1>
-  <p>Cursor Agent sessions can contain the prompt, tool call, command output, or file path that explains a change. Agent Sessions makes that local Cursor Agent history searchable beside Codex, Claude, OpenCode, Hermes, OpenClaw, Gemini, Copilot, and Pi.</p>
-  <p class="note">Agent Sessions supports Cursor Agent transcripts. It does not claim full Cursor IDE chat history support.</p>
-  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+  <header class="site-header">
+    <a class="brand" href="../index.html">
+      <img src="../assets/app-icon-512.png" alt="Agent Sessions app icon">
+      <span>Agent Sessions</span>
+    </a>
+    <nav class="nav-links" aria-label="Guide navigation">
+      <a href="../index.html">Home</a>
+      <a href="https://github.com/jazzyalex/agent-sessions">GitHub</a>
+      <span class="stars" id="github-stars-container" hidden>Stars: <span id="github-stars">0</span></span>
+      <a href="https://github.com/jazzyalex/agent-sessions/releases">Releases</a>
+      <a class="primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg">Download</a>
+    </nav>
+  </header>
 
-  <h2>Where Cursor Agent Stores Local Data</h2>
-  <p>Cursor Agent writes JSONL transcripts under Cursor's local data directory:</p>
-  <pre><code>~/.cursor/projects/&lt;project&gt;/agent-transcripts/&lt;session-id&gt;/&lt;session-id&gt;.jsonl</code></pre>
-  <p>Cursor also stores per-session chat metadata in SQLite databases:</p>
-  <pre><code>~/.cursor/chats/&lt;workspace-hash&gt;/&lt;session-id&gt;/store.db</code></pre>
-  <p>Agent Sessions uses the JSONL transcript as the primary source for readable events and uses <code>store.db</code> metadata for names, model hints, timestamps, and workspace context when available.</p>
+  <main class="guide-shell">
+    <p class="eyebrow">Local History Guide / Cursor Agent</p>
+    <h1>Cursor Agent Local History: Search Cursor Agent Sessions on macOS</h1>
+    <p class="lede">Cursor Agent sessions can contain the prompt, tool call, command output, or file path that explains a change. Agent Sessions makes that local Cursor Agent history searchable beside Codex, Claude, OpenCode, Hermes, OpenClaw, Gemini, Copilot, and Pi.</p>
+    <p class="boundary">Agent Sessions supports Cursor Agent transcripts. It does not claim full Cursor IDE chat history support because DB-only Cursor chat message blobs are not decoded as transcript events.</p>
+    <img class="hero-image" src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
 
-  <h2>What Agent Sessions Does</h2>
-  <ul>
-    <li>Lists Cursor Agent sessions beside other local coding-agent sessions.</li>
-    <li>Full-text searches transcript text.</li>
-    <li>Shows prompts, assistant responses, tool calls, and tool results from JSONL transcripts.</li>
-    <li>Enriches sessions with Cursor chat metadata from <code>store.db</code>.</li>
-    <li>Builds Cursor resume commands when the installed Cursor Agent command supports resume flags.</li>
-  </ul>
-  <p>Cursor Agent support is verified against Cursor 3.5.38 using the app-bundled CLI at <code>/Applications/Cursor.app/Contents/Resources/app/bin/cursor</code>.</p>
+    <section class="meta-grid" aria-label="Cursor support summary">
+      <div class="meta-card"><strong>Primary storage</strong><code>~/.cursor/projects/.../agent-transcripts</code></div>
+      <div class="meta-card"><strong>Metadata storage</strong><code>~/.cursor/chats/.../store.db</code></div>
+      <div class="meta-card"><strong>Surface</strong>Cursor Agent sessions from the Cursor app and bundled command-line entrypoint.</div>
+    </section>
 
-  <h2>What This Does Not Do</h2>
-  <ul>
-    <li>Parse every Cursor IDE chat from <code>store.db</code> when no Cursor Agent transcript exists.</li>
-    <li>Decode Cursor's protobuf message blobs from DB-only chat history.</li>
-    <li>Upload Cursor transcripts to a hosted search service.</li>
-    <li>Write into Cursor's local databases.</li>
-  </ul>
+    <h2>Where Cursor Agent Stores Local Data</h2>
+    <p>Cursor Agent writes JSONL transcripts under Cursor's local data directory:</p>
+    <pre><code>~/.cursor/projects/&lt;project&gt;/agent-transcripts/&lt;session-id&gt;/&lt;session-id&gt;.jsonl</code></pre>
+    <p>Cursor also stores per-session chat metadata in SQLite databases:</p>
+    <pre><code>~/.cursor/chats/&lt;workspace-hash&gt;/&lt;session-id&gt;/store.db</code></pre>
+    <p>Agent Sessions uses the JSONL transcript as the primary source for readable events and uses <code>store.db</code> metadata for names, model hints, timestamps, and workspace context when available.</p>
 
-  <h2>Sources</h2>
-  <ul>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionDiscovery.swift">Cursor discovery</a></li>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionParser.swift">Cursor transcript parser</a></li>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Cursor/CursorChatMetaReader.swift">Cursor chat metadata reader</a></li>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionIndexer.swift">Cursor indexer</a></li>
-  </ul>
-</main>
+    <h2>What Agent Sessions Does</h2>
+    <ul>
+      <li>Lists Cursor Agent sessions beside other local coding-agent sessions.</li>
+      <li>Full-text searches transcript text, command output, tool calls, tool results, errors, and file paths.</li>
+      <li>Shows prompts, assistant responses, tool calls, and tool results from JSONL transcripts.</li>
+      <li>Enriches sessions with Cursor chat metadata from <code>store.db</code>.</li>
+      <li>Builds Cursor resume commands when the installed Cursor Agent command supports resume flags.</li>
+    </ul>
+    <p>Cursor Agent support has been verified against Cursor 3.5.38 using the app-bundled CLI at <code>/Applications/Cursor.app/Contents/Resources/app/bin/cursor</code>.</p>
+
+    <h2>What This Does Not Do</h2>
+    <ul>
+      <li>Parse every Cursor IDE chat from <code>store.db</code> when no Cursor Agent transcript exists.</li>
+      <li>Decode Cursor's protobuf message blobs from DB-only chat history.</li>
+      <li>Upload Cursor transcripts to a hosted search service.</li>
+      <li>Write into Cursor's local databases.</li>
+    </ul>
+
+    <h2>Related Guides</h2>
+    <ul>
+      <li><a href="codex-local-history.html">Codex local history</a></li>
+      <li><a href="claude-code-jsonl-history.html">Claude Code JSONL history</a></li>
+      <li><a href="hermes-agent-state-db-history.html">Hermes state database history</a></li>
+    </ul>
+
+    <h2>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionDiscovery.swift">Cursor discovery</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionParser.swift">Cursor transcript parser</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Cursor/CursorChatMetaReader.swift">Cursor chat metadata reader</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CursorSessionIndexer.swift">Cursor indexer</a></li>
+    </ul>
+  </main>
+
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
 </body>
 </html>

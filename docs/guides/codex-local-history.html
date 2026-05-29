@@ -7,6 +7,8 @@
   <meta name="description" content="Search local Codex CLI, Codex Desktop, and Codex VS Code session history on macOS. Agent Sessions reads ~/.codex/sessions and CODEX_HOME rollout JSONL files without uploading transcripts.">
   <meta name="keywords" content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Codex rollout JSONL, ~/.codex/sessions, CODEX_HOME sessions, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html">
+  <link rel="icon" href="../assets/app-icon-32.png">
+  <link rel="stylesheet" href="guide.css">
   <meta property="og:type" content="article">
   <meta property="og:title" content="Codex Local History">
   <meta property="og:description" content="Search local Codex CLI, Desktop, and VS Code rollout history with Agent Sessions.">
@@ -15,61 +17,78 @@
   <meta name="twitter:title" content="Codex Local History">
   <meta name="twitter:description" content="Browse and search local Codex rollout JSONL sessions on macOS.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
-  <style>
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
-    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
-    a { color: #0969da; }
-    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
-    h2 { margin-top: 34px; }
-    p, li { line-height: 1.65; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
-    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
-    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
-    .note { background: #fff; border-left: 4px solid #0969da; padding: 12px 16px; }
-  </style>
+  <script defer src="guide.js"></script>
 </head>
 <body>
-<main>
-  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
-  <h1>Codex Local History: Search Codex CLI, Desktop, and VS Code Sessions on macOS</h1>
-  <p>Codex sessions are often the record of how a task actually happened: the prompt, plan, tool call, patch output, command error, image input, or final reasoning boundary. Agent Sessions makes that local Codex history searchable across Codex CLI, Codex Desktop, and Codex VS Code surfaces.</p>
-  <p class="note">Agent Sessions reads local Codex rollout files. It does not upload Codex transcripts or turn them into hosted project memory.</p>
-  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+  <header class="site-header">
+    <a class="brand" href="../index.html">
+      <img src="../assets/app-icon-512.png" alt="Agent Sessions app icon">
+      <span>Agent Sessions</span>
+    </a>
+    <nav class="nav-links" aria-label="Guide navigation">
+      <a href="../index.html">Home</a>
+      <a href="https://github.com/jazzyalex/agent-sessions">GitHub</a>
+      <span class="stars" id="github-stars-container" hidden>Stars: <span id="github-stars">0</span></span>
+      <a href="https://github.com/jazzyalex/agent-sessions/releases">Releases</a>
+      <a class="primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg">Download</a>
+    </nav>
+  </header>
 
-  <h2>Where Codex Stores Local Data</h2>
-  <p>Codex session logs use JSONL rollout files. The default root is:</p>
-  <pre><code>~/.codex/sessions</code></pre>
-  <p>If <code>CODEX_HOME</code> is set, Agent Sessions follows:</p>
-  <pre><code>$CODEX_HOME/sessions</code></pre>
-  <p>Codex stores sessions in date-sharded folders:</p>
-  <pre><code>YYYY/MM/DD/rollout-*.jsonl</code></pre>
-  <p>Agent Sessions also scans archived Codex session folders when they exist, so restored or archived Codex Desktop sessions can remain visible.</p>
+  <main class="guide-shell">
+    <p class="eyebrow">Local History Guide / Codex</p>
+    <h1>Codex Local History: Search Codex CLI, Desktop, and VS Code Sessions on macOS</h1>
+    <p class="lede">Codex sessions are often the record of how a task actually happened: the prompt, plan, tool call, patch output, command error, image input, or final reasoning boundary. Agent Sessions makes that local Codex history searchable across Codex CLI, Codex Desktop, and Codex VS Code surfaces.</p>
+    <p class="note">Agent Sessions reads local Codex rollout files. It does not upload Codex transcripts or turn them into hosted project memory.</p>
+    <img class="hero-image" src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
 
-  <h2>What Agent Sessions Does</h2>
-  <ul>
-    <li>Lists Codex CLI, Codex Desktop, and Codex VS Code sessions in one Codex corpus.</li>
-    <li>Shows row-level surface labels such as CLI, Desktop, or VS Code when that metadata is available.</li>
-    <li>Full-text searches prompts, assistant text, tool calls, command output, errors, file paths, and image references.</li>
-    <li>Supports archived Codex Desktop filtering and projectless Desktop chat grouping.</li>
-    <li>Supports Codex resume workflows, including modern resume IDs and fallback <code>experimental_resume</code> paths.</li>
-  </ul>
+    <section class="meta-grid" aria-label="Codex support summary">
+      <div class="meta-card"><strong>Primary storage</strong><code>~/.codex/sessions</code> or <code>$CODEX_HOME/sessions</code></div>
+      <div class="meta-card"><strong>Formats</strong>Date-sharded <code>rollout-*.jsonl</code> session logs.</div>
+      <div class="meta-card"><strong>Surfaces</strong>Codex CLI, Codex Desktop, and Codex VS Code sessions in one Codex corpus.</div>
+    </section>
 
-  <h2>What This Does Not Do</h2>
-  <ul>
-    <li>Upload Codex transcripts to a hosted search service.</li>
-    <li>Recover hidden model state that Codex never wrote locally.</li>
-    <li>Decrypt opaque encrypted reasoning blobs.</li>
-    <li>Replace Codex's own resume picker.</li>
-    <li>Modify Codex rollout files.</li>
-  </ul>
+    <h2>Where Codex Stores Local Data</h2>
+    <p>Codex session logs use JSONL rollout files. The default root is:</p>
+    <pre><code>~/.codex/sessions</code></pre>
+    <p>If <code>CODEX_HOME</code> is set, Agent Sessions follows:</p>
+    <pre><code>$CODEX_HOME/sessions</code></pre>
+    <p>Codex stores sessions in date-sharded folders:</p>
+    <pre><code>YYYY/MM/DD/rollout-*.jsonl</code></pre>
+    <p>Agent Sessions also scans archived Codex session folders when they exist, so restored or archived Codex Desktop sessions can remain visible.</p>
 
-  <h2>Sources</h2>
-  <ul>
-    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/SessionDiscovery.swift">Agent Sessions Codex discovery</a></li>
-    <li><a href="../session-storage-format.md">Codex session storage format</a></li>
-    <li><a href="../codex-resume.md">Codex resume behavior</a></li>
-  </ul>
-</main>
+    <h2>What Agent Sessions Does</h2>
+    <ul>
+      <li>Lists Codex CLI, Codex Desktop, and Codex VS Code sessions in one Codex corpus.</li>
+      <li>Shows row-level surface labels such as CLI, Desktop, or VS Code when that metadata is available.</li>
+      <li>Full-text searches prompts, assistant text, tool calls, command output, errors, file paths, and image references.</li>
+      <li>Supports archived Codex Desktop filtering and projectless Desktop chat grouping.</li>
+      <li>Supports Codex resume workflows, including modern resume IDs and fallback <code>experimental_resume</code> paths.</li>
+    </ul>
+
+    <h2>What This Does Not Do</h2>
+    <ul>
+      <li>Upload Codex transcripts to a hosted search service.</li>
+      <li>Recover hidden model state that Codex never wrote locally.</li>
+      <li>Decrypt opaque encrypted reasoning blobs.</li>
+      <li>Replace Codex's own resume picker.</li>
+      <li>Modify Codex rollout files.</li>
+    </ul>
+
+    <h2>Related Guides</h2>
+    <ul>
+      <li><a href="claude-code-jsonl-history.html">Claude Code JSONL history</a></li>
+      <li><a href="cursor-agent-local-history.html">Cursor Agent local history</a></li>
+      <li><a href="opencode-sqlite-history.html">OpenCode SQLite history</a></li>
+    </ul>
+
+    <h2>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/SessionDiscovery.swift">Agent Sessions Codex discovery</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/session-storage-format.md">Codex session storage format</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/codex-resume.md">Codex resume behavior</a></li>
+    </ul>
+  </main>
+
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
 </body>
 </html>

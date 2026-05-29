@@ -132,12 +132,12 @@ open "/Applications/Agent Sessions.app"
 ## Documentation
 
 - Guides:
-  - [Codex local history: search Codex CLI, Desktop, and VS Code sessions](docs/guides/codex-local-history.md)
-  - [OpenCode SQLite history: browsing old runs](docs/guides/opencode-sqlite-history.md)
-  - [Claude Code JSONL history: what you can recover locally](docs/guides/claude-code-jsonl-history.md)
-  - [Cursor Agent local history: search Cursor Agent transcripts](docs/guides/cursor-agent-local-history.md)
-  - [Hermes Agent state database history](docs/guides/hermes-agent-state-db-history.md)
-  - [OpenClaw local agent history](docs/guides/openclaw-local-agent-history.md)
+  - [Codex local history: search Codex CLI, Desktop, and VS Code sessions](docs/guides/codex-local-history.html)
+  - [OpenCode SQLite history: browsing old runs](docs/guides/opencode-sqlite-history.html)
+  - [Claude Code JSONL history: what you can recover locally](docs/guides/claude-code-jsonl-history.html)
+  - [Cursor Agent local history: search Cursor Agent transcripts](docs/guides/cursor-agent-local-history.html)
+  - [Hermes Agent state database history](docs/guides/hermes-agent-state-db-history.html)
+  - [OpenClaw local agent history](docs/guides/openclaw-local-agent-history.html)
 - Release notes: `docs/CHANGELOG.md`
 - Monthly summaries: `docs/summaries/`
 - Privacy: `docs/PRIVACY.md`
