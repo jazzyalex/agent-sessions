@@ -183,7 +183,7 @@ The weekly scan fingerprints JSONL transcripts only. The SQLite probe (`cursor_s
 - The `agent-transcripts/` directory being renamed or moved.
 - SQLite probe failures indicating `meta` table schema changes.
 
-**Note:** `cursor --version` returns null when the Cursor IDE is not installed. This is expected and not a monitoring failure.
+**Note:** Some machines may have a stale PATH shim for `cursor` even when Cursor.app is installed. The weekly monitor tries the PATH command first, then falls back to the embedded app CLI at `/Applications/Cursor.app/Contents/Resources/app/bin/cursor --version`.
 
 ---
 

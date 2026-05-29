@@ -189,6 +189,48 @@ def _resolve_cli_binary_mtime(installed_version_cmd: list[str] | None) -> tuple[
     return resolved, float(st.st_mtime)
 
 
+def _expand_cmd_paths(argv: list[str]) -> list[str]:
+    if not argv:
+        return argv
+    first = argv[0]
+    if first.startswith("~") or first.startswith("$HOME"):
+        first = os.path.expandvars(os.path.expanduser(first))
+    return [first, *argv[1:]]
+
+
+def _installed_version_cmd_candidates(agent_cfg: dict[str, Any]) -> list[list[str]]:
+    candidates: list[list[str]] = []
+    primary = agent_cfg.get("installed_version_cmd")
+    if isinstance(primary, list) and all(isinstance(x, str) for x in primary):
+        candidates.append(_expand_cmd_paths(primary))
+    fallback_cfg = agent_cfg.get("installed_version_fallback_cmds")
+    if isinstance(fallback_cfg, list):
+        for fallback in fallback_cfg:
+            if isinstance(fallback, list) and all(isinstance(x, str) for x in fallback):
+                candidates.append(_expand_cmd_paths(fallback))
+    return candidates
+
+
+def _run_installed_version_cmds(agent_cfg: dict[str, Any]) -> tuple[list[str] | None, int, str, str, str | None]:
+    candidates = _installed_version_cmd_candidates(agent_cfg)
+    if not candidates:
+        return None, 127, "", "missing installed_version_cmd", None
+
+    first_result: tuple[list[str], int, str, str, str | None] | None = None
+    for argv in candidates:
+        rc, stdout, stderr = _run_cmd(argv, timeout=10)
+        text = "\n".join(part for part in (stdout, stderr) if part)
+        parsed = _extract_semver(text) or (stdout.split()[0] if stdout else None)
+        result = (argv, rc, stdout, stderr, parsed)
+        if first_result is None:
+            first_result = result
+        if rc == 0 and parsed:
+            return result
+
+    assert first_result is not None
+    return first_result
+
+
 def _epoch_to_utc_iso(epoch: float | None) -> str | None:
     if epoch is None:
         return None
@@ -2142,14 +2184,17 @@ def main(argv: list[str]) -> int:
         verified_semver = _extract_semver(verified or "") if verified else None
 
         installed_cmd = agent_cfg.get("installed_version_cmd")
+        effective_installed_cmd = installed_cmd if isinstance(installed_cmd, list) else None
         installed_rc, installed_stdout, installed_stderr = (0, "", "skipped")
         installed: str | None = None
         if not args.skip_update:
-            installed_rc, installed_stdout, installed_stderr = (127, "", "missing installed_version_cmd")
-            if isinstance(installed_cmd, list) and all(isinstance(x, str) for x in installed_cmd):
-                installed_rc, installed_stdout, installed_stderr = _run_cmd(installed_cmd, timeout=10)
-            installed_text = "\n".join(part for part in (installed_stdout, installed_stderr) if part)
-            installed = _extract_semver(installed_text) or (installed_stdout.split()[0] if installed_stdout else None)
+            (
+                effective_installed_cmd,
+                installed_rc,
+                installed_stdout,
+                installed_stderr,
+                installed,
+            ) = _run_installed_version_cmds(agent_cfg)
 
         upstream_sources = agent_cfg.get("upstream") or []
         upstream: str | None = None
@@ -2366,7 +2411,7 @@ def main(argv: list[str]) -> int:
                             local_schema_obj["mtime_utc"] = _epoch_to_utc_iso(sample_mtime_epoch)
                         except OSError:
                             pass
-            cli_path, cli_mtime = _resolve_cli_binary_mtime(installed_cmd if isinstance(installed_cmd, list) else None)
+            cli_path, cli_mtime = _resolve_cli_binary_mtime(effective_installed_cmd)
             mode_context = "skip_update" if args.skip_update else "normal"
             sample_freshness = _compute_sample_freshness(
                 sample_mtime=sample_mtime_epoch,
@@ -2427,7 +2472,7 @@ def main(argv: list[str]) -> int:
         results[agent_name] = {
             "verified_version": verified,
             "installed": {
-                "argv": installed_cmd,
+                "argv": effective_installed_cmd,
                 "exit_code": installed_rc,
                 "stdout": installed_stdout,
                 "stderr": installed_stderr,

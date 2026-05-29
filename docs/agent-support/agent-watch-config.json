@@ -307,6 +307,10 @@
     "cursor": {
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["cursor", "--version"],
+      "installed_version_fallback_cmds": [
+        ["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "--version"],
+        ["~/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "--version"]
+      ],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.cursor.max_verified_version",
       "upstream": [],
       "risk_keywords": {

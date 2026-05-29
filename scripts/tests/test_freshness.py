@@ -180,6 +180,27 @@ def test_resolve_cli_binary_mtime_handles_empty_cmd():
     assert mtime is None
 
 
+def test_installed_version_cmds_fall_back_after_broken_primary():
+    cfg = {
+        "installed_version_cmd": ["cursor", "--version"],
+        "installed_version_fallback_cmds": [["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "--version"]],
+    }
+
+    def fake_run(argv, timeout):
+        if argv[0] == "cursor":
+            return (1, "", "No Cursor IDE installation found")
+        return (0, "3.5.38\n009bb5a\narm64\n", "")
+
+    with mock.patch("agent_watch._run_cmd", side_effect=fake_run):
+        argv, rc, stdout, stderr, version = agent_watch._run_installed_version_cmds(cfg)
+
+    assert argv == ["/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "--version"]
+    assert rc == 0
+    assert stdout.startswith("3.5.38")
+    assert stderr == ""
+    assert version == "3.5.38"
+
+
 def test_sample_freshness_fresh_when_sample_newer_than_cli():
     result = agent_watch._compute_sample_freshness(
         sample_mtime=2_000.0,

@@ -87,7 +87,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/openclaw/large.jsonl"
       - "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl"
   cursor:
-    max_verified_version: "2026.04.12"
+    max_verified_version: "3.5.38"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"

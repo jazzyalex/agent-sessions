@@ -47,6 +47,10 @@ entries:
         sessions:
           max_verified_version: "2026.5.27"
           evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/agent_captures/20260528-210423Z/openclaw/agents/main/sessions/agent-watch-20260528.jsonl", "scripts/probe_scan_output/agent_watch/20260528-211619Z/report.json"]
+      cursor:
+        sessions:
+          max_verified_version: "3.5.38"
+          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl", "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl", "/Users/alexm/.cursor/projects/Users-alexm-Repository-Codex-History/agent-transcripts/97cfd11d-7865-4cbb-ac57-fac9bc48d327/97cfd11d-7865-4cbb-ac57-fac9bc48d327.jsonl", "scripts/probe_scan_output/agent_watch/20260529-001303Z/report.json"]
       pi:
         sessions:
           max_verified_version: "0.76.0"
@@ -57,6 +61,7 @@ entries:
       - "Fresh Codex local session, Gemini/Copilot/Pi prebump sessions, OpenCode SQLite session, Hermes state.db session, and OpenClaw normal session evidence matched baseline in scripts/probe_scan_output/agent_watch/20260528-211619Z/report.json."
       - "Claude 2.1.156 was verified after the five-hour reset with a successful real-home standard-context Sonnet transcript at /Users/alexm/.claude/projects/-Users-alexm-Repository-Codex-History/2133c258-c0b2-4dfc-babb-31709d1d8b69.jsonl; scripts/probe_scan_output/agent_watch/20260528-235633Z/report.json reports schema_matches_baseline=true and stale=false."
       - "Final post-bump monitor scripts/probe_scan_output/agent_watch/20260528-212047Z/report.json reports severity=none for Codex, Gemini, Copilot, OpenCode, Hermes, OpenClaw, and Pi; Claude was finalized by scripts/probe_scan_output/agent_watch/20260528-235633Z/report.json."
+      - "Cursor IDE 3.5.38 is installed at /Applications/Cursor.app. The PATH shim points to a missing ~/.local/bin/agent, so monitoring falls back to /Applications/Cursor.app/Contents/Resources/app/bin/cursor --version. Fresh headless Cursor Agent transcript 97cfd11d-7865-4cbb-ac57-fac9bc48d327 and SQLite probe evidence matched baseline in scripts/probe_scan_output/agent_watch/20260529-001303Z/report.json."
       - "Implemented format fixes from the audit: Pi prebump driver/config, Cursor schema_drift fixture coverage, OpenClaw .trajectory.jsonl exclusion, Hermes state.db discovery/parsing/weekly fingerprinting, and weekly reuse of successful prebump freshness evidence."
       - "The earlier failed Claude transcript introduced additive assistant.apiErrorStatus metadata, now covered by the normal and schema-drift Claude fixtures."
 
