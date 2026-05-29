@@ -211,6 +211,68 @@
       border-radius: 8px;
       display: block;
     }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+      }
+
+      body,
+      header {
+        background: #0d1117;
+        color: #e6edf3;
+      }
+
+      a {
+        color: #58a6ff;
+      }
+
+      .header-right,
+      footer,
+      p[style*="color:#586069"],
+      p[style*="color: #586069"],
+      span[style*="color: #4B5563"] {
+        color: #8b949e !important;
+      }
+
+      .card {
+        background: #161b22;
+        border-color: #30363d;
+        color: #e6edf3;
+      }
+
+      .card.grey {
+        background: #0f1620;
+        border-color: #30363d;
+        color: #8b949e;
+      }
+
+      .btn.secondary,
+      a.btn.secondary[style] {
+        background: #161b22 !important;
+        border-color: #30363d;
+        color: #58a6ff !important;
+      }
+
+      code,
+      pre {
+        background: #161b22;
+        border-color: #30363d;
+        color: #e6edf3;
+      }
+
+      pre code {
+        background: transparent;
+      }
+
+      img.screenshot {
+        border-color: #30363d;
+      }
+
+      footer section {
+        border-top-color: #30363d !important;
+      }
+    }
   </style>
 </head>
 
@@ -371,8 +433,11 @@ brew install --cask agent-sessions</code></pre>
   </div>
 
   <p style="text-align:center; color:#586069; font-size:14px; margin-top:-5px; margin-bottom:0px;"><em>Saved Sessions with restore actions</em></p>
-  <img src="assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions"
-    style="width:100%; max-width:960px; margin:5px auto; display:block;" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/saved-sessions-dark.png">
+    <img src="assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions"
+      style="width:100%; max-width:960px; margin:5px auto; display:block;" />
+  </picture>
 
   <p style="text-align:center; color:#586069; font-size:14px; margin-top:20px; margin-bottom:0px;">
     <em>Image Browser for visual session outputs</em>
