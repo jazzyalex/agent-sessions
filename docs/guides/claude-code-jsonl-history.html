@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Code JSONL History - Search Local Claude Code Sessions on macOS</title>
+  <meta name="description" content="Search local Claude Code JSONL session history on macOS. Agent Sessions reads ~/.claude/projects transcripts and Claude Desktop local-agent-mode session roots without uploading transcripts.">
+  <meta name="keywords" content="Claude Code history, Claude Code JSONL, Claude local sessions, ~/.claude/projects, Claude Desktop sessions, AI coding agent history, Agent Sessions">
+  <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Claude Code JSONL History">
+  <meta property="og:description" content="Search local Claude Code JSONL transcripts with Agent Sessions.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Claude Code JSONL History">
+  <meta name="twitter:description" content="Recover local Claude Code transcript context without uploading sessions.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
+    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
+    a { color: #0969da; }
+    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
+    h2 { margin-top: 34px; }
+    p, li { line-height: 1.65; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
+    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
+    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
+  <h1>Claude Code JSONL History: What You Can Recover Locally</h1>
+  <p>Claude Code writes local session transcripts as JSONL. Those transcripts often contain the useful part of an old run: the prompt, assistant response, tool call, command output, error, or file path that explains what happened.</p>
+  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search and a readable transcript preview for local AI coding-agent sessions.">
+
+  <h2>Where Claude Code Session History Lives</h2>
+  <p>Standard Claude Code local history lives under:</p>
+  <pre><code>~/.claude/projects/&lt;encoded-cwd&gt;/&lt;session-id&gt;.jsonl</code></pre>
+  <p>Agent Sessions also scans configured Claude roots, <code>CLAUDE_CONFIG_DIR</code>, <code>CLAUDE_CONFIG_DIRS</code>, and Claude Desktop local-agent-mode session roots.</p>
+
+  <h2>What You Can Recover</h2>
+  <ul>
+    <li>Old prompts and assistant responses.</li>
+    <li>Tool calls and tool results.</li>
+    <li>Command output.</li>
+    <li>File paths and errors mentioned in the session.</li>
+    <li>Old decisions or implementation notes.</li>
+  </ul>
+  <p>The boundary is transcript context versus hidden runtime/model state. Agent Sessions can search and display transcript context that Claude wrote to disk. It should not be described as recovering hidden runtime state.</p>
+
+  <h2>What Agent Sessions Does</h2>
+  <ul>
+    <li>Provides a local macOS browser for Claude Code sessions.</li>
+    <li>Full-text searches old transcripts.</li>
+    <li>Shows readable timeline views.</li>
+    <li>Separates Claude rows from Codex, OpenCode, Gemini CLI, Cursor Agent, Copilot CLI, Hermes, OpenClaw, and Pi.</li>
+    <li>Supports resume workflows where the underlying Claude command supports resume.</li>
+  </ul>
+
+  <h2>Sources</h2>
+  <ul>
+    <li><a href="https://code.claude.com/docs/en/agent-sdk/sessions">Claude Code sessions docs</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/SessionDiscovery.swift">Agent Sessions Claude discovery</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/ClaudeSessionIndexer.swift">Agent Sessions Claude session indexer</a></li>
+  </ul>
+</main>
+</body>
+</html>

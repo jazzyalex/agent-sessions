@@ -9,8 +9,8 @@
 </td>
 <td>
 
-**Unified session browser for Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Hermes CLI, Cursor CLI, Gemini CLI, GitHub Copilot CLI, OpenCode CLI, OpenClaw CLI, and Pi CLI sessions across CLI and desktop surfaces.**
-Search, browse, and resume your past AI-coding sessions in a local-first macOS app.
+**Unified session browser for Codex CLI/Desktop/VS Code, Claude CLI/Desktop, Cursor Agent, Hermes Agent, Gemini CLI, GitHub Copilot CLI, OpenCode, OpenClaw, and Pi CLI sessions across CLI and desktop agent surfaces.**
+Search, browse, and resume your past AI-coding sessions from local agent apps and CLIs in a local-first macOS app.
 
 </td>
 </tr>
@@ -34,7 +34,7 @@ Search, browse, and resume your past AI-coding sessions in a local-first macOS a
 
 ## Overview
 
-Agent Sessions helps you search across large session histories, quickly find the right prompt/tool output, then reuse it by copying snippets or resuming supported sessions in your terminal.
+Agent Sessions helps you search across large local session histories, quickly find the right prompt/tool output, then reuse it by copying snippets or resuming supported sessions in your terminal. It is built for the practical middle ground where coding agents write useful local history across terminal CLIs, desktop apps, and app-bundled agent commands.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
@@ -66,7 +66,9 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 - Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
 - Browse and search Codex CLI, Codex Desktop, and Codex VS Code sessions in one place.
 - Browse Claude CLI and Claude Desktop sessions with consistent labels and project context.
-- Hermes CLI sessions participate in browsing, search, filtering, analytics, and resume workflows.
+- Browse Cursor Agent transcripts from Cursor's local storage, enriched with Cursor chat metadata when available.
+- Hermes Agent sessions participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
+- OpenClaw sessions participate in browsing, search, filtering, deleted-session visibility, and resume workflows while ignoring trajectory traces.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
 - Unified browsing across supported agents, with strict filtering and a single session list.
 - Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
@@ -132,6 +134,9 @@ open "/Applications/Agent Sessions.app"
 - Guides:
   - [OpenCode SQLite history: browsing old runs](docs/guides/opencode-sqlite-history.md)
   - [Claude Code JSONL history: what you can recover locally](docs/guides/claude-code-jsonl-history.md)
+  - [Cursor Agent local history: search Cursor Agent transcripts](docs/guides/cursor-agent-local-history.md)
+  - [Hermes Agent state database history](docs/guides/hermes-agent-state-db-history.md)
+  - [OpenClaw local agent history](docs/guides/openclaw-local-agent-history.md)
 - Release notes: `docs/CHANGELOG.md`
 - Monthly summaries: `docs/summaries/`
 - Privacy: `docs/PRIVACY.md`
@@ -154,6 +159,9 @@ open "/Applications/Agent Sessions.app"
   - `~/.copilot/session-state`
   - `~/.cursor/projects` and `~/.cursor/chats`
   - `~/.factory/sessions` and `~/.factory/projects`
+  - `~/.hermes/state.db` and `~/.hermes/sessions`
+  - `~/.openclaw/agents` and legacy `~/.clawdbot/agents`
+  - `~/.pi/agent/sessions`
   - `~/.local/share/opencode/opencode.db` and `~/.local/share/opencode/storage/session`
 - Details: `docs/PRIVACY.md` and `docs/security.md`
 

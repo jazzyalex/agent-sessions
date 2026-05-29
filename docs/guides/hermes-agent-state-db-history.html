@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermes Agent State Database History - Browse Hermes Sessions on macOS</title>
+  <meta name="description" content="Browse and search Hermes Agent session history on macOS. Agent Sessions reads current ~/.hermes/state.db storage and falls back to legacy ~/.hermes/sessions JSON files.">
+  <meta name="keywords" content="Hermes Agent history, Hermes state.db, Hermes sessions, ~/.hermes/state.db, macOS AI coding agent history, Agent Sessions">
+  <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Hermes Agent State Database History">
+  <meta property="og:description" content="Browse and search Hermes Agent sessions from ~/.hermes/state.db on macOS.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hermes Agent State Database History">
+  <meta name="twitter:description" content="Search Hermes Agent state.db session history locally with Agent Sessions.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
+    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
+    a { color: #0969da; }
+    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
+    h2 { margin-top: 34px; }
+    p, li { line-height: 1.65; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
+    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
+    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
+  <h1>Hermes Agent State Database History: Browse Hermes Sessions on macOS</h1>
+  <p>Hermes Agent writes useful local project history: prompts, assistant responses, tool calls, command output, reasoning metadata, model changes, and working-directory context. Agent Sessions reads that history locally so Hermes sessions can be searched beside other coding-agent sessions.</p>
+  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+
+  <h2>Where Hermes Stores Local Data</h2>
+  <p>Current Hermes versions use:</p>
+  <pre><code>~/.hermes/state.db</code></pre>
+  <p>Older Hermes installs may still have JSON session files:</p>
+  <pre><code>~/.hermes/sessions/session_*.json</code></pre>
+  <p>Agent Sessions checks <code>state.db</code> first. If the database exists and contains sessions, it reads session and message rows from that database. If the database is absent or empty, it falls back to legacy JSON files.</p>
+
+  <h2>What Agent Sessions Does</h2>
+  <ul>
+    <li>Lists Hermes sessions by time and project context.</li>
+    <li>Reads <code>model_config</code> working-directory data when available.</li>
+    <li>Full-text searches Hermes transcript text.</li>
+    <li>Shows user messages, assistant responses, tool calls, tool results, and metadata events.</li>
+    <li>Supports Hermes resume workflows when the installed Hermes command exposes the required session flags.</li>
+  </ul>
+  <p>Hermes session-format support is verified through Hermes 0.15.0 with <code>~/.hermes/state.db</code> evidence.</p>
+
+  <h2>What This Does Not Do</h2>
+  <ul>
+    <li>Write into <code>~/.hermes/state.db</code>.</li>
+    <li>Recover history that Hermes never wrote locally.</li>
+    <li>Upload Hermes transcripts to a hosted index.</li>
+    <li>Replace Hermes' own command-line interface.</li>
+  </ul>
+
+  <h2>Sources</h2>
+  <ul>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/HermesSessionDiscovery.swift">Hermes discovery</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/HermesSessionParser.swift">Hermes parser</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/HermesSessionIndexer.swift">Hermes indexer</a></li>
+  </ul>
+</main>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 Claude Code writes local session transcripts as JSONL. That matters because the transcript is often the useful part of an old run: the prompt, assistant response, tool call, command output, error, or file path that explains what happened.
 
-Agent Sessions is built around that local-history layer. It gives Claude Code transcripts a searchable macOS browser without turning them into a hosted dashboard.
+Agent Sessions is built around that local-history layer. It gives Claude Code transcripts a searchable macOS browser without turning them into a hosted dashboard, and places them beside local history from CLI tools, desktop apps, and app-bundled agents.
 
 ![Agent Sessions showing full-text search and a readable transcript preview for local AI coding-agent sessions.](../assets/session-search-dark.png)
 
@@ -50,7 +50,7 @@ Agent Sessions gives Claude Code sessions:
 - A local macOS browser.
 - Full-text search across old transcripts.
 - Readable timeline views.
-- Source labels so Claude Code is not mixed with Codex, OpenCode, Gemini CLI, Cursor, Copilot CLI, Hermes, OpenClaw, or Pi rows.
+- Source labels so Claude Code is not mixed with Codex, OpenCode, Gemini CLI, Cursor Agent, Copilot CLI, Hermes, OpenClaw, or Pi rows.
 - Filters by date, model, project, and event kind.
 - Resume workflows where the underlying CLI supports resume.
 
@@ -76,7 +76,7 @@ This helps when:
 - A project has many old Claude Code sessions.
 - A built-in resume picker is not enough to identify the right run.
 - You need to find a command output or file path from an earlier run.
-- You use Claude Code alongside Codex, OpenCode, Gemini CLI, Cursor, or Copilot CLI.
+- You use Claude Code alongside Codex, OpenCode, Gemini CLI, Cursor Agent, Hermes, OpenClaw, or Copilot CLI.
 
 ![Agent Sessions showing local AI coding-agent histories across Codex, Claude, Gemini, OpenCode, Hermes, Copilot, OpenClaw, Cursor, and Pi.](../assets/session-all-agents-dark.png)
 

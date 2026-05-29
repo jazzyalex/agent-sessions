@@ -2,7 +2,7 @@
 
 OpenCode sessions become useful project history quickly. A run may contain the failed command, a model explanation, a file path, or the decision that explains why code changed. The hard part is finding that material later, especially when work spans projects and terminal tabs.
 
-Agent Sessions is built for that local-history layer. It reads local coding-agent session data on your Mac, gives it a visual browser, and lets you full-text search old runs without uploading transcripts.
+Agent Sessions is built for that local-history layer. It reads local coding-agent session data on your Mac, including CLI tools, desktop apps, and app-bundled agents, gives it a visual browser, and lets you full-text search old runs without uploading transcripts.
 
 ![Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.](../assets/session-search-dark.png)
 
@@ -37,7 +37,7 @@ Agent Sessions turns local OpenCode history into a macOS session browser:
 - Lists old OpenCode sessions by project and time.
 - Full-text searches transcript text.
 - Opens old runs as readable timelines.
-- Keeps OpenCode rows labeled separately from Codex, Claude Code, Gemini CLI, Cursor, Copilot CLI, Hermes, OpenClaw, and Pi.
+- Keeps OpenCode rows labeled separately from Codex, Claude Code, Gemini CLI, Cursor Agent, Copilot CLI, Hermes, OpenClaw, and Pi.
 - Copies or launches resume commands when the installed OpenCode CLI supports the needed flags.
 
 For resume workflows, Agent Sessions checks local OpenCode CLI help for `--session` and `--continue`, then builds commands like:

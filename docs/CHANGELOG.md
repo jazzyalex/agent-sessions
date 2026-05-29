@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 - Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.
 - Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.
 - Website: Open Graph and Twitter previews now use the main Sessions screenshot directly until a dedicated social banner is ready.
+- Docs/Website: Repositioned Agent Sessions around local history for CLI tools, desktop apps, and app-bundled agents, with new SEO guides for Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
 
 ## [3.8.1] - 2026-05-27
 ### Highlights

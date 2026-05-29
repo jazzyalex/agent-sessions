@@ -4,7 +4,9 @@ Agent Sessions is a local-first app. Session data stays on your Mac and is not s
 
 ## Data access model
 - The app reads session logs from local folders you choose (or the default CLI locations).
+- Supported default locations include local session stores for CLI tools, desktop apps, and app-bundled agents such as Cursor Agent, Hermes, OpenClaw, OpenCode, Codex Desktop, and Claude Desktop.
 - The app may build a local index/database to enable search and navigation.
+- Agent Sessions opens supported SQLite stores read-only when possible and does not write into agent-owned history databases.
 
 ## Network activity
 - The app does not include telemetry, analytics, or remote logging.

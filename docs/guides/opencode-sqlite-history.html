@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCode SQLite History - Browse Old OpenCode Runs on macOS</title>
+  <meta name="description" content="Browse and search OpenCode local history on macOS. Agent Sessions reads ~/.local/share/opencode/opencode.db and legacy OpenCode JSON storage in read-only mode.">
+  <meta name="keywords" content="OpenCode history, OpenCode SQLite, opencode.db, OpenCode sessions, local AI coding agent history, Agent Sessions">
+  <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="OpenCode SQLite History">
+  <meta property="og:description" content="Browse and search OpenCode local SQLite session history on macOS.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="OpenCode SQLite History">
+  <meta name="twitter:description" content="Search OpenCode opencode.db history locally with Agent Sessions.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; color: #1f2328; background: #f6f8fa; }
+    main { max-width: 860px; margin: 0 auto; padding: 36px 22px 56px; }
+    a { color: #0969da; }
+    h1 { font-size: 34px; line-height: 1.12; margin: 0 0 12px; }
+    h2 { margin-top: 34px; }
+    p, li { line-height: 1.65; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    pre { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px; overflow: auto; }
+    img { max-width: 100%; border-radius: 8px; border: 1px solid #d0d7de; }
+    .eyebrow { color: #57606a; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow"><a href="../index.html">Agent Sessions</a> / Local History Guide</p>
+  <h1>OpenCode SQLite History: Browsing Old Runs</h1>
+  <p>OpenCode sessions become useful project history quickly. A run may contain a failed command, model explanation, file path, or decision that explains why code changed. Agent Sessions reads that local-history layer and makes it searchable without uploading transcripts.</p>
+  <img src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+
+  <h2>Where OpenCode Stores Local Data</h2>
+  <p>Current OpenCode history is SQLite-backed:</p>
+  <pre><code>~/.local/share/opencode/opencode.db</code></pre>
+  <p>Agent Sessions also keeps a fallback for older per-file JSON storage:</p>
+  <pre><code>~/.local/share/opencode/storage/session</code></pre>
+  <p>The SQLite backend is preferred when <code>opencode.db</code> exists and contains a <code>session</code> table. Agent Sessions opens the database read-only, reads session metadata plus message and part rows, and leaves OpenCode's files untouched.</p>
+
+  <h2>What Agent Sessions Does</h2>
+  <ul>
+    <li>Lists old OpenCode sessions by project and time.</li>
+    <li>Full-text searches transcript text.</li>
+    <li>Opens old runs as readable timelines.</li>
+    <li>Keeps OpenCode rows labeled separately from Codex, Claude Code, Gemini CLI, Cursor Agent, Copilot CLI, Hermes, OpenClaw, and Pi.</li>
+    <li>Copies or launches resume commands when the installed OpenCode command supports the needed flags.</li>
+  </ul>
+
+  <h2>What This Does Not Do</h2>
+  <ul>
+    <li>Fix OpenCode TUI rendering behavior.</li>
+    <li>Recover hidden runtime state that was never written to disk.</li>
+    <li>Migrate sessions between machines.</li>
+    <li>Upload OpenCode transcripts to a hosted index.</li>
+    <li>Write into OpenCode's database.</li>
+  </ul>
+
+  <h2>Sources</h2>
+  <ul>
+    <li><a href="https://opencode.ai/docs/troubleshooting/">OpenCode troubleshooting docs</a></li>
+    <li><a href="https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/session.sql.ts">OpenCode session SQLite schema</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/OpenCode/OpenCodeBackendDetector.swift">Agent Sessions OpenCode backend detector</a></li>
+    <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/OpenCode/OpenCodeSqliteReader.swift">Agent Sessions OpenCode SQLite reader</a></li>
+  </ul>
+</main>
+</body>
+</html>
