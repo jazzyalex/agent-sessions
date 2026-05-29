@@ -12,26 +12,26 @@
   <meta property="og:type" content="article">
   <meta property="og:title" content="Hermes Agent State Database History">
   <meta property="og:description" content="Browse and search Hermes Agent sessions from ~/.hermes/state.db on macOS.">
-  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-hermes-history.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Hermes Agent State Database History">
   <meta name="twitter:description" content="Search Hermes Agent state.db session history locally with Agent Sessions.">
-  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-search-dark.png">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/marketing/screenshots/agent-sessions-hermes-history.png">
   <script defer src="guide.js"></script>
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="../index.html">
       <img src="../assets/app-icon-512.png" alt="Agent Sessions app icon">
-      <span>Agent Sessions</span>
+      <h1>Agent Sessions</h1>
     </a>
-    <nav class="nav-links" aria-label="Guide navigation">
-      <a href="../index.html">Home</a>
-      <a href="https://github.com/jazzyalex/agent-sessions">GitHub</a>
+    <div class="header-right" aria-label="Product metadata">
+      <span>macOS</span>
+      <span>/</span>
+      <span>Open Source</span>
+      <span>/</span>
       <span class="stars" id="github-stars-container" hidden>Stars: <span id="github-stars">0</span></span>
-      <a href="https://github.com/jazzyalex/agent-sessions/releases">Releases</a>
-      <a class="primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg">Download</a>
-    </nav>
+    </div>
   </header>
 
   <main class="guide-shell">
@@ -39,7 +39,13 @@
     <h1>Hermes Agent State Database History: Browse Hermes Sessions on macOS</h1>
     <p class="lede">Hermes Agent writes useful local project history: prompts, assistant responses, tool calls, command output, reasoning metadata, model changes, and working-directory context. Agent Sessions reads that history locally so Hermes sessions can be searched beside other coding-agent sessions.</p>
     <p class="note">Hermes support is centered on the current <code>state.db</code> storage format, with a legacy JSON fallback for older installs.</p>
-    <img class="hero-image" src="../assets/session-search-dark.png" alt="Agent Sessions showing full-text search across local AI coding-agent sessions with a transcript preview.">
+    <div class="button-row">
+      <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.1/AgentSessions-3.8.1.dmg">Download Agent Sessions 3.8.1</a>
+      <a class="btn secondary" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+      <a class="btn secondary" href="../index.html">Product page</a>
+    </div>
+
+    <img class="hero-image" src="../assets/marketing/screenshots/agent-sessions-hermes-history.png" alt="Agent Sessions showing Hermes sessions filtered in the local history browser.">
 
     <section class="meta-grid" aria-label="Hermes support summary">
       <div class="meta-card"><strong>Primary storage</strong><code>~/.hermes/state.db</code></div>

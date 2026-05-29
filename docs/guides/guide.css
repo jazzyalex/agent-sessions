@@ -20,9 +20,8 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 22px;
-  border-bottom: 1px solid #d0d7de;
-  background: #fff;
+  padding: 20px;
+  background: #f6f8fa;
 }
 
 .brand {
@@ -40,39 +39,59 @@ a {
   border-radius: 7px;
 }
 
-.nav-links {
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.header-right {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
+  color: #586069;
   font-size: 14px;
 }
 
-.nav-links a,
 .stars {
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
-  background: #fff;
-  color: #24292f;
-  text-decoration: none;
+  color: #586069;
 }
 
-.nav-links a.primary {
-  color: #fff;
-  border-color: #0969da;
-  background: #0969da;
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 22px 0 26px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  text-decoration: none;
   font-weight: 600;
 }
 
+.btn.primary {
+  background: #007aff;
+  color: #fff;
+}
+
+.btn.secondary {
+  background: #f2f2f2;
+  color: #111;
+  border: 1px solid #d0d7de;
+}
+
 .guide-shell {
-  max-width: 920px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 38px 22px 56px;
+  padding: 30px 30px 56px;
 }
 
 .eyebrow {
@@ -84,14 +103,15 @@ a {
 }
 
 h1 {
-  max-width: 850px;
-  font-size: clamp(34px, 5vw, 52px);
-  line-height: 1.04;
+  max-width: 900px;
+  font-size: clamp(32px, 4vw, 48px);
+  line-height: 1.08;
   margin: 10px 0 14px;
   letter-spacing: 0;
 }
 
 h2 {
+  max-width: 860px;
   margin-top: 38px;
   font-size: 25px;
 }
@@ -102,17 +122,24 @@ li {
 }
 
 .lede {
-  max-width: 820px;
+  max-width: 860px;
   font-size: 19px;
   color: #3d444d;
+}
+
+.guide-shell > p,
+.guide-shell > ul:not(.sources),
+.guide-shell > pre {
+  max-width: 860px;
 }
 
 .hero-image {
   display: block;
   width: 100%;
-  margin: 26px 0 30px;
+  margin: 30px 0 34px;
   border: 1px solid #d0d7de;
   border-radius: 10px;
+  background: #000;
 }
 
 .note,
@@ -177,9 +204,9 @@ pre {
 }
 
 .site-footer {
-  max-width: 920px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 0 22px 36px;
+  padding: 0 30px 36px;
   color: #57606a;
   font-size: 14px;
 }
@@ -190,7 +217,11 @@ pre {
     flex-direction: column;
   }
 
-  .nav-links {
+  .header-right {
     justify-content: flex-start;
+  }
+
+  .guide-shell {
+    padding: 24px 18px 48px;
   }
 }
