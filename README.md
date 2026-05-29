@@ -9,8 +9,8 @@
 </td>
 <td>
 
-**Unified session browser for [Codex CLI/Desktop/VS Code](docs/guides/codex-local-history.html), [Claude CLI/Desktop](docs/guides/claude-code-jsonl-history.html), [Cursor Agent](docs/guides/cursor-agent-local-history.html), [Hermes Agent](docs/guides/hermes-agent-state-db-history.html), Gemini CLI, GitHub Copilot CLI, [OpenCode](docs/guides/opencode-sqlite-history.html), [OpenClaw](docs/guides/openclaw-local-agent-history.html), and Pi CLI sessions across CLI and desktop agent surfaces.**
-Search, browse, and resume your past AI-coding sessions from local agent apps and CLIs in a local-first macOS app.
+**Session management for [Codex](docs/guides/codex-local-history.html), [Claude](docs/guides/claude-code-jsonl-history.html), [OpenCode](docs/guides/opencode-sqlite-history.html), [Cursor](docs/guides/cursor-agent-local-history.html), GitHub Copilot, Pi, Gemini, [Hermes](docs/guides/hermes-agent-state-db-history.html), and [OpenClaw](docs/guides/openclaw-local-agent-history.html) on macOS.**
+Search, inspect, save, and resume local AI-coding sessions from CLI tools, desktop apps, and IDE agent surfaces.
 
 </td>
 </tr>
@@ -34,14 +34,26 @@ Search, browse, and resume your past AI-coding sessions from local agent apps an
 
 ## Overview
 
-Agent Sessions helps you search across large local session histories, quickly find the right prompt/tool output, then reuse it by copying snippets or resuming supported sessions in your terminal. It is built for the practical middle ground where coding agents write useful local history across terminal CLIs, desktop apps, and app-bundled agent commands.
+Agent Sessions is a local-first Mac app for finding useful work that coding agents already wrote to disk. It brings Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Gemini, Copilot, and Pi histories into one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Transcript view with search (Dark Mode)</em></p>
-  <img src="docs/assets/screenshot-H.png" alt="Main Sessions window with active search and transcript preview in Dark Mode" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/session-all-agents-dark.png">
+    <img src="docs/assets/session-history-light.png" alt="Main Sessions window with local agent history and transcript preview" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  </picture>
 
   <p style="margin:0 0 0px 0;"><em>Saved Sessions with restore actions</em></p>
-  <img src="docs/assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions" width="100%" style="max-width:960px;border-radius:8px;margin:5px;"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/saved-sessions-dark.png">
+    <img src="docs/assets/screenshot-V.png" alt="Saved Sessions window listing stored sessions and restore actions" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  </picture>
+
+  <p style="margin:0 0 0px 0;"><em>Image Browser for visual session outputs</em></p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/image-browser-dark.png">
+    <img src="docs/assets/image-browser-light.png" alt="Image Browser window with thumbnail grid and selected screenshot preview" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  </picture>
 </div>
 
 ## Security & Privacy
@@ -57,23 +69,23 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 3.8.1
 
-**TL;DR** - Resume workflows now support Warp and WarpPreview across every supported CLI agent.
+**TL;DR** - Resume workflows now support Warp across every supported CLI agent.
 
-**Highlights:** Choose Terminal.app, iTerm2, Warp, or WarpPreview once in Preferences, and Agent Sessions uses that shared terminal preference for supported Resume launches. Warp and WarpPreview launches use Warp terminal tab configs so Claude, Codex, Cursor, Gemini, GitHub Copilot, Hermes, OpenCode, and Pi Resume commands open in the intended terminal tab.
+**Highlights:** Choose Terminal.app, iTerm2, or Warp once in Preferences, and Agent Sessions uses that shared terminal preference for supported Resume launches. Warp launches use terminal tab configs so Claude, Codex, Cursor, Gemini, GitHub Copilot, Hermes, OpenCode, and Pi Resume commands open in the intended terminal tab.
 
 ## Core Features
 
-- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
 - Browse and search [Codex CLI, Codex Desktop, and Codex VS Code sessions](docs/guides/codex-local-history.html) in one place.
 - Browse [Claude CLI and Claude Desktop sessions](docs/guides/claude-code-jsonl-history.html) with consistent labels and project context.
 - Browse [Cursor Agent transcripts](docs/guides/cursor-agent-local-history.html) from Cursor's local storage, enriched with Cursor chat metadata when available.
 - [Hermes Agent sessions](docs/guides/hermes-agent-state-db-history.html) participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
 - [OpenClaw sessions](docs/guides/openclaw-local-agent-history.html) participate in browsing, search, filtering, deleted-session visibility, and resume workflows while ignoring trajectory traces.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
-- Unified browsing across supported agents, with strict filtering and a single session list.
-- Unified Search and image browsing across sessions, plus in-session Find for fast transcript navigation.
+- Unified browsing across supported agents, with strict filtering, saved sessions, and a single session list.
+- Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
-- Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, Warp, and WarpPreview launch targets.
+- Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
+- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
@@ -147,7 +159,7 @@ open "/Applications/Agent Sessions.app"
 ## Resume Workflows
 
 - Right-click any supported CLI session and choose **Copy Resume Command** to get the exact CLI command for that session.
-- Open supported Resume sessions in your preferred terminal: Terminal.app, iTerm2, Warp, or WarpPreview.
+- Open supported Resume sessions in your preferred terminal: Terminal.app, iTerm2, or Warp.
 - Use Unified Search (across sessions) and Find (within a session) to jump to relevant tool calls and outputs quickly.
 
 ## Privacy & Security

@@ -111,6 +111,8 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      color: #586069;
+      white-space: nowrap;
     }
 
     .features {
@@ -212,6 +214,45 @@
       display: block;
     }
 
+    @media (max-width: 640px) {
+      header {
+        align-items: flex-start;
+        gap: 16px;
+        padding: 18px 22px;
+      }
+
+      header h1 {
+        font-size: 18px !important;
+        line-height: 1.05;
+      }
+
+      .brand img {
+        width: 36px;
+        height: 36px;
+      }
+
+      .header-right {
+        flex: 1;
+        justify-content: flex-end;
+        font-size: 14px;
+        text-align: right;
+        white-space: normal;
+      }
+
+      .container {
+        padding: 24px 30px;
+      }
+
+      .container>h1 {
+        line-height: 1.12;
+      }
+
+      .button-row>.btn {
+        flex: 1 1 100%;
+        justify-content: center;
+      }
+    }
+
     @media (prefers-color-scheme: dark) {
       :root {
         color-scheme: dark;
@@ -287,17 +328,17 @@
       </a>
     </div>
     <div class="header-right">
-      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span
-            id="github-stars">–</span></span></span>
+      <span>macOS • Open Source<span id="github-stars-container" style="display:none;"> • GitHub Stars <span
+            id="github-stars">-</span></span></span>
     </div>
   </header>
   <div class="container">
     <h1 style="font-size: 24px;">Session Management for Codex, Claude, OpenCode, Cursor, Copilot, Pi and Gemini</h1>
-    <p><strong>Agent Sessions</strong> is a broader local-first hub for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>, with searchable histories and Resume workflows that can launch supported agents in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, or <strong>Warp</strong>. <strong>Agent Cockpit</strong> adds a live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions.</p>
+    <p><strong>Agent Sessions</strong> is a local-first Mac app for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>. Search local Codex, Claude, OpenCode, Cursor, Copilot, Pi, Gemini, Hermes, and OpenClaw histories, inspect transcripts and images, then resume supported CLI sessions in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, or <strong>Warp</strong>. <strong>Agent Cockpit</strong> adds a live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions.</p>
     <div class="hero-row" style="margin-bottom: 20px;">
       <span
-        style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0.05em;">local-first,
-        open source, and built for terminal vibe warriors.</span>
+        style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0;">local
+        histories, desktop transcripts, resume-ready workflows.</span>
     </div>
 
     <br>
@@ -337,7 +378,7 @@ brew install --cask agent-sessions</code></pre>
     <div class="features">
 
       <div class="card">
-        <h3>9 Agent Histories Supported</h3>
+        <h3>Session History Across Agents</h3>
         <p>Browse local sessions from CLI tools, desktop apps, and app-bundled coding agents in one unified window.</p>
         <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:0 20px; margin:12px 0 0 0;">
           <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">

@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Product page now includes light/dark Image Browser screenshots for visual session outputs.
 - Product page headline now focuses on session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi, and Gemini.
 - Product page now uses a full dark-mode page theme and dark-mode Saved Sessions plus refreshed Image Browser screenshots.
+- README and product-page copy now use the same local session-management positioning, updated screenshots, and cleaner mobile/header presentation.
 - Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
   detection (`evidence.sample_freshness`) across all 7 agents and a new
   opt-in `--mode prebump` path with per-agent drivers for codex, claude,
