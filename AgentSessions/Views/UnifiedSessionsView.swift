@@ -1055,10 +1055,13 @@ struct UnifiedSessionsView: View {
 	    private var footerSessionCountText: String {
 	        let visible = cachedRows.count
 	        let total = unified.sessions.count
-	        if visible != total {
-	            return "\(visible) / \(total) Sessions"
+	        let countText = visible != total
+	            ? "\(visible) / \(total) Sessions"
+	            : "\(total) Sessions"
+	        if unified.showFavoritesOnly {
+	            return "\(countText) | Saved only"
 	        }
-	        return "\(total) Sessions"
+	        return countText
 	    }
 
 	    private var footerFreshnessText: String? {

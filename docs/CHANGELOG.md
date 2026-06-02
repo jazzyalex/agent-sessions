@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.
 - Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.
 - Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
 - Agent Cockpit: Improved Limits mode with separate Codex and Claude rows, width-adaptive reset times, and a hover toolbar without the All filter pill.
