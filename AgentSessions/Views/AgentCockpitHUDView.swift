@@ -177,6 +177,54 @@ private enum AgentCockpitHUDTheme {
     static let toolbarButtonCornerRadius: CGFloat = 7
 }
 
+enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
+    case full
+    case compact
+    case limits
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .full: return "Full"
+        case .compact: return "Compact"
+        case .limits: return "Limits"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .full: return "rectangle.split.3x1"
+        case .compact: return "rectangle.compress.vertical"
+        case .limits: return "gauge.with.dots.needle.50percent"
+        }
+    }
+
+    var usesCompactChrome: Bool {
+        switch self {
+        case .full: return false
+        case .compact, .limits: return true
+        }
+    }
+
+    static func initialMode(defaults: UserDefaults = .standard) -> AgentCockpitHUDDisplayMode {
+        if let raw = defaults.string(forKey: PreferencesKey.Cockpit.hudDisplayMode),
+           let mode = AgentCockpitHUDDisplayMode(rawValue: raw) {
+            return mode
+        }
+        let legacyCompact = defaults.object(forKey: PreferencesKey.Cockpit.hudCompact) as? Bool ?? false
+        return legacyCompact ? .compact : .full
+    }
+
+    func next() -> AgentCockpitHUDDisplayMode {
+        switch self {
+        case .full: return .compact
+        case .compact: return .limits
+        case .limits: return .full
+        }
+    }
+}
+
 enum HUDSessionFilterMode: Equatable {
     case all
     case active
@@ -498,7 +546,8 @@ struct AgentCockpitHUDView: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudGroupByProject) private var groupByProject: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.hudCompact) private var isCompact: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
+    @AppStorage(PreferencesKey.Cockpit.hudCompact) private var legacyCompactMode: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
@@ -529,6 +578,7 @@ struct AgentCockpitHUDView: View {
     @State private var highlightedRowIDs: Set<String> = []
     @State private var isCockpitWindowKey: Bool = true
     @State private var isCompactWindowHovered: Bool = false
+    @State private var compactToolbarHideTask: Task<Void, Never>? = nil
     @State private var staleAutoCollapsedProjects: Set<String> = []
     @State private var manuallyExpandedStaleProjects: Set<String> = []
     @State private var presentationState: HUDPresentationState = .empty
@@ -568,6 +618,30 @@ struct AgentCockpitHUDView: View {
         min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
     }
 
+    private var hudDisplayMode: AgentCockpitHUDDisplayMode {
+        AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? (legacyCompactMode ? .compact : .full)
+    }
+
+    private var isCompact: Bool {
+        hudDisplayMode.usesCompactChrome
+    }
+
+    private var isLimitsOnly: Bool {
+        hudDisplayMode == .limits
+    }
+
+    private var limitsRowCount: Int {
+        var count = 0
+        if codexAgentEnabledForLimits && codexUsageEnabledForLimits { count += 1 }
+        if claudeAgentEnabledForLimits && claudeUsageEnabledForLimits { count += 1 }
+        return max(1, min(count, 2))
+    }
+
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabledForLimits: Bool = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabledForLimits: Bool = false
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
+
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
@@ -577,7 +651,7 @@ struct AgentCockpitHUDView: View {
                 codexIndexer: codexIndexer,
                 claudeIndexer: claudeIndexer,
                 opencodeIndexer: opencodeIndexer,
-                initialCompact: UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudCompact) as? Bool ?? false
+                initialCompact: AgentCockpitHUDDisplayMode.initialMode().usesCompactChrome
             )
         )
     }
@@ -592,6 +666,7 @@ struct AgentCockpitHUDView: View {
             }
         }
         .onAppear {
+            normalizeHUDDisplayMode()
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
             activeCodex.setCockpitWindowVisible(true, consumerID: activeConsumerID)
             UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
@@ -606,6 +681,7 @@ struct AgentCockpitHUDView: View {
             UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
             CodexUsageModel.shared.setCockpitVisible(false, pinned: false)
             ClaudeUsageModel.shared.setCockpitVisible(false, pinned: false)
+            cancelCompactToolbarHideTask()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             CodexUsageModel.shared.setAppActive(true)
@@ -640,7 +716,7 @@ struct AgentCockpitHUDView: View {
         let displayState = presentationState.inputs == currentPresentationInputs
             ? presentationState
             : Self.makePresentationState(from: currentPresentationInputs)
-        let showsCompactToolbar = !isCompact || isPinned || isCockpitWindowKey || isCompactWindowHovered
+        let showsCompactToolbar = !isCompact || isCompactWindowHovered
 
         return configuredHUDContent(
             snapshot: snapshot,
@@ -704,7 +780,11 @@ struct AgentCockpitHUDView: View {
         }
         .onChange(of: isCompact) { _, _ in
             derivedState.setCompact(isCompact, activeCodex: activeCodex)
+            handleCompactModeChange()
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
+        }
+        .onChange(of: hudDisplayModeRaw) { _, _ in
+            normalizeHUDDisplayMode()
         }
         .onChange(of: sessionFilterMode) { _, _ in
             refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
@@ -736,10 +816,7 @@ struct AgentCockpitHUDView: View {
             synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onHover { hovering in
-            guard isCompact else { return }
-            withAnimation(.easeInOut(duration: 0.14)) {
-                isCompactWindowHovered = hovering
-            }
+            handleCompactWindowHoverChange(hovering)
         }
         .applyIf(isCompact) { view in
             view.ignoresSafeArea(.container, edges: .top)
@@ -756,12 +833,18 @@ struct AgentCockpitHUDView: View {
                 showsCompactToolbar: showsCompactToolbar
             )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(hudBackground)
+        .background(
+            RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous)
+                .fill(hudBackground)
+                .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
+        )
         .background(
             AgentCockpitHUDWindowConfigurator(
                 isPinned: isPinned,
                 shownSessionCount: displayState.shownSessionCount,
                 isCompact: isCompact,
+                isLimitsOnly: isLimitsOnly,
+                limitsRowCount: limitsRowCount,
                 activeEnabled: activeEnabled,
                 compactToolbarVisible: showsCompactToolbar,
                 groupByProject: groupByProject,
@@ -783,7 +866,6 @@ struct AgentCockpitHUDView: View {
             RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
         .animation(.easeInOut(duration: 0.18), value: isCompact)
         )
     }
@@ -809,18 +891,22 @@ struct AgentCockpitHUDView: View {
                     .padding(.vertical, 10)
             }
 
-            bodyList(
-                visibleRows: displayState.visibleRows,
-                groupedRows: displayState.groupedVisibleRows,
-                shortcutIndexMap: displayState.shortcutIndexMap,
-                totalRowsCount: displayState.rowsForDisplay.count,
-                showsCompactToolbar: showsCompactToolbar,
-                fullListLayoutSignature: displayState.fullListLayoutSignature
-            )
-            .background(Color.clear)
-            .disabled(!activeEnabled)
+            if isLimitsOnly {
+                HUDLimitsRowsPanel()
+            } else {
+                bodyList(
+                    visibleRows: displayState.visibleRows,
+                    groupedRows: displayState.groupedVisibleRows,
+                    shortcutIndexMap: displayState.shortcutIndexMap,
+                    totalRowsCount: displayState.rowsForDisplay.count,
+                    showsCompactToolbar: showsCompactToolbar,
+                    fullListLayoutSignature: displayState.fullListLayoutSignature
+                )
+                .background(Color.clear)
+                .disabled(!activeEnabled)
+            }
 
-            if showLimits {
+            if showLimits && !isLimitsOnly {
                 HUDLimitsBar()
             }
 
@@ -845,82 +931,169 @@ struct AgentCockpitHUDView: View {
         )
     }
 
+    private func handleCompactWindowHoverChange(_ hovering: Bool) {
+        guard isCompact else {
+            cancelCompactToolbarHideTask()
+            if isCompactWindowHovered {
+                withAnimation(.easeInOut(duration: 0.14)) {
+                    isCompactWindowHovered = false
+                }
+            }
+            return
+        }
+
+        cancelCompactToolbarHideTask()
+        if hovering {
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isCompactWindowHovered = true
+            }
+            return
+        }
+
+        compactToolbarHideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isCompactWindowHovered = false
+            }
+            compactToolbarHideTask = nil
+        }
+    }
+
+    private func handleCompactModeChange() {
+        guard isCompact else {
+            cancelCompactToolbarHideTask()
+            if isCompactWindowHovered {
+                isCompactWindowHovered = false
+            }
+            return
+        }
+        isCompactWindowHovered = false
+    }
+
+    private func cancelCompactToolbarHideTask() {
+        compactToolbarHideTask?.cancel()
+        compactToolbarHideTask = nil
+    }
+
+    private func normalizeHUDDisplayMode() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: PreferencesKey.Cockpit.hudDisplayMode) == nil {
+            setHUDDisplayMode(legacyCompactMode ? .compact : .full)
+            return
+        }
+        guard AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) == nil else {
+            legacyCompactMode = isCompact
+            return
+        }
+        setHUDDisplayMode(.full)
+    }
+
+    private func setHUDDisplayMode(_ mode: AgentCockpitHUDDisplayMode) {
+        hudDisplayModeRaw = mode.rawValue
+        legacyCompactMode = mode.usesCompactChrome
+    }
+
+    private func cycleHUDDisplayMode() {
+        setHUDDisplayMode(hudDisplayMode.next())
+    }
+
     @ViewBuilder
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
             HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    Button {
-                        guard activeEnabled else { return }
-                        sessionFilterMode = .all
-                    } label: {
-                        Text("All \(activeCount + idleCount)")
-                    }
-                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .all, kind: .all))
-                    .help("Show all live sessions.")
-
-                    Button {
-                        guard activeEnabled else { return }
-                        sessionFilterMode = .active
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(Color(hex: "30d158"))
-                                .frame(width: 7, height: 7)
-                            Text("\(activeCount)")
+                if isLimitsOnly {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            limitsCounterPill(color: Color(hex: "30d158"), count: activeCount, help: "Active working sessions")
+                            limitsCounterPill(color: Color(hex: "ffb340"), count: idleCount, help: "Waiting sessions")
                         }
+                        .fixedSize(horizontal: true, vertical: false)
+                        Color.clear
+                            .frame(width: 0, height: 1)
                     }
-                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .active, kind: .active))
-                    .help("Show active working sessions only.")
-
-                    Button {
-                        guard activeEnabled else { return }
-                        sessionFilterMode = .idle
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(Color(hex: "ffb340"))
-                                .frame(width: 7, height: 7)
-                            Text("\(idleCount)")
+                    .opacity(activeEnabled ? 1 : 0.6)
+                } else {
+                    HStack(spacing: 6) {
+                        Button {
+                            guard activeEnabled else { return }
+                            sessionFilterMode = .all
+                        } label: {
+                            Text("All \(activeCount + idleCount)")
                         }
+                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .all, kind: .all))
+                        .help("Show all live sessions.")
+
+                        Button {
+                            guard activeEnabled else { return }
+                            sessionFilterMode = .active
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color(hex: "30d158"))
+                                    .frame(width: 7, height: 7)
+                                Text("\(activeCount)")
+                            }
+                        }
+                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .active, kind: .active))
+                        .help("Show active working sessions only.")
+
+                        Button {
+                            guard activeEnabled else { return }
+                            sessionFilterMode = .idle
+                        } label: {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(Color(hex: "ffb340"))
+                                    .frame(width: 7, height: 7)
+                                Text("\(idleCount)")
+                            }
+                        }
+                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .idle, kind: .idle))
+                        .help("Show waiting sessions only.")
                     }
-                    .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .idle, kind: .idle))
-                    .help("Show waiting sessions only.")
+                    .disabled(!activeEnabled)
+                    .opacity(activeEnabled ? 1 : 0.6)
                 }
-                .disabled(!activeEnabled)
-                .opacity(activeEnabled ? 1 : 0.6)
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 6) {
-                    Button {
-                        AppWindowRouter.showAgentSessionsWindow()
-                    } label: {
-                        Image(systemName: "rectangle.stack")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
-                    .help("Open Agent Sessions")
-
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            isCompact.toggle()
+                if isLimitsOnly {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            cockpitOpenButton
+                            cockpitModePicker
+                            cockpitSettingsButton
+                            cockpitPinButton
                         }
-                    } label: {
-                        Image(systemName: isCompact ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(HUDIconButtonStyle(isOn: isCompact, tint: nil))
-                    .help(isCompact ? "Show filter and navigation" : "Compact mode")
+                        .fixedSize(horizontal: true, vertical: false)
 
-                    Button {
-                        isPinned.toggle()
-                    } label: {
-                        Image(systemName: isPinned ? "pin.fill" : "pin")
-                            .font(.system(size: 11, weight: .semibold))
+                        HStack(spacing: 6) {
+                            cockpitOpenButton
+                            cockpitModePicker
+                            cockpitPinButton
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+
+                        HStack(spacing: 6) {
+                            cockpitModePicker
+                            cockpitPinButton
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+
+                        cockpitPinButton
+                            .fixedSize(horizontal: true, vertical: false)
+
+                        Color.clear
+                            .frame(width: 0, height: 1)
                     }
-                    .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
-                    .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
+                } else {
+                    HStack(spacing: 6) {
+                        cockpitOpenButton
+                        cockpitModePicker
+                        cockpitSettingsButton
+                        cockpitPinButton
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -961,6 +1134,87 @@ struct AgentCockpitHUDView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+    }
+
+    private var cockpitOpenButton: some View {
+        Button {
+            AppWindowRouter.showAgentSessionsWindow()
+        } label: {
+            Image(systemName: "rectangle.stack")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+        .help("Open Agent Sessions")
+    }
+
+    private var cockpitModePicker: some View {
+        Picker("", selection: Binding(
+            get: { hudDisplayModeRaw },
+            set: { raw in
+                guard let mode = AgentCockpitHUDDisplayMode(rawValue: raw) else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    setHUDDisplayMode(mode)
+                }
+            }
+        )) {
+            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
+                Label(mode.title, systemImage: mode.systemImage)
+                    .labelStyle(.iconOnly)
+                    .tag(mode.rawValue)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .frame(width: 86)
+        .help("Switch Agent Cockpit mode: Full, Compact, or Limits.")
+    }
+
+    private var cockpitSettingsButton: some View {
+        Button {
+            NotificationCenter.default.post(
+                name: .showPreferencesTab,
+                object: nil,
+                userInfo: ["tab": PreferencesTab.agentCockpit.rawValue]
+            )
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+        .help("Open Agent Cockpit settings")
+    }
+
+    private var cockpitPinButton: some View {
+        Button {
+            isPinned.toggle()
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
+        .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
+    }
+
+    private func limitsCounterPill(color: Color, count: Int, help: String) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text("\(count)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.055))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .help(help)
     }
 
     @ViewBuilder
@@ -1109,7 +1363,7 @@ struct AgentCockpitHUDView: View {
 
             Button("") {
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    isCompact.toggle()
+                    cycleHUDDisplayMode()
                 }
             }
             .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -3037,6 +3291,104 @@ private struct HUDLimitsBar: View {
     }
 }
 
+private struct HUDLimitsRowsPanel: View {
+    @EnvironmentObject private var codexUsageModel: CodexUsageModel
+    @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled = false
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
+    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
+
+    private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
+
+    private var entries: [HUDLimitsProviderEntry] {
+        var out: [HUDLimitsProviderEntry] = []
+        if codexAgentEnabled && codexUsageEnabled {
+            out.append(HUDLimitsProviderEntry(
+                source: .codex,
+                fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
+                weekLeft: codexUsageModel.weekRemainingPercent,
+                fiveHourResetText: codexUsageModel.fiveHourResetText,
+                weekResetText: codexUsageModel.weekResetText,
+                isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
+                lastDataTimestamp: codexUsageModel.lastEventTimestamp
+            ))
+        }
+        if claudeAgentEnabled && claudeUsageEnabled {
+            out.append(HUDLimitsProviderEntry(
+                source: .claude,
+                fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
+                weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
+                fiveHourResetText: claudeUsageModel.sessionResetText,
+                weekResetText: claudeUsageModel.weekAllModelsResetText,
+                isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
+                lastDataTimestamp: claudeUsageModel.lastUpdate
+            ))
+        }
+        return out
+    }
+
+    var body: some View {
+        Group {
+            if entries.isEmpty {
+                emptyRow
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                        if index > 0 {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(height: 0.5)
+                                .padding(.horizontal, 14)
+                        }
+                        row(entry: entry)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.primary.opacity(0.025))
+        .onTapGesture(count: 2) {
+            if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
+                codexUsageModel.hardProbeNow { _ in }
+            }
+            if claudeAgentEnabled && claudeUsageEnabled && !claudeUsageModel.isUpdating {
+                claudeUsageModel.hardProbeNowDiagnostics { _ in }
+            }
+        }
+    }
+
+    private func row(entry: HUDLimitsProviderEntry) -> some View {
+        HStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HUDLimitsProviderText(entry: entry, mode: mode, showResets: true, onlyBottleneck: false)
+                    .fixedSize(horizontal: true, vertical: false)
+                HUDLimitsProviderText(entry: entry, mode: mode, showResets: false, onlyBottleneck: false)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 30)
+    }
+
+    private var emptyRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "gauge")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("Usage tracking is off")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 30)
+    }
+}
+
 private struct HUDLimitsDetailPanel: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
@@ -3196,16 +3548,22 @@ private struct HUDLimitsProviderText: View {
 
     private func fiveHourResetLabel() -> String? {
         if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
-        guard entry.fiveHourLeft < 30 else { return nil }
+        let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
         let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
-        return formatRelativeTimeUntil(date)
+        if let relative = formatRelativeTimeUntil(date) { return relative }
+        let fallback = UsageResetText.displayText(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
+        return fallback.isEmpty ? nil : fallback
     }
 
     private func weekResetLabel() -> String? {
         if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
-        guard entry.weekLeft < 30 else { return nil }
+        let raw = entry.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
         let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
-        return formatWeeklyReset(date)
+        if let weekly = formatWeeklyReset(date) { return weekly }
+        let fallback = UsageResetText.displayText(kind: "Wk", source: entry.source, raw: entry.weekResetText)
+        return fallback.isEmpty ? nil : fallback
     }
 
     // Matches CockpitFooterView.QuotaWidget.formatRelativeTimeUntil exactly

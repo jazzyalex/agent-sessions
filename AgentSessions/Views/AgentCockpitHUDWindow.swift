@@ -5,6 +5,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
     let shownSessionCount: Int
     let isCompact: Bool
+    let isLimitsOnly: Bool
+    let limitsRowCount: Int
     let activeEnabled: Bool
     let compactToolbarVisible: Bool
     let groupByProject: Bool
@@ -16,6 +18,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             isPinned: isPinned,
             shownSessionCount: shownSessionCount,
             isCompact: isCompact,
+            isLimitsOnly: isLimitsOnly,
+            limitsRowCount: limitsRowCount,
             activeEnabled: activeEnabled,
             compactToolbarVisible: compactToolbarVisible,
             groupByProject: groupByProject,
@@ -82,12 +86,15 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private enum Mode: Hashable {
             case full
             case compact
+            case limits
         }
 
         struct StyleInputs: Equatable {
             let isPinned: Bool
             let shownSessionCount: Int
             let isCompact: Bool
+            let isLimitsOnly: Bool
+            let limitsRowCount: Int
             let activeEnabled: Bool
             let compactToolbarVisible: Bool
             let groupByProject: Bool
@@ -99,7 +106,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private var baselineLevel: NSWindow.Level = .normal
         private var baselineCollectionBehavior: NSWindow.CollectionBehavior = []
         private var baselineHidesOnDeactivate: Bool = false
+        private var baselineHasShadow: Bool = true
+        private var baselineHasShadowCaptured = false
         private var baselineStyleMask: NSWindow.StyleMask = []
+        private var baselineMaxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        private var baselineMaxSizeCaptured = false
         private let fallbackStandardStyleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         private var currentMode: Mode?
         // Keep pinned cockpit above regular windows without covering system tooltip windows.
@@ -108,6 +119,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
         private let fullAutosaveName = "AgentCockpitHUDWindow.full"
         private let compactAutosaveName = "AgentCockpitHUDWindow.compact"
+        private let limitsAutosaveName = "AgentCockpitHUDWindow.limits"
         private let rowResizeStep: CGFloat = 31
         private let compactDefaultRowsWhenToolbarVisible: CGFloat = 6
         private let compactDefaultRowsWhenToolbarHidden: CGFloat = 4
@@ -116,6 +128,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let compactMaximumRowsWhenToolbarVisible: CGFloat = 10
         private let compactMinimumWidth: CGFloat = 330
         private let compactDefaultFrameWidth: CGFloat = 330
+        private let limitsMinimumWidth: CGFloat = 220
+        private let limitsDefaultFrameWidth: CGFloat = 380
+        private let limitsRowHeight: CGFloat = 30
         private let compactHeaderHeight: CGFloat = 44.5
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
@@ -155,6 +170,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isPinned: inputs.isPinned,
                 shownSessionCount: inputs.shownSessionCount,
                 isCompact: inputs.isCompact,
+                isLimitsOnly: inputs.isLimitsOnly,
+                limitsRowCount: inputs.limitsRowCount,
                 activeEnabled: inputs.activeEnabled,
                 compactToolbarVisible: inputs.compactToolbarVisible,
                 groupByProject: inputs.groupByProject,
@@ -167,6 +184,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         func applyStyle(isPinned: Bool,
                         shownSessionCount: Int,
                         isCompact: Bool,
+                        isLimitsOnly: Bool,
+                        limitsRowCount: Int,
                         activeEnabled: Bool,
                         compactToolbarVisible: Bool,
                         groupByProject: Bool,
@@ -178,7 +197,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 cachedFrameByMode[currentMode] = window.frame
             }
             let clampedCompactPreferredRows = clampedPreferredCompactRows(compactPreferredRows)
-            let includesToolbarForStableSizing = compactAutoFitEnabled ? compactToolbarVisible : true
+            let includesToolbarForStableSizing = isLimitsOnly
+                ? compactToolbarVisible
+                : (compactAutoFitEnabled ? compactToolbarVisible : true)
 
             if window.identifier?.rawValue != "AgentCockpit" {
                 window.identifier = NSUserInterfaceItemIdentifier("AgentCockpit")
@@ -188,38 +209,68 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.isRestorable = true
             // Keep vertical resize snapping aligned to row increments so partial rows
             // are not clipped at the window edge.
-            window.resizeIncrements = NSSize(width: 1, height: rowResizeStep)
-            window.contentResizeIncrements = NSSize(width: 1, height: rowResizeStep)
+            window.resizeIncrements = isLimitsOnly
+                ? NSSize(width: 1, height: 1)
+                : NSSize(width: 1, height: rowResizeStep)
+            window.contentResizeIncrements = isLimitsOnly
+                ? NSSize(width: 1, height: 1)
+                : NSSize(width: 1, height: rowResizeStep)
 
             if isCompact {
                 let wasAlreadyCompact = currentMode == .compact
                 let previousCompactToolbarVisibility = lastAppliedCompactToolbarVisibility
                 applyCompactChrome(to: window)
-                window.minSize = NSSize(
-                    width: compactMinimumWidth,
-                    height: compactMinimumWindowHeight(
+                if isLimitsOnly {
+                    let targetHeight = limitsWindowHeight(
                         for: window,
+                        rowCount: limitsRowCount,
                         includesDisabledCallout: !activeEnabled,
                         includesToolbar: includesToolbarForStableSizing
                     )
-                )
+                    window.minSize = NSSize(
+                        width: limitsMinimumWidth,
+                        height: targetHeight
+                    )
+                    window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: targetHeight)
+                } else {
+                    window.maxSize = baselineMaxSize
+                    window.minSize = NSSize(
+                        width: compactMinimumWidth,
+                        height: compactMinimumWindowHeight(
+                            for: window,
+                            includesDisabledCallout: !activeEnabled,
+                            includesToolbar: includesToolbarForStableSizing
+                        )
+                    )
+                }
                 applyModeTransition(
-                    to: .compact,
+                    to: isLimitsOnly ? .limits : .compact,
                     window: window,
                     activeEnabled: activeEnabled,
                     compactToolbarVisible: includesToolbarForStableSizing,
-                    compactPreferredRows: clampedCompactPreferredRows
+                    compactPreferredRows: clampedCompactPreferredRows,
+                    limitsRowCount: limitsRowCount
                 )
-                if let previousCompactToolbarVisibility,
-                   previousCompactToolbarVisibility != compactToolbarVisible,
-                   compactAutoFitEnabled {
+                if isLimitsOnly {
+                    applyLimitsDefaultSize(
+                        to: window,
+                        rowCount: limitsRowCount,
+                        activeEnabled: activeEnabled,
+                        includesToolbar: compactToolbarVisible,
+                        appliesDefaultWidth: false,
+                        animated: previousCompactToolbarVisibility != compactToolbarVisible
+                    )
+                } else if let previousCompactToolbarVisibility,
+                          previousCompactToolbarVisibility != compactToolbarVisible,
+                          compactAutoFitEnabled {
                     applyCompactToolbarVisibilityTransition(
                         to: compactToolbarVisible,
                         groupByProject: groupByProject,
                         window: window
                     )
                 }
-                if compactAutoFitEnabled,
+                if !isLimitsOnly,
+                   compactAutoFitEnabled,
                    compactToolbarVisible,
                    !groupByProject {
                     applyCompactVisibleRowsAutoHeight(
@@ -227,7 +278,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         activeEnabled: activeEnabled,
                         window: window
                     )
-                } else if shouldApplyCompactBaselineHeight(
+                } else if !isLimitsOnly,
+                          shouldApplyCompactBaselineHeight(
                     compactPreferredRows: clampedCompactPreferredRows,
                     compactAutoFitEnabled: compactAutoFitEnabled
                 ), wasAlreadyCompact {
@@ -248,12 +300,14 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 captureBaselineStyleMaskIfNeeded(from: window.styleMask)
                 restoreStandardChrome(to: window)
                 window.minSize = NSSize(width: 560, height: 320)
+                window.maxSize = baselineMaxSize
                 applyModeTransition(
                     to: .full,
                     window: window,
                     activeEnabled: activeEnabled,
                     compactToolbarVisible: true,
-                    compactPreferredRows: clampedCompactPreferredRows
+                    compactPreferredRows: clampedCompactPreferredRows,
+                    limitsRowCount: limitsRowCount
                 )
                 lastAppliedCompactToolbarVisibility = nil
                 lastAppliedCompactPreferredRows = nil
@@ -294,6 +348,14 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             baselineLevel = window.level
             baselineCollectionBehavior = Self.sanitizedUnpinnedCollectionBehavior(from: window.collectionBehavior)
             baselineHidesOnDeactivate = window.hidesOnDeactivate
+            if !baselineHasShadowCaptured {
+                baselineHasShadow = window.hasShadow
+                baselineHasShadowCaptured = true
+            }
+            if !baselineMaxSizeCaptured {
+                baselineMaxSize = window.maxSize
+                baselineMaxSizeCaptured = true
+            }
         }
 
         private func applyCompactChrome(to window: NSWindow) {
@@ -310,6 +372,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             // caused by the NSWindow frame's own corner radius overlapping the view clip.
             window.isOpaque = false
             window.backgroundColor = .clear
+            window.hasShadow = false
+            applyClearHostingBackground(to: window)
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
@@ -331,6 +395,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             window.titlebarSeparatorStyle = .automatic
             window.isOpaque = true
             window.backgroundColor = .windowBackgroundColor
+            window.hasShadow = baselineHasShadow
             let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             for buttonType in buttons {
                 guard let button = window.standardWindowButton(buttonType) else { continue }
@@ -339,6 +404,13 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             }
             if let container = window.standardWindowButton(.closeButton)?.superview {
                 container.isHidden = false
+            }
+        }
+
+        private func applyClearHostingBackground(to window: NSWindow) {
+            for view in [window.contentView, window.contentView?.superview].compactMap({ $0 }) {
+                view.wantsLayer = true
+                view.layer?.backgroundColor = NSColor.clear.cgColor
             }
         }
 
@@ -356,7 +428,8 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                          window: NSWindow,
                                          activeEnabled: Bool,
                                          compactToolbarVisible: Bool,
-                                         compactPreferredRows: Int) {
+                                         compactPreferredRows: Int,
+                                         limitsRowCount: Int) {
             guard currentMode != mode else { return }
 
             let previousMode = currentMode
@@ -378,6 +451,15 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             let restored = restoredFromCache || window.setFrameUsingName(targetAutosaveName)
             if !restored {
                 switch mode {
+                case .limits:
+                    self.applyLimitsDefaultSize(
+                        to: window,
+                        rowCount: limitsRowCount,
+                        activeEnabled: activeEnabled,
+                        includesToolbar: compactToolbarVisible,
+                        appliesDefaultWidth: true,
+                        animated: false
+                    )
                 case .compact:
                     applyCompactDefaultSize(
                         to: window,
@@ -400,12 +482,15 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 return fullAutosaveName
             case .compact:
                 return compactAutosaveName
+            case .limits:
+                return limitsAutosaveName
             }
         }
 
         private func inferredMode(from autosaveName: String) -> Mode? {
             if autosaveName == fullAutosaveName { return .full }
             if autosaveName == compactAutosaveName { return .compact }
+            if autosaveName == limitsAutosaveName { return .limits }
             return nil
         }
 
@@ -427,6 +512,21 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
         private func compactContentHeight(forRows rows: CGFloat, includesToolbar: Bool) -> CGFloat {
             (includesToolbar ? compactHeaderHeight : 0) + (rows * rowResizeStep)
+        }
+
+        private func limitsWindowHeight(for window: NSWindow,
+                                        rowCount: Int,
+                                        includesDisabledCallout: Bool,
+                                        includesToolbar: Bool) -> CGFloat {
+            let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
+            let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
+            let rows = CGFloat(max(1, min(rowCount, 2)))
+            let rowSeparators = max(rows - 1, 0) * 0.5
+            return (includesToolbar ? compactHeaderHeight + 0.5 : 0)
+                + (rows * limitsRowHeight)
+                + rowSeparators
+                + calloutHeight
+                + chromeHeight
         }
 
         private func applyCompactDefaultSize(to window: NSWindow,
@@ -551,6 +651,37 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             // Preserve top edge when applying first-run defaults.
             frame.origin.y += oldHeight - targetHeight
             window.setFrame(frame, display: true, animate: false)
+        }
+
+        private func applyLimitsDefaultSize(to window: NSWindow,
+                                            rowCount: Int,
+                                            activeEnabled: Bool,
+                                            includesToolbar: Bool,
+                                            appliesDefaultWidth: Bool,
+                                            animated: Bool) {
+            let targetWidth = appliesDefaultWidth
+                ? max(window.minSize.width, limitsDefaultFrameWidth)
+                : max(window.minSize.width, window.frame.width)
+            let targetHeight = max(
+                window.minSize.height,
+                self.limitsWindowHeight(
+                    for: window,
+                    rowCount: rowCount,
+                    includesDisabledCallout: !activeEnabled,
+                    includesToolbar: includesToolbar
+                )
+            )
+
+            var frame = window.frame
+            let oldHeight = frame.height
+            guard abs(frame.width - targetWidth) > 1 || abs(frame.height - targetHeight) > 1 else {
+                return
+            }
+
+            frame.size.width = targetWidth
+            frame.size.height = targetHeight
+            frame.origin.y += oldHeight - targetHeight
+            window.setFrame(frame, display: true, animate: animated)
         }
     }
 }

@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
+- Agent Cockpit: Improved Limits mode with separate Codex and Claude rows, width-adaptive reset times, and a hover toolbar without the All filter pill.
+- Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
 
 ## [3.8.2] - 2026-05-28
 - Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.

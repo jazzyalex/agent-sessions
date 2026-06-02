@@ -59,6 +59,7 @@ final class ClaudeUsageModel: ObservableObject {
     private var sourceManager: ClaudeUsageSourceManager?
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
+    private let limitNotifier = UsageLimitNotifier.shared
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -343,6 +344,12 @@ final class ClaudeUsageModel: ObservableObject {
         currentSourceLabel = s.source.description
         currentHealthLabel = s.health.description
         dataIsStale = (s.health == .stale || s.health == .degraded)
+        limitNotifier.handle(snapshot: usageLimitSnapshot(
+            fiveHourRemainingPercent: s.fiveHourRemainingPercent,
+            fiveHourResetText: s.fiveHourResetText,
+            weeklyRemainingPercent: s.weeklyRemainingPercent,
+            weeklyResetText: s.weeklyResetText
+        ))
         if isUpdating { isUpdating = false }
         if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
     }
@@ -357,7 +364,30 @@ final class ClaudeUsageModel: ObservableObject {
         weekOpusResetText = s.weekOpusResetText
         lastUpdate = Date()
         dataIsStale = false
+        limitNotifier.handle(snapshot: usageLimitSnapshot(
+            fiveHourRemainingPercent: s.sessionRemainingPercent,
+            fiveHourResetText: s.sessionResetText,
+            weeklyRemainingPercent: s.weekAllModelsRemainingPercent,
+            weeklyResetText: s.weekAllModelsResetText
+        ))
         if isUpdating { isUpdating = false }
+    }
+
+    private func usageLimitSnapshot(fiveHourRemainingPercent: Int,
+                                    fiveHourResetText: String,
+                                    weeklyRemainingPercent: Int,
+                                    weeklyResetText: String) -> UsageLimitSnapshot {
+        let hasFiveHour = !fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasWeekly = !weeklyResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: fiveHourRemainingPercent,
+            fiveHourResetText: fiveHourResetText,
+            hasFiveHourRateLimit: hasFiveHour,
+            weeklyRemainingPercent: weeklyRemainingPercent,
+            weeklyResetText: weeklyResetText,
+            hasWeeklyRateLimit: hasWeekly
+        )
     }
 
 }

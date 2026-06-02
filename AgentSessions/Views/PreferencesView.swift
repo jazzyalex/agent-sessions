@@ -27,6 +27,7 @@ struct PreferencesView: View {
     // Cockpit: active-session registry + iTerm focus
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) var codexActiveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride) var codexActiveRegistryRootOverride: String = ""
+    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) var cockpitHUDDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) var cockpitCompactBaselineRows: Int = 4
     @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = false
@@ -86,6 +87,15 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.stripShowResetTime) var stripShowResetTime: Bool = false
     @AppStorage(PreferencesKey.stripMonochromeMeters) var stripMonochromeGlobal: Bool = false
     @AppStorage(PreferencesKey.usageDisplayMode) var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
+    @AppStorage(PreferencesKey.usageLimitNotificationsEnabled) var usageLimitNotificationsEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationVisualEnabled) var usageLimitNotificationVisualEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationSoundEnabled) var usageLimitNotificationSoundEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationThresholdPercent) var usageLimitNotificationThresholdPercent: Int = 10
+    @AppStorage(PreferencesKey.usageLimitNotificationCodexEnabled) var usageLimitNotificationCodexEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationClaudeEnabled) var usageLimitNotificationClaudeEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationApproachingEnabled) var usageLimitNotificationApproachingEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
     @AppStorage(PreferencesKey.hideZeroMessageSessions) var hideZeroMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.hideLowMessageSessions) var hideLowMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessions: Bool = false

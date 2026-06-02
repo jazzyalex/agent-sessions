@@ -161,6 +161,23 @@ extension PreferencesView {
 
             sectionHeader("Compact Mode")
             VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Default Cockpit Mode") {
+                    Picker("", selection: Binding(
+                        get: { AgentCockpitHUDDisplayMode(rawValue: cockpitHUDDisplayModeRaw) ?? .full },
+                        set: { mode in
+                            cockpitHUDDisplayModeRaw = mode.rawValue
+                            UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
+                        }
+                    )) {
+                        ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .help("Choose whether Agent Cockpit opens as a full session list, compact session HUD, or limits-only cockpit.")
+                }
+
                 Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
                     .help("When disabled, compact rows hide the agent-name text to free horizontal space. Status dot and row numbering remain visible.")
 
@@ -254,7 +271,7 @@ extension PreferencesView {
                     UserDefaults.standard.set(newValue, forKey: PreferencesKey.Advanced.hideDockIcon)
                 }
             ))
-            .help("Removes Agent Sessions from the Dock by switching the app to accessory activation mode. When enabled, Agent Sessions automatically keeps the menu bar item enabled so the app remains accessible.")
+            .help("Removes Agent Sessions from the Dock when the menu bar item is visible. If macOS cannot fit the menu bar item, Agent Sessions restores the Dock icon so the app remains accessible.")
 
             Toggle("Show Git Context button", isOn: Binding(
                 get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },

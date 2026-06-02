@@ -14,6 +14,10 @@ final class StatusItemController: NSObject {
     private let claudeStatus: ClaudeUsageModel
     private var cancellables: Set<AnyCancellable> = []
     private var lengthUpdateScheduled: Bool = false
+    private var isUsingCompactMenuBarIcon: Bool = false
+    var visibilityDidChange: ((Bool) -> Void)?
+    var compactPresentationDidChange: ((Bool) -> Void)?
+    private let maximumMenuBarLabelWidth: CGFloat = 96
 
     init(indexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
@@ -71,6 +75,7 @@ final class StatusItemController: NSObject {
             ])
             self.hosting = hv
             scheduleLengthUpdate()
+            scheduleVisibilityCheck()
 
             button.target = self
             button.action = #selector(togglePopover(_:))
@@ -109,7 +114,28 @@ final class StatusItemController: NSObject {
     private func updateLength() {
         guard let item = statusItem, let hv = hosting else { return }
         let size = hv.fittingSize
-        item.length = max(24, size.width)
+        let shouldUseCompactIcon = size.width > maximumMenuBarLabelWidth
+        if shouldUseCompactIcon != isUsingCompactMenuBarIcon {
+            isUsingCompactMenuBarIcon = shouldUseCompactIcon
+            applyMenuBarPresentationMode(compact: shouldUseCompactIcon)
+            compactPresentationDidChange?(shouldUseCompactIcon)
+        }
+        item.length = shouldUseCompactIcon ? 28 : max(24, size.width)
+        scheduleVisibilityCheck()
+    }
+
+    private func applyMenuBarPresentationMode(compact: Bool) {
+        guard let button = statusItem?.button else { return }
+        hosting?.isHidden = compact
+        if compact {
+            button.image = NSImage(systemSymbolName: "rectangle.stack.fill", accessibilityDescription: "Agent Sessions")
+            button.imagePosition = .imageOnly
+            button.toolTip = "Agent Sessions"
+        } else {
+            button.image = nil
+            button.imagePosition = .noImage
+            button.toolTip = nil
+        }
     }
 
     private func scheduleLengthUpdate() {
@@ -127,8 +153,18 @@ final class StatusItemController: NSObject {
             NSStatusBar.system.removeStatusItem(item)
             statusItem = nil
         }
+        isUsingCompactMenuBarIcon = false
         cancellables.removeAll()
+        visibilityDidChange?(false)
+        compactPresentationDidChange?(false)
         // nothing else
+    }
+
+    private func scheduleVisibilityCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            guard let self else { return }
+            self.visibilityDidChange?(self.statusItem?.button?.window != nil)
+        }
     }
 
     @objc private func togglePopover(_ sender: Any?) {

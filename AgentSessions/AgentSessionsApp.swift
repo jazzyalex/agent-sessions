@@ -15,6 +15,7 @@ extension Notification.Name {
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
     static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
     static let requestCoreIndexRebuild = Notification.Name("AgentSessionsRequestCoreIndexRebuild")
+    static let showPreferencesTab = Notification.Name("AgentSessionsShowPreferencesTab")
 }
 
 struct PendingCockpitNavigationRequest {
@@ -188,6 +189,7 @@ struct AgentSessionsApp: App {
     @State private var menuBarDefaultsObserver: NSObjectProtocol?
     @State private var lastObservedMenuBarEnabled: Bool?
     @State private var lastObservedHideDockIcon: Bool?
+    @State private var didRestoreDockForUnavailableMenuBar: Bool = false
     @State private var didRunStartupTasks: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
@@ -320,6 +322,7 @@ struct AgentSessionsApp: App {
         }
         .onChange(of: hideDockIcon) { _, newValue in
             Self.applyActivationPolicy(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
+            updateUsageModels()
         }
         .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
@@ -468,6 +471,15 @@ struct AgentSessionsApp: App {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     handleAppDidResignActive()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .showPreferencesTab)) { note in
+                    let raw = note.userInfo?["tab"] as? String
+                    let tab = raw.flatMap(PreferencesTab.init(rawValue:)) ?? .general
+                    PreferencesWindowController.shared.show(
+                        indexer: indexer,
+                        updaterController: updaterController,
+                        initialTab: tab
+                    )
                 }
             }
         }
@@ -747,6 +759,26 @@ extension AgentSessionsApp {
         Self.applyActivationPolicy(hideDockIcon: effectiveHideDockIcon, menuBarEnabled: enabled)
     }
 
+    @MainActor
+    private func handleMenuBarVisibilityChange(_ isVisible: Bool) {
+        guard !AppRuntime.isRunningTests else { return }
+        if isVisible {
+            didRestoreDockForUnavailableMenuBar = false
+            return
+        }
+        guard hideDockIcon, menuBarEnabled, !didRestoreDockForUnavailableMenuBar else { return }
+        didRestoreDockForUnavailableMenuBar = true
+        UserDefaults.standard.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
+        Self.applyActivationPolicy(hideDockIcon: false, menuBarEnabled: menuBarEnabled)
+        AppWindowRouter.showAgentSessionsWindow()
+    }
+
+    @MainActor
+    private func handleMenuBarCompactPresentationChange(_ isCompact: Bool) {
+        guard isCompact else { return }
+        handleMenuBarVisibilityChange(false)
+    }
+
     private func setupMenuBarDefaultsObserverIfNeeded() {
         guard !AppRuntime.isRunningTests else { return }
         guard menuBarDefaultsObserver == nil else { return }
@@ -810,12 +842,19 @@ extension AgentSessionsApp {
     private func ensureStatusItemController() {
         guard !AppRuntime.isRunningTests else { return }
         guard statusItemController == nil else { return }
-        statusItemController = StatusItemController(indexer: indexer,
-                                                    claudeIndexer: claudeIndexer,
-                                                    opencodeIndexer: opencodeIndexer,
-                                                    activeSessions: activeCodexSessions,
-                                                    codexStatus: codexUsageModel,
-                                                    claudeStatus: claudeUsageModel)
+        let controller = StatusItemController(indexer: indexer,
+                                              claudeIndexer: claudeIndexer,
+                                              opencodeIndexer: opencodeIndexer,
+                                              activeSessions: activeCodexSessions,
+                                              codexStatus: codexUsageModel,
+                                              claudeStatus: claudeUsageModel)
+        controller.visibilityDidChange = { [self] isVisible in
+            handleMenuBarVisibilityChange(isVisible)
+        }
+        controller.compactPresentationDidChange = { [self] isCompact in
+            handleMenuBarCompactPresentationChange(isCompact)
+        }
+        statusItemController = controller
     }
 
     private func setupAnalytics() {

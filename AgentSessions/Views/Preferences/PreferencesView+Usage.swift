@@ -134,6 +134,66 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
+            sectionHeader("Limit Notifications")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow(
+                    "Notify for usage limits",
+                    isOn: $usageLimitNotificationsEnabled,
+                    help: "Show alerts when Codex or Claude 5h and weekly limits are low, exhausted, or when a 5h window resets."
+                )
+                .disabled(!(codexAgentEnabled && codexUsageEnabled) && !(claudeAgentEnabled && claudeUsageEnabled))
+
+                labeledRow("Providers") {
+                    HStack(spacing: 16) {
+                        Toggle("Codex", isOn: $usageLimitNotificationCodexEnabled)
+                            .toggleStyle(.checkbox)
+                            .disabled(!codexAgentEnabled || !codexUsageEnabled || !usageLimitNotificationsEnabled)
+                        Toggle("Claude", isOn: $usageLimitNotificationClaudeEnabled)
+                            .toggleStyle(.checkbox)
+                            .disabled(!claudeAgentEnabled || !claudeUsageEnabled || !usageLimitNotificationsEnabled)
+                    }
+                    .help("Choose which usage sources can send limit notifications.")
+                }
+                .disabled(!usageLimitNotificationsEnabled)
+
+                labeledRow("Warnings") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Approaching limit", isOn: $usageLimitNotificationApproachingEnabled)
+                            .toggleStyle(.checkbox)
+                        Toggle("Limit exhausted", isOn: $usageLimitNotificationExhaustedEnabled)
+                            .toggleStyle(.checkbox)
+                        Toggle("5h is back again", isOn: $usageLimitNotificationFiveHourResetEnabled)
+                            .toggleStyle(.checkbox)
+                    }
+                    .help("Choose which limit events should create notifications.")
+                }
+                .disabled(!usageLimitNotificationsEnabled)
+
+                toggleRow(
+                    "Visual notifications",
+                    isOn: $usageLimitNotificationVisualEnabled,
+                    help: "Use macOS notifications for usage limit alerts."
+                )
+                .disabled(!usageLimitNotificationsEnabled)
+
+                toggleRow(
+                    "Play sound",
+                    isOn: $usageLimitNotificationSoundEnabled,
+                    help: "Play a sound for immediate usage limit alerts and scheduled 5h reset notifications."
+                )
+                .disabled(!usageLimitNotificationsEnabled)
+
+                labeledRow("Low limit threshold") {
+                    Stepper(value: $usageLimitNotificationThresholdPercent, in: 1...50, step: 1) {
+                        Text("\(usageLimitNotificationThresholdPercent)% remaining")
+                            .monospacedDigit()
+                    }
+                    .frame(maxWidth: 220, alignment: .leading)
+                    .help("Alert once per reset window when a 5h or weekly limit reaches this remaining percentage.")
+                }
+                .disabled(!usageLimitNotificationsEnabled || !usageLimitNotificationApproachingEnabled)
+            }
+
             // Menu Bar controls moved to the Menu Bar pane
         }
     }
