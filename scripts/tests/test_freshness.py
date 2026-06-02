@@ -154,6 +154,39 @@ def test_latest_successful_prebump_evidence_requires_fresh_matching_report(tmp_p
     assert stale_to_cli is None
 
 
+def test_latest_failed_prebump_evidence_classifies_auth_failure(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    report_dir = reports_root / "20260602-120000Z-prebump"
+    agent_dir = report_dir / "claude"
+    agent_dir.mkdir(parents=True)
+    stdout = agent_dir / "stdout.txt"
+    stderr = agent_dir / "stderr.txt"
+    stdout.write_text("Not logged in · Please run /login\n")
+    stderr.write_text("")
+    (report_dir / "report.json").write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "claude": {
+                "ok": False,
+                "error": "claude_print_failed rc=1",
+                "stdout_file": str(stdout),
+                "stderr_file": str(stderr),
+            }
+        },
+    }))
+
+    evidence = agent_watch._latest_failed_prebump_evidence(
+        agent_name="claude",
+        reports_root=reports_root,
+        cli_binary_mtime=None,
+    )
+
+    assert evidence is not None
+    assert evidence["source"] == "latest_failed_prebump_report"
+    assert evidence["failure_class"] == "auth_failed"
+    assert evidence["error"] == "claude_print_failed rc=1"
+
+
 def test_resolve_cli_binary_mtime_returns_path_and_mtime(tmp_path):
     fake_bin = tmp_path / "codex"
     fake_bin.write_text("#!/bin/sh\nexit 0\n")
@@ -437,6 +470,7 @@ def _compat(**overrides):
         "sample_freshness": {"is_stale": False, "stale_reason": None},
         "fresh_evidence_source": None,
         "probe_failed": False,
+        "real_session_driver_configured": True,
     }
     base.update(overrides)
     return agent_watch._build_compatibility_assessment(**base)
@@ -457,10 +491,59 @@ def test_compatibility_supports_latest_when_installed_is_latest_candidate():
         upstream="0.136.0",
         installed_newer_than_verified=True,
         upstream_newer_than_verified=True,
+        fresh_evidence_source="latest_prebump_report",
     )
     assert result["verdict"] == "supports_latest"
     assert result["scope"] == "latest"
     assert result["supports_latest"] is True
+
+
+def test_compatibility_installed_equals_latest_without_prebump_is_installed_only():
+    result = _compat(
+        verified="0.135.0",
+        installed="0.136.0",
+        upstream="0.136.0",
+        installed_newer_than_verified=True,
+        upstream_newer_than_verified=True,
+        fresh_evidence_source=None,
+    )
+    assert result["verdict"] == "supports_installed_only"
+    assert result["scope"] == "installed"
+    assert result["supports_installed"] is True
+    assert result["supports_latest"] is False
+    assert result["latest_real_session_evidence"] is False
+
+
+def test_compatibility_records_missing_real_session_driver_for_latest_source():
+    result = _compat(real_session_driver_configured=False)
+    assert result["verdict"] == "supports_installed_only"
+    assert result["supports_latest"] is False
+    assert result["real_session_driver_configured"] is False
+    assert "no_real_session_driver_configured" in result["blockers"]
+
+
+def test_compatibility_records_missing_real_session_driver_when_latest_unknown():
+    result = _compat(
+        upstream=None,
+        upstream_sources_configured=False,
+        real_session_driver_configured=False,
+    )
+    assert result["verdict"] == "latest_unknown"
+    assert "unknown_not_configured" in result["blockers"]
+    assert "no_real_session_driver_configured" in result["blockers"]
+
+
+def test_compatibility_records_failed_real_session_auth_attempt():
+    result = _compat(
+        failed_prebump_evidence={
+            "source": "latest_failed_prebump_report",
+            "failure_class": "auth_failed",
+            "error": "claude_print_failed rc=1",
+        }
+    )
+    assert result["latest_real_session_failure"]["failure_class"] == "auth_failed"
+    assert "real_session_auth_failed" in result["blockers"]
+    assert result["next_action"] == "restore agent auth, then rerun prebump"
 
 
 def test_compatibility_latest_unknown_does_not_claim_latest_support():
@@ -600,6 +683,88 @@ def test_weekly_report_schema_drift_not_silent(tmp_path, monkeypatch):
     assert codex["compatibility"]["verdict"] == "format_drift_detected"
     assert codex["severity"] == "high"
     assert codex["recommendation"] == "prepare_hotfix"
+
+
+def test_weekly_report_uses_prebump_even_when_local_sample_is_fresh(tmp_path, monkeypatch):
+    sample_root = tmp_path / "sessions"
+    sample_root.mkdir()
+    sample = sample_root / "rollout-fresh.jsonl"
+    sample.write_text(_json.dumps({"type": "session_meta", "payload": {"id": "s1"}}) + "\n")
+
+    report_root = tmp_path / "out"
+    prebump_dir = report_root / "20260602-120000Z-prebump"
+    prebump_dir.mkdir(parents=True)
+    (prebump_dir / "report.json").write_text(_json.dumps({
+        "mode": "prebump",
+        "results": {
+            "codex": {
+                "ok": True,
+                "session_path": str(sample),
+                "evidence": {
+                    "schema_matches_baseline": True,
+                    "fresh_session_matches_baseline": True,
+                    "fresh_evidence_available": True,
+                    "schema_diff": {"unknown_only_is_empty": True},
+                    "sample_freshness": {
+                        "is_stale": False,
+                        "stale_reason": None,
+                        "sample_mtime_utc": "2026-06-02T12:00:00Z",
+                        "cli_binary_mtime_utc": "2026-06-02T11:00:00Z",
+                    },
+                },
+            }
+        },
+    }))
+
+    cfg = {
+        "report_root": str(report_root),
+        "agents": {
+            "codex": {
+                "cadence": {"weekly": True},
+                "installed_version_cmd": ["codex", "--version"],
+                "upstream": [{"kind": "github_latest_release", "repo": "openai/codex"}],
+                "risk_keywords": {"schema": [], "usage": []},
+                "weekly": {
+                    "local_schema": {
+                        "kind": "jsonl_newest",
+                        "roots": [str(sample_root)],
+                        "glob": "*.jsonl",
+                        "max_lines": 100,
+                    }
+                },
+                "prebump": {"driver": "codex_exec"},
+            }
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(_json.dumps(cfg))
+
+    monkeypatch.chdir(_Path(__file__).resolve().parents[2])
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_installed_version_cmds",
+        lambda _cfg: (["codex", "--version"], 0, "codex 0.136.0", "", "0.136.0"),
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_resolve_cli_binary_mtime",
+        lambda _argv: ("/tmp/fake-codex", 1_000.0),
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_fetch_upstream",
+        lambda _source, timeout: {"ok": True, "version": "0.136.0", "url": "https://example.test"},
+    )
+
+    rc = agent_watch.main(["--mode", "weekly", "--config", str(cfg_path)])
+    assert rc == 0
+    report_path = sorted(p for p in report_root.glob("*/report.json") if "-prebump" not in str(p))[-1]
+    report = _json.loads(report_path.read_text())
+    codex = report["results"]["codex"]
+    assert codex["evidence"]["fresh_evidence_source"] == "latest_prebump_report"
+    assert codex["compatibility"]["latest_real_session_evidence"] is True
+    assert codex["compatibility"]["verdict"] == "supports_latest"
+    assert codex["compatibility"]["scope"] == "latest"
 
 
 def test_daily_report_does_not_use_weekly_compatibility_blockers(tmp_path, monkeypatch, capsys):

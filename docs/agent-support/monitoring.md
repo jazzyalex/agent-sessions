@@ -47,9 +47,9 @@ Each verdict separates version scope from evidence quality:
 
 | Verdict | Meaning | Required next action |
 |---------|---------|----------------------|
-| `supports_latest` | Latest known build is covered by fresh matching schema/probe evidence. | None, unless bumping docs/matrix. |
-| `supports_installed_only` | Installed build is covered, but a known latest available build is newer. | Validate latest before claiming full support. |
-| `latest_unknown` | No configured or reachable latest-version source. | Add/fix latest source, or record a scoped exception. |
+| `supports_latest` | Latest known build is covered by a freshly generated real-session prebump report whose schema/probes match baseline. | None, unless bumping docs/matrix. |
+| `supports_installed_only` | Installed build is covered by a non-stale real local session, but latest is newer, unknown, or lacks fresh real-session proof. | Run the real-session driver before claiming full latest support. |
+| `latest_unknown` | No configured or reachable latest-version source, or no real-session driver exists for proving latest. | Add/fix latest source or driver, or record a scoped exception. |
 | `blocked_stale_sample` | The newest sample predates the installed CLI or freshness window. | Run prebump for that agent. |
 | `blocked_no_fresh_evidence` | A version changed, but no fresh sample proves format compatibility. | Generate a fresh sample and compare against baseline. |
 | `format_drift_detected` | Unknown schema/storage/usage fields or types appeared. | Triage parser/fixture impact before any bump. |
@@ -58,6 +58,15 @@ Each verdict separates version scope from evidence quality:
 Use `compatibility.scope` to distinguish `latest`, `installed`, and `none`.
 Use `compatibility.blockers` for the exact reason a support claim is blocked.
 Weekly stdout prints every monitored agent with its compatibility verdict.
+Do not treat `supports_installed_only`, `latest_unknown`, `blocked_stale_sample`,
+or `blocked_no_fresh_evidence` as verified latest support. For active agents,
+`supports_latest` requires `evidence.fresh_evidence_source ==
+"latest_prebump_report"` and `compatibility.latest_real_session_evidence ==
+true`; ordinary weekly newest-on-disk samples only prove installed/local scope.
+If a real-session driver ran but failed, inspect
+`compatibility.latest_real_session_failure`. Auth failures surface as
+`real_session_auth_failed` blockers and require re-auth before rerunning
+prebump.
 
 ## Severity model
 Each agent also gets a legacy `severity` and `recommendation` for escalation.
@@ -134,9 +143,16 @@ local session predates the currently installed CLI binary. Fields:
 When `installed > verified`, `schema_matches_baseline == true`, and
 `is_stale == true`, severity is `medium` and the recommendation is
 `run_prebump_validator`. Fresh samples retain the existing
-`bump_verified_version` auto-downgrade.
+`bump_verified_version` auto-downgrade, but it is not enough to claim
+`supports_latest` unless paired with a fresh prebump report for that active
+agent.
 
 ### Gating a matrix bump on prebump
+
+Run the real-session driver for every active agent being claimed. Agents with
+no `prebump` block in `agent-watch-config.json` cannot be reported as verified
+latest until a bounded driver exists or a scoped exception is explicitly
+recorded.
 
 ```
 ./scripts/agent_watch.py --mode prebump --agent codex --agent claude \

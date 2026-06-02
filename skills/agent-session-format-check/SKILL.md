@@ -43,28 +43,36 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
    - `weekly.local_schema` (newest local session used for fingerprinting)
    - `weekly.schema_diff` and `evidence.schema_matches_baseline`
    - `evidence.sample_freshness` and `evidence.fresh_evidence_source`
+   - `compatibility.latest_real_session_failure` when a prebump attempt failed
    - `severity` and `recommendation` only as legacy escalation fields
 
 Interpretation:
-- `supports_latest`: latest known build is covered by fresh matching evidence.
-- `supports_installed_only`: installed build is covered, but a known latest build is newer.
-- `latest_unknown`: no configured/reachable latest source; do not claim latest support.
+- `supports_latest`: latest known build is covered by
+  `evidence.fresh_evidence_source == "latest_prebump_report"` and
+  `compatibility.latest_real_session_evidence == true`.
+- `supports_installed_only`: installed build is covered by non-stale real local
+  evidence, but latest is newer, unknown, or lacks fresh real-session proof.
+- `latest_unknown`: no configured/reachable latest source or no real-session
+  driver exists; do not claim latest support.
 - `blocked_stale_sample`: evidence predates the installed CLI; run prebump before claiming support.
 - `blocked_no_fresh_evidence`: a version changed but no fresh matching sample proves support.
 - `format_drift_detected`: unknown schema/storage/usage fields appeared; update fixtures/parsers.
 - `monitoring_broken`: latest source, usage probe, or discovery contract failed.
+- `real_session_auth_failed` in blockers: the real-session driver ran but the
+  sandboxed agent was not authenticated; re-auth or provide the configured env
+  token, then rerun prebump.
 
 ---
 
-## 1a  Prebump Validation (opt-in, before a matrix bump)
+## 1a  Real-Session Prebump Validation (required before latest claims)
 
 Weekly scanning samples the newest on-disk session, which can predate a CLI
 upgrade and give a false "safe to bump" call (the codex 0.120.0 trap and the
 copilot `session.shutdown` trap). When weekly reports
 `recommendation == run_prebump_validator` — or before you stage any
-`max_verified_version` bump — run the prebump path to exercise the currently
-installed CLI once inside a sandbox and diff its output against the fixture
-baseline:
+`max_verified_version` bump or latest-support claim — run the prebump path for
+every active agent being claimed. The driver exercises the currently installed
+CLI once inside a sandbox and diffs its output against the fixture baseline:
 
 ```
 ./scripts/agent_watch.py --mode prebump --agent codex --agent claude
@@ -97,14 +105,20 @@ Flags:
 - `--allow-real-home` — copilot/real-HOME opt-in after a sandbox-breach
   diagnostic; never persistent.
 
+Configured real-session drivers today are `codex`, `claude`, `gemini`,
+`copilot`, and `pi`. `opencode`, `hermes`, `openclaw`, and `cursor` have
+weekly local/session probes but no prebump block, so weekly can only support
+installed/local scope for them until a driver or explicit scoped exception is
+added. Droid is legacy-only and excluded from active checks.
+
 Prebump uses the hybrid env-var-first auth policy: if the relevant API-key
 env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
 `FACTORY_API_KEY`, `GITHUB_TOKEN`) is set it is forwarded into the sandbox
 and real HOME is never read. Otherwise the driver copies the declared
 credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
-`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`.
-opencode + openclaw are v2. Droid is legacy-only and excluded from active checks.
+`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`, and
+`pi_prompt`.
 
 ---
 

@@ -1519,6 +1519,75 @@ def _latest_successful_prebump_evidence(
     return evidence
 
 
+def _classify_prebump_failure(entry: dict[str, Any]) -> str:
+    error = str(entry.get("error") or "").lower()
+    detail_parts = [error]
+    for key in ("stderr_file", "stdout_file"):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            text = Path(value).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        detail_parts.append(text.lower()[:4000])
+    detail = "\n".join(detail_parts)
+    if any(token in detail for token in ("not logged in", "no authentication", "authentication_failed", "/login", "auth login")):
+        return "auth_failed"
+    if "timeout" in detail:
+        return "timeout"
+    if "not_found" in detail or "not found" in detail:
+        return "cli_missing"
+    if "discovery" in detail or "contract" in detail:
+        return "discovery_contract_failed"
+    if "config_gate" in detail or "hygiene" in detail:
+        return "config_error"
+    if "sandbox_breach" in detail:
+        return "sandbox_breach"
+    return "driver_failed"
+
+
+def _latest_failed_prebump_evidence(
+    *,
+    agent_name: str,
+    reports_root: Path,
+    cli_binary_mtime: float | None,
+) -> dict[str, Any] | None:
+    candidates: list[tuple[float, Path, dict[str, Any]]] = []
+    for report_path in reports_root.glob("*-prebump/report.json"):
+        try:
+            report_mtime = report_path.stat().st_mtime
+        except OSError:
+            continue
+        if cli_binary_mtime is not None and report_mtime < cli_binary_mtime:
+            continue
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        results = report.get("results")
+        if not isinstance(results, dict):
+            continue
+        entry = results.get(agent_name)
+        if not isinstance(entry, dict) or entry.get("ok") is True:
+            continue
+        candidates.append((report_mtime, report_path, entry))
+
+    if not candidates:
+        return None
+
+    _, report_path, entry = max(candidates, key=lambda item: item[0])
+    return {
+        "source": "latest_failed_prebump_report",
+        "report": _safe_relpath(report_path),
+        "failure_class": _classify_prebump_failure(entry),
+        "error": entry.get("error"),
+        "session_path": entry.get("session_path"),
+        "stdout_file": entry.get("stdout_file"),
+        "stderr_file": entry.get("stderr_file"),
+    }
+
+
 def _format_summary_line(
     *,
     agent_name: str,
@@ -1586,6 +1655,8 @@ def _build_compatibility_assessment(
     sample_freshness: dict[str, Any] | None,
     fresh_evidence_source: str | None,
     probe_failed: bool,
+    real_session_driver_configured: bool,
+    failed_prebump_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Answer whether current AS code supports the latest available agent format.
 
@@ -1621,6 +1692,7 @@ def _build_compatibility_assessment(
         and not sample_is_stale
         and (fresh_evidence_source == "latest_prebump_report" or not cli_binary_unresolved)
     )
+    latest_real_session_evidence = fresh_evidence_source == "latest_prebump_report"
     unknown_schema_drift = (
         schema_matches_baseline is False
         and isinstance(schema_diff, dict)
@@ -1641,6 +1713,13 @@ def _build_compatibility_assessment(
         blockers.append("cli_binary_unresolved")
     if latest_status.startswith("unknown"):
         blockers.append(latest_status)
+    if not real_session_driver_configured:
+        blockers.append("no_real_session_driver_configured")
+    failed_prebump_class = None
+    if isinstance(failed_prebump_evidence, dict) and not latest_real_session_evidence:
+        value = failed_prebump_evidence.get("failure_class")
+        failed_prebump_class = value if isinstance(value, str) and value else "driver_failed"
+        blockers.append(f"real_session_{failed_prebump_class}")
 
     if installed and fresh_schema_evidence and not probe_failed and not unknown_schema_drift:
         supports_installed = True
@@ -1680,30 +1759,49 @@ def _build_compatibility_assessment(
         next_action = "configure or repair latest-version source for this agent"
         supports_latest = None
         confidence = "high"
-    elif upstream_newer_than_verified and installed == upstream and fresh_schema_evidence:
+    elif upstream_newer_than_verified and installed == upstream and latest_real_session_evidence:
         verdict = "supports_latest"
         scope = "latest"
         next_action = "none"
         supports_latest = True
-        confidence = "high" if fresh_evidence_source == "latest_prebump_report" else "medium"
+        confidence = "high"
+    elif upstream_newer_than_verified and installed == upstream and fresh_schema_evidence:
+        verdict = "supports_installed_only"
+        scope = "installed"
+        next_action = "run prebump/latest-build validation before claiming latest support"
+        supports_latest = False
+        confidence = "medium"
     elif upstream_newer_than_verified:
         verdict = "supports_installed_only" if supports_installed else "blocked_no_fresh_evidence"
         scope = "installed" if supports_installed else "none"
         next_action = "run prebump/latest-build validation before bumping verified support"
         supports_latest = False
         confidence = "high"
-    elif fresh_schema_evidence:
+    elif upstream and latest_real_session_evidence:
         verdict = "supports_latest"
         scope = "latest"
         next_action = "none"
         supports_latest = True
-        confidence = "high" if fresh_evidence_source == "latest_prebump_report" else "medium"
+        confidence = "high"
+    elif fresh_schema_evidence:
+        verdict = "supports_installed_only" if upstream else "latest_unknown"
+        scope = "installed"
+        next_action = (
+            "run prebump/latest-build validation before claiming latest support"
+            if upstream
+            else "configure or repair latest-version source for this agent"
+        )
+        supports_latest = False if upstream else None
+        confidence = "medium"
     else:
         verdict = "blocked_no_fresh_evidence"
         scope = "none"
         next_action = "collect local schema evidence or add fixtures"
         supports_latest = False if upstream else None
         confidence = "medium"
+
+    if failed_prebump_class == "auth_failed" and verdict not in ("format_drift_detected", "monitoring_broken"):
+        next_action = "restore agent auth, then rerun prebump"
 
     return {
         "question": "Can current Agent Sessions code support the latest available session/storage/usage format for this agent?",
@@ -1718,6 +1816,9 @@ def _build_compatibility_assessment(
         "supports_latest": supports_latest,
         "evidence_source": evidence_source,
         "fresh_schema_evidence": fresh_schema_evidence,
+        "latest_real_session_evidence": latest_real_session_evidence,
+        "real_session_driver_configured": real_session_driver_configured,
+        "latest_real_session_failure": failed_prebump_evidence,
         "blockers": blockers,
         "next_action": next_action,
     }
@@ -2594,6 +2695,7 @@ def main(argv: list[str]) -> int:
         fresh_evidence_available = False
         fresh_evidence_source: str | None = None
         prebump_evidence: dict[str, Any] | None = None
+        failed_prebump_evidence: dict[str, Any] | None = None
         if args.mode == "weekly":
             window_days_cfg = int(((agent_cfg.get("weekly") or {}).get("freshness_window_days") or 14))
             window_seconds = window_days_cfg * 86400
@@ -2621,7 +2723,7 @@ def main(argv: list[str]) -> int:
                 mode_context=mode_context,
                 force_fresh=bool(getattr(args, "force_fresh", False)),
             )
-            if sample_freshness.get("is_stale") is True:
+            if isinstance(agent_cfg.get("prebump"), dict):
                 prebump_evidence = _latest_successful_prebump_evidence(
                     agent_name=agent_name,
                     reports_root=report_dir.parent,
@@ -2637,6 +2739,12 @@ def main(argv: list[str]) -> int:
                         schema_diff = prebump_evidence.get("schema_diff") if isinstance(prebump_evidence.get("schema_diff"), dict) else schema_diff
                     fresh_evidence_available = True
                     fresh_evidence_source = "latest_prebump_report"
+                else:
+                    failed_prebump_evidence = _latest_failed_prebump_evidence(
+                        agent_name=agent_name,
+                        reports_root=report_dir.parent,
+                        cli_binary_mtime=cli_mtime,
+                    )
 
         # If we have concrete evidence that the newest local schema matches our fixture baseline,
         # downgrade "installed newer" to low and suggest bumping verified version.
@@ -2675,6 +2783,8 @@ def main(argv: list[str]) -> int:
                 sample_freshness=sample_freshness,
                 fresh_evidence_source=fresh_evidence_source,
                 probe_failed=probe_failed,
+                real_session_driver_configured=isinstance(agent_cfg.get("prebump"), dict),
+                failed_prebump_evidence=failed_prebump_evidence,
             )
             severity, recommendation = _apply_compatibility_to_legacy_status(
                 severity=severity,
@@ -2738,6 +2848,7 @@ def main(argv: list[str]) -> int:
                 "fresh_evidence_available": fresh_evidence_available,
                 "fresh_evidence_source": fresh_evidence_source,
                 "prebump_evidence": prebump_evidence,
+                "failed_prebump_evidence": failed_prebump_evidence,
             },
             "compatibility": compatibility,
             "severity": severity,
