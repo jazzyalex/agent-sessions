@@ -111,8 +111,6 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      color: #586069;
-      white-space: nowrap;
     }
 
     .features {
@@ -215,30 +213,6 @@
     }
 
     @media (max-width: 640px) {
-      header {
-        align-items: flex-start;
-        gap: 16px;
-        padding: 18px 22px;
-      }
-
-      header h1 {
-        font-size: 18px !important;
-        line-height: 1.05;
-      }
-
-      .brand img {
-        width: 36px;
-        height: 36px;
-      }
-
-      .header-right {
-        flex: 1;
-        justify-content: flex-end;
-        font-size: 14px;
-        text-align: right;
-        white-space: normal;
-      }
-
       .container {
         padding: 24px 30px;
       }
@@ -258,8 +232,7 @@
         color-scheme: dark;
       }
 
-      body,
-      header {
+      body {
         background: #0d1117;
         color: #e6edf3;
       }
@@ -268,7 +241,6 @@
         color: #58a6ff;
       }
 
-      .header-right,
       footer,
       p[style*="color:#586069"],
       p[style*="color: #586069"],
@@ -328,8 +300,8 @@
       </a>
     </div>
     <div class="header-right">
-      <span>macOS • Open Source<span id="github-stars-container" style="display:none;"> • GitHub Stars <span
-            id="github-stars">-</span></span></span>
+      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span
+            id="github-stars">–</span></span></span>
     </div>
   </header>
   <div class="container">
