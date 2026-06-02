@@ -1310,6 +1310,62 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(result.rowMeta["review-child"]?.depth, 1)
     }
 
+    func testSubagentHierarchyHidesChildrenForCollapsedParents() {
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: "/tmp/repo"
+        )
+        let child = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019d9d15-b642-7fd3-b91b-390331f2aefa",
+            timestamp: "2026-04-17T13-15-39",
+            cwd: "/tmp/repo",
+            parentSessionID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            subagentType: "review"
+        )
+
+        let collapsed = SubagentHierarchyBuilder.build(
+            sessions: [parent, child],
+            collapsedParents: ["parent"],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(collapsed.sessions.map(\.id), ["parent"])
+        XCTAssertEqual(collapsed.rowMeta["parent"]?.hasChildren, true)
+        XCTAssertEqual(collapsed.rowMeta["parent"]?.childCount, 1)
+        XCTAssertNil(collapsed.rowMeta["review-child"])
+    }
+
+    func testSubagentHierarchyShowsChildrenWhenCollapsedParentsIsEmpty() {
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: "/tmp/repo"
+        )
+        let child = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019d9d15-b642-7fd3-b91b-390331f2aefa",
+            timestamp: "2026-04-17T13-15-39",
+            cwd: "/tmp/repo",
+            parentSessionID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            subagentType: "review"
+        )
+
+        let expanded = SubagentHierarchyBuilder.build(
+            sessions: [parent, child],
+            collapsedParents: [],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(expanded.sessions.map(\.id), ["parent", "review-child"])
+        XCTAssertEqual(expanded.rowMeta["parent"]?.hasChildren, true)
+        XCTAssertEqual(expanded.rowMeta["parent"]?.childCount, 1)
+        XCTAssertEqual(expanded.rowMeta["review-child"]?.depth, 1)
+    }
+
     func testSubagentHierarchyDoesNotInferRoleOnlyParentAcrossWorkspaces() {
         let parent = makeCodexHierarchySession(
             id: "parent",

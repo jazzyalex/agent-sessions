@@ -99,6 +99,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.hideZeroMessageSessions) var hideZeroMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.hideLowMessageSessions) var hideLowMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessions: Bool = false
+    @AppStorage(PreferencesKey.Unified.showTranscriptWindow) var unifiedShowTranscriptWindow: Bool = true
     @AppStorage("InlineSessionImageThumbnailsEnabled") var inlineSessionImageThumbnailsEnabled: Bool = true
     @AppStorage(PreferencesKey.Transcript.preferredIDETarget) var transcriptPreferredIDETargetRaw: String = IDEOpener.Target.systemDefault.rawValue
     @AppStorage(PreferencesKey.Transcript.ideBinaryOverridePath) var transcriptIDEBinaryOverridePath: String = ""

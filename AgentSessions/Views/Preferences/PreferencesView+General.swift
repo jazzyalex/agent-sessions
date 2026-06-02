@@ -348,6 +348,9 @@ extension PreferencesView {
                     .help("When opening a session without a search query, choose which prompt to jump to in Session view")
                 }
 
+                Toggle("Show Transcript Window", isOn: $unifiedShowTranscriptWindow)
+                    .help("Show or hide the Transcript window in the Unified Window")
+
                 Toggle("Show inline image thumbnails in Session view", isOn: $inlineSessionImageThumbnailsEnabled)
                     .help("Show small image thumbnails inline in Session view. Thumbnails load after scrolling stops to reduce CPU and I/O during fast scroll.")
 

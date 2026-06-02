@@ -12,6 +12,8 @@ extension Notification.Name {
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
+    static let collapseAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsCollapseAllUnifiedSessionGroupsFromMenu")
+    static let expandAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsExpandAllUnifiedSessionGroupsFromMenu")
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
     static let selectImagesBrowserItem = Notification.Name("AgentSessionsSelectImagesBrowserItem")
     static let requestCoreIndexRebuild = Notification.Name("AgentSessionsRequestCoreIndexRebuild")
@@ -199,6 +201,7 @@ struct AgentSessionsApp: App {
     @AppStorage("LayoutMode") private var layoutModeRaw: String = LayoutMode.vertical.rawValue
     @AppStorage("ShowUsageStrip") private var showUsageStrip: Bool = false
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
     @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
@@ -396,6 +399,7 @@ struct AgentSessionsApp: App {
                     NotificationCenter.default.post(name: .openTranscriptFindFromMenu, object: nil)
                 }
                 .keyboardShortcut("f", modifiers: [.command])
+                .disabled(!showTranscriptWindow)
             }
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
@@ -408,6 +412,14 @@ struct AgentSessionsApp: App {
                 Divider()
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
+                Toggle("Transcript Window", isOn: $showTranscriptWindow)
+                Divider()
+                Button("Collapse All") {
+                    NotificationCenter.default.post(name: .collapseAllUnifiedSessionGroupsFromMenu, object: nil)
+                }
+                Button("Expand All") {
+                    NotificationCenter.default.post(name: .expandAllUnifiedSessionGroupsFromMenu, object: nil)
+                }
                 Button("Toggle Dark/Light") { indexer.toggleDarkLightUsingSystemAppearance() }
                 Button("Use System Appearance") { indexer.useSystemAppearance() }
                     .disabled((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .system)

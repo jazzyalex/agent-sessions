@@ -262,6 +262,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
+    @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
@@ -616,14 +617,24 @@ struct UnifiedSessionsView: View {
 						handleNavigateToSessionFromCockpit(n)
 					}
 
-				let afterShowImages = afterNavigateFromCockpit
-					.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
-						showImagesForSelectedSession(showNoSelectionAlert: true)
-					}
+					let afterShowImages = afterNavigateFromCockpit
+						.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
+							showImagesForSelectedSession(showNoSelectionAlert: true)
+						}
 
-				let afterShowImagesForInlineImage = afterShowImages
-						.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
-							guard let id = n.object as? String else { return }
+                    let afterCollapseAllGroups = afterShowImages
+                        .onReceive(NotificationCenter.default.publisher(for: .collapseAllUnifiedSessionGroupsFromMenu)) { _ in
+                            collapseAllHierarchyParents()
+                        }
+
+                    let afterExpandAllGroups = afterCollapseAllGroups
+                        .onReceive(NotificationCenter.default.publisher(for: .expandAllUnifiedSessionGroupsFromMenu)) { _ in
+                            expandAllHierarchyParents()
+                        }
+
+					let afterShowImagesForInlineImage = afterExpandAllGroups
+							.onReceive(NotificationCenter.default.publisher(for: .showImagesForInlineImage)) { n in
+								guard let id = n.object as? String else { return }
 							let requestedItemID = n.userInfo?["selectedItemID"] as? String
 
 							let source = cachedRows.first(where: { $0.id == id })?.source
@@ -721,7 +732,11 @@ struct UnifiedSessionsView: View {
 
 	    @ViewBuilder
 	    private var mainSplitView: some View {
-	        if layoutMode == .vertical {
+	        if !showTranscriptWindow {
+	            listPane
+	                .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+	                .transaction { $0.animation = nil }
+	        } else if layoutMode == .vertical {
 	            HSplitView {
 	                listPane
 	                    .frame(minWidth: 320, maxWidth: 1200)
@@ -1523,6 +1538,15 @@ struct UnifiedSessionsView: View {
 
             ToolbarGroupDivider()
 
+            ToolbarIconToggle(
+                isOn: $showTranscriptWindow,
+                onSymbol: "sidebar.right",
+                offSymbol: "sidebar.right",
+                help: showTranscriptWindow ? "Hide Transcript window" : "Show Transcript window",
+                activeColor: .primary,
+                accessibilityLabel: "Transcript Window"
+            )
+
             LayoutToggleButton(layoutMode: layoutMode, onToggleLayout: onToggleLayout)
 
             ToolbarIconButton(help: effectiveColorScheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode") { _ in
@@ -1544,11 +1568,30 @@ struct UnifiedSessionsView: View {
 
 	    private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
-	    private var visibleRowIDs: Set<String> {
-	        Set(cachedRows.map(\.id))
-	    }
+		    private var visibleRowIDs: Set<String> {
+		        Set(cachedRows.map(\.id))
+		    }
 
-	    private var tableSingleSelection: Binding<String?> {
+            private var currentExpandableParentIDs: Set<String> {
+                guard isHierarchyBrowsing else { return [] }
+                return Set(cachedRows.compactMap { session in
+                    hierarchyRowMeta[session.id]?.hasChildren == true ? session.id : nil
+                })
+            }
+
+            private func collapseAllHierarchyParents() {
+                let parentIDs = currentExpandableParentIDs
+                guard !parentIDs.isEmpty else { return }
+                collapsedParents = parentIDs
+            }
+
+            private func expandAllHierarchyParents() {
+                guard isHierarchyBrowsing else { return }
+                guard !collapsedParents.isEmpty else { return }
+                collapsedParents.removeAll()
+            }
+
+		    private var tableSingleSelection: Binding<String?> {
 	        Binding(
 	            get: {
                     guard UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(

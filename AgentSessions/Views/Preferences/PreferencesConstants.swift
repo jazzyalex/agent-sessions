@@ -85,6 +85,7 @@ enum PreferencesKey {
         static let showGeminiToolbarFilter = "UnifiedShowGeminiToolbarFilter"
         static let showOpenCodeToolbarFilter = "UnifiedShowOpenCodeToolbarFilter"
         static let showSubagentHierarchy = "UnifiedShowSubagentHierarchy"
+        static let showTranscriptWindow = "UnifiedShowSessionDetails"
     }
 
     enum MenuBar {
