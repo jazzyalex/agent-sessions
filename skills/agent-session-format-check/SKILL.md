@@ -5,9 +5,13 @@ description: Verify agent session format compatibility for Agent Sessions. Use w
 
 # Agent Session Format Check
 
-Quickly verify whether a newer agent CLI version changes the local session format,
-usage/limits schema, or storage layout — and whether Agent Sessions can safely bump its
-verified support.
+Answer one precise question for every supported agent:
+
+> Can current Agent Sessions code support the latest available session/storage/usage
+> format from the latest available agent build?
+
+The answer must be layered. Do not collapse version checks, stale samples, schema
+fingerprints, discovery contracts, and usage probes into a vague severity label.
 
 **Evidence-first:**
 - Gather a report + sample paths first.
@@ -17,8 +21,8 @@ verified support.
 update-checklist workflow. This skill focuses on *detection and evidence collection*;
 `agent-support-matrix` focuses on *recording and gating version bumps*.
 
-**Process doc:** `docs/agent-support/monitoring.md` — defines the severity model, cadence
-(daily/weekly), and escalation workflow that feeds into this skill.
+**Process doc:** `docs/agent-support/monitoring.md` — defines the compatibility verdicts,
+legacy severity model, cadence, and escalation workflow that feed into this skill.
 
 ---
 
@@ -32,15 +36,23 @@ update-checklist workflow. This skill focuses on *detection and evidence collect
    `scripts/probe_scan_output/agent_watch/*/report.json`.
 
 2. In `report.json`, check each agent under `results.<agent>`:
+   - `compatibility.verdict`, `compatibility.scope`, `compatibility.blockers`,
+     and `compatibility.next_action`
    - `verified_version`, `installed.parsed_version`, `upstream.parsed_version`
+   - `compatibility.latest_status` to distinguish latest checked vs unknown
    - `weekly.local_schema` (newest local session used for fingerprinting)
    - `weekly.schema_diff` and `evidence.schema_matches_baseline`
-   - `severity` and `recommendation`
+   - `evidence.sample_freshness` and `evidence.fresh_evidence_source`
+   - `severity` and `recommendation` only as legacy escalation fields
 
 Interpretation:
-- `installed == verified` and `upstream == verified`: no action.
-- `installed/upstream > verified` and `schema_matches_baseline == true`: safe to bump (after approval).
-- `schema_matches_baseline == false`: collect evidence and plan a parser/fixture update.
+- `supports_latest`: latest known build is covered by fresh matching evidence.
+- `supports_installed_only`: installed build is covered, but a known latest build is newer.
+- `latest_unknown`: no configured/reachable latest source; do not claim latest support.
+- `blocked_stale_sample`: evidence predates the installed CLI; run prebump before claiming support.
+- `blocked_no_fresh_evidence`: a version changed but no fresh matching sample proves support.
+- `format_drift_detected`: unknown schema/storage/usage fields appeared; update fixtures/parsers.
+- `monitoring_broken`: latest source, usage probe, or discovery contract failed.
 
 ---
 

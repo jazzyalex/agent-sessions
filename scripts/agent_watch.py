@@ -1528,6 +1528,7 @@ def _format_summary_line(
     upstream: str | None,
     recommendation: str,
     sample_freshness: dict[str, Any] | None,
+    compatibility: dict[str, Any] | None = None,
 ) -> str:
     base = (
         f"{agent_name}: severity={severity} "
@@ -1536,6 +1537,13 @@ def _format_summary_line(
         f"upstream={upstream or 'unknown'} "
         f"rec={recommendation}"
     )
+    if isinstance(compatibility, dict):
+        verdict = compatibility.get("verdict")
+        scope = compatibility.get("scope")
+        if isinstance(verdict, str) and verdict:
+            base = f"{base} verdict={verdict}"
+        if isinstance(scope, str) and scope:
+            base = f"{base} scope={scope}"
     if not isinstance(sample_freshness, dict):
         return base
     is_stale = sample_freshness.get("is_stale")
@@ -1544,6 +1552,197 @@ def _format_summary_line(
     if isinstance(reason, str) and reason:
         token = f"{token}({reason})"
     return f"{base} {token}"
+
+
+def _compatibility_evidence_source(
+    *,
+    schema_matches_baseline: bool | None,
+    sample_freshness: dict[str, Any] | None,
+    fresh_evidence_source: str | None,
+) -> str:
+    if isinstance(fresh_evidence_source, str) and fresh_evidence_source:
+        return fresh_evidence_source
+    if not isinstance(sample_freshness, dict):
+        return "no_sample_freshness"
+    if sample_freshness.get("is_stale") is True:
+        return "stale_local_sample"
+    if schema_matches_baseline is None:
+        return "fresh_sample_without_baseline"
+    return "fresh_local_sample"
+
+
+def _build_compatibility_assessment(
+    *,
+    verified: str | None,
+    installed: str | None,
+    upstream: str | None,
+    upstream_sources_configured: bool,
+    upstream_errors: list[dict[str, Any]],
+    installed_newer_than_verified: bool,
+    upstream_newer_than_verified: bool,
+    monitoring_failed: bool,
+    schema_matches_baseline: bool | None,
+    schema_diff: dict[str, Any] | None,
+    sample_freshness: dict[str, Any] | None,
+    fresh_evidence_source: str | None,
+    probe_failed: bool,
+) -> dict[str, Any]:
+    """Answer whether current AS code supports the latest available agent format.
+
+    `severity` remains useful for legacy notification behavior, but it is too coarse
+    for support claims. This object is deliberately explicit about version scope,
+    evidence freshness, and blockers.
+    """
+    blockers: list[str] = []
+    next_action = "none"
+    supports_latest: bool | None = None
+    supports_installed: bool | None = None
+
+    latest_status: str
+    if upstream:
+        latest_status = "known"
+    elif upstream_sources_configured:
+        latest_status = "unknown_fetch_failed" if upstream_errors else "unknown_no_version"
+    else:
+        latest_status = "unknown_not_configured"
+
+    evidence_source = _compatibility_evidence_source(
+        schema_matches_baseline=schema_matches_baseline,
+        sample_freshness=sample_freshness,
+        fresh_evidence_source=fresh_evidence_source,
+    )
+    sample_is_stale = isinstance(sample_freshness, dict) and sample_freshness.get("is_stale") is True
+    cli_binary_unresolved = (
+        isinstance(sample_freshness, dict)
+        and sample_freshness.get("stale_reason") == "cli_binary_unresolved"
+    )
+    fresh_schema_evidence = (
+        schema_matches_baseline is True
+        and not sample_is_stale
+        and (fresh_evidence_source == "latest_prebump_report" or not cli_binary_unresolved)
+    )
+    unknown_schema_drift = (
+        schema_matches_baseline is False
+        and isinstance(schema_diff, dict)
+        and schema_diff.get("unknown_only_is_empty") is False
+    )
+
+    if monitoring_failed:
+        blockers.append("latest_source_failed")
+    if probe_failed:
+        blockers.append("probe_or_discovery_failed")
+    if unknown_schema_drift:
+        blockers.append("schema_unknowns_detected")
+    elif schema_matches_baseline is None:
+        blockers.append("schema_baseline_not_checked")
+    if sample_is_stale:
+        blockers.append(str(sample_freshness.get("stale_reason") or "stale_sample"))
+    elif cli_binary_unresolved:
+        blockers.append("cli_binary_unresolved")
+    if latest_status.startswith("unknown"):
+        blockers.append(latest_status)
+
+    if installed and fresh_schema_evidence and not probe_failed and not unknown_schema_drift:
+        supports_installed = True
+    elif installed:
+        supports_installed = False
+
+    if monitoring_failed or probe_failed:
+        verdict = "monitoring_broken"
+        scope = "none"
+        next_action = "fix monitoring/probe/discovery failure before making support claims"
+        supports_installed = False if installed else None
+        supports_latest = False if upstream else None
+        confidence = "high"
+    elif unknown_schema_drift:
+        verdict = "format_drift_detected"
+        scope = "none"
+        next_action = "triage schema unknowns, update fixtures/parsers, then rerun weekly/prebump"
+        supports_latest = False if upstream else None
+        confidence = "high"
+    elif sample_is_stale and (installed_newer_than_verified or upstream_newer_than_verified):
+        verdict = "blocked_stale_sample"
+        scope = "none"
+        next_action = "run prebump validator for the affected agent"
+        supports_latest = False if upstream else None
+        supports_installed = False if installed_newer_than_verified else supports_installed
+        confidence = "high"
+    elif (installed_newer_than_verified or upstream_newer_than_verified) and not fresh_schema_evidence:
+        verdict = "blocked_no_fresh_evidence"
+        scope = "none"
+        next_action = "generate a fresh session sample and compare against fixture baseline"
+        supports_latest = False if upstream else None
+        supports_installed = False if installed_newer_than_verified else supports_installed
+        confidence = "high"
+    elif latest_status.startswith("unknown"):
+        verdict = "latest_unknown"
+        scope = "installed" if supports_installed else "none"
+        next_action = "configure or repair latest-version source for this agent"
+        supports_latest = None
+        confidence = "high"
+    elif upstream_newer_than_verified and installed == upstream and fresh_schema_evidence:
+        verdict = "supports_latest"
+        scope = "latest"
+        next_action = "none"
+        supports_latest = True
+        confidence = "high" if fresh_evidence_source == "latest_prebump_report" else "medium"
+    elif upstream_newer_than_verified:
+        verdict = "supports_installed_only" if supports_installed else "blocked_no_fresh_evidence"
+        scope = "installed" if supports_installed else "none"
+        next_action = "run prebump/latest-build validation before bumping verified support"
+        supports_latest = False
+        confidence = "high"
+    elif fresh_schema_evidence:
+        verdict = "supports_latest"
+        scope = "latest"
+        next_action = "none"
+        supports_latest = True
+        confidence = "high" if fresh_evidence_source == "latest_prebump_report" else "medium"
+    else:
+        verdict = "blocked_no_fresh_evidence"
+        scope = "none"
+        next_action = "collect local schema evidence or add fixtures"
+        supports_latest = False if upstream else None
+        confidence = "medium"
+
+    return {
+        "question": "Can current Agent Sessions code support the latest available session/storage/usage format for this agent?",
+        "verdict": verdict,
+        "scope": scope,
+        "confidence": confidence,
+        "latest_status": latest_status,
+        "verified_version": verified,
+        "installed_version": installed,
+        "latest_available_version": upstream,
+        "supports_installed": supports_installed,
+        "supports_latest": supports_latest,
+        "evidence_source": evidence_source,
+        "fresh_schema_evidence": fresh_schema_evidence,
+        "blockers": blockers,
+        "next_action": next_action,
+    }
+
+
+def _apply_compatibility_to_legacy_status(
+    *,
+    severity: str,
+    recommendation: str,
+    compatibility: dict[str, Any],
+) -> tuple[str, str]:
+    """Keep legacy severity/recommendation from hiding compatibility blockers."""
+    verdict = compatibility.get("verdict")
+    latest_status = compatibility.get("latest_status")
+    if verdict in ("monitoring_broken", "format_drift_detected"):
+        return "high", "prepare_hotfix"
+    if verdict in ("blocked_stale_sample", "blocked_no_fresh_evidence"):
+        return "medium", "run_prebump_validator"
+    if verdict == "latest_unknown":
+        if latest_status == "unknown_fetch_failed":
+            return "medium", "monitor"
+        return "low", "monitor"
+    if verdict == "supports_installed_only" and severity == "none":
+        return "low", "monitor"
+    return severity, recommendation
 
 
 def _build_prebump_report_entry(
@@ -2461,6 +2660,45 @@ def main(argv: list[str]) -> int:
                 probe_failed=probe_failed,
             )
 
+        if args.mode == "weekly":
+            compatibility = _build_compatibility_assessment(
+                verified=verified,
+                installed=installed,
+                upstream=upstream,
+                upstream_sources_configured=bool(upstream_sources),
+                upstream_errors=upstream_errors,
+                installed_newer_than_verified=installed_newer_than_verified,
+                upstream_newer_than_verified=upstream_newer_than_verified,
+                monitoring_failed=monitoring_failed,
+                schema_matches_baseline=schema_matches_baseline,
+                schema_diff=schema_diff,
+                sample_freshness=sample_freshness,
+                fresh_evidence_source=fresh_evidence_source,
+                probe_failed=probe_failed,
+            )
+            severity, recommendation = _apply_compatibility_to_legacy_status(
+                severity=severity,
+                recommendation=recommendation,
+                compatibility=compatibility,
+            )
+        else:
+            compatibility = {
+                "question": "Can current Agent Sessions code support the latest available session/storage/usage format for this agent?",
+                "verdict": "not_evaluated_daily",
+                "scope": "none",
+                "confidence": "none",
+                "latest_status": "known" if upstream else ("unknown_fetch_failed" if upstream_errors else "unknown_not_configured"),
+                "verified_version": verified,
+                "installed_version": installed,
+                "latest_available_version": upstream,
+                "supports_installed": None,
+                "supports_latest": None,
+                "evidence_source": "not_collected_daily",
+                "fresh_schema_evidence": False,
+                "blockers": [],
+                "next_action": "run weekly mode for compatibility verdict",
+            }
+
         # Daily runs should only bother the user when something looks risky/urgent.
         # Low severity (newer version with no risk signal) is recorded silently.
         if args.mode == "weekly":
@@ -2501,11 +2739,12 @@ def main(argv: list[str]) -> int:
                 "fresh_evidence_source": fresh_evidence_source,
                 "prebump_evidence": prebump_evidence,
             },
+            "compatibility": compatibility,
             "severity": severity,
             "recommendation": recommendation,
         }
 
-        if severity != "none":
+        if args.mode == "weekly" or severity != "none":
             summary_lines.append(
                 _format_summary_line(
                     agent_name=agent_name,
@@ -2515,6 +2754,7 @@ def main(argv: list[str]) -> int:
                     upstream=upstream,
                     recommendation=recommendation,
                     sample_freshness=sample_freshness,
+                    compatibility=compatibility,
                 )
             )
 

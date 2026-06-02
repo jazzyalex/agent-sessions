@@ -68,6 +68,9 @@
       "role": "assistant",
       "content": "The current directory is /Users/alexm/Repository/Codex-History.",
       "finish_reason": "stop"
+    },
+    {
+      "role": "session_meta"
     }
   ]
 }

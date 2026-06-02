@@ -420,3 +420,217 @@ def test_summary_line_no_reason_omits_parens():
     )
     assert "stale=false" in line
     assert "stale=false(" not in line
+
+
+def _compat(**overrides):
+    base = {
+        "verified": "1.0.0",
+        "installed": "1.0.0",
+        "upstream": "1.0.0",
+        "upstream_sources_configured": True,
+        "upstream_errors": [],
+        "installed_newer_than_verified": False,
+        "upstream_newer_than_verified": False,
+        "monitoring_failed": False,
+        "schema_matches_baseline": True,
+        "schema_diff": {"unknown_only_is_empty": True},
+        "sample_freshness": {"is_stale": False, "stale_reason": None},
+        "fresh_evidence_source": None,
+        "probe_failed": False,
+    }
+    base.update(overrides)
+    return agent_watch._build_compatibility_assessment(**base)
+
+
+def test_compatibility_supports_latest_with_fresh_matching_evidence():
+    result = _compat(fresh_evidence_source="latest_prebump_report")
+    assert result["verdict"] == "supports_latest"
+    assert result["scope"] == "latest"
+    assert result["supports_latest"] is True
+    assert result["confidence"] == "high"
+
+
+def test_compatibility_supports_latest_when_installed_is_latest_candidate():
+    result = _compat(
+        verified="0.135.0",
+        installed="0.136.0",
+        upstream="0.136.0",
+        installed_newer_than_verified=True,
+        upstream_newer_than_verified=True,
+    )
+    assert result["verdict"] == "supports_latest"
+    assert result["scope"] == "latest"
+    assert result["supports_latest"] is True
+
+
+def test_compatibility_latest_unknown_does_not_claim_latest_support():
+    result = _compat(
+        upstream=None,
+        upstream_sources_configured=False,
+    )
+    assert result["verdict"] == "latest_unknown"
+    assert result["scope"] == "installed"
+    assert result["supports_latest"] is None
+    assert "unknown_not_configured" in result["blockers"]
+
+
+def test_compatibility_unresolved_cli_binary_blocks_latest_support():
+    result = _compat(
+        sample_freshness={"is_stale": False, "stale_reason": "cli_binary_unresolved"},
+    )
+    assert result["verdict"] == "blocked_no_fresh_evidence"
+    assert result["supports_latest"] is False
+    assert "cli_binary_unresolved" in result["blockers"]
+
+
+def test_compatibility_monitoring_broken_clears_installed_support():
+    result = _compat(probe_failed=True)
+    assert result["verdict"] == "monitoring_broken"
+    assert result["scope"] == "none"
+    assert result["supports_installed"] is False
+
+
+def test_compatibility_schema_drift_beats_no_version_drift():
+    result = _compat(
+        upstream=None,
+        upstream_sources_configured=False,
+        schema_matches_baseline=False,
+        schema_diff={
+            "unknown_only_is_empty": False,
+            "unknown_types": ["message.session_meta"],
+            "unknown_keys": {"message.session_meta": ["role"]},
+        },
+    )
+    assert result["verdict"] == "format_drift_detected"
+    assert result["supports_installed"] is False
+    assert "schema_unknowns_detected" in result["blockers"]
+
+
+def test_compatibility_stale_changed_installed_blocks_support_claim():
+    result = _compat(
+        verified="0.76.0",
+        installed="0.78.0",
+        upstream=None,
+        upstream_sources_configured=False,
+        installed_newer_than_verified=True,
+        sample_freshness={"is_stale": True, "stale_reason": "sample_older_than_cli"},
+    )
+    assert result["verdict"] == "blocked_stale_sample"
+    assert result["scope"] == "none"
+    assert result["supports_installed"] is False
+    assert result["next_action"] == "run prebump validator for the affected agent"
+
+
+def test_legacy_status_tracks_format_drift_blocker():
+    result = _compat(
+        schema_matches_baseline=False,
+        schema_diff={
+            "unknown_only_is_empty": False,
+            "unknown_types": ["new_event"],
+            "unknown_keys": {},
+        },
+    )
+    severity, recommendation = agent_watch._apply_compatibility_to_legacy_status(
+        severity="none",
+        recommendation="ignore",
+        compatibility=result,
+    )
+    assert severity == "high"
+    assert recommendation == "prepare_hotfix"
+
+
+def test_legacy_status_tracks_latest_unknown_blocker():
+    result = _compat(upstream=None, upstream_sources_configured=False)
+    severity, recommendation = agent_watch._apply_compatibility_to_legacy_status(
+        severity="none",
+        recommendation="ignore",
+        compatibility=result,
+    )
+    assert severity == "low"
+    assert recommendation == "monitor"
+
+
+def test_weekly_report_schema_drift_not_silent(tmp_path, monkeypatch):
+    sample_root = tmp_path / "sessions"
+    sample_root.mkdir()
+    sample = sample_root / "drift.jsonl"
+    sample.write_text(_json.dumps({"type": "new_event", "foo": "bar"}) + "\n")
+
+    report_root = tmp_path / "out"
+    cfg = {
+        "report_root": str(report_root),
+        "agents": {
+            "codex": {
+                "cadence": {"weekly": True},
+                "installed_version_cmd": ["codex", "--version"],
+                "upstream": [],
+                "risk_keywords": {"schema": [], "usage": []},
+                "weekly": {
+                    "local_schema": {
+                        "kind": "jsonl_newest",
+                        "roots": [str(sample_root)],
+                        "glob": "*.jsonl",
+                        "max_lines": 100,
+                    }
+                },
+            }
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(_json.dumps(cfg))
+
+    monkeypatch.chdir(_Path(__file__).resolve().parents[2])
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_installed_version_cmds",
+        lambda _cfg: (["codex", "--version"], 0, "codex 0.135.0", "", "0.135.0"),
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_resolve_cli_binary_mtime",
+        lambda _argv: ("/tmp/fake-codex", None),
+    )
+
+    rc = agent_watch.main(["--mode", "weekly", "--config", str(cfg_path)])
+    assert rc == 0
+    report_path = next(report_root.glob("*/report.json"))
+    report = _json.loads(report_path.read_text())
+    codex = report["results"]["codex"]
+    assert codex["evidence"]["schema_matches_baseline"] is False
+    assert codex["compatibility"]["verdict"] == "format_drift_detected"
+    assert codex["severity"] == "high"
+    assert codex["recommendation"] == "prepare_hotfix"
+
+
+def test_daily_report_does_not_use_weekly_compatibility_blockers(tmp_path, monkeypatch, capsys):
+    report_root = tmp_path / "out"
+    cfg = {
+        "report_root": str(report_root),
+        "agents": {
+            "codex": {
+                "cadence": {"daily": True},
+                "installed_version_cmd": ["codex", "--version"],
+                "upstream": [],
+                "risk_keywords": {"schema": [], "usage": []},
+            }
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(_json.dumps(cfg))
+
+    monkeypatch.chdir(_Path(__file__).resolve().parents[2])
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_installed_version_cmds",
+        lambda _cfg: (["codex", "--version"], 0, "codex 0.135.0", "", "0.135.0"),
+    )
+
+    rc = agent_watch.main(["--mode", "daily", "--config", str(cfg_path)])
+    assert rc == 0
+    assert capsys.readouterr().out == ""
+    report_path = next(report_root.glob("*/report.json"))
+    report = _json.loads(report_path.read_text())
+    codex = report["results"]["codex"]
+    assert codex["severity"] == "none"
+    assert codex["recommendation"] == "ignore"
+    assert codex["compatibility"]["verdict"] == "not_evaluated_daily"

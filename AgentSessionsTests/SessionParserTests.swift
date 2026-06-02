@@ -222,6 +222,8 @@ final class SessionParserTests: XCTestCase {
         VALUES (2, 'hermes_sqlite_demo', 'assistant', 'Running pwd.', NULL, \(sqlString(toolCalls)), NULL, 1780000001.0, 8, NULL, 'brief reasoning', NULL, NULL, NULL, NULL, NULL, 1);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
         VALUES (3, 'hermes_sqlite_demo', 'tool', '/tmp/hermes-repo', 'call_hermes_1', NULL, 'shell', 1780000002.0, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+        VALUES (4, 'hermes_sqlite_demo', 'session_meta', NULL, NULL, NULL, NULL, 1780000003.0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
         """)
     }
 
@@ -3171,6 +3173,7 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "shell" && $0.messageID == "call_hermes_1" })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_result && $0.toolName == "shell" && ($0.toolOutput ?? "").contains("/tmp/hermes-repo") })
         XCTAssertTrue(full.events.contains { $0.kind == .meta && ($0.text ?? "").contains("brief reasoning") })
+        XCTAssertTrue(full.events.contains { $0.kind == .meta && $0.role == "session_meta" })
     }
 
     func testHermesParserKeepsOfflinePathMetadata() throws {

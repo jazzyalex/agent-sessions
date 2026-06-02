@@ -38,8 +38,6 @@ def test_droid_driver_runs_and_returns_session(tmp_path, monkeypatch):
     assert res.session_path.suffix == ".jsonl"
 
 
-def test_droid_config_has_prebump_block():
+def test_droid_config_excluded_from_active_monitoring():
     cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json").read_text())
-    pb = cfg["agents"]["droid"]["prebump"]
-    assert pb["driver"] == "droid_exec"
-    assert pb["sandbox"]["mode"] == "home_override"
+    assert "droid" not in cfg["agents"]

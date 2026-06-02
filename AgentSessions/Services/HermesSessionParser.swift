@@ -286,7 +286,7 @@ final class HermesSessionParser {
                                            isDelta: false,
                                            rawJSON: rawJSON))
             default:
-                if let content, !content.isEmpty {
+                if (role == "session_meta") || (content?.isEmpty == false) {
                     events.append(SessionEvent(id: baseID,
                                                timestamp: fallbackTimestamp,
                                                kind: .meta,
@@ -522,8 +522,8 @@ struct HermesStateDBReader {
                                            isDelta: false,
                                            rawJSON: raw))
             default:
-                if let content, !content.isEmpty {
-                    events.append(event(id: "hermes-\(rowID)-meta", timestamp: date, kind: .meta, role: role, text: content, rawJSON: raw))
+                if (role == "session_meta") || (content?.isEmpty == false) {
+                    events.append(event(id: "hermes-\(rowID)-meta", timestamp: date, kind: .meta, role: role, text: content ?? "", rawJSON: raw))
                 }
             }
         }

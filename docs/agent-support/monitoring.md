@@ -37,8 +37,31 @@ Daily behavior:
 Weekly behavior:
 - Always write a report and print a short summary (weekly is expected to be reviewed).
 
+## Compatibility Verdict Model
+
+The primary support answer is `results.<agent>.compatibility`, not `severity`.
+It answers: can current Agent Sessions code support the latest available
+session/storage/usage format from the latest available agent build?
+
+Each verdict separates version scope from evidence quality:
+
+| Verdict | Meaning | Required next action |
+|---------|---------|----------------------|
+| `supports_latest` | Latest known build is covered by fresh matching schema/probe evidence. | None, unless bumping docs/matrix. |
+| `supports_installed_only` | Installed build is covered, but a known latest available build is newer. | Validate latest before claiming full support. |
+| `latest_unknown` | No configured or reachable latest-version source. | Add/fix latest source, or record a scoped exception. |
+| `blocked_stale_sample` | The newest sample predates the installed CLI or freshness window. | Run prebump for that agent. |
+| `blocked_no_fresh_evidence` | A version changed, but no fresh sample proves format compatibility. | Generate a fresh sample and compare against baseline. |
+| `format_drift_detected` | Unknown schema/storage/usage fields or types appeared. | Triage parser/fixture impact before any bump. |
+| `monitoring_broken` | Latest source, usage probe, or discovery contract failed. | Fix monitoring before making support claims. |
+
+Use `compatibility.scope` to distinguish `latest`, `installed`, and `none`.
+Use `compatibility.blockers` for the exact reason a support claim is blocked.
+Weekly stdout prints every monitored agent with its compatibility verdict.
+
 ## Severity model
-Each agent gets a `severity` and a `recommendation`.
+Each agent also gets a legacy `severity` and `recommendation` for escalation.
+These fields are not sufficient to claim latest-format support.
 
 Severity levels:
 - `none`: nothing newer than verified and monitoring succeeded.

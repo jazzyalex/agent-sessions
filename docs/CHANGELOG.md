@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 - Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.
 - Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.
 - Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.
+- Agent formats: Preserved empty Hermes session metadata records during parsing and added explicit compatibility verdicts to agent-support monitoring reports.
 - Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
 - Agent Cockpit: Improved Limits mode with separate Codex and Claude rows, width-adaptive reset times, and a hover toolbar without the All filter pill.
 - Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
