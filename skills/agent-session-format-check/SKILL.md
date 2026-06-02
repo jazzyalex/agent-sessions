@@ -39,7 +39,8 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
    - `compatibility.verdict`, `compatibility.scope`, `compatibility.blockers`,
      and `compatibility.next_action`
    - `verified_version`, `installed.parsed_version`, `upstream.parsed_version`
-   - `compatibility.latest_status` to distinguish latest checked vs unknown
+   - `compatibility.latest_status` to distinguish `current_fetch_known`,
+     `cached_latest`, and unknown latest-source states
    - `weekly.local_schema` (newest local session used for fingerprinting)
    - `weekly.schema_diff` and `evidence.schema_matches_baseline`
    - `evidence.sample_freshness` and `evidence.fresh_evidence_source`
@@ -49,9 +50,11 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
 Interpretation:
 - `supports_latest`: latest known build is covered by
   `evidence.fresh_evidence_source == "latest_prebump_report"` and
-  `compatibility.latest_real_session_evidence == true`.
+  `compatibility.latest_real_session_evidence == true` with
+  `compatibility.latest_status == "current_fetch_known"`.
 - `supports_installed_only`: installed build is covered by non-stale real local
-  evidence, but latest is newer, unknown, or lacks fresh real-session proof.
+  evidence, but latest is newer, cached from a prior report, unknown, or lacks
+  fresh real-session proof.
 - `latest_unknown`: no configured/reachable latest source or no real-session
   driver exists; do not claim latest support.
 - `blocked_stale_sample`: evidence predates the installed CLI; run prebump before claiming support.
@@ -106,10 +109,8 @@ Flags:
   diagnostic; never persistent.
 
 Configured real-session drivers today are `codex`, `claude`, `gemini`,
-`copilot`, and `pi`. `opencode`, `hermes`, `openclaw`, and `cursor` have
-weekly local/session probes but no prebump block, so weekly can only support
-installed/local scope for them until a driver or explicit scoped exception is
-added. Droid is legacy-only and excluded from active checks.
+`copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, and `pi`. Droid is
+legacy-only and excluded from active checks.
 
 Prebump uses the hybrid env-var-first auth policy: if the relevant API-key
 env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
@@ -117,8 +118,12 @@ env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
 and real HOME is never read. Otherwise the driver copies the declared
 credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
-`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`, and
-`pi_prompt`.
+`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`,
+`opencode_run`, `hermes_oneshot`, `openclaw_local_agent`,
+`cursor_agent_print`, and `pi_prompt`. Some OAuth/keychain-backed CLIs use
+`real_home_session: true`; run them with `--allow-real-home` so the session
+lands in the real agent store instead of copying single-use auth state into a
+sandbox.
 
 ---
 

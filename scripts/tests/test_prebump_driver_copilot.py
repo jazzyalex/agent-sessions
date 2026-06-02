@@ -26,9 +26,10 @@ def test_copilot_driver_succeeds_without_leak(tmp_path, monkeypatch):
         assert env is not None
         sandbox_home = Path(env["HOME"])
         assert sandbox_home == sb
+        marker = argv[argv.index("-p") + 1].split("Include this exact marker in your final answer: ", 1)[1]
         sess = sandbox_home / ".copilot" / "session-state" / "uuid-1"
         sess.mkdir(parents=True, exist_ok=True)
-        (sess / "events.jsonl").write_text('{"type":"session.start"}\n{"type":"session.shutdown"}\n')
+        (sess / "events.jsonl").write_text(f'{{"type":"session.start"}}\n{{"type":"session.shutdown","marker":"{marker}"}}\n')
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
 
@@ -40,6 +41,33 @@ def test_copilot_driver_succeeds_without_leak(tmp_path, monkeypatch):
     assert res.ok is True
     assert res.session_path is not None
     assert res.session_path.name == "events.jsonl"
+
+
+def test_copilot_driver_rejects_real_home_session_without_probe_marker(tmp_path, monkeypatch):
+    real_home = tmp_path / "realhome"
+    sb = tmp_path / "sb"
+    real_home.mkdir()
+    sb.mkdir()
+
+    def fake_run(argv, *, env=None, **kwargs):
+        assert env is not None
+        sess = real_home / ".copilot" / "session-state" / "uuid-old"
+        sess.mkdir(parents=True, exist_ok=True)
+        path = sess / "events.jsonl"
+        path.write_text('{"type":"session.start"}\n')
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    env = {"HOME": str(real_home), "AGENT_WATCH_SESSION_HOME": str(real_home)}
+    with (
+        mock.patch.object(drv_mod.time, "time", return_value=1500),
+        mock.patch.object(drv_mod.subprocess, "run", side_effect=fake_run),
+    ):
+        driver = drv_mod.DRIVERS["copilot_prompt"]
+        res = driver.run(sb, env, "Run ls.", timeout=30)
+
+    assert res.ok is False
+    assert res.error == "copilot_marker_missing"
 
 
 def test_copilot_driver_fails_on_real_home_leak(tmp_path, monkeypatch):
@@ -54,9 +82,10 @@ def test_copilot_driver_fails_on_real_home_leak(tmp_path, monkeypatch):
         leaked = real_home / ".copilot" / "leaked.txt"
         leaked.write_text("oops")
         sb_home = Path(env["HOME"])
+        marker = argv[argv.index("-p") + 1].split("Include this exact marker in your final answer: ", 1)[1]
         sess = sb_home / ".copilot" / "session-state" / "uuid-2"
         sess.mkdir(parents=True, exist_ok=True)
-        (sess / "events.jsonl").write_text('{"type":"session.start"}\n')
+        (sess / "events.jsonl").write_text(f'{{"type":"session.start","marker":"{marker}"}}\n')
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
 
@@ -88,9 +117,10 @@ def test_copilot_driver_detects_deleted_file_as_leak(tmp_path, monkeypatch):
         # Delete the file from real ~/.copilot during the run
         victim.unlink()
         sb_home = Path(env["HOME"])
+        marker = argv[argv.index("-p") + 1].split("Include this exact marker in your final answer: ", 1)[1]
         sess = sb_home / ".copilot" / "session-state" / "uuid-del"
         sess.mkdir(parents=True, exist_ok=True)
-        (sess / "events.jsonl").write_text('{"type":"session.start"}\n')
+        (sess / "events.jsonl").write_text(f'{{"type":"session.start","marker":"{marker}"}}\n')
         import subprocess as _sp
         return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
 

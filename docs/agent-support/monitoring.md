@@ -56,13 +56,21 @@ Each verdict separates version scope from evidence quality:
 | `monitoring_broken` | Latest source, usage probe, or discovery contract failed. | Fix monitoring before making support claims. |
 
 Use `compatibility.scope` to distinguish `latest`, `installed`, and `none`.
+Use `compatibility.latest_status` to distinguish latest-source quality:
+`current_fetch_known` means the current run reached a latest-version source;
+`cached_latest` means the current source was degraded and the report reused the
+most recent prior successful upstream version from agent-watch history;
+`unknown_fetch_failed`, `unknown_no_version`, and `unknown_not_configured`
+mean no usable latest candidate was available for the current report.
 Use `compatibility.blockers` for the exact reason a support claim is blocked.
 Weekly stdout prints every monitored agent with its compatibility verdict.
 Do not treat `supports_installed_only`, `latest_unknown`, `blocked_stale_sample`,
 or `blocked_no_fresh_evidence` as verified latest support. For active agents,
 `supports_latest` requires `evidence.fresh_evidence_source ==
 "latest_prebump_report"` and `compatibility.latest_real_session_evidence ==
-true`; ordinary weekly newest-on-disk samples only prove installed/local scope.
+true` with `compatibility.latest_status == "current_fetch_known"`; ordinary
+weekly newest-on-disk samples and `cached_latest` only prove installed/local
+scope.
 If a real-session driver ran but failed, inspect
 `compatibility.latest_real_session_failure`. Auth failures surface as
 `real_session_auth_failed` blockers and require re-auth before rerunning

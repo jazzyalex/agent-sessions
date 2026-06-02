@@ -50,17 +50,22 @@ def _expand_path(p: str) -> Path:
 
 def _http_get_text(url: str, timeout: int) -> str:
     # Prefer curl to avoid Python SSL trust-store drift on some macOS setups.
-    rc, out, err = _run_cmd(["curl", "-fsSL", url], timeout=timeout)
+    curl_argv = ["curl", "-fsSL", "-H", "User-Agent: AgentSessions-AgentWatch/1.0"]
+    github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if github_token and urllib.parse.urlparse(url).netloc == "api.github.com":
+        curl_argv.extend(["-H", f"Authorization: Bearer {github_token}"])
+    curl_argv.append(url)
+    rc, out, err = _run_cmd(curl_argv, timeout=timeout)
     if rc == 0 and out:
         return out
     # Fallback to urllib for environments without curl.
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "AgentSessions-AgentWatch/1.0",
-            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
-        },
-    )
+    headers = {
+        "User-Agent": "AgentSessions-AgentWatch/1.0",
+        "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+    }
+    if github_token and urllib.parse.urlparse(url).netloc == "api.github.com":
+        headers["Authorization"] = f"Bearer {github_token}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read()
     try:
@@ -332,6 +337,69 @@ def _upstream_fetch_degraded(errors: list[dict[str, Any]]) -> bool:
             continue
         return False
     return True
+
+
+def _latest_cached_upstream_evidence(
+    *,
+    agent_name: str,
+    reports_root: Path,
+) -> dict[str, Any] | None:
+    def _report_sort_time(report_path: Path, report: dict[str, Any]) -> float:
+        ts = report.get("timestamp_utc")
+        if isinstance(ts, str) and ts:
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                pass
+        slug = report_path.parent.name.removesuffix("-prebump")
+        try:
+            return datetime.strptime(slug, "%Y%m%d-%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            return -1.0
+
+    candidates: list[tuple[float, Path, dict[str, Any], dict[str, Any]]] = []
+    for report_path in reports_root.glob("*/report.json"):
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        report_sort_time = _report_sort_time(report_path, report)
+        if report_sort_time < 0:
+            continue
+        results = report.get("results")
+        if not isinstance(results, dict):
+            continue
+        entry = results.get(agent_name)
+        if not isinstance(entry, dict):
+            continue
+        upstream = entry.get("upstream")
+        if not isinstance(upstream, dict):
+            continue
+        version = upstream.get("parsed_version")
+        if not isinstance(version, str) or not version:
+            continue
+        source_used = upstream.get("source_used")
+        if not isinstance(source_used, dict) or source_used.get("ok") is not True:
+            continue
+        if source_used.get("kind") == "cached_prior_report":
+            continue
+        candidates.append((report_sort_time, report_path, report, source_used))
+
+    if not candidates:
+        return None
+
+    _, report_path, report, source_used = max(candidates, key=lambda item: item[0])
+    entry = (report.get("results") or {}).get(agent_name) if isinstance(report.get("results"), dict) else None
+    upstream = entry.get("upstream") if isinstance(entry, dict) else None
+    version = upstream.get("parsed_version") if isinstance(upstream, dict) else None
+    return {
+        "ok": True,
+        "kind": "cached_prior_report",
+        "version": version,
+        "report": _safe_relpath(report_path),
+        "report_timestamp_utc": report.get("timestamp_utc"),
+        "cached_source_used": source_used,
+    }
 
 
 def _compare_semver(a: str | None, b: str | None) -> int | None:
@@ -1657,6 +1725,7 @@ def _build_compatibility_assessment(
     probe_failed: bool,
     real_session_driver_configured: bool,
     failed_prebump_evidence: dict[str, Any] | None = None,
+    upstream_source_status: str | None = None,
 ) -> dict[str, Any]:
     """Answer whether current AS code supports the latest available agent format.
 
@@ -1670,8 +1739,10 @@ def _build_compatibility_assessment(
     supports_installed: bool | None = None
 
     latest_status: str
-    if upstream:
-        latest_status = "known"
+    if upstream and upstream_source_status == "cached_prior_report":
+        latest_status = "cached_latest"
+    elif upstream:
+        latest_status = "current_fetch_known"
     elif upstream_sources_configured:
         latest_status = "unknown_fetch_failed" if upstream_errors else "unknown_no_version"
     else:
@@ -1701,6 +1772,8 @@ def _build_compatibility_assessment(
 
     if monitoring_failed:
         blockers.append("latest_source_failed")
+    elif latest_status == "cached_latest" and upstream_errors:
+        blockers.append("latest_source_degraded")
     if probe_failed:
         blockers.append("probe_or_discovery_failed")
     if unknown_schema_drift:
@@ -1759,7 +1832,7 @@ def _build_compatibility_assessment(
         next_action = "configure or repair latest-version source for this agent"
         supports_latest = None
         confidence = "high"
-    elif upstream_newer_than_verified and installed == upstream and latest_real_session_evidence:
+    elif upstream_newer_than_verified and installed == upstream and latest_real_session_evidence and latest_status == "current_fetch_known":
         verdict = "supports_latest"
         scope = "latest"
         next_action = "none"
@@ -1777,7 +1850,7 @@ def _build_compatibility_assessment(
         next_action = "run prebump/latest-build validation before bumping verified support"
         supports_latest = False
         confidence = "high"
-    elif upstream and latest_real_session_evidence:
+    elif upstream and installed == upstream and latest_real_session_evidence and latest_status == "current_fetch_known":
         verdict = "supports_latest"
         scope = "latest"
         next_action = "none"
@@ -2176,6 +2249,12 @@ def _run_prebump(
             _sys.stderr.write(f"agent_watch prebump [{agent_name}]: {_warn}\n")
 
         prompt = str(pb.get("prompt") or "")
+        model_override = pb.get("model")
+        if isinstance(model_override, str) and model_override:
+            env["AGENT_WATCH_MODEL"] = model_override
+        if args.allow_real_home and pb.get("real_home_session") is True:
+            env["HOME"] = str(real_home)
+            env["AGENT_WATCH_SESSION_HOME"] = str(real_home)
         # F6: CLI flag wins by default; fall back to per-agent config; then global default.
         if args.timeout_seconds is not None:
             timeout = int(args.timeout_seconds)
@@ -2256,9 +2335,7 @@ def _run_prebump(
                     "evidence": {},
                 })
                 continue
-            # For the re-run, discovery validation must use real_home
-            # as the sandbox parameter since roots are HOME-relative.
-            sandbox = real_home
+            env["AGENT_WATCH_SESSION_HOME"] = str(real_home)
 
         # P1: ok=True must be backed by an actual session file. A driver
         # that returns ok=True with session_path=None or a path that does
@@ -2284,7 +2361,7 @@ def _run_prebump(
                 _validate_session_discovery(
                     result.session_path,
                     pb.get("discover_session") or {},
-                    sandbox,
+                    Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox))),
                 )
             except _DiscoveryViolation as exc:
                 entries.append({
@@ -2303,18 +2380,28 @@ def _run_prebump(
             matrix_key = {
                 "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
                 "gemini": "gemini_cli", "opencode": "opencode", "hermes": "hermes",
-                "openclaw": "openclaw", "pi": "pi",
+                "openclaw": "openclaw", "cursor": "cursor", "pi": "pi",
             }.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
             if agent_name == "gemini":
                 fp = _gemini_session_json_schema_fingerprint(result.session_path, max_messages=5000)
             elif agent_name == "hermes":
-                fp = _hermes_session_json_schema_fingerprint(result.session_path, max_messages=5000)
+                if result.session_path.name == "state.db":
+                    fp = _hermes_state_db_latest_session_schema_fingerprint(result.session_path, max_messages=5000)
+                else:
+                    fp = _hermes_session_json_schema_fingerprint(result.session_path, max_messages=5000)
             elif agent_name == "opencode":
-                fp = _opencode_storage_session_tree_schema_fingerprint(
-                    result.session_path, max_messages=250, max_parts=2500
-                )
+                if result.session_path.name == "opencode.db":
+                    fp = _opencode_sqlite_latest_session_schema_fingerprint(
+                        result.session_path, max_messages=250, max_parts=2500
+                    )
+                else:
+                    fp = _opencode_storage_session_tree_schema_fingerprint(
+                        result.session_path, max_messages=250, max_parts=2500
+                    )
+            elif agent_name == "cursor":
+                fp = _cursor_transcript_schema_fingerprint(result.session_path, max_lines=5000)
             else:
                 fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
             if baseline_type_keys:
@@ -2499,6 +2586,7 @@ def main(argv: list[str]) -> int:
         upstream_sources = agent_cfg.get("upstream") or []
         upstream: str | None = None
         upstream_source_used: dict[str, Any] | None = None
+        upstream_source_status: str | None = None
         upstream_errors: list[dict[str, Any]] = []
 
         if not args.skip_update and isinstance(upstream_sources, list):
@@ -2509,8 +2597,24 @@ def main(argv: list[str]) -> int:
                 if res.get("ok"):
                     upstream = res.get("version")
                     upstream_source_used = res
+                    upstream_source_status = "current_fetch"
                     break
                 upstream_errors.append(res)
+
+        if (
+            not args.skip_update
+            and upstream_sources
+            and upstream is None
+            and _upstream_fetch_degraded(upstream_errors)
+        ):
+            cached_upstream = _latest_cached_upstream_evidence(
+                agent_name=agent_name,
+                reports_root=report_dir.parent,
+            )
+            if cached_upstream is not None:
+                upstream = cached_upstream.get("version")
+                upstream_source_used = cached_upstream
+                upstream_source_status = "cached_prior_report"
 
         schema_keywords = list((agent_cfg.get("risk_keywords") or {}).get("schema") or [])
         usage_keywords = list((agent_cfg.get("risk_keywords") or {}).get("usage") or [])
@@ -2773,6 +2877,7 @@ def main(argv: list[str]) -> int:
                 verified=verified,
                 installed=installed,
                 upstream=upstream,
+                upstream_source_status=upstream_source_status,
                 upstream_sources_configured=bool(upstream_sources),
                 upstream_errors=upstream_errors,
                 installed_newer_than_verified=installed_newer_than_verified,
@@ -2797,7 +2902,15 @@ def main(argv: list[str]) -> int:
                 "verdict": "not_evaluated_daily",
                 "scope": "none",
                 "confidence": "none",
-                "latest_status": "known" if upstream else ("unknown_fetch_failed" if upstream_errors else "unknown_not_configured"),
+                "latest_status": (
+                    "cached_latest"
+                    if upstream and upstream_source_status == "cached_prior_report"
+                    else (
+                        "current_fetch_known"
+                        if upstream
+                        else ("unknown_fetch_failed" if upstream_errors else "unknown_not_configured")
+                    )
+                ),
                 "verified_version": verified,
                 "installed_version": installed,
                 "latest_available_version": upstream,
@@ -2829,6 +2942,7 @@ def main(argv: list[str]) -> int:
             "upstream": {
                 "parsed_version": upstream,
                 "source_used": upstream_source_used,
+                "source_status": upstream_source_status,
                 "errors": upstream_errors[:3],
             },
             "diff": {

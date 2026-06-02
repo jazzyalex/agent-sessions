@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import stat
 import subprocess
 import tempfile
@@ -41,6 +42,136 @@ class PrebumpDriver(Protocol):
 
 
 DRIVERS: dict[str, PrebumpDriver] = {}
+
+
+def _newest_matching(root: Path, patterns: tuple[str, ...]) -> Path | None:
+    newest: Path | None = None
+    newest_m = -1.0
+    if not root.exists():
+        return None
+    for pattern in patterns:
+        for p in root.rglob(pattern):
+            if not p.is_file():
+                continue
+            try:
+                m = p.stat().st_mtime
+            except OSError:
+                continue
+            if m > newest_m:
+                newest = p
+                newest_m = m
+    return newest
+
+
+def _newest_matching_after(root: Path, patterns: tuple[str, ...], min_mtime: float) -> Path | None:
+    newest: Path | None = None
+    newest_m = -1.0
+    if not root.exists():
+        return None
+    for pattern in patterns:
+        for p in root.rglob(pattern):
+            if not p.is_file():
+                continue
+            try:
+                m = p.stat().st_mtime
+            except OSError:
+                continue
+            if m < min_mtime:
+                continue
+            if m > newest_m:
+                newest = p
+                newest_m = m
+    return newest
+
+
+def _newest_matching_after_with_text(root: Path, patterns: tuple[str, ...], min_mtime: float, needle: str) -> Path | None:
+    matches: list[tuple[float, Path]] = []
+    if not root.exists():
+        return None
+    for pattern in patterns:
+        for p in root.rglob(pattern):
+            if not p.is_file():
+                continue
+            try:
+                m = p.stat().st_mtime
+            except OSError:
+                continue
+            if m < min_mtime:
+                continue
+            matches.append((m, p))
+    for _, p in sorted(matches, key=lambda item: item[0], reverse=True):
+        if _file_contains(p, needle):
+            return p
+    return None
+
+
+def _write_completed_output(sandbox: Path, label: str, proc: subprocess.CompletedProcess[str]) -> tuple[Path, Path]:
+    stdout_file = sandbox / f"{label}.stdout.txt"
+    stderr_file = sandbox / f"{label}.stderr.txt"
+    stdout_file.write_text(proc.stdout or "")
+    stderr_file.write_text(proc.stderr or "")
+    return stdout_file, stderr_file
+
+
+def _timeout_result(sandbox: Path, label: str, timeout: int, exc: subprocess.TimeoutExpired) -> DriverResult:
+    stdout_file = sandbox / f"{label}.stdout.txt"
+    stderr_file = sandbox / f"{label}.stderr.txt"
+    stdout_file.write_text("")
+    stderr_file.write_text(f"timeout after {timeout}s: {exc}")
+    return DriverResult(False, None, stdout_file, stderr_file, 124, f"timeout:{timeout}")
+
+
+def _not_found_result(sandbox: Path, label: str, binary: str, exc: FileNotFoundError) -> DriverResult:
+    stdout_file = sandbox / f"{label}.stdout.txt"
+    stderr_file = sandbox / f"{label}.stderr.txt"
+    stdout_file.write_text("")
+    stderr_file.write_text(f"{binary} not found: {exc}")
+    return DriverResult(False, None, stdout_file, stderr_file, 127, f"{binary}_not_found")
+
+
+def _file_contains(path: Path, needle: str) -> bool:
+    try:
+        return needle in path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def _hermes_state_db_contains_recent_marker(path: Path, needle: str, min_started: float) -> bool:
+    try:
+        conn = sqlite3.connect(str(path))
+    except Exception:
+        return False
+    try:
+        message_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(messages);").fetchall()
+            if len(row) > 1
+        }
+        marker_columns = [
+            col
+            for col in ("content", "tool_calls", "codex_message_items", "codex_reasoning_items", "reasoning", "reasoning_content")
+            if col in message_columns
+        ]
+        if not marker_columns:
+            return False
+        marker_clause = " OR ".join(f"COALESCE(m.{col}, '') LIKE ?" for col in marker_columns)
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM sessions s
+            JOIN messages m ON m.session_id = s.id
+            WHERE s.started_at >= ?
+              AND m.timestamp >= ?
+              AND ({marker_clause})
+            LIMIT 1;
+            """,
+            (min_started, min_started, *([f"%{needle}%"] * len(marker_columns))),
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+    finally:
+        conn.close()
 
 
 def make_sandbox(*, parent: Path, label: str) -> Path:
@@ -234,22 +365,28 @@ class ClaudePrintDriver:
     name = "claude_print"
 
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
-        claude_home = sandbox / ".claude"
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
+        claude_home = session_home / ".claude"
         claude_home.mkdir(parents=True, exist_ok=True)
         # F2: env comes from prepare_auth; do not call os.environ.copy().
         env = dict(env)
         session_id = str(_uuid.uuid4())
         stdout_file = sandbox / "claude.stdout.txt"
         stderr_file = sandbox / "claude.stderr.txt"
+        cmd = [
+            "claude", "-p",
+            "--verbose",
+            "--output-format", "stream-json",
+            "--session-id", session_id,
+        ]
+        model = env.get("AGENT_WATCH_MODEL")
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append(prompt)
+        run_started = time.time()
         try:
             proc = subprocess.run(
-                [
-                    "claude", "-p",
-                    "--verbose",
-                    "--output-format", "stream-json",
-                    "--session-id", session_id,
-                    prompt,
-                ],
+                cmd,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -280,18 +417,16 @@ class ClaudePrintDriver:
                 if m > newest_m:
                     newest = p
                     newest_m = m
-            if newest is None:
-                for p in projects_root.rglob("*.jsonl"):
-                    try:
-                        m = p.stat().st_mtime
-                    except OSError:
-                        continue
-                    if m > newest_m:
-                        newest = p
-                        newest_m = m
+        if newest is not None:
+            try:
+                if newest.stat().st_mtime < run_started:
+                    newest = None
+            except OSError:
+                newest = None
 
         if rc != 0 or newest is None:
-            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"claude_print_failed rc={rc}")
+            err = f"claude_print_failed rc={rc}" if rc != 0 else "claude_no_run_session"
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, err)
         return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
 
 
@@ -440,18 +575,26 @@ class CopilotPromptDriver:
         return leaks
 
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
-        copilot_home = sandbox / ".copilot"
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
+        using_real_session_home = session_home != sandbox
+        copilot_home = session_home / ".copilot"
         copilot_home.mkdir(parents=True, exist_ok=True)
         env = dict(env)
         env["COPILOT_ALLOW_ALL"] = "1"
         real_home = Path(os.environ.get("HOME", str(Path.home())))
-        pre = self._snapshot_real_home_copilot(real_home)
+        pre = {} if using_real_session_home else self._snapshot_real_home_copilot(real_home)
 
         stdout_file = sandbox / "copilot.stdout.txt"
         stderr_file = sandbox / "copilot.stderr.txt"
+        marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
+        probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
+        cmd = ["copilot", "-p", probe_prompt, "--allow-all-tools"]
+        if not using_real_session_home:
+            cmd.extend(["--config-dir", str(copilot_home)])
+        run_started = time.time()
         try:
             proc = subprocess.run(
-                ["copilot", "-p", prompt, "--allow-all-tools", "--config-dir", str(copilot_home)],
+                cmd,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -470,40 +613,278 @@ class CopilotPromptDriver:
             stderr_file.write_text(f"copilot not found: {exc}")
             return DriverResult(False, None, stdout_file, stderr_file, 127, "copilot_not_found")
 
-        leaks = self._find_leaks(real_home, pre)
+        leaks = [] if using_real_session_home else self._find_leaks(real_home, pre)
         if leaks:
             msg = "sandbox_breach: real ~/.copilot was modified during the run: " + ", ".join(leaks[:5])
             stderr_file.write_text((stderr_file.read_text() if stderr_file.exists() else "") + "\n" + msg)
             return DriverResult(False, None, stdout_file, stderr_file, rc, msg)
 
         sessions_root = copilot_home / "session-state"
-        newest: Path | None = None
-        newest_m = -1.0
-        if sessions_root.exists():
-            for p in sessions_root.rglob("events.jsonl"):
-                try:
-                    m = p.stat().st_mtime
-                except OSError:
-                    continue
-                if m > newest_m:
-                    newest = p
-                    newest_m = m
-            if newest is None:
-                for p in sessions_root.rglob("*.jsonl"):
-                    try:
-                        m = p.stat().st_mtime
-                    except OSError:
-                        continue
-                    if m > newest_m:
-                        newest = p
-                        newest_m = m
+        newest = _newest_matching_after_with_text(
+            sessions_root,
+            ("events.jsonl", "*.jsonl"),
+            run_started,
+            marker,
+        )
 
         if rc != 0 or newest is None:
-            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"copilot_prompt_failed rc={rc}")
+            err = f"copilot_prompt_failed rc={rc}" if rc != 0 else "copilot_marker_missing"
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, err)
         return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
 
 
 DRIVERS["copilot_prompt"] = CopilotPromptDriver()
+
+
+class OpenCodeRunDriver:
+    name = "opencode_run"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        data_home = sandbox / ".local" / "share"
+        config_home = sandbox / ".config"
+        state_home = sandbox / ".local" / "state"
+        for root in (data_home, config_home, state_home):
+            root.mkdir(parents=True, exist_ok=True)
+        env = dict(env)
+        env["XDG_DATA_HOME"] = str(data_home)
+        env["XDG_CONFIG_HOME"] = str(config_home)
+        env["XDG_STATE_HOME"] = str(state_home)
+        run_started = time.time()
+        try:
+            proc = subprocess.run(
+                [
+                    "opencode",
+                    "run",
+                    "--pure",
+                    "--format",
+                    "json",
+                    "--dir",
+                    str(sandbox),
+                    prompt,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "opencode", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "opencode", "opencode", exc)
+
+        stdout_file, stderr_file = _write_completed_output(sandbox, "opencode", proc)
+        opencode_root = data_home / "opencode"
+        storage_root = opencode_root / "storage" / "session"
+        newest = _newest_matching_after(storage_root, ("ses_*.json",), run_started)
+        if newest is None:
+            db = opencode_root / "opencode.db"
+            try:
+                if db.is_file() and db.stat().st_mtime >= run_started:
+                    newest = db
+            except OSError:
+                pass
+        if proc.returncode != 0:
+            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"opencode_run_failed rc={proc.returncode}")
+        if newest is None:
+            return DriverResult(False, None, stdout_file, stderr_file, proc.returncode, "opencode_no_session_store")
+        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None)
+
+
+DRIVERS["opencode_run"] = OpenCodeRunDriver()
+
+
+class OpenClawLocalAgentDriver:
+    name = "openclaw_local_agent"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
+        state_dir = session_home / ".openclaw"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        env = dict(env)
+        env["OPENCLAW_STATE_DIR"] = str(state_dir)
+        session_key = f"agent:main:prebump-{_uuid.uuid4()}"
+        marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
+        probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
+        run_started = time.time()
+        try:
+            proc = subprocess.run(
+                [
+                    "openclaw",
+                    "agent",
+                    "--local",
+                    "--json",
+                    "--session-key",
+                    session_key,
+                    "--message",
+                    probe_prompt,
+                    "--timeout",
+                    str(timeout),
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout + 5,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "openclaw", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "openclaw", "openclaw", exc)
+
+        stdout_file, stderr_file = _write_completed_output(sandbox, "openclaw", proc)
+        agents_root = state_dir / "agents"
+        newest: Path | None = None
+        if agents_root.exists():
+            candidates: list[tuple[float, Path]] = []
+            for p in agents_root.rglob("*.jsonl"):
+                if p.name.endswith(".jsonl.lock") or p.name.endswith(".trajectory.jsonl"):
+                    continue
+                if ".jsonl.deleted." in p.name or ".jsonl.reset." in p.name:
+                    continue
+                if "sessions" not in p.parts:
+                    continue
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m < run_started:
+                    continue
+                candidates.append((m, p))
+            for _, p in sorted(candidates, key=lambda item: item[0], reverse=True):
+                if _file_contains(p, marker):
+                    newest = p
+                    break
+        if proc.returncode != 0:
+            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"openclaw_local_agent_failed rc={proc.returncode}")
+        if newest is None:
+            return DriverResult(False, None, stdout_file, stderr_file, proc.returncode, "openclaw_marker_missing")
+        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None)
+
+
+DRIVERS["openclaw_local_agent"] = OpenClawLocalAgentDriver()
+
+
+class CursorAgentPrintDriver:
+    name = "cursor_agent_print"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
+        cursor_home = session_home / ".cursor"
+        cursor_home.mkdir(parents=True, exist_ok=True)
+        env = dict(env)
+        marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
+        probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
+        run_started = time.time()
+        try:
+            proc = subprocess.run(
+                [
+                    "cursor-agent",
+                    "--print",
+                    "--output-format",
+                    "stream-json",
+                    "--mode",
+                    "ask",
+                    "--trust",
+                    "--sandbox",
+                    "enabled",
+                    "--workspace",
+                    str(sandbox),
+                    probe_prompt,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "cursor", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "cursor", "cursor-agent", exc)
+
+        stdout_file, stderr_file = _write_completed_output(sandbox, "cursor", proc)
+        newest = _newest_matching_after_with_text(cursor_home / "projects", ("*.jsonl",), run_started, marker)
+        if proc.returncode != 0:
+            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"cursor_agent_print_failed rc={proc.returncode}")
+        if newest is None:
+            return DriverResult(False, None, stdout_file, stderr_file, proc.returncode, "cursor_marker_missing")
+        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None)
+
+
+DRIVERS["cursor_agent_print"] = CursorAgentPrintDriver()
+
+
+class HermesOneshotDriver:
+    name = "hermes_oneshot"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
+        hermes_home = session_home / ".hermes"
+        hermes_home.mkdir(parents=True, exist_ok=True)
+        marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
+        marked_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
+        env = dict(env)
+        env["HERMES_HOME"] = str(hermes_home)
+        env["HERMES_ACCEPT_HOOKS"] = "1"
+        run_started = time.time()
+        try:
+            proc = subprocess.run(
+                [
+                    "hermes",
+                    "--oneshot",
+                    marked_prompt,
+                    "--accept-hooks",
+                    "--ignore-rules",
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "hermes", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "hermes", "hermes", exc)
+
+        stdout_file, stderr_file = _write_completed_output(sandbox, "hermes", proc)
+        newest = _newest_matching_after_with_text(hermes_home / "sessions", ("session_*.json",), run_started, marker)
+        db = hermes_home / "state.db"
+        if db.is_file():
+            db_fresh = False
+            for candidate in (db, hermes_home / "state.db-wal", hermes_home / "state.db-shm"):
+                try:
+                    if candidate.is_file() and candidate.stat().st_mtime >= run_started:
+                        db_fresh = True
+                        break
+                except OSError:
+                    continue
+            if db_fresh and _hermes_state_db_contains_recent_marker(db, marker, run_started):
+                try:
+                    os.utime(db, None)
+                except OSError:
+                    pass
+                if newest is None:
+                    newest = db
+                else:
+                    try:
+                        if db.stat().st_mtime > newest.stat().st_mtime:
+                            newest = db
+                    except OSError:
+                        newest = db
+        if proc.returncode != 0:
+            return DriverResult(False, newest, stdout_file, stderr_file, proc.returncode, f"hermes_oneshot_failed rc={proc.returncode}")
+        if newest is None:
+            return DriverResult(False, None, stdout_file, stderr_file, proc.returncode, "hermes_no_session_store")
+        return DriverResult(True, newest, stdout_file, stderr_file, proc.returncode, None)
+
+
+DRIVERS["hermes_oneshot"] = HermesOneshotDriver()
 
 
 class PiPromptDriver:

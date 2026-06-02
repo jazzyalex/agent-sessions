@@ -31,6 +31,96 @@ def test_upstream_fetch_rate_limit_is_degraded_not_monitoring_failure():
     ])
 
 
+def test_http_get_text_uses_github_token_for_api(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+    seen = {}
+
+    def fake_run(argv, timeout):
+        seen["argv"] = argv
+        return 0, "{}", ""
+
+    monkeypatch.setattr(agent_watch, "_run_cmd", fake_run)
+    assert agent_watch._http_get_text("https://api.github.com/repos/o/r/releases/latest", timeout=5) == "{}"
+    assert "Authorization: Bearer ghp_test" in seen["argv"]
+
+
+def test_cached_upstream_evidence_uses_prior_successful_report(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    old_dir = reports_root / "20260601-120000Z"
+    old_dir.mkdir(parents=True)
+    report_path = old_dir / "report.json"
+    report_path.write_text(_json.dumps({
+        "timestamp_utc": "2026-06-01T12:00:00+00:00",
+        "mode": "weekly",
+        "results": {
+            "codex": {
+                "upstream": {
+                    "parsed_version": "0.136.0",
+                    "source_used": {
+                        "ok": True,
+                        "version": "0.136.0",
+                        "url": "https://api.github.com/repos/openai/codex/releases/latest",
+                    },
+                },
+            },
+        },
+    }))
+    os.utime(report_path, (2_000.0, 2_000.0))
+
+    evidence = agent_watch._latest_cached_upstream_evidence(
+        agent_name="codex",
+        reports_root=reports_root,
+    )
+
+    assert evidence is not None
+    assert evidence["kind"] == "cached_prior_report"
+    assert evidence["version"] == "0.136.0"
+    assert evidence["report"].endswith("report.json")
+    assert evidence["cached_source_used"]["ok"] is True
+
+
+def test_cached_upstream_evidence_orders_by_report_timestamp_not_file_mtime(tmp_path):
+    reports_root = tmp_path / "agent_watch"
+    older_dir = reports_root / "20260601-120000Z"
+    newer_dir = reports_root / "20260602-120000Z"
+    older_dir.mkdir(parents=True)
+    newer_dir.mkdir(parents=True)
+    older_report = older_dir / "report.json"
+    newer_report = newer_dir / "report.json"
+
+    def write_report(path: _Path, ts: str, version: str) -> None:
+        path.write_text(_json.dumps({
+            "timestamp_utc": ts,
+            "mode": "weekly",
+            "results": {
+                "codex": {
+                    "upstream": {
+                        "parsed_version": version,
+                        "source_used": {
+                            "ok": True,
+                            "version": version,
+                            "url": "https://api.github.com/repos/openai/codex/releases/latest",
+                        },
+                    },
+                },
+            },
+        }))
+
+    write_report(older_report, "2026-06-01T12:00:00+00:00", "0.135.0")
+    write_report(newer_report, "2026-06-02T12:00:00+00:00", "0.136.0")
+    os.utime(older_report, (3_000.0, 3_000.0))
+    os.utime(newer_report, (2_000.0, 2_000.0))
+
+    evidence = agent_watch._latest_cached_upstream_evidence(
+        agent_name="codex",
+        reports_root=reports_root,
+    )
+
+    assert evidence is not None
+    assert evidence["version"] == "0.136.0"
+    assert evidence["report_timestamp_utc"] == "2026-06-02T12:00:00+00:00"
+
+
 def test_hermes_state_db_latest_session_schema_fingerprint(tmp_path):
     db_path = tmp_path / "state.db"
     conn = sqlite3.connect(db_path)
@@ -482,6 +572,19 @@ def test_compatibility_supports_latest_with_fresh_matching_evidence():
     assert result["scope"] == "latest"
     assert result["supports_latest"] is True
     assert result["confidence"] == "high"
+    assert result["latest_status"] == "current_fetch_known"
+
+
+def test_compatibility_cached_latest_does_not_hide_degraded_source():
+    result = _compat(
+        upstream_source_status="cached_prior_report",
+        upstream_errors=[{"error": "fetch_failed", "detail": "HTTP Error 429: too many requests"}],
+        fresh_evidence_source="latest_prebump_report",
+    )
+    assert result["latest_status"] == "cached_latest"
+    assert "latest_source_degraded" in result["blockers"]
+    assert result["verdict"] == "supports_installed_only"
+    assert result["supports_latest"] is False
 
 
 def test_compatibility_supports_latest_when_installed_is_latest_candidate():
@@ -496,6 +599,18 @@ def test_compatibility_supports_latest_when_installed_is_latest_candidate():
     assert result["verdict"] == "supports_latest"
     assert result["scope"] == "latest"
     assert result["supports_latest"] is True
+
+
+def test_compatibility_does_not_support_latest_when_installed_lags_upstream():
+    result = _compat(
+        verified="0.136.0",
+        installed="0.135.0",
+        upstream="0.136.0",
+        fresh_evidence_source="latest_prebump_report",
+    )
+    assert result["verdict"] == "supports_installed_only"
+    assert result["scope"] == "installed"
+    assert result["supports_latest"] is False
 
 
 def test_compatibility_installed_equals_latest_without_prebump_is_installed_only():
@@ -571,6 +686,30 @@ def test_compatibility_monitoring_broken_clears_installed_support():
     assert result["verdict"] == "monitoring_broken"
     assert result["scope"] == "none"
     assert result["supports_installed"] is False
+
+
+def test_cursor_fixture_baseline_is_available_for_prebump_diffing():
+    repo = _Path(__file__).resolve().parents[2]
+    matrix_obj = (repo / "docs" / "agent-support" / "agent-support-matrix.yml").read_text()
+    evidence = []
+    in_cursor = False
+    in_evidence = False
+    for raw in matrix_obj.splitlines():
+        if raw.startswith("  cursor:"):
+            in_cursor = True
+            in_evidence = False
+            continue
+        if in_cursor and raw.startswith("  ") and not raw.startswith("    ") and not raw.startswith("  cursor:"):
+            break
+        if in_cursor and raw.strip() == "evidence_fixtures:":
+            in_evidence = True
+            continue
+        if in_cursor and in_evidence and raw.strip().startswith("- "):
+            evidence.append(raw.strip().removeprefix("- ").strip('"'))
+
+    baseline = agent_watch._baseline_type_keys_for_agent("cursor", evidence)
+    assert "user" in baseline
+    assert "assistant" in baseline
 
 
 def test_compatibility_schema_drift_beats_no_version_drift():
@@ -765,6 +904,90 @@ def test_weekly_report_uses_prebump_even_when_local_sample_is_fresh(tmp_path, mo
     assert codex["compatibility"]["latest_real_session_evidence"] is True
     assert codex["compatibility"]["verdict"] == "supports_latest"
     assert codex["compatibility"]["scope"] == "latest"
+
+
+def test_weekly_report_uses_cached_upstream_after_rate_limit_without_hiding_error(tmp_path, monkeypatch):
+    sample_root = tmp_path / "sessions"
+    sample_root.mkdir()
+    sample = sample_root / "rollout-fresh.jsonl"
+    sample.write_text(_json.dumps({"type": "session_meta", "payload": {"id": "s1"}}) + "\n")
+
+    report_root = tmp_path / "out"
+    old_dir = report_root / "20260601-120000Z"
+    old_dir.mkdir(parents=True)
+    (old_dir / "report.json").write_text(_json.dumps({
+        "timestamp_utc": "2026-06-01T12:00:00+00:00",
+        "mode": "weekly",
+        "results": {
+            "codex": {
+                "upstream": {
+                    "parsed_version": "0.136.0",
+                    "source_used": {
+                        "ok": True,
+                        "version": "0.136.0",
+                        "url": "https://api.github.com/repos/openai/codex/releases/latest",
+                    },
+                },
+            },
+        },
+    }))
+
+    cfg = {
+        "report_root": str(report_root),
+        "agents": {
+            "codex": {
+                "cadence": {"weekly": True},
+                "installed_version_cmd": ["codex", "--version"],
+                "upstream": [{"kind": "github_latest_release", "repo": "openai/codex"}],
+                "risk_keywords": {"schema": [], "usage": []},
+                "weekly": {
+                    "local_schema": {
+                        "kind": "jsonl_newest",
+                        "roots": [str(sample_root)],
+                        "glob": "*.jsonl",
+                        "max_lines": 100,
+                    }
+                },
+            }
+        },
+    }
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(_json.dumps(cfg))
+
+    rate_limited = {
+        "ok": False,
+        "error": "fetch_failed",
+        "detail": "HTTP Error 429: too many requests",
+        "url": "https://api.github.com/repos/openai/codex/releases/latest",
+    }
+
+    monkeypatch.chdir(_Path(__file__).resolve().parents[2])
+    monkeypatch.setattr(
+        agent_watch,
+        "_run_installed_version_cmds",
+        lambda _cfg: (["codex", "--version"], 0, "codex 0.136.0", "", "0.136.0"),
+    )
+    monkeypatch.setattr(
+        agent_watch,
+        "_resolve_cli_binary_mtime",
+        lambda _argv: ("/tmp/fake-codex", None),
+    )
+    monkeypatch.setattr(agent_watch, "_fetch_upstream", lambda _source, timeout: rate_limited)
+
+    rc = agent_watch.main(["--mode", "weekly", "--config", str(cfg_path)])
+    assert rc == 0
+    report_path = sorted(p for p in report_root.glob("*/report.json") if p.parent != old_dir)[-1]
+    report = _json.loads(report_path.read_text())
+    codex = report["results"]["codex"]
+    assert codex["upstream"]["parsed_version"] == "0.136.0"
+    assert codex["upstream"]["source_status"] == "cached_prior_report"
+    assert codex["upstream"]["source_used"]["kind"] == "cached_prior_report"
+    assert codex["upstream"]["source_used"]["cached_source_used"]["ok"] is True
+    assert codex["upstream"]["errors"] == [rate_limited]
+    assert codex["risk"]["monitoring_failed"] is False
+    assert codex["compatibility"]["latest_status"] == "cached_latest"
+    assert "latest_source_degraded" in codex["compatibility"]["blockers"]
+    assert codex["compatibility"]["verdict"] != "latest_unknown"
 
 
 def test_daily_report_does_not_use_weekly_compatibility_blockers(tmp_path, monkeypatch, capsys):
