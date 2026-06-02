@@ -3173,7 +3173,9 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "shell" && $0.messageID == "call_hermes_1" })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_result && $0.toolName == "shell" && ($0.toolOutput ?? "").contains("/tmp/hermes-repo") })
         XCTAssertTrue(full.events.contains { $0.kind == .meta && ($0.text ?? "").contains("brief reasoning") })
-        XCTAssertTrue(full.events.contains { $0.kind == .meta && $0.role == "session_meta" })
+        let sessionMeta = try XCTUnwrap(full.events.first { $0.kind == .meta && $0.role == "session_meta" })
+        XCTAssertNil(sessionMeta.text)
+        XCTAssertFalse(sessionMeta.rawJSON.isEmpty)
     }
 
     func testHermesParserKeepsOfflinePathMetadata() throws {

@@ -523,7 +523,18 @@ struct HermesStateDBReader {
                                            rawJSON: raw))
             default:
                 if (role == "session_meta") || (content?.isEmpty == false) {
-                    events.append(event(id: "hermes-\(rowID)-meta", timestamp: date, kind: .meta, role: role, text: content ?? "", rawJSON: raw))
+                    events.append(SessionEvent(id: "hermes-\(rowID)-meta",
+                                               timestamp: date,
+                                               kind: .meta,
+                                               role: role,
+                                               text: content,
+                                               toolName: nil,
+                                               toolInput: nil,
+                                               toolOutput: nil,
+                                               messageID: nil,
+                                               parentID: nil,
+                                               isDelta: false,
+                                               rawJSON: raw))
                 }
             }
         }
