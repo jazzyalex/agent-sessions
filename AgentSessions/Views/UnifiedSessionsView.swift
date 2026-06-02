@@ -62,6 +62,12 @@ enum UnifiedRowsStabilityPolicy {
     }
 }
 
+enum UnifiedTableIdentityPolicy {
+    static func tableIdentity(columnLayoutID: UUID) -> String {
+        "unified-table-\(columnLayoutID.uuidString)"
+    }
+}
+
 private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
@@ -860,7 +866,7 @@ struct UnifiedSessionsView: View {
 
             // Removed separate Refresh column to avoid churn
 	        }
-	        .id("unified-table-\(columnLayoutID.uuidString)-\(activeCodexSessions.activeMembershipVersion)")
+	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID))
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
             .tint(UnifiedSessionsStyle.selectionAccent)
 	        .environment(\.defaultMinListRowHeight, 28)
