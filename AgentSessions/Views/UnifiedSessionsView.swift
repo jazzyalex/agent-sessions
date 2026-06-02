@@ -68,6 +68,44 @@ enum UnifiedTableIdentityPolicy {
     }
 }
 
+enum UnifiedHierarchyCommandPolicy {
+    static func collapsedParentsAfterCollapseAll(
+        existing: Set<String>,
+        visibleParentIDs: Set<String>
+    ) -> Set<String> {
+        existing.union(visibleParentIDs)
+    }
+
+    static func collapsedParentsAfterExpandAll(
+        existing: Set<String>,
+        visibleParentIDs: Set<String>
+    ) -> Set<String> {
+        existing.subtracting(visibleParentIDs)
+    }
+
+    static func parentIDForSelectedHierarchyChild(
+        rowIDs: [String],
+        rowMeta: [String: SubagentRowMeta],
+        selectedID: String?
+    ) -> String? {
+        guard let selectedID,
+              let selectedIndex = rowIDs.firstIndex(of: selectedID),
+              selectedIndex > 0,
+              rowMeta[selectedID]?.depth ?? 0 > 0 else {
+            return nil
+        }
+
+        for index in stride(from: selectedIndex - 1, through: 0, by: -1) {
+            let candidateID = rowIDs[index]
+            let metadata = rowMeta[candidateID]
+            if metadata?.depth == 0, metadata?.hasChildren == true {
+                return candidateID
+            }
+        }
+        return nil
+    }
+}
+
 private extension Notification.Name {
     static let collapseInlineSearchIfEmpty = Notification.Name("UnifiedSessionsCollapseInlineSearchIfEmpty")
 }
@@ -1579,16 +1617,34 @@ struct UnifiedSessionsView: View {
                 })
             }
 
+            private var parentIDForSelectedHierarchyChild: String? {
+                UnifiedHierarchyCommandPolicy.parentIDForSelectedHierarchyChild(
+                    rowIDs: cachedRows.map(\.id),
+                    rowMeta: hierarchyRowMeta,
+                    selectedID: selection
+                )
+            }
+
             private func collapseAllHierarchyParents() {
                 let parentIDs = currentExpandableParentIDs
                 guard !parentIDs.isEmpty else { return }
-                collapsedParents = parentIDs
+                if let parentID = parentIDForSelectedHierarchyChild,
+                   let parent = cachedRows.first(where: { $0.id == parentID }) {
+                    setActiveSelection(parentID, source: parent.source, userInitiated: false)
+                }
+                collapsedParents = UnifiedHierarchyCommandPolicy.collapsedParentsAfterCollapseAll(
+                    existing: collapsedParents,
+                    visibleParentIDs: parentIDs
+                )
             }
 
             private func expandAllHierarchyParents() {
                 guard isHierarchyBrowsing else { return }
                 guard !collapsedParents.isEmpty else { return }
-                collapsedParents.removeAll()
+                collapsedParents = UnifiedHierarchyCommandPolicy.collapsedParentsAfterExpandAll(
+                    existing: collapsedParents,
+                    visibleParentIDs: currentExpandableParentIDs
+                )
             }
 
 		    private var tableSingleSelection: Binding<String?> {

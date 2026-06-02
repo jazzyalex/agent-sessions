@@ -64,6 +64,54 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
         XCTAssertFalse(beforeLivePoll.contains("activeMembership"))
     }
 
+    func testCollapseAllPreservesOffScopeCollapsedParents() {
+        let result = UnifiedHierarchyCommandPolicy.collapsedParentsAfterCollapseAll(
+            existing: ["off-scope-parent"],
+            visibleParentIDs: ["visible-parent"]
+        )
+
+        XCTAssertEqual(result, ["off-scope-parent", "visible-parent"])
+    }
+
+    func testExpandAllOnlyClearsVisibleCollapsedParents() {
+        let result = UnifiedHierarchyCommandPolicy.collapsedParentsAfterExpandAll(
+            existing: ["off-scope-parent", "visible-parent"],
+            visibleParentIDs: ["visible-parent"]
+        )
+
+        XCTAssertEqual(result, ["off-scope-parent"])
+    }
+
+    func testCollapseAllPromotesSelectedChildToVisibleParent() {
+        let rowMeta = [
+            "parent": SubagentRowMeta(depth: 0, hasChildren: true, childCount: 1),
+            "child": SubagentRowMeta(depth: 1, hasChildren: false, childCount: 0)
+        ]
+
+        let parentID = UnifiedHierarchyCommandPolicy.parentIDForSelectedHierarchyChild(
+            rowIDs: ["parent", "child"],
+            rowMeta: rowMeta,
+            selectedID: "child"
+        )
+
+        XCTAssertEqual(parentID, "parent")
+    }
+
+    func testCollapseAllDoesNotPromoteTopLevelSelection() {
+        let rowMeta = [
+            "parent": SubagentRowMeta(depth: 0, hasChildren: true, childCount: 1),
+            "child": SubagentRowMeta(depth: 1, hasChildren: false, childCount: 0)
+        ]
+
+        let parentID = UnifiedHierarchyCommandPolicy.parentIDForSelectedHierarchyChild(
+            rowIDs: ["parent", "child"],
+            rowMeta: rowMeta,
+            selectedID: "parent"
+        )
+
+        XCTAssertNil(parentID)
+    }
+
     func testDoesNotClearSelectionWhileDatasetIsChurning() {
         XCTAssertFalse(
             UnifiedTableSelectionPolicy.shouldClearCanonicalSelectionOnTableDeselection(
