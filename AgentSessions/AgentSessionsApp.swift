@@ -785,12 +785,6 @@ extension AgentSessionsApp {
         AppWindowRouter.showAgentSessionsWindow()
     }
 
-    @MainActor
-    private func handleMenuBarCompactPresentationChange(_ isCompact: Bool) {
-        guard isCompact else { return }
-        handleMenuBarVisibilityChange(false)
-    }
-
     private func setupMenuBarDefaultsObserverIfNeeded() {
         guard !AppRuntime.isRunningTests else { return }
         guard menuBarDefaultsObserver == nil else { return }
@@ -862,9 +856,6 @@ extension AgentSessionsApp {
                                               claudeStatus: claudeUsageModel)
         controller.visibilityDidChange = { [self] isVisible in
             handleMenuBarVisibilityChange(isVisible)
-        }
-        controller.compactPresentationDidChange = { [self] isCompact in
-            handleMenuBarCompactPresentationChange(isCompact)
         }
         statusItemController = controller
     }

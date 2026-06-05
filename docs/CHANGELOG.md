@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Bug Fixes
+- Menu bar: Kept the live status label visible instead of collapsing it to a generic stack icon when usage or session counts exceed a narrow width threshold.
 
 ## [3.9] - 2026-06-04
 ### Features
