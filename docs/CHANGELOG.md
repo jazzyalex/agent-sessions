@@ -3,17 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Features
+- Limits Widget: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.
+- Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
 - Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.
 - Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.
+
+### Improvements
+- Limits Widget: Shows Codex and Claude on separate rows, adapts reset times to the available width, and keeps controls out of the way until hover.
+- Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
 - Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.
-- Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.
 - Agent formats: Preserved empty Hermes session metadata records during parsing and added explicit compatibility verdicts to agent-support monitoring reports.
 - Agent formats: Added real-session prebump drivers for OpenCode, OpenClaw, Cursor, and Hermes, and refreshed verified coverage for the 2026-06-02 Codex, Claude, Copilot, OpenCode, OpenClaw, Cursor, Hermes, and Pi binaries.
 - Agent formats: Added an official Cursor CLI latest-version source and expanded Cursor Desktop agent-window monitoring with fresh chat metadata evidence.
 - Agent formats: Refreshed Claude 2.1.161, Gemini 0.45.0, and Copilot 1.0.59 format coverage from fresh real-session probes.
-- Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
-- Agent Cockpit: Improved Limits mode with separate Codex and Claude rows, width-adaptive reset times, and a hover toolbar without the All filter pill.
-- Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
+
+### Bug Fixes
+- Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.
+- Unified Window: Kept Collapse All and Expand All scoped to visible hierarchy groups and preserved the parent selection when a selected child row is collapsed.
 
 ## [3.8.2] - 2026-05-28
 - Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.

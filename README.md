@@ -67,11 +67,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.8.1
+## What's New in 3.9
 
-**TL;DR** - Resume workflows now support Warp across every supported CLI agent.
+**TL;DR** - Limits Widget keeps Codex and Claude limits visible without using menu bar space.
 
-**Highlights:** Choose Terminal.app, iTerm2, or Warp once in Preferences, and Agent Sessions uses that shared terminal preference for supported Resume launches. Warp launches use terminal tab configs so Claude, Codex, Cursor, Gemini, GitHub Copilot, Hermes, OpenCode, and Pi Resume commands open in the intended terminal tab.
+**Highlights:** MacBook users can pin a tiny always-on limits window instead of opening the full Agent Cockpit or relying on a crowded menu bar item. It shows Codex and Claude 5h/weekly usage, adapts reset times to the available width, and pairs with new shared limit notifications for approaching, exhausted, and reset limits.
+
+Also new in 3.9:
+- Unified Window controls to collapse or expand visible session hierarchy groups.
+- A persistent Transcript Window toggle for list-focused browsing.
+- Saved-only session counts when the saved filter is active.
+- A fix for live-session refreshes jumping the session list back to the top.
+- A fix that keeps Collapse All and Expand All scoped to visible hierarchy groups.
+- Refreshed agent-format support for current Codex, Claude, Gemini, Copilot, OpenCode, Hermes, OpenClaw, Cursor, and Pi builds, including stronger real-session verification and Cursor Desktop metadata monitoring.
 
 ## Core Features
 
@@ -85,7 +93,7 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
-- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions.
+- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with a compact Limits Widget for always-on Codex and Claude usage visibility.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
@@ -93,6 +101,9 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
+  <p style="margin:0 0 0px 0;"><em>Limits Widget for Codex and Claude usage</em></p>
+  <img src="docs/assets/limits-widget-light.png" alt="Small Limits Widget showing Codex and Claude 5h and weekly usage" width="100%" style="max-width:700px;border-radius:8px;margin:5px 0 22px;"/>
+
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
 </div>

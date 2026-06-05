@@ -306,7 +306,7 @@
   </header>
   <div class="container">
     <h1 style="font-size: 24px;">Session Management for Codex, Claude, OpenCode, Cursor, Copilot, Pi and Gemini</h1>
-    <p><strong>Agent Sessions</strong> is a local-first Mac app for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>. Search local Codex, Claude, OpenCode, Cursor, Copilot, Pi, Gemini, Hermes, and OpenClaw histories, inspect transcripts and images, then resume supported CLI sessions in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, or <strong>Warp</strong>. <strong>Agent Cockpit</strong> adds a live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions.</p>
+    <p><strong>Agent Sessions</strong> is a local-first Mac app for session history across <strong>CLI tools, desktop apps, and app-bundled agent commands</strong>. Search local Codex, Claude, OpenCode, Cursor, Copilot, Pi, Gemini, Hermes, and OpenClaw histories, inspect transcripts and images, then resume supported CLI sessions in <strong>Terminal.app</strong>, <strong>iTerm2</strong>, or <strong>Warp</strong>. <strong>Agent Cockpit</strong> adds a live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode sessions, plus a tiny Limits Widget for always-on Codex and Claude usage visibility.</p>
     <div class="hero-row" style="margin-bottom: 20px;">
       <span
         style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-weight: 600; color: #4B5563; font-size: 0.8em; font-variant: small-caps; letter-spacing: 0;">local
@@ -332,6 +332,9 @@
         Follow on X
       </a>
     </div>
+
+    <h3 style="margin-top:34px;">What's New in 3.9</h3>
+    <p>The new Limits Widget keeps Codex and Claude 5h/weekly usage visible in a tiny always-on window, useful on MacBooks where the menu bar is already crowded and the full Agent Cockpit is more than you need. 3.9 also adds shared limit notifications, Unified Window collapse/expand commands, a persistent Transcript Window toggle, Saved-only count labels, scroll-position fixes during live refresh, safer hierarchy collapse behavior, and refreshed agent-format support for current Codex, Claude, Gemini, Copilot, OpenCode, Hermes, OpenClaw, Cursor, and Pi builds.</p>
 
     <h3 style="margin-top:40px;">Install with Homebrew Tap</h3>
 
@@ -385,9 +388,10 @@ brew install --cask agent-sessions</code></pre>
         </ul>
       </div>
       <div class="card full-width">
-        <h3>Agent Cockpit</h3>
-        <p>Agent Cockpit is the live command center for active iTerm2 Codex CLI, Claude CLI, and OpenCode CLI sessions, with grouped
-          active and waiting visibility, quick focus jumps, and compact/full cockpit modes.</p>
+        <h3>Limits Widget and Agent Cockpit</h3>
+        <p>The Limits Widget is a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limits visible without spending menu bar space or opening the full Cockpit. Agent Cockpit still provides grouped active and waiting visibility, quick focus jumps, and compact/full cockpit modes.</p>
+        <p style="text-align:center; color:#586069; font-size:14px; margin:18px 0 0;"><em>Limits Widget</em></p>
+        <img src="assets/limits-widget-light.png" alt="Small Limits Widget showing Codex and Claude 5h and weekly usage" style="width:100%; max-width:700px; margin:5px auto 18px; display:block; border-radius:8px;">
         <div class="cockpit-grid">
           <img src="assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode">
           <img src="assets/screenshot-cockpit-dark.png" alt="Compact cockpit menu showing grouped active sessions in Dark Mode">
@@ -404,8 +408,7 @@ brew install --cask agent-sessions</code></pre>
       </div>
       <div class="card">
         <h3>Usage Tracking</h3>
-        <p>Track Codex CLI and Claude CLI usage in-app and in the menu bar. Power-aware probing and refresh cadence reduce idle
-          load and energy spikes.</p>
+        <p>Track Codex CLI and Claude CLI usage in-app, in the menu bar, or in the Limits Widget. Shared notifications can warn when 5h or weekly limits are approaching or exhausted.</p>
       </div>
       <div class="card">
         <h3>Analytics</h3>
