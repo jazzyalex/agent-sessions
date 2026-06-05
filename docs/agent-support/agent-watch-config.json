@@ -389,7 +389,20 @@
         ["~/Applications/Cursor.app/Contents/Resources/app/bin/cursor", "--version"]
       ],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.cursor.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://cursor.com/install",
+          "pattern": "downloads\\.cursor\\.com/lab/([^/]+)/\\$\\{OS\\}/\\$\\{ARCH\\}/agent-cli-package\\.tar\\.gz",
+          "note": "Official Cursor CLI installer script; do not use the unrelated npm cursor-agent package."
+        },
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://formulae.brew.sh/cask/cursor-cli",
+          "pattern": "downloads\\.cursor\\.com/lab/([^/]+)/darwin/(?:arm64|x64)/agent-cli-package\\.tar\\.gz",
+          "note": "Homebrew cask page fallback for Cursor CLI latest build."
+        }
+      ],
       "risk_keywords": {
         "schema": ["session", "transcript", "json", "jsonl", "agent-transcripts", "format", "tool_result", "thinking"],
         "usage": []

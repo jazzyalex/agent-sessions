@@ -171,6 +171,15 @@ recorded.
 Auth notes:
 - Copilot prebump accepts `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN`; `GH_TOKEN=$(gh auth token) ./scripts/agent_watch.py --mode prebump --agent copilot` is the least intrusive local path when GitHub CLI auth is already available.
 - Claude sandbox prebump requires sandbox-visible API/credential auth. If it fails with `Not logged in` but real-home Claude is authenticated, generate a real-home `claude -p --verbose --output-format stream-json ...` sample and cite that weekly evidence instead of treating the sandbox auth failure as session-format drift.
+- Cursor latest-source monitoring uses the official `https://cursor.com/install`
+  installer script and a Homebrew `cursor-cli` cask fallback. The unrelated npm
+  package named `cursor-agent` is not an official Cursor CLI source.
+- Cursor Desktop agent-window sessions are covered through the same
+  `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` transcripts plus
+  `~/.cursor/chats/*/*/store.db` metadata. The weekly `cursor_sqlite_probe`
+  records the newest Desktop chat DB's `agentId`, `createdAt`, mode/model fields,
+  mtime, and meta-key schema so fresh Desktop-only windows remain visible even
+  when the JSONL transcript is absent or older.
 - Pi prebump runs `pi --print --mode json` with sandboxed `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR`, copying `~/.pi/agent/auth.json` and `settings.json` when env-var auth is not used. The fresh session must land under `.pi/agent/sessions/**/*.jsonl` and include `session` and `message` events.
 
 Exit 0 is required. Exit 2 means the fresh session does not match baseline.

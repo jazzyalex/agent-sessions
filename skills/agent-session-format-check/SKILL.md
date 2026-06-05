@@ -216,6 +216,19 @@ The weekly scan fingerprints JSONL transcripts only. The SQLite probe (`cursor_s
 
 **Note:** Some machines may have a stale PATH shim for `cursor` even when Cursor.app is installed. The weekly monitor tries the PATH command first, then falls back to the embedded app CLI at `/Applications/Cursor.app/Contents/Resources/app/bin/cursor --version`.
 
+Cursor CLI latest-source truth comes from the official installer script at
+`https://cursor.com/install`, which embeds `downloads.cursor.com/lab/<build>/...`
+agent CLI package URLs. The Homebrew `cursor-cli` cask page is a fallback. Do
+not use the unrelated npm package named `cursor-agent`.
+
+Cursor Desktop agent windows use the same local surfaces as Cursor CLI:
+`~/.cursor/projects/*/agent-transcripts/**/*.jsonl` for transcript content and
+`~/.cursor/chats/*/*/store.db` for chat metadata. The weekly
+`cursor_sqlite_probe` must keep reporting the newest Desktop chat DB's
+`agentId`, `createdAt`, mode/model fields, mtime, and meta-key schema so fresh
+Desktop-only windows are visible even when their JSONL transcript is absent or
+older.
+
 ---
 
 ## 4  Discovery Path Contracts

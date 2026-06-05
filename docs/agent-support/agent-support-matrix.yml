@@ -22,7 +22,9 @@ notes:
   - "2026-05-12 follow-up: bumped Codex 0.129.0->0.130.0, Claude 2.1.132->2.1.140, Copilot 1.0.43->1.0.46, and OpenCode 1.14.41->1.14.48. Fresh Codex and Copilot prebump sessions matched baseline; Claude 2.1.140 matched baseline from a real-home headless transcript after sandbox auth remained unavailable; OpenCode local SQLite evidence matched baseline. No parser, UI, or UX changes were needed."
   - "2026-05-19 format checks: bumped Codex 0.130.0->0.131.0, Claude 2.1.140->2.1.144, Gemini 0.41.2->0.42.0, Copilot 1.0.46->1.0.49, OpenCode 1.14.48->1.15.5, and OpenClaw 2026.5.7->2026.5.18. Fresh prebump or local samples matched baseline after adding OpenClaw custom_message runtime-context coverage to the normal fixture baseline. No parser, UI, or UX changes were needed."
   - "2026-05-28 format check: bumped Codex 0.131.0->0.135.0, Claude 2.1.144->2.1.156, Gemini 0.42.0->0.44.1, Copilot 1.0.49->1.0.55, OpenCode 1.15.5->1.15.12, Hermes 0.11.0->0.15.0, OpenClaw 2026.5.18->2026.5.27, and Pi 0.74.0->0.76.0. Fresh local, capture, prebump, or Hermes state.db evidence matched baseline after adding Pi prebump support, Cursor fixture coverage, OpenClaw trajectory exclusion, Hermes state.db parsing, and weekly-prebump freshness bridging. Claude was verified after the five-hour reset with a successful standard-context Sonnet transcript."
-  - "2026-06-02 format check: bumped Codex 0.135.0->0.136.0, Claude 2.1.156->2.1.160, Copilot 1.0.55->1.0.58, OpenCode 1.15.12->1.15.13, Hermes 0.15.0->0.15.1, OpenClaw 2026.5.27->2026.5.28, Cursor 3.5.38->2026.6.2, and Pi 0.76.0->0.78.0. Fresh real-session prebump evidence matched baseline for every configured active agent after adding real-session drivers for OpenCode, OpenClaw, Cursor, and Hermes. Cursor remains latest_unknown because Cursor Agent reports already up to date but does not expose an independent latest-version source for monitoring."
+  - "2026-06-02 format check: bumped Codex 0.135.0->0.136.0, Claude 2.1.156->2.1.160, Copilot 1.0.55->1.0.58, OpenCode 1.15.12->1.15.13, Hermes 0.15.0->0.15.1, OpenClaw 2026.5.27->2026.5.28, Cursor 3.5.38->2026.6.2, and Pi 0.76.0->0.78.0. Fresh real-session prebump evidence matched baseline for every configured active agent after adding real-session drivers for OpenCode, OpenClaw, Cursor, and Hermes."
+  - "2026-06-03 Cursor follow-up: Cursor CLI latest-source monitoring now uses the official cursor.com/install installer script and Homebrew cursor-cli cask fallback; both identify latest build 2026.06.02-8c11d9f, normalized to 2026.6.2. Cursor Desktop agent-window store.db metadata is monitored by cursor_sqlite_probe with agentId, createdAt, mode, model, and meta-key schema evidence."
+  - "2026-06-03 format follow-up: bumped Claude 2.1.160->2.1.161, Gemini 0.44.1->0.45.0, and Copilot 1.0.58->1.0.59. Fresh real-session prebump evidence matched baseline after adding Claude user.promptSource fixture coverage."
 agents:
   codex_cli:
     max_verified_version: "0.136.0"
@@ -32,14 +34,14 @@ agents:
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.160"
+    max_verified_version: "2.1.161"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
   gemini_cli:
-    max_verified_version: "0.44.1"
+    max_verified_version: "0.45.0"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/gemini/small.json"
@@ -47,7 +49,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/gemini/jsonl_v040.jsonl"
       - "Resources/Fixtures/stage0/agents/gemini/schema_drift.json"
   copilot_cli:
-    max_verified_version: "1.0.58"
+    max_verified_version: "1.0.59"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"

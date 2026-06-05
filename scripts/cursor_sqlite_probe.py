@@ -16,10 +16,21 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 REQUIRED_META_KEYS = {"agentId", "name", "createdAt"}
+
+
+def _epoch_ms_to_utc_iso(value) -> str | None:
+    try:
+        ms = float(value)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
 
 
 def find_newest_store_db() -> Path | None:
@@ -31,6 +42,11 @@ def find_newest_store_db() -> Path | None:
 
 
 def probe(db_path: Path) -> dict:
+    try:
+        db_mtime = db_path.stat().st_mtime
+    except OSError:
+        db_mtime = None
+
     try:
         con = sqlite3.connect(str(db_path))
     except Exception as e:
@@ -69,7 +85,27 @@ def probe(db_path: Path) -> dict:
             "exit_code": 3,
         }
 
-    return {"ok": True, "db_path": str(db_path), "meta_keys": meta_keys, "error": None, "exit_code": 0}
+    agent_id = meta.get("agentId")
+    created_at = meta.get("createdAt")
+    return {
+        "ok": True,
+        "db_path": str(db_path),
+        "db_mtime_epoch": db_mtime,
+        "db_mtime_utc": datetime.fromtimestamp(db_mtime, tz=timezone.utc).isoformat() if db_mtime else None,
+        "agent_id": agent_id if isinstance(agent_id, str) else None,
+        "created_at_epoch_ms": created_at if isinstance(created_at, (int, float)) else None,
+        "created_at_utc": _epoch_ms_to_utc_iso(created_at),
+        "mode": meta.get("mode") if isinstance(meta.get("mode"), str) else None,
+        "name": meta.get("name") if isinstance(meta.get("name"), str) else None,
+        "last_used_model": meta.get("lastUsedModel") if isinstance(meta.get("lastUsedModel"), str) else None,
+        "meta_keys": meta_keys,
+        "schema_fingerprint": {
+            "type_counts": {"meta": 1},
+            "type_keys": {"meta": meta_keys},
+        },
+        "error": None,
+        "exit_code": 0,
+    }
 
 
 def main() -> int:
