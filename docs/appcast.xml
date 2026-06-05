@@ -3,29 +3,37 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.8.2</title>
-            <pubDate>Thu, 28 May 2026 20:55:14 -0700</pubDate>
+            <title>3.9</title>
+            <pubDate>Thu, 04 Jun 2026 19:43:52 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.8.2</h2>
+<h2>What&#x27;s New in 3.9</h2>
+<h3>Features</h3>
+<ul>
+<li>Limits Widget: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.</li>
+<li>Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.</li>
+<li>Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.</li>
+<li>Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.</li>
+</ul>
 <h3>Improvements</h3>
 <ul>
-<li>Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.</li>
-<li>Session list: Fixed the toolbar Saved filter so it toggles saved-only sessions even when the Save column is hidden.</li>
-<li>Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.</li>
+<li>Limits Widget: Shows Codex and Claude on separate rows, adapts reset times to the available width, and keeps controls out of the way until hover.</li>
+<li>Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.</li>
+<li>Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.</li>
+<li>Agent formats: Preserved empty Hermes session metadata records during parsing and added explicit compatibility verdicts to agent-support monitoring reports.</li>
+<li>Agent formats: Added real-session prebump drivers for OpenCode, OpenClaw, Cursor, and Hermes, and refreshed verified coverage for the 2026-06-02 Codex, Claude, Copilot, OpenCode, OpenClaw, Cursor, Hermes, and Pi binaries.</li>
+<li>Agent formats: Added an official Cursor CLI latest-version source and expanded Cursor Desktop agent-window monitoring with fresh chat metadata evidence.</li>
 </ul>
-<h3>Reminder: What You Got in 3.8</h3>
+<h3>Bug Fixes</h3>
 <ul>
-<li>Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.</li>
-<li>Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.</li>
-<li>Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.</li>
-<li>Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.</li>
+<li>Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.</li>
+<li>Unified Window: Kept Collapse All and Expand All scoped to visible hierarchy groups and preserved the parent selection when a selected child row is collapsed.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.8.2</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9</a></p>
             ]]></description>
-            <sparkle:version>48</sparkle:version>
-            <sparkle:shortVersionString>3.8.2</sparkle:shortVersionString>
+            <sparkle:version>49</sparkle:version>
+            <sparkle:shortVersionString>3.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.8.2/AgentSessions-3.8.2.dmg" length="17680366" type="application/octet-stream" sparkle:edSignature="swejULvDOG7Z4Ab2e35e1mhZJeQoNs1nn0N8c+fO1y+O19vdnOJaEC9ZUv1EwYuPFoIXfwN4qYtslJ3ZiogwDw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9/AgentSessions-3.9.dmg" length="17928799" type="application/octet-stream" sparkle:edSignature="RzZct4LIb1lXSxfAb9bHTex927kj7mQKj2gzLDhMy53V1ENIPauPeQCuHV/f0zeJjgulYjWpWEwlZ5lP9mDUDg=="/>
         </item>
     </channel>
 </rss>
