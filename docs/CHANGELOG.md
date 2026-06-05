@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.9] - 2026-06-04
 ### Features
 - Limits Widget: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.
 - Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
