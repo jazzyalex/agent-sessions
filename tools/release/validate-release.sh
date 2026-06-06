@@ -39,8 +39,31 @@ info() {
   blue "ℹ️  $*"
 }
 
-# Canonical agent list
-AGENTS=("Codex CLI" "Claude Code" "Gemini CLI" "GitHub Copilot CLI" "OpenCode")
+load_agent_list() {
+  local source="$REPO_ROOT/docs/agent-support/public-agents.json"
+  if [[ -f "$source" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$source" <<'PYEOF'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+
+for agent in data.get("agents", []):
+    name = agent.get("public_name")
+    if name:
+        print(name)
+PYEOF
+  else
+    printf '%s\n' "Codex" "Claude" "OpenCode" "Cursor" "GitHub Copilot CLI" "Pi" "Gemini CLI" "Hermes" "OpenClaw"
+  fi
+}
+
+# Canonical public agent list, shared with release documentation checks.
+AGENTS=()
+while IFS= read -r agent; do
+  [[ -n "$agent" ]] && AGENTS+=("$agent")
+done < <(load_agent_list)
 
 usage() {
   echo "Usage: $0 VERSION"

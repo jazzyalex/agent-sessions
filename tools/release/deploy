@@ -20,6 +20,7 @@ red(){ printf "\033[31m%s\033[0m\n" "$*"; }
 # Structured logging
 LOG_FILE=""
 STATE_FILE="/tmp/deploy-state.json"
+QA_STAMP_FILE="${TMPDIR:-/tmp}/agent-sessions-release-qa.json"
 
 init_logging() {
   local context="${1:-deploy}"
@@ -32,10 +33,13 @@ save_state() {
   local version="$1"
   local step="$2"
   local timestamp=$(date -Iseconds)
+  local head
+  head=$(git rev-parse HEAD)
   cat > "$STATE_FILE" <<EOF
 {
   "version": "$version",
   "last_step": "$step",
+  "head": "$head",
   "timestamp": "$timestamp",
   "log_file": "$LOG_FILE"
 }
@@ -59,6 +63,149 @@ clear_state() {
 log() {
   local level="$1"; shift
   echo "[$(date -Iseconds)] [$level] $*"
+}
+
+current_project_version() {
+  grep -m1 "MARKETING_VERSION = " AgentSessions.xcodeproj/project.pbxproj | sed 's/.*= \([^;]*\);/\1/' | tr -d ' '
+}
+
+write_qa_stamp() {
+  local version="$1"
+  local head="$2"
+  local started_at="$3"
+  local completed_at
+  completed_at=$(date -Iseconds)
+  VERSION_VALUE="$version" \
+  HEAD_VALUE="$head" \
+  STARTED_AT_VALUE="$started_at" \
+  COMPLETED_AT_VALUE="$completed_at" \
+  STAMP_PATH_VALUE="$QA_STAMP_FILE" \
+    python3 <<'PYEOF'
+import json
+import os
+from pathlib import Path
+
+stamp = {
+    "version": os.environ["VERSION_VALUE"],
+    "head": os.environ["HEAD_VALUE"],
+    "started_at": os.environ["STARTED_AT_VALUE"],
+    "completed_at": os.environ["COMPLETED_AT_VALUE"],
+    "checks": [
+        "git scope review",
+        "Debug xcodebuild",
+        "stable XCTest wrapper",
+        "Python release tests",
+        "warning sweep",
+    ],
+}
+path = Path(os.environ["STAMP_PATH_VALUE"])
+path.write_text(json.dumps(stamp, indent=2) + "\n")
+PYEOF
+}
+
+qa_stamp_head() {
+  if [[ "${SKIP_QA:-0}" == "1" ]]; then
+    git rev-parse HEAD
+    return 0
+  fi
+
+  if [[ ! -f "$QA_STAMP_FILE" ]]; then
+    return 1
+  fi
+
+  STAMP_PATH_VALUE="$QA_STAMP_FILE" \
+    python3 <<'PYEOF'
+import json
+import os
+
+with open(os.environ["STAMP_PATH_VALUE"], "r", encoding="utf-8") as fh:
+    stamp = json.load(fh)
+print(stamp.get("head", ""))
+PYEOF
+}
+
+require_qa_stamp() {
+  local version="$1"
+  local expected_head="${2:-}"
+  local dirty_mode="${3:-strict}"
+
+  if [[ "${SKIP_QA:-0}" == "1" ]]; then
+    yellow "SKIP_QA=1: proceeding without a fresh QA stamp"
+    return 0
+  fi
+
+  local tracked_dirty
+  local untracked_dirty
+  tracked_dirty=$({ git diff --name-only; git diff --cached --name-only; } | sort -u)
+  untracked_dirty=$(git ls-files --others --exclude-standard)
+  if [[ -n "$tracked_dirty" ]] || [[ -n "$untracked_dirty" ]]; then
+    if [[ "$dirty_mode" == "allow-appcast" && "$tracked_dirty" == "docs/appcast.xml" && -z "$untracked_dirty" ]]; then
+      yellow "Resume checkpoint has expected pending docs/appcast.xml changes."
+    else
+      red "ERROR: Release requires the same clean working tree that was QA-stamped."
+      git status --short
+      exit 2
+    fi
+  fi
+
+  if [[ ! -f "$QA_STAMP_FILE" ]]; then
+    red "ERROR: No release QA stamp found."
+    red "Run: tools/release/deploy qa --version $version"
+    red "Or explicitly bypass with SKIP_QA=1 tools/release/deploy release $version"
+    exit 2
+  fi
+
+  local current_head
+  current_head=$(git rev-parse HEAD)
+  if [[ -z "$expected_head" ]]; then
+    expected_head="$current_head"
+  fi
+
+  STAMP_PATH_VALUE="$QA_STAMP_FILE" \
+  EXPECTED_VERSION="$version" \
+  EXPECTED_HEAD="$expected_head" \
+    python3 <<'PYEOF'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+path = os.environ["STAMP_PATH_VALUE"]
+expected_version = os.environ["EXPECTED_VERSION"]
+expected_head = os.environ["EXPECTED_HEAD"]
+
+try:
+    with open(path, "r", encoding="utf-8") as fh:
+        stamp = json.load(fh)
+except Exception as exc:
+    print(f"ERROR: Could not read QA stamp {path}: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+errors = []
+if stamp.get("version") != expected_version:
+    errors.append(f"stamp version {stamp.get('version')!r} != {expected_version!r}")
+if stamp.get("head") != expected_head:
+    errors.append(f"stamp head {stamp.get('head')!r} != expected release HEAD {expected_head!r}")
+
+completed = stamp.get("completed_at", "")
+try:
+    completed_dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+    if completed_dt.tzinfo is None:
+        completed_dt = completed_dt.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - completed_dt.astimezone(timezone.utc)).total_seconds()
+    if age_seconds > 24 * 60 * 60:
+        errors.append("stamp is older than 24 hours")
+except Exception:
+    errors.append(f"stamp completed_at is invalid: {completed!r}")
+
+if errors:
+    print("ERROR: Release QA stamp is not valid:", file=sys.stderr)
+    for error in errors:
+        print(f"  - {error}", file=sys.stderr)
+    sys.exit(2)
+PYEOF
+
+  green "✓ Release QA stamp valid for $version at $expected_head"
 }
 
 count_lines() {
@@ -382,6 +529,109 @@ Why: Version bump for $NEW_VERSION release"
 }
 
 # ============================================================================
+# SUBCOMMAND: qa
+# ============================================================================
+
+cmd_qa() {
+  shift # remove 'qa' from args
+  local VERSION=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version)
+        VERSION="${2:-}"
+        shift 2
+        ;;
+      -*)
+        red "ERROR: Unknown option: $1"
+        echo "Usage: tools/release/deploy qa [--version VERSION]"
+        exit 1
+        ;;
+      *)
+        VERSION="$1"
+        shift
+        ;;
+    esac
+  done
+
+  check_dependencies git xcodebuild python3
+  init_logging "release-qa"
+
+  if [[ -z "$VERSION" ]]; then
+    VERSION=$(current_project_version)
+  fi
+
+  echo "==> Release QA preflight"
+  if [[ -n $(git status --porcelain) ]]; then
+    red "ERROR: Release QA requires a clean working tree."
+    git status --short
+    exit 2
+  fi
+
+  if [[ $(git branch --show-current) != "main" ]]; then
+    red "ERROR: Release QA must run on main (currently on $(git branch --show-current))"
+    exit 2
+  fi
+
+  git fetch origin main --quiet
+  if [[ $(git rev-parse HEAD) != $(git rev-parse origin/main) ]]; then
+    red "ERROR: Release QA must run on the same commit as origin/main."
+    red "Push or pull before running QA."
+    exit 2
+  fi
+  green "✓ Clean main synced with origin/main"
+
+  local started_at
+  started_at=$(date -Iseconds)
+  local head
+  head=$(git rev-parse HEAD)
+  local last_tag
+  last_tag=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | head -n1 || true)
+
+  echo "==> Release QA"
+  echo "Version: $VERSION"
+  echo "HEAD:    $head"
+  echo "Last tag: ${last_tag:-<none>}"
+  echo ""
+
+  echo "==> Scope"
+  git log --oneline --decorate -n 30
+  if [[ -n "$last_tag" ]]; then
+    echo ""
+    echo "==> Files changed since $last_tag"
+    git diff --name-only "$last_tag..HEAD"
+  fi
+
+  echo ""
+  echo "==> Debug build"
+  local build_log="/tmp/agent-sessions-qa-build-$(date +%s).log"
+  xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build 2>&1 | tee "$build_log"
+
+  echo ""
+  echo "==> Stable XCTest"
+  ./scripts/xcode_test_stable.sh
+
+  if [[ -d scripts/tests ]]; then
+    echo ""
+    echo "==> Python release/script tests"
+    PYTHONPATH=scripts python3 -m pytest scripts/tests
+  fi
+
+  echo ""
+  echo "==> Warning sweep"
+  if grep -n "warning:" "$build_log" >/tmp/agent-sessions-qa-warnings.txt 2>/dev/null; then
+    yellow "Build warnings found in $build_log:"
+    sed -n '1,40p' /tmp/agent-sessions-qa-warnings.txt
+    yellow "Review whether these warnings are pre-existing or actionable before release."
+  else
+    green "✓ No build warnings found"
+  fi
+
+  write_qa_stamp "$VERSION" "$head" "$started_at"
+  green "✓ Release QA stamp written: $QA_STAMP_FILE"
+}
+
+# ============================================================================
 # SUBCOMMAND: release
 # ============================================================================
 
@@ -403,9 +653,13 @@ cmd_release() {
         SKIP_VALIDATION=1
         shift
         ;;
+      --skip-qa)
+        export SKIP_QA=1
+        shift
+        ;;
       -*)
         red "ERROR: Unknown option: $1"
-        echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation]"
+        echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation] [--skip-qa]"
         exit 1
         ;;
       *)
@@ -417,7 +671,7 @@ cmd_release() {
 
   if [[ -z "$VERSION" ]]; then
     red "ERROR: VERSION not provided"
-    echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation]"
+    echo "Usage: tools/release/deploy release VERSION [--dry-run] [--skip-validation] [--skip-qa]"
     exit 1
   fi
 
@@ -449,29 +703,38 @@ cmd_release() {
     echo ""
     echo "==> Steps that would be performed:"
     echo "    1. Build Release configuration (xcodebuild)"
-    echo "    2. Create signed DMG (create_dmg_from_app)"
-    echo "    3. Submit to Apple Notary (xcrun notarytool)"
-    echo "    4. Wait for notarization (xcrun notarytool wait)"
-    echo "    5. Staple notarization ticket (xcrun stapler)"
-    echo "    6. Generate SHA256 checksum"
-    echo "    7. Generate appcast.xml (generate_appcast)"
-    echo "    8. Update Homebrew cask"
-    echo "    9. Create git tag v$VERSION"
-    echo "    10. Create GitHub release with DMG"
-    echo "    11. Push changes to remote"
+    echo "    2. Sign app and create DMG"
+    echo "    3. Submit to Apple Notary and staple ticket"
+    echo "    4. Generate SHA256 checksum"
+    echo "    5. Generate and lint Sparkle release notes/appcast"
+    echo "    6. Pause for release-notes approval when interactive"
+    echo "    7. Publish GitHub Release assets and curated notes"
+    echo "    8. Commit/push appcast to GitHub Pages"
+    echo "    9. Normalize README/docs download links"
+    echo "    10. Update Homebrew cask via GitHub API"
+    echo "    11. Run post-deployment verification"
     echo ""
 
     echo "==> Files that would be modified:"
     echo "    - dist/AgentSessions-$VERSION.dmg (created)"
     echo "    - dist/AgentSessions-$VERSION.dmg.sha256 (created)"
     echo "    - docs/appcast.xml (updated)"
-    echo "    - homebrew-cask/Casks/agent-sessions.rb (updated)"
+    echo "    - README.md and docs/index.html download links (if stale)"
+    echo "    - jazzyalex/homebrew-agent-sessions cask via GitHub API"
     echo ""
 
     echo "═══════════════════════════════════════════════════════════"
     green "  DRY-RUN complete. Run without --dry-run to deploy."
     echo "═══════════════════════════════════════════════════════════"
     return 0
+  fi
+
+  require_qa_stamp "$VERSION"
+  local RELEASE_QA_HEAD
+  RELEASE_QA_HEAD=$(qa_stamp_head)
+  if [[ -z "$RELEASE_QA_HEAD" ]]; then
+    red "ERROR: Could not read release QA stamp head."
+    exit 2
   fi
 
   # ============================================================================
@@ -528,6 +791,7 @@ cmd_release() {
   # Source the existing deploy-agent-sessions.sh script with VERSION set
   export VERSION="$VERSION"
   export SKIP_CONFIRM="${SKIP_CONFIRM:-0}"
+  export RELEASE_QA_HEAD
 
   # Call the existing deployment script
   "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
@@ -693,6 +957,8 @@ cmd_resume() {
 
   local version=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
   local last_step=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("last_step",""))')
+  local saved_head=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("head",""))')
+  local saved_release_head=$(echo "$state_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("release_head") or data.get("head",""))')
   local saved_log=$(echo "$state_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("log_file",""))')
 
   if [[ -z "$version" ]] || [[ -z "$last_step" ]]; then
@@ -700,9 +966,32 @@ cmd_resume() {
     exit 1
   fi
 
+  if [[ -z "$saved_head" ]]; then
+    red "ERROR: Deployment state is missing git HEAD. Restart with tools/release/deploy release $version."
+    exit 2
+  fi
+
+  local current_head
+  current_head=$(git rev-parse HEAD)
+  if [[ "$current_head" != "$saved_head" ]]; then
+    red "ERROR: Cannot resume from a different git HEAD."
+    red "  State HEAD:   $saved_head"
+    red "  Current HEAD: $current_head"
+    red "Return to the saved commit or restart the release."
+    exit 2
+  fi
+
+  local dirty_mode="strict"
+  if [[ "$last_step" == "github_release_published" ]]; then
+    dirty_mode="allow-appcast"
+  fi
+  require_qa_stamp "$version" "$saved_release_head" "$dirty_mode"
+
   echo "═══════════════════════════════════════════════════════════"
   echo "  Resuming deployment for version $version"
   echo "  Last completed step: $last_step"
+  echo "  Checkpoint HEAD: $saved_head"
+  echo "  QA release HEAD: $saved_release_head"
   if [[ -f "$saved_log" ]]; then
     echo "  Previous log: $saved_log"
   fi
@@ -716,6 +1005,7 @@ cmd_resume() {
       # Continue with deployment script - it will handle waiting/stapling
       export VERSION="$version"
       export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
       export RESUME_FROM="notarization"
       "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
       ;;
@@ -724,15 +1014,39 @@ cmd_resume() {
       green "==> Continuing with appcast generation..."
       export VERSION="$version"
       export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
       export RESUME_FROM="appcast"
       "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
       ;;
 
     "appcast_generated")
-      green "==> Continuing with GitHub release..."
+      green "==> Continuing after appcast publication..."
       export VERSION="$version"
       export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
-      export RESUME_FROM="github_release"
+      export RELEASE_QA_HEAD="$saved_release_head"
+      export GITHUB_RELEASE_PUBLISHED=1
+      export RESUME_FROM="post_appcast"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+
+    "github_release_published")
+      green "==> Continuing after GitHub release asset publication..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_NOTES_REVIEWED="${RELEASE_NOTES_REVIEWED:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
+      export GITHUB_RELEASE_PUBLISHED=1
+      export RESUME_FROM="appcast"
+      "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
+      ;;
+
+    "appcast_committed")
+      green "==> Continuing appcast publication..."
+      export VERSION="$version"
+      export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
+      export GITHUB_RELEASE_PUBLISHED=1
+      export RESUME_FROM="appcast_committed"
       "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
       ;;
 
@@ -740,6 +1054,8 @@ cmd_resume() {
       green "==> GitHub release already created, running verification..."
       export VERSION="$version"
       export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
+      export GITHUB_RELEASE_PUBLISHED=1
       if [[ -x "$REPO_ROOT/tools/release/verify-deployment.sh" ]]; then
         "$REPO_ROOT/tools/release/verify-deployment.sh" "$version"
       else
@@ -752,6 +1068,7 @@ cmd_resume() {
       echo "Attempting to continue full deployment..."
       export VERSION="$version"
       export SKIP_CONFIRM="${SKIP_CONFIRM:-1}"
+      export RELEASE_QA_HEAD="$saved_release_head"
       "$REPO_ROOT/tools/release/deploy-agent-sessions.sh"
       ;;
   esac
@@ -781,6 +1098,10 @@ SUBCOMMANDS:
                                 Options:
                                   --dry-run         Show what would happen without executing
                                   --skip-validation Skip pre-deployment validation (not recommended)
+                                  --skip-qa         Skip required QA stamp (not recommended)
+
+    qa [--version VERSION]      Run release QA and write the QA stamp required
+                                by the release command
 
     verify VERSION              Verify deployment completed successfully
                                 Checks GitHub release, appcast, Homebrew cask
@@ -806,6 +1127,9 @@ SUBCOMMAND="${1:-help}"
 case "$SUBCOMMAND" in
   bump)
     cmd_bump "$@"
+    ;;
+  qa)
+    cmd_qa "$@"
     ;;
   release)
     cmd_release "$@"

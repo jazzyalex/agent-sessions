@@ -25,6 +25,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 - **Always run QA automatically** before any bump/release/verify step, unless the user explicitly says to skip it (e.g. "skip QA", "no QA").
 - Do not ask whether to run QA — just run it.
+- Preferred command: `tools/release/deploy qa --version <VERSION>`. The release command requires the fresh QA stamp from this command unless `--skip-qa` or `SKIP_QA=1` is explicit. QA stamps require a clean `main` checkout synced with `origin/main`, and release/resume rejects dirty or different-HEAD checkouts.
 - QA execution order:
   1. **Scope** — `git log --oneline --decorate -n 30` and `git diff --name-only <LAST_TAG>..HEAD`; identify high-risk areas.
   2. **Build** — `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build`
@@ -66,7 +67,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
   - Lead with the headline change the user should care about.
   - Do not include internal cleanup, validation fixes, or pre-release stabilization as “Bug Fixes” if users never received that broken behavior.
   - If the preview is misleading, stop and edit `docs/CHANGELOG.md` before publishing.
-- If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing (pushing appcast, updating Homebrew, updating the GitHub release).
+- If `SKIP_CONFIRM` is not `1`, it will pause and ask for approval before publishing. After approval, the deployment publishes the GitHub Release assets and curated notes first, then publishes the appcast, then updates Homebrew.
 - `SKIP_CONFIRM=1` requires `RELEASE_NOTES_REVIEWED=1` at the appcast publish gate; set it only after manually inspecting the Sparkle preview or for a rerun whose notes were already reviewed.
 - The notes generator fails before publishing if notes contain obvious internal/process wording or put Bug Fixes ahead of a headline section.
 - GitHub Release notes must use the same curated/linted notes as Sparkle, not raw commit history or raw changelog extraction.
@@ -76,8 +77,10 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 ```bash
 tools/release/deploy changelog [FROM_TAG]
+tools/release/deploy qa --version <VERSION>
 tools/release/deploy bump [patch|minor|major]
 git push origin main
+tools/release/deploy qa --version <VERSION>
 tools/release/deploy release <VERSION> [--dry-run]
 tools/release/deploy verify <VERSION>
 ```
@@ -85,5 +88,7 @@ tools/release/deploy verify <VERSION>
 ## Failure Handling
 
 - First stop: `docs/deployment.md` → Troubleshooting, logs, and rollback guidance.
+- A Release build can spend several minutes inside `swift-frontend` during whole-module optimization. Treat periodic `swift-frontend` heartbeats from the build helper as normal progress, not a separate frontend task.
+- If interrupted after the notarized DMG is built, prefer `tools/release/deploy resume`; it validates the saved git `HEAD`, requires the fresh QA stamp, and uses idempotent GitHub release/appcast steps.
 - If post-deploy verification fails on a GitHub/network check with timeout or 5xx behavior, rerun `tools/release/deploy verify <VERSION>` before considering rollback. Treat repeated transient API failures differently from confirmed missing release assets, bad appcast entries, or SHA mismatches.
 - Rollback only after reviewing logs: `tools/release/rollback-release.sh <VERSION>`.

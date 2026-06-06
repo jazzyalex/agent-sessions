@@ -21,7 +21,7 @@ CURR_VERSION=$(sed -n 's/.*MARKETING_VERSION = \([0-9][0-9.]*\).*/\1/p' AgentSes
 
 VERSION=${VERSION:-}
 if [[ -z "${VERSION}" ]]; then
-  red "ERROR: VERSION not provided. Set VERSION=X.Y environment variable."
+  printf "\033[31m%s\033[0m\n" "ERROR: VERSION not provided. Set VERSION=X.Y environment variable."
   echo "Current version in project: ${CURR_VERSION:-unknown}"
   exit 1
 fi
@@ -34,10 +34,23 @@ UPDATE_CASK=${UPDATE_CASK:-1}
 SKIP_CONFIRM=${SKIP_CONFIRM:-0}
 COMMIT_TOOL=${COMMIT_TOOL:-Codex}
 COMMIT_MODEL=${COMMIT_MODEL:-gpt-5}
+GITHUB_RELEASE_PUBLISHED=${GITHUB_RELEASE_PUBLISHED:-0}
 
 green(){ printf "\033[32m%s\033[0m\n" "$*"; }
 yellow(){ printf "\033[33m%s\033[0m\n" "$*"; }
 red(){ printf "\033[31m%s\033[0m\n" "$*"; }
+
+if [[ -z "${RELEASE_QA_HEAD:-}" ]]; then
+  if [[ "${SKIP_QA:-0}" == "1" ]]; then
+    RELEASE_QA_HEAD=$(git rev-parse HEAD)
+    yellow "SKIP_QA=1: running release without a unified QA stamp"
+  else
+    red "ERROR: deploy-agent-sessions.sh requires a QA-stamped release head."
+    red "Run: tools/release/deploy qa --version ${VERSION} && tools/release/deploy release ${VERSION}"
+    red "For emergency manual runs, set SKIP_QA=1 explicitly."
+    exit 2
+  fi
+fi
 
 source "$REPO_ROOT/tools/release/notary-auth.sh"
 
@@ -48,11 +61,15 @@ save_state() {
   local step="$1"
   local timestamp
   timestamp=$(date -Iseconds)
+  local head
+  head=$(git rev-parse HEAD)
   cat > "$STATE_FILE" <<EOF
 {
   "version": "${VERSION:-}",
   "tag": "${TAG:-}",
   "last_step": "$step",
+  "head": "$head",
+  "release_head": "${RELEASE_QA_HEAD:-$head}",
   "timestamp": "$timestamp"
 }
 EOF
@@ -173,6 +190,56 @@ retry() {
   return $exitCode
 }
 
+publish_github_release() {
+  green "==> Creating or updating GitHub Release"
+
+  # Use the same generated, linted notes as Sparkle so GitHub Release copy cannot
+  # drift back to raw changelog internals or ad-hoc override files.
+  if [[ -n "${NOTES_FILE:-}" ]]; then
+    red "ERROR: NOTES_FILE override is no longer supported for deploy release."
+    red "Edit docs/CHANGELOG.md so Sparkle and GitHub Release notes stay aligned."
+    exit 2
+  fi
+
+  if [[ -z "${DMG:-}" ]] || [[ ! -f "$DMG" ]]; then
+    red "ERROR: DMG not found before GitHub release publish: ${DMG:-<unset>}"
+    exit 2
+  fi
+
+  if [[ ! -f "$DMG.sha256" ]]; then
+    red "ERROR: SHA256 file not found before GitHub release publish: $DMG.sha256"
+    exit 2
+  fi
+
+  RELEASE_NOTES_FILE=$(mktemp)
+  python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
+    --version "$VERSION" \
+    --changelog "$REPO_ROOT/docs/CHANGELOG.md" \
+    --github-url "https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}" \
+    --out-text "$RELEASE_NOTES_FILE" \
+    --lint >/dev/null
+  if [[ ! -s "$RELEASE_NOTES_FILE" ]]; then
+    red "ERROR: Could not generate curated GitHub release notes for ${VERSION}"
+    red "Add user-facing notes to docs/CHANGELOG.md and rerun."
+    exit 2
+  fi
+
+  if gh release view "$TAG" >/dev/null 2>&1; then
+    log INFO "Release $TAG already exists, updating assets"
+    yellow "Release $TAG already exists, updating assets..."
+    retry gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
+    log INFO "Updating release notes"
+    retry gh release edit "$TAG" --notes-file "$RELEASE_NOTES_FILE"
+    green "✓ Release $TAG updated (idempotent)"
+  else
+    log INFO "Creating new release $TAG"
+    retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$RELEASE_NOTES_FILE"
+    green "✓ Release $TAG created"
+  fi
+
+  GITHUB_RELEASE_PUBLISHED=1
+}
+
 show_preflight_checklist() {
   local build_number="$1"
   local previous_version="$2"
@@ -198,7 +265,7 @@ Validations (already passed):
 
 Deployment pipeline:
   1) Build → 2) Sign → 3) DMG → 4) Notarize (background)
-  5) Appcast → 6) GitHub Release → 7) Docs → 8) Homebrew
+  5) Review notes → 6) GitHub Release assets → 7) Appcast → 8) Docs/Homebrew
 
 If a step fails, rollback prompt will appear after automated verification.
 EOF
@@ -258,12 +325,23 @@ echo "==> Enhanced Pre-Flight Validation"
 
 # Git state validation
 echo "Checking git state..."
-if [[ -n $(git status --porcelain | grep -v "^??") ]]; then
-  red "ERROR: Uncommitted changes detected. Commit or stash changes before deploying."
-  git status --short
-  exit 2
+TRACKED_DIRTY=$({ git diff --name-only; git diff --cached --name-only; } | sort -u)
+APPCAST_RESUME_DIRTY=0
+if [[ -n "$TRACKED_DIRTY" ]]; then
+  if [[ "${RESUME_FROM:-}" == "appcast" && "$GITHUB_RELEASE_PUBLISHED" == "1" && "$TRACKED_DIRTY" == "docs/appcast.xml" ]]; then
+    yellow "Resume checkpoint has expected pending docs/appcast.xml changes."
+    APPCAST_RESUME_DIRTY=1
+  else
+    red "ERROR: Uncommitted changes detected. Commit or stash changes before deploying."
+    git status --short
+    exit 2
+  fi
 fi
-green "✓ Working directory clean"
+if [[ "$APPCAST_RESUME_DIRTY" == "1" ]]; then
+  green "✓ Working directory matches expected appcast resume state"
+else
+  green "✓ Working directory clean"
+fi
 
 if [[ $(git branch --show-current) != "main" ]]; then
   red "ERROR: Not on main branch (currently on $(git branch --show-current))"
@@ -273,10 +351,15 @@ green "✓ On main branch"
 
 git fetch origin main --quiet
 if [[ $(git rev-parse HEAD) != $(git rev-parse origin/main) ]]; then
-  red "ERROR: Local main not synced with origin/main. Run: git push or git pull"
-  exit 2
+  if [[ "${RESUME_FROM:-}" == "appcast_committed" ]] && git merge-base --is-ancestor origin/main HEAD; then
+    yellow "Resume checkpoint has a local appcast commit pending push."
+  else
+    red "ERROR: Local main not synced with origin/main. Run: git push or git pull"
+    exit 2
+  fi
+else
+  green "✓ Local main synced with origin"
 fi
-green "✓ Local main synced with origin"
 
 # Version validation
 echo "Checking version validity..."
@@ -357,7 +440,7 @@ show_preflight_checklist "$CURR_BUILD" "${PREV_VERSION:-}" "${PREV_BUILD:-}"
 export TEAM_ID NOTARY_PROFILE NOTARY_KEY_PATH NOTARY_KEY_ID NOTARY_ISSUER NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD DEV_ID_APP VERSION TAG
 
 # Check if resuming and build already complete
-if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "github_release" ]]; then
+if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "appcast_committed" ]] || [[ "${RESUME_FROM:-}" == "post_appcast" ]] || [[ "${RESUME_FROM:-}" == "github_release" ]]; then
   green "==> Skipping build (resuming from ${RESUME_FROM})"
   DMG="$REPO_ROOT/dist/${APP_NAME}-${VERSION}.dmg"
   if [[ ! -f "$DMG" ]]; then
@@ -430,220 +513,253 @@ else
   exit 2
 fi
 
-# Check if resuming and appcast already generated
-if [[ "${RESUME_FROM:-}" == "github_release" ]]; then
-  green "==> Skipping appcast/README updates (resuming from ${RESUME_FROM})"
-else
+# Check if resuming after the appcast was committed but before publication
+# completed.
+if [[ "${RESUME_FROM:-}" == "appcast_committed" ]]; then
+  green "==> Publishing committed appcast checkpoint"
+  retry git push origin HEAD:main
 
-green "==> Generating Sparkle appcast"
-# Sparkle 2: Generate appcast.xml with EdDSA signatures
-UPDATES_DIR="$REPO_ROOT/dist/updates"
-mkdir -p "$UPDATES_DIR"
-
-# Copy DMG to updates directory (Sparkle needs all versions in one place for delta updates)
-cp "$DMG" "$UPDATES_DIR/"
-
-# Find Sparkle generate_appcast tool from SPM artifacts
-SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData \
-  -name "generate_appcast" \
-  -path "*/artifacts/*/Sparkle/bin/*" \
-  2>/dev/null | head -n1)
-
-if [[ -z "$SPARKLE_BIN" ]]; then
-  yellow "WARNING: Sparkle generate_appcast tool not found. Skipping appcast generation."
-  yellow "Ensure Sparkle 2 is added via SPM and the project has been built at least once."
-else
-  green "Found Sparkle tools at: $(dirname "$SPARKLE_BIN")"
-
-  # Generate appcast with EdDSA signatures (private key must be in Keychain)
-  # Sparkle will read the private key from Keychain item "Sparkle"
-  "$SPARKLE_BIN" "$UPDATES_DIR"
-
-	if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
-	  green "Appcast generated successfully"
-
-    # Fix DMG URLs: Sparkle generates wrong URLs pointing to GitHub Pages
-    # Replace: https://jazzyalex.github.io/agent-sessions/AgentSessions-{VERSION}.dmg
-    # With:    https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg
-    sed -i '' -E 's|https://jazzyalex\.github\.io/agent-sessions/AgentSessions-([0-9.]+)\.dmg|https://github.com/jazzyalex/agent-sessions/releases/download/v\1/AgentSessions-\1.dmg|g' \
-      "$UPDATES_DIR/appcast.xml"
-	  green "Fixed DMG URLs in appcast to point to GitHub Releases"
-
-	  # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
-	  # CRITICAL: Sparkle UI will hang without release notes!
-	  CHANGELOG_PATH="$REPO_ROOT/docs/CHANGELOG.md"
-	  NOTES_PREVIEW_TXT="$UPDATES_DIR/release-notes-${VERSION}.txt"
-	  NOTES_PREVIEW_HTML="$UPDATES_DIR/release-notes-${VERSION}.html"
-	  GITHUB_URL="https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}"
-
-	  if [[ ! -f "$CHANGELOG_PATH" ]]; then
-	    red "ERROR: $CHANGELOG_PATH not found"
-	    red "Sparkle UI will HANG without release notes!"
-	    exit 1
-	  fi
-
-	  python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
-	    --version "$VERSION" \
-	    --changelog "$CHANGELOG_PATH" \
-	    --appcast "$UPDATES_DIR/appcast.xml" \
-	    --github-url "$GITHUB_URL" \
-	    --out-text "$NOTES_PREVIEW_TXT" \
-	    --out-html "$NOTES_PREVIEW_HTML" \
-	    --lint >/dev/null
-
-	  if grep -q '<description>' "$UPDATES_DIR/appcast.xml"; then
-	    green "Added structured release notes from CHANGELOG.md to appcast"
-	  else
-	    red "ERROR: Failed to add release notes to appcast"
-	    red "Sparkle UI will HANG without release notes!"
-	    exit 1
-	  fi
-
-	  # Copy appcast to docs/ for GitHub Pages
-	  cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
-
-    # ========================================================================
-    # APPCAST VALIDATION
-    # ========================================================================
-    echo "==> Validating generated appcast..."
-    APPCAST_FILE="$REPO_ROOT/docs/appcast.xml"
-    APPCAST_VALID=1
-
-    # 1. Verify shortVersionString matches VERSION
-    APPCAST_SHORT_VERSION=$(grep -o '<sparkle:shortVersionString>[^<]*</sparkle:shortVersionString>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
-    if [[ "$APPCAST_SHORT_VERSION" != "$VERSION" ]]; then
-      red "ERROR: Appcast shortVersionString mismatch. Expected $VERSION, got $APPCAST_SHORT_VERSION"
-      APPCAST_VALID=0
-    else
-      green "✓ Appcast shortVersionString: $APPCAST_SHORT_VERSION"
-    fi
-
-    # 2. Verify sparkle:version (build number) is present
-    APPCAST_BUILD=$(grep -o '<sparkle:version>[^<]*</sparkle:version>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
-    if [[ -z "$APPCAST_BUILD" ]]; then
-      red "ERROR: Appcast missing sparkle:version (build number)"
-      APPCAST_VALID=0
-    else
-      # Check build number > previous
-      if [[ -n "${PREV_BUILD:-}" ]] && [[ "$APPCAST_BUILD" -le "$PREV_BUILD" ]]; then
-        red "ERROR: Appcast build $APPCAST_BUILD must be greater than previous $PREV_BUILD"
-        APPCAST_VALID=0
-      else
-        green "✓ Appcast build number: $APPCAST_BUILD"
-      fi
-    fi
-
-    # 3. Verify description element has content
-    if ! grep -q '<description>' "$APPCAST_FILE"; then
-      red "ERROR: Appcast missing <description> element (Sparkle UI will hang!)"
-      APPCAST_VALID=0
-    else
-      # Check it's not empty
-      DESC_CONTENT=$(sed -n '/<description>/,/<\/description>/p' "$APPCAST_FILE" | grep -v '<description>' | grep -v '</description>' | tr -d '[:space:]')
-      if [[ -z "$DESC_CONTENT" ]] || [[ "$DESC_CONTENT" == "<![CDATA[]]>" ]]; then
-        red "ERROR: Appcast <description> is empty (Sparkle UI will hang!)"
-        APPCAST_VALID=0
-      else
-        green "✓ Appcast has release notes"
-      fi
-    fi
-
-    # 4. Verify sparkle:edSignature is present
-    if ! grep -q 'sparkle:edSignature=' "$APPCAST_FILE"; then
-      red "ERROR: Appcast missing EdDSA signature (sparkle:edSignature)"
-      APPCAST_VALID=0
-    else
-      green "✓ Appcast has EdDSA signature"
-    fi
-
-    # 5. Verify enclosure URL format
-    ENCLOSURE_URL=$(grep -o 'url="[^"]*\.dmg"' "$APPCAST_FILE" | head -1 | sed 's/url="//;s/"$//')
-    EXPECTED_URL_PATTERN="https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg"
-    if [[ "$ENCLOSURE_URL" != "$EXPECTED_URL_PATTERN" ]]; then
-      red "ERROR: Appcast enclosure URL mismatch"
-      red "  Expected: $EXPECTED_URL_PATTERN"
-      red "  Got:      $ENCLOSURE_URL"
-      APPCAST_VALID=0
-    else
-      green "✓ Appcast enclosure URL correct"
-    fi
-
-    # 6. Verify enclosure has length attribute
-    if ! grep -q 'length="[0-9]\+"' "$APPCAST_FILE"; then
-      yellow "WARNING: Appcast enclosure missing length attribute"
-    else
-      green "✓ Appcast enclosure has length"
-    fi
-
-    if [[ "$APPCAST_VALID" -eq 0 ]]; then
-      red ""
-      red "═══════════════════════════════════════════════════════════"
-      red "  APPCAST VALIDATION FAILED"
-      red "  Fix the issues above before continuing."
-      red "═══════════════════════════════════════════════════════════"
-      exit 2
-	    fi
-
-	    green "✓ All appcast validation checks passed"
-	    echo ""
-
-	    # ================================================================
-	    # RELEASE NOTES REVIEW GATE (before publishing anything)
-	    # ================================================================
-	    echo "==> Sparkle release notes preview"
-	    if [[ -f "$NOTES_PREVIEW_TXT" ]]; then
-	      cat "$NOTES_PREVIEW_TXT"
-	    else
-	      yellow "WARNING: Missing notes preview file: $NOTES_PREVIEW_TXT"
-	    fi
-	    echo ""
-
-	    if [[ "${SKIP_CONFIRM}" != "1" ]]; then
-	      read -r -p "Publish these release notes and continue deployment? [y/N] " approve_notes
-	      if [[ ! "$approve_notes" =~ ^[Yy]$ ]]; then
-	        yellow "Stopped before publishing (no appcast push, no Homebrew update, no GitHub release changes)."
-	        yellow "Edit notes in docs/CHANGELOG.md and rerun when ready."
-	        exit 0
-	      fi
-	    else
-	      if [[ "${RELEASE_NOTES_REVIEWED:-0}" != "1" ]]; then
-	        red "ERROR: SKIP_CONFIRM=1 requires RELEASE_NOTES_REVIEWED=1 after inspecting the Sparkle notes preview."
-	        red "This prevents unattended deploys from publishing misleading user-facing release notes."
-	        red "Edit docs/CHANGELOG.md if needed, then rerun with RELEASE_NOTES_REVIEWED=1."
-	        exit 2
-	      fi
-	      green "Proceeding automatically (SKIP_CONFIRM=1, RELEASE_NOTES_REVIEWED=1): publishing reviewed release notes"
-	    fi
-
-	    save_state "appcast_generated"
-
-	    # Commit and push appcast to GitHub Pages (fail hard if push fails)
-	    git add "$REPO_ROOT/docs/appcast.xml"
-    if ! git diff --staged --quiet; then
-      git commit \
-        -m "chore(release): update appcast for ${VERSION}" \
-        -m "Tool: ${COMMIT_TOOL}" \
-        -m "Model: ${COMMIT_MODEL}" \
-        -m "Why: Publish appcast for ${VERSION} release"
-      retry git push origin HEAD:main
-    else
-      yellow "No appcast changes to commit."
-    fi
-
-    # Wait for GitHub Pages cache invalidation
-    echo "Waiting for GitHub Pages to serve new appcast..."
-    if ! wait_for_cache \
-      "https://jazzyalex.github.io/agent-sessions/appcast.xml" \
-      "$VERSION" \
-      "https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg" \
-      120; then
-      yellow "WARNING: Appcast cache did not propagate, but continuing..."
-    fi
-
-    green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
-  else
-    yellow "WARNING: appcast.xml not created. Check Sparkle EdDSA key in Keychain."
+  echo "Waiting for GitHub Pages to serve new appcast..."
+  if ! wait_for_cache \
+    "https://jazzyalex.github.io/agent-sessions/appcast.xml" \
+    "$VERSION" \
+    "https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg" \
+    120; then
+    yellow "WARNING: Appcast cache did not propagate, but continuing..."
   fi
+
+  green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
+  save_state "appcast_generated"
+
+# Check if resuming after the appcast was already published.
+elif [[ "${RESUME_FROM:-}" == "post_appcast" ]] || [[ "${RESUME_FROM:-}" == "github_release" ]]; then
+  green "==> Skipping appcast generation/publication (resuming from ${RESUME_FROM})"
+else
+
+  green "==> Generating Sparkle appcast"
+  # Sparkle 2: Generate appcast.xml with EdDSA signatures
+  UPDATES_DIR="$REPO_ROOT/dist/updates"
+  mkdir -p "$UPDATES_DIR"
+
+  # Copy DMG to updates directory (Sparkle needs all versions in one place for delta updates)
+  cp "$DMG" "$UPDATES_DIR/"
+
+  # Find Sparkle generate_appcast tool from SPM artifacts
+  SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData \
+    -name "generate_appcast" \
+    -path "*/artifacts/*/Sparkle/bin/*" \
+    2>/dev/null | head -n1)
+
+  if [[ -z "$SPARKLE_BIN" ]]; then
+    red "ERROR: Sparkle generate_appcast tool not found."
+    red "Build the project so Sparkle SPM artifacts are available, then rerun deployment."
+    red "No appcast, Homebrew, or GitHub release changes were published."
+    exit 2
+  else
+    green "Found Sparkle tools at: $(dirname "$SPARKLE_BIN")"
+
+    # Generate appcast with EdDSA signatures (private key must be in Keychain)
+    # Sparkle will read the private key from Keychain item "Sparkle"
+    "$SPARKLE_BIN" "$UPDATES_DIR"
+
+    if [[ -f "$UPDATES_DIR/appcast.xml" ]]; then
+      green "Appcast generated successfully"
+
+      # Fix DMG URLs: Sparkle generates wrong URLs pointing to GitHub Pages
+      # Replace: https://jazzyalex.github.io/agent-sessions/AgentSessions-{VERSION}.dmg
+      # With:    https://github.com/jazzyalex/agent-sessions/releases/download/v{VERSION}/AgentSessions-{VERSION}.dmg
+      sed -i '' -E 's|https://jazzyalex\.github\.io/agent-sessions/AgentSessions-([0-9.]+)\.dmg|https://github.com/jazzyalex/agent-sessions/releases/download/v\1/AgentSessions-\1.dmg|g' \
+        "$UPDATES_DIR/appcast.xml"
+      green "Fixed DMG URLs in appcast to point to GitHub Releases"
+
+      # Add release notes from CHANGELOG.md to prevent Sparkle UI hang
+      # CRITICAL: Sparkle UI will hang without release notes!
+      CHANGELOG_PATH="$REPO_ROOT/docs/CHANGELOG.md"
+      NOTES_PREVIEW_TXT="$UPDATES_DIR/release-notes-${VERSION}.txt"
+      NOTES_PREVIEW_HTML="$UPDATES_DIR/release-notes-${VERSION}.html"
+      GITHUB_URL="https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}"
+
+      if [[ ! -f "$CHANGELOG_PATH" ]]; then
+        red "ERROR: $CHANGELOG_PATH not found"
+        red "Sparkle UI will HANG without release notes!"
+        exit 1
+      fi
+
+      python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
+        --version "$VERSION" \
+        --changelog "$CHANGELOG_PATH" \
+        --appcast "$UPDATES_DIR/appcast.xml" \
+        --github-url "$GITHUB_URL" \
+        --out-text "$NOTES_PREVIEW_TXT" \
+        --out-html "$NOTES_PREVIEW_HTML" \
+        --lint >/dev/null
+
+      if grep -q '<description>' "$UPDATES_DIR/appcast.xml"; then
+        green "Added structured release notes from CHANGELOG.md to appcast"
+      else
+        red "ERROR: Failed to add release notes to appcast"
+        red "Sparkle UI will HANG without release notes!"
+        exit 1
+      fi
+
+      # Copy appcast to docs/ for GitHub Pages
+      cp "$UPDATES_DIR/appcast.xml" "$REPO_ROOT/docs/appcast.xml"
+
+      # ========================================================================
+      # APPCAST VALIDATION
+      # ========================================================================
+      echo "==> Validating generated appcast..."
+      APPCAST_FILE="$REPO_ROOT/docs/appcast.xml"
+      APPCAST_VALID=1
+
+      # 1. Verify shortVersionString matches VERSION
+      APPCAST_SHORT_VERSION=$(grep -o '<sparkle:shortVersionString>[^<]*</sparkle:shortVersionString>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
+      if [[ "$APPCAST_SHORT_VERSION" != "$VERSION" ]]; then
+        red "ERROR: Appcast shortVersionString mismatch. Expected $VERSION, got $APPCAST_SHORT_VERSION"
+        APPCAST_VALID=0
+      else
+        green "✓ Appcast shortVersionString: $APPCAST_SHORT_VERSION"
+      fi
+
+      # 2. Verify sparkle:version (build number) is present
+      APPCAST_BUILD=$(grep -o '<sparkle:version>[^<]*</sparkle:version>' "$APPCAST_FILE" | head -1 | sed 's/<[^>]*>//g')
+      if [[ -z "$APPCAST_BUILD" ]]; then
+        red "ERROR: Appcast missing sparkle:version (build number)"
+        APPCAST_VALID=0
+      else
+        # Check build number > previous
+        if [[ -n "${PREV_BUILD:-}" ]] && [[ "$APPCAST_BUILD" -le "$PREV_BUILD" ]]; then
+          red "ERROR: Appcast build $APPCAST_BUILD must be greater than previous $PREV_BUILD"
+          APPCAST_VALID=0
+        else
+          green "✓ Appcast build number: $APPCAST_BUILD"
+        fi
+      fi
+
+      # 3. Verify description element has content
+      if ! grep -q '<description>' "$APPCAST_FILE"; then
+        red "ERROR: Appcast missing <description> element (Sparkle UI will hang!)"
+        APPCAST_VALID=0
+      else
+        # Check it's not empty
+        DESC_CONTENT=$(sed -n '/<description>/,/<\/description>/p' "$APPCAST_FILE" | grep -v '<description>' | grep -v '</description>' | tr -d '[:space:]')
+        if [[ -z "$DESC_CONTENT" ]] || [[ "$DESC_CONTENT" == "<![CDATA[]]>" ]]; then
+          red "ERROR: Appcast <description> is empty (Sparkle UI will hang!)"
+          APPCAST_VALID=0
+        else
+          green "✓ Appcast has release notes"
+        fi
+      fi
+
+      # 4. Verify sparkle:edSignature is present
+      if ! grep -q 'sparkle:edSignature=' "$APPCAST_FILE"; then
+        red "ERROR: Appcast missing EdDSA signature (sparkle:edSignature)"
+        APPCAST_VALID=0
+      else
+        green "✓ Appcast has EdDSA signature"
+      fi
+
+      # 5. Verify enclosure URL format
+      ENCLOSURE_URL=$(grep -o 'url="[^"]*\.dmg"' "$APPCAST_FILE" | head -1 | sed 's/url="//;s/"$//')
+      EXPECTED_URL_PATTERN="https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg"
+      if [[ "$ENCLOSURE_URL" != "$EXPECTED_URL_PATTERN" ]]; then
+        red "ERROR: Appcast enclosure URL mismatch"
+        red "  Expected: $EXPECTED_URL_PATTERN"
+        red "  Got:      $ENCLOSURE_URL"
+        APPCAST_VALID=0
+      else
+        green "✓ Appcast enclosure URL correct"
+      fi
+
+      # 6. Verify enclosure has length attribute
+      if ! grep -q 'length="[0-9]\+"' "$APPCAST_FILE"; then
+        yellow "WARNING: Appcast enclosure missing length attribute"
+      else
+        green "✓ Appcast enclosure has length"
+      fi
+
+      if [[ "$APPCAST_VALID" -eq 0 ]]; then
+        red ""
+        red "═══════════════════════════════════════════════════════════"
+        red "  APPCAST VALIDATION FAILED"
+        red "  Fix the issues above before continuing."
+        red "═══════════════════════════════════════════════════════════"
+        exit 2
+      fi
+
+      green "✓ All appcast validation checks passed"
+      echo ""
+
+      # ================================================================
+      # RELEASE NOTES REVIEW GATE (before publishing anything)
+      # ================================================================
+      echo "==> Sparkle release notes preview"
+      if [[ -f "$NOTES_PREVIEW_TXT" ]]; then
+        cat "$NOTES_PREVIEW_TXT"
+      else
+        yellow "WARNING: Missing notes preview file: $NOTES_PREVIEW_TXT"
+      fi
+      echo ""
+
+      if [[ "${SKIP_CONFIRM}" != "1" ]]; then
+        read -r -p "Publish these release notes and continue deployment? [y/N] " approve_notes
+        if [[ ! "$approve_notes" =~ ^[Yy]$ ]]; then
+          yellow "Stopped before publishing (no appcast push, no Homebrew update, no GitHub release changes)."
+          yellow "Edit notes in docs/CHANGELOG.md and rerun when ready."
+          exit 0
+        fi
+      else
+        if [[ "${RELEASE_NOTES_REVIEWED:-0}" != "1" ]]; then
+          red "ERROR: SKIP_CONFIRM=1 requires RELEASE_NOTES_REVIEWED=1 after inspecting the Sparkle notes preview."
+          red "This prevents unattended deploys from publishing misleading user-facing release notes."
+          red "Edit docs/CHANGELOG.md if needed, then rerun with RELEASE_NOTES_REVIEWED=1."
+          exit 2
+        fi
+        green "Proceeding automatically (SKIP_CONFIRM=1, RELEASE_NOTES_REVIEWED=1): publishing reviewed release notes"
+      fi
+
+      if [[ "$GITHUB_RELEASE_PUBLISHED" != "1" ]]; then
+        publish_github_release
+      fi
+      save_state "github_release_published"
+
+      # Commit and push appcast to GitHub Pages (fail hard if push fails)
+      git add "$REPO_ROOT/docs/appcast.xml"
+      if ! git diff --staged --quiet; then
+        git commit \
+          -m "chore(release): update appcast for ${VERSION}" \
+          -m "Tool: ${COMMIT_TOOL}" \
+          -m "Model: ${COMMIT_MODEL}" \
+          -m "Why: Publish appcast for ${VERSION} release"
+        save_state "appcast_committed"
+        retry git push origin HEAD:main
+      else
+        yellow "No appcast changes to commit."
+      fi
+
+      # Wait for GitHub Pages cache invalidation
+      echo "Waiting for GitHub Pages to serve new appcast..."
+      if ! wait_for_cache \
+        "https://jazzyalex.github.io/agent-sessions/appcast.xml" \
+        "$VERSION" \
+        "https://github.com/jazzyalex/agent-sessions/releases/download/v${VERSION}/AgentSessions-${VERSION}.dmg" \
+        120; then
+        yellow "WARNING: Appcast cache did not propagate, but continuing..."
+      fi
+
+      green "Appcast published to GitHub Pages: https://jazzyalex.github.io/agent-sessions/appcast.xml"
+      save_state "appcast_generated"
+    else
+      red "ERROR: appcast.xml was not created. Check Sparkle EdDSA key in Keychain."
+      red "No appcast, Homebrew, or GitHub release changes were published."
+      exit 2
+    fi
+  fi
+fi
+
+if [[ "${RESUME_FROM:-}" == "post_appcast" || "${RESUME_FROM:-}" == "github_release" ]] && [[ "$GITHUB_RELEASE_PUBLISHED" != "1" ]]; then
+  publish_github_release
+  save_state "github_release_published"
 fi
 
 green "==> Updating README and website download links"
@@ -689,8 +805,6 @@ else
 fi
 
 # (labels/filenames normalized and validated above)
-
-fi  # End of RESUME_FROM check for appcast/README
 
 # Always update the tap via GitHub API (no local clone required)
 if [[ "${UPDATE_CASK}" == "1" ]]; then
@@ -839,41 +953,9 @@ CASK
   echo ""
 fi
 
-green "==> Creating or updating GitHub Release"
-# Use the same generated, linted notes as Sparkle so GitHub Release copy cannot
-# drift back to raw changelog internals or ad-hoc override files.
-if [[ -n "${NOTES_FILE:-}" ]]; then
-  red "ERROR: NOTES_FILE override is no longer supported for deploy release."
-  red "Edit docs/CHANGELOG.md so Sparkle and GitHub Release notes stay aligned."
-  exit 2
+if [[ "$GITHUB_RELEASE_PUBLISHED" != "1" ]]; then
+  publish_github_release
 fi
-
-RELEASE_NOTES_FILE=$(mktemp)
-python3 "$REPO_ROOT/tools/release/sparkle_release_notes.py" \
-  --version "$VERSION" \
-  --changelog "$REPO_ROOT/docs/CHANGELOG.md" \
-  --github-url "https://github.com/jazzyalex/agent-sessions/releases/tag/v${VERSION}" \
-  --out-text "$RELEASE_NOTES_FILE" \
-  --lint >/dev/null
-if [[ ! -s "$RELEASE_NOTES_FILE" ]]; then
-  red "ERROR: Could not generate curated GitHub release notes for ${VERSION}"
-  red "Add user-facing notes to docs/CHANGELOG.md and rerun."
-  exit 2
-fi
-
-if gh release view "$TAG" >/dev/null 2>&1; then
-  log INFO "Release $TAG already exists, updating assets"
-  yellow "Release $TAG already exists, updating assets..."
-  retry gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
-  log INFO "Updating release notes"
-  retry gh release edit "$TAG" --notes-file "$RELEASE_NOTES_FILE"
-  green "✓ Release $TAG updated (idempotent)"
-else
-  log INFO "Creating new release $TAG"
-  retry gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$RELEASE_NOTES_FILE"
-  green "✓ Release $TAG created"
-fi
-
 save_state "github_release_created"
 
 green "==> Running post-deployment verification"

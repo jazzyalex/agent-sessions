@@ -66,11 +66,64 @@ DMG="$DIST/$APP_NAME-$VERSION.dmg"
 VOL="Agent Sessions"
 
 echo "==> Building Release to $DIST"
+echo "    Note: Xcode may spend several minutes in swift-frontend during Release whole-module optimization."
+echo "    This is expected for universal release builds; progress heartbeats will print every 60s."
 rm -rf "$DIST" build || true
 mkdir -p "$DIST"
 xattr -w com.apple.xcode.CreatedByBuildSystem true "$DIST" || true
+
+BUILD_PID=""
+HEARTBEAT_PID=""
+cleanup_release_build() {
+  local status=$?
+  trap - EXIT INT TERM
+
+  if [[ -n "${HEARTBEAT_PID:-}" ]]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+  fi
+
+  if [[ -n "${BUILD_PID:-}" ]] && kill -0 "$BUILD_PID" 2>/dev/null; then
+    echo "==> Stopping Release build process $BUILD_PID"
+    kill "$BUILD_PID" 2>/dev/null || true
+    wait "$BUILD_PID" 2>/dev/null || true
+  fi
+
+  exit "$status"
+}
+trap cleanup_release_build EXIT INT TERM
+
 xcodebuild -scheme AgentSessions -configuration Release -destination 'platform=macOS' \
-  CONFIGURATION_BUILD_DIR="$DIST" clean build
+  CONFIGURATION_BUILD_DIR="$DIST" clean build &
+BUILD_PID=$!
+(
+  elapsed=0
+  while kill -0 "$BUILD_PID" 2>/dev/null; do
+    sleep 60
+    elapsed=$((elapsed + 60))
+    if kill -0 "$BUILD_PID" 2>/dev/null; then
+      echo "==> Release build still running (${elapsed}s elapsed)"
+      swift_processes=$(ps -axo pid,etime,comm,args | awk '/swift-frontend/ && !/awk/ { print "    " $0 }' | head -5 || true)
+      if [[ -n "$swift_processes" ]]; then
+        echo "    Active Swift compiler processes:"
+        echo "$swift_processes"
+      fi
+    fi
+  done
+) &
+HEARTBEAT_PID=$!
+BUILD_STATUS=0
+if wait "$BUILD_PID"; then
+  BUILD_STATUS=0
+else
+  BUILD_STATUS=$?
+fi
+kill "$HEARTBEAT_PID" 2>/dev/null || true
+wait "$HEARTBEAT_PID" 2>/dev/null || true
+trap - EXIT INT TERM
+if [[ "$BUILD_STATUS" -ne 0 ]]; then
+  exit "$BUILD_STATUS"
+fi
 
 if [[ ! -d "$APP" ]]; then
   echo "ERROR: Build did not produce $APP" >&2
@@ -277,18 +330,3 @@ spctl --assess --type open -vv "$DMG" || echo "Note: spctl assessment may fail i
 
 echo "==> Checksumming"
 shasum -a 256 "$DMG" | tee "$DMG.sha256"
-
-if command -v gh >/dev/null 2>&1; then
-  echo "==> Uploading to GitHub Release $TAG"
-  if gh release view "$TAG" >/dev/null 2>&1; then
-    gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
-  else
-    gh release create "$TAG" "$DMG" "$DMG.sha256" \
-      --title "$APP_NAME $VERSION" \
-      --notes "Release $VERSION"
-  fi
-  echo "Done."
-else
-  echo "gh CLI not found. Skipping GitHub release upload."
-  echo "Run: gh auth login; then rerun this script or run:\n  gh release create $TAG \"$DMG\" \"$DMG.sha256\" --title \"$APP_NAME $VERSION\" --notes \"Release $VERSION\"" 
-fi

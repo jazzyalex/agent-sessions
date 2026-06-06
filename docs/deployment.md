@@ -22,8 +22,10 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 
 **Core commands** (run from repo root):
 - `tools/release/deploy changelog [FROM_TAG]`
+- `tools/release/deploy qa --version <VERSION>`
 - `tools/release/deploy bump [patch|minor|major]`
 - `git push origin main`
+- `tools/release/deploy qa --version <VERSION>`
 - `tools/release/deploy release <VERSION>`
 - `tools/release/deploy verify <VERSION>`
 
@@ -63,16 +65,22 @@ The entire deployment workflow is now handled by a single unified tool: `tools/r
 # 1. Review what changed since last release
 tools/release/deploy changelog
 
-# 2. Bump version (patch/minor/major)
+# 2. Run release-candidate QA before mutating release metadata
+tools/release/deploy qa --version 2.8
+
+# 3. Bump version (patch/minor/major)
 tools/release/deploy bump minor
 
-# 3. Push version bump to GitHub
+# 4. Push version bump to GitHub
 git push origin main
 
-# 4. Deploy the release
+# 5. Re-run QA on the exact pushed version-bump commit that will be released
+tools/release/deploy qa --version 2.8
+
+# 6. Deploy the release
 tools/release/deploy release 2.8
 
-# 5. Verify deployment (runs automatically, but can re-run)
+# 7. Verify deployment (runs automatically, but can re-run)
 tools/release/deploy verify 2.8
 ```
 
@@ -81,6 +89,7 @@ tools/release/deploy verify 2.8
 ```bash
 tools/release/deploy bump patch
 git push origin main
+tools/release/deploy qa --version 2.7.2
 tools/release/deploy release 2.7.2
 ```
 
@@ -97,6 +106,7 @@ Automatically increments version and updates CHANGELOG:
 
 ### `deploy release VERSION`
 Full deployment pipeline with enhanced safety:
+- ✅ **Fresh QA stamp required** (from `tools/release/deploy qa --version VERSION`, unless explicitly skipped)
 - ✅ **Comprehensive dependency validation** (all required tools)
 - ✅ **Enhanced pre-flight checks** (git state, version validation, build numbers)
 - ✅ **Build, sign, and notarize** (Apple Developer ID)
@@ -129,6 +139,16 @@ Generate CHANGELOG from conventional commits:
 - Shows commit breakdown by category
 - Offers to save snippet file for easy copying when run interactively; in unattended/non-interactive runs it prints the preview and exits successfully without modifying files.
 
+### `deploy qa [--version VERSION]`
+Release-candidate QA gate:
+- Shows scope since the last release tag
+- Requires a clean `main` checkout synced with `origin/main`
+- Runs Debug `xcodebuild`
+- Runs the stable XCTest wrapper
+- Runs Python release/script tests
+- Prints a warning sweep from the build log
+- Writes a QA stamp tied to the current git `HEAD` and target version; `deploy release VERSION` and `deploy resume` require this stamp unless `--skip-qa` or `SKIP_QA=1` is explicit
+
 ### Emergency Rollback
 
 If deployment fails or has issues, use the separate rollback tool:
@@ -143,21 +163,22 @@ tools/release/rollback-release.sh VERSION
 # - Interactive confirmations for safety
 ```
 
-## Legacy Commands (Still Work)
+## Legacy Commands
 
-The individual scripts are still available for backward compatibility:
+The unified `tools/release/deploy` entrypoint is the supported path. Legacy
+wrappers delegate to it so QA-stamp enforcement, resume validation, and release
+sequencing remain centralized:
 
 ```bash
-# Old way (still works)
-tools/release/bump-version.sh patch
-VERSION=2.7.2 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
-tools/release/verify-deployment.sh 2.7.2
-
-# New unified way (recommended)
 tools/release/deploy bump patch
+tools/release/deploy qa --version 2.7.2
 tools/release/deploy release 2.7.2
 tools/release/deploy verify 2.7.2
 ```
+
+`tools/release/deploy-agent-sessions.sh` is an internal implementation detail.
+Direct emergency use must set `SKIP_QA=1` explicitly; normal releases should not
+call it directly.
 
 Outputs:
 - DMG: `dist/AgentSessions-2.5.1.dmg`
@@ -359,7 +380,7 @@ SKIP_CONFIRM=1                                        # Skip interactive prompts
 Once pre-flight is complete, run the deployment script with all parameters:
 
 ```bash
-VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
+tools/release/deploy release 2.5.1
 ```
 
 ### What the script does automatically:
@@ -369,8 +390,9 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Auto-detects Developer ID certificate
    - Verifies CHANGELOG.md has version section
 
-2. **Build & Sign** (2-5 minutes)
+2. **Build & Sign** (2-10 minutes)
    - Builds Release configuration
+   - Release builds may spend several minutes in `swift-frontend` during whole-module optimization; the helper prints periodic heartbeats so this does not look stuck.
    - Code signs with Developer ID Application certificate + hardened runtime
    - **Verifies signature uses Developer ID (not ad-hoc)**
    - Creates DMG
@@ -401,6 +423,8 @@ VERSION=2.5.1 SKIP_CONFIRM=1 tools/release/deploy-agent-sessions.sh
    - Copies appcast.xml to docs/ for GitHub Pages
    - Prints a Sparkle release notes preview and asks for approval before publishing (unless `SKIP_CONFIRM=1`)
    - `SKIP_CONFIRM=1` is not enough to publish appcast notes; unattended release runs must also set `RELEASE_NOTES_REVIEWED=1` after the preview has been inspected
+   - After approval, publishes the GitHub Release DMG/SHA assets and curated notes before committing the appcast, so Sparkle never advertises a DMG that is not uploaded yet
+   - Fails hard before any Homebrew or GitHub Release publication if Sparkle appcast generation is unavailable or invalid
    - Commits and pushes appcast to main branch
 
 6. **Update Documentation**
@@ -716,7 +740,7 @@ notary checks:
 NOTARY_APPLE_ID="your-apple-id@example.com" \
 NOTARY_TEAM_ID="24NDRU35WD" \
 NOTARY_PASSWORD="app-specific-password" \
-VERSION=3.6.2 SKIP_CONFIRM=1 tools/release/deploy release 3.6.2
+SKIP_CONFIRM=1 tools/release/deploy release 3.6.2
 ```
 
 Do not commit `.env` files or shell history containing `NOTARY_PASSWORD`.
