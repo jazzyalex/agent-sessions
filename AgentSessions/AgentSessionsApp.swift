@@ -193,6 +193,7 @@ struct AgentSessionsApp: App {
     @State private var lastObservedHideDockIcon: Bool?
     @State private var didRestoreDockForUnavailableMenuBar: Bool = false
     @State private var didRunStartupTasks: Bool = false
+    @State private var isDockRecentCleanupScheduled: Bool = false
     private let onboardingWindowPresenter = OnboardingWindowPresenter()
     @AppStorage("MenuBarEnabled") private var menuBarEnabled: Bool = false
     @AppStorage("MenuBarScope") private var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -324,7 +325,7 @@ struct AgentSessionsApp: App {
             updateUsageModels()
         }
         .onChange(of: hideDockIcon) { _, newValue in
-            Self.applyActivationPolicy(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
+            applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
             updateUsageModels()
         }
         .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
@@ -334,7 +335,7 @@ struct AgentSessionsApp: App {
         .onChange(of: piAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onAppear {
             guard !AppRuntime.isRunningTests else { return }
-            Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+            applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
         }
         .onReceive(NotificationCenter.default.publisher(for: .showOnboardingFromMenu)) { _ in
             onboardingCoordinator.presentManually()
@@ -583,15 +584,38 @@ extension AgentSessionsApp {
 
     private static func applyActivationPolicy(hideDockIcon: Bool, menuBarEnabled: Bool) {
         let apply: () -> Void = {
-            // Safety: never allow accessory mode without a persistent reopen path.
-            let shouldHideDockIcon = hideDockIcon && menuBarEnabled
-            let policy: NSApplication.ActivationPolicy = shouldHideDockIcon ? .accessory : .regular
+            let policy = ActivationPolicyDecider.policy(
+                hideDockIcon: hideDockIcon,
+                menuBarEnabled: menuBarEnabled
+            )
             NSApplication.shared.setActivationPolicy(policy)
         }
         if Thread.isMainThread {
             apply()
         } else {
             DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    @MainActor
+    private func applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: Bool, menuBarEnabled: Bool) {
+        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+        let policy = ActivationPolicyDecider.policy(
+            hideDockIcon: hideDockIcon,
+            menuBarEnabled: menuBarEnabled
+        )
+        if policy == .accessory {
+            scheduleDockRecentCleanup()
+        }
+    }
+
+    @MainActor
+    private func scheduleDockRecentCleanup() {
+        guard !isDockRecentCleanupScheduled else { return }
+        isDockRecentCleanupScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DockRecentAppCleaner.removeCurrentAppIfPresent()
+            isDockRecentCleanupScheduled = false
         }
     }
 
@@ -768,7 +792,7 @@ extension AgentSessionsApp {
         lastObservedMenuBarEnabled = enabled
         lastObservedHideDockIcon = effectiveHideDockIcon
         updateUsageModels(menuBarEnabledOverride: enabled)
-        Self.applyActivationPolicy(hideDockIcon: effectiveHideDockIcon, menuBarEnabled: enabled)
+        applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: effectiveHideDockIcon, menuBarEnabled: enabled)
     }
 
     @MainActor
@@ -806,7 +830,12 @@ extension AgentSessionsApp {
             self.lastObservedMenuBarEnabled = nextMenuBarEnabled
             self.lastObservedHideDockIcon = nextHideDockIcon
             self.updateUsageModels(menuBarEnabledOverride: nextMenuBarEnabled)
-            Self.applyActivationPolicy(hideDockIcon: nextHideDockIcon, menuBarEnabled: nextMenuBarEnabled)
+            Task { @MainActor in
+                self.applyActivationPolicyAndCleanupIfNeeded(
+                    hideDockIcon: nextHideDockIcon,
+                    menuBarEnabled: nextMenuBarEnabled
+                )
+            }
         }
     }
 
