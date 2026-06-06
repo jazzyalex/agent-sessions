@@ -3,9 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.9.1] - 2026-06-05
 ### Bug Fixes
-- Menu bar: Hide Dock icon now launches as a UIElement-capable app and clears stale Dock recent-app entries when switching hidden, preventing macOS from leaving a visible Dock icon behind.
 - Menu bar: Kept the live status label visible instead of collapsing it to a generic stack icon when usage or session counts exceed a narrow width threshold.
+- Menu bar: Hide Dock icon now launches as a UIElement-capable app and clears stale Dock recent-app entries when switching hidden, preventing macOS from leaving a visible Dock icon behind.
 
 ## [3.9] - 2026-06-04
 ### Features
