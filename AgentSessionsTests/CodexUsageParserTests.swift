@@ -898,6 +898,45 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: secondTime, now: secondTime), "▸44m")
     }
 
+    func testUsageLimitProjectionTrackerRetainsProjectionAcrossSameRoundedPercentRefresh() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let thirdTime = secondTime.addingTimeInterval(60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let projected = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        let retained = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: thirdTime
+        ), now: thirdTime)
+
+        XCTAssertEqual(retained, projected)
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: retained, observedAt: thirdTime, now: thirdTime), "▸43m")
+    }
+
     func testUsageLimitProjectionTrackerIgnoresCachedData() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)

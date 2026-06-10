@@ -74,6 +74,7 @@ struct UsageLimitProjectionSample: Equatable {
 
 struct UsageLimitProjectionTracker {
     private var previous: ResolvedSample?
+    private var lastProjection: Projection?
 
     mutating func update(with sample: UsageLimitProjectionSample,
                          now: Date = Date()) -> Date? {
@@ -81,6 +82,7 @@ struct UsageLimitProjectionTracker {
               sample.freshness.allowsProjectedAlerts,
               !isResetInfoUnavailable(raw: sample.resetText) else {
             previous = nil
+            lastProjection = nil
             return nil
         }
         guard let resetDate = UsageResetText.resetDate(
@@ -91,6 +93,7 @@ struct UsageLimitProjectionTracker {
         ), resetDate > sample.observedAt,
            resetDate > now else {
             previous = nil
+            lastProjection = nil
             return nil
         }
 
@@ -102,32 +105,76 @@ struct UsageLimitProjectionTracker {
         defer { previous = current }
 
         guard let previous else { return nil }
-        guard abs(previous.resetDate.timeIntervalSince(current.resetDate)) < 120 else { return nil }
+        guard abs(previous.resetDate.timeIntervalSince(current.resetDate)) < 120 else {
+            lastProjection = nil
+            return nil
+        }
+
+        if current.remainingPercent > previous.remainingPercent {
+            lastProjection = nil
+            return nil
+        }
 
         let elapsed = current.observedAt.timeIntervalSince(previous.observedAt)
-        guard elapsed >= 60 else { return nil }
-        guard previous.remainingPercent > current.remainingPercent else { return nil }
+        guard elapsed >= 60 else { return retainedProjection(for: current, now: now) }
+        guard previous.remainingPercent > current.remainingPercent else {
+            return retainedProjection(for: current, now: now)
+        }
 
         let percentBurned = Double(previous.remainingPercent - current.remainingPercent)
         let secondsUntilEmpty = Double(current.remainingPercent) / (percentBurned / elapsed)
         guard secondsUntilEmpty > 0,
               secondsUntilEmpty <= 60 * 60 else {
+            lastProjection = nil
             return nil
         }
 
         let projectedRunoutAt = current.observedAt.addingTimeInterval(secondsUntilEmpty)
-        guard projectedRunoutAt < current.resetDate else { return nil }
+        guard projectedRunoutAt < current.resetDate else {
+            lastProjection = nil
+            return nil
+        }
+        lastProjection = Projection(
+            runoutAt: projectedRunoutAt,
+            resetDate: current.resetDate,
+            remainingPercent: current.remainingPercent
+        )
         return projectedRunoutAt
     }
 
     mutating func reset() {
         previous = nil
+        lastProjection = nil
+    }
+
+    private mutating func retainedProjection(for current: ResolvedSample, now: Date) -> Date? {
+        guard let projection = lastProjection else { return nil }
+        guard abs(projection.resetDate.timeIntervalSince(current.resetDate)) < 120 else {
+            lastProjection = nil
+            return nil
+        }
+        guard current.remainingPercent <= projection.remainingPercent else {
+            lastProjection = nil
+            return nil
+        }
+        guard projection.runoutAt > now,
+              projection.runoutAt < current.resetDate else {
+            lastProjection = nil
+            return nil
+        }
+        return projection.runoutAt
     }
 
     private struct ResolvedSample: Equatable {
         let remainingPercent: Int
         let resetDate: Date
         let observedAt: Date
+    }
+
+    private struct Projection: Equatable {
+        let runoutAt: Date
+        let resetDate: Date
+        let remainingPercent: Int
     }
 }
 
