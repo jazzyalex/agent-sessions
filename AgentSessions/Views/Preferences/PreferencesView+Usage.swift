@@ -128,69 +128,9 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .help("Choose whether usage meters show remaining (left) or used percentages.")
                 }
-                Text("Applies to Codex and Claude usage strips and menu bar reset meters.")
+                Text("Applies to Codex and Claude usage strips, menu bar reset meters, and Cockpit limits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-
-            sectionHeader("Limit Notifications")
-            VStack(alignment: .leading, spacing: 12) {
-                toggleRow(
-                    "Notify for usage limits",
-                    isOn: $usageLimitNotificationsEnabled,
-                    help: "Show alerts when Codex or Claude 5h and weekly limits are low, exhausted, or when a 5h window resets."
-                )
-                .disabled(!(codexAgentEnabled && codexUsageEnabled) && !(claudeAgentEnabled && claudeUsageEnabled))
-
-                labeledRow("Providers") {
-                    HStack(spacing: 16) {
-                        Toggle("Codex", isOn: $usageLimitNotificationCodexEnabled)
-                            .toggleStyle(.checkbox)
-                            .disabled(!codexAgentEnabled || !codexUsageEnabled || !usageLimitNotificationsEnabled)
-                        Toggle("Claude", isOn: $usageLimitNotificationClaudeEnabled)
-                            .toggleStyle(.checkbox)
-                            .disabled(!claudeAgentEnabled || !claudeUsageEnabled || !usageLimitNotificationsEnabled)
-                    }
-                    .help("Choose which usage sources can send limit notifications.")
-                }
-                .disabled(!usageLimitNotificationsEnabled)
-
-                labeledRow("Warnings") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Approaching limit", isOn: $usageLimitNotificationApproachingEnabled)
-                            .toggleStyle(.checkbox)
-                        Toggle("Limit exhausted", isOn: $usageLimitNotificationExhaustedEnabled)
-                            .toggleStyle(.checkbox)
-                        Toggle("5h is back again", isOn: $usageLimitNotificationFiveHourResetEnabled)
-                            .toggleStyle(.checkbox)
-                    }
-                    .help("Choose which limit events should create notifications.")
-                }
-                .disabled(!usageLimitNotificationsEnabled)
-
-                toggleRow(
-                    "Visual notifications",
-                    isOn: $usageLimitNotificationVisualEnabled,
-                    help: "Use macOS notifications for usage limit alerts."
-                )
-                .disabled(!usageLimitNotificationsEnabled)
-
-                toggleRow(
-                    "Play sound",
-                    isOn: $usageLimitNotificationSoundEnabled,
-                    help: "Play a sound for immediate usage limit alerts and scheduled 5h reset notifications."
-                )
-                .disabled(!usageLimitNotificationsEnabled)
-
-                labeledRow("Low limit threshold") {
-                    Stepper(value: $usageLimitNotificationThresholdPercent, in: 1...50, step: 1) {
-                        Text("\(usageLimitNotificationThresholdPercent)% remaining")
-                            .monospacedDigit()
-                    }
-                    .frame(maxWidth: 220, alignment: .leading)
-                    .help("Alert once per reset window when a 5h or weekly limit reaches this remaining percentage.")
-                }
-                .disabled(!usageLimitNotificationsEnabled || !usageLimitNotificationApproachingEnabled)
             }
 
             // Menu Bar controls moved to the Menu Bar pane
@@ -204,6 +144,251 @@ extension PreferencesView {
         }
         if ![120, 180].contains(claudePollingInterval) {
             claudePollingInterval = 180
+        }
+    }
+
+    var limitAlertsTab: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Limit Alerts")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            sectionHeader("Alert Sources")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow(
+                    "Notify for usage limits",
+                    isOn: $usageLimitNotificationsEnabled,
+                    help: "Enable Codex and Claude usage-limit alerts."
+                )
+                .disabled(!(codexAgentEnabled && codexUsageEnabled) && !(claudeAgentEnabled && claudeUsageEnabled))
+
+                labeledRow("Providers") {
+                    HStack(spacing: 16) {
+                        Toggle("Codex", isOn: $usageLimitNotificationCodexEnabled)
+                            .toggleStyle(.checkbox)
+                            .disabled(!codexAgentEnabled || !codexUsageEnabled || !usageLimitNotificationsEnabled)
+                        Toggle("Claude", isOn: $usageLimitNotificationClaudeEnabled)
+                            .toggleStyle(.checkbox)
+                            .disabled(!claudeAgentEnabled || !claudeUsageEnabled || !usageLimitNotificationsEnabled)
+                    }
+                    .help("Choose which usage sources can send limit alerts.")
+                }
+                .disabled(!usageLimitNotificationsEnabled)
+            }
+
+            sectionHeader("Alert Types")
+            VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Warnings") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Low remaining", isOn: $usageLimitNotificationApproachingEnabled)
+                            .toggleStyle(.checkbox)
+                        Toggle("Predicted run-out soon", isOn: $usageLimitNotificationProjectedEnabled)
+                            .toggleStyle(.checkbox)
+                        Toggle("Limit exhausted", isOn: $usageLimitNotificationExhaustedEnabled)
+                            .toggleStyle(.checkbox)
+                        Toggle("5h reset reminder", isOn: $usageLimitNotificationFiveHourResetEnabled)
+                            .toggleStyle(.checkbox)
+                    }
+                    .help("Choose which limit events should create alerts.")
+                }
+                .disabled(!usageLimitNotificationsEnabled)
+
+                labeledRow("Low limit threshold") {
+                    Stepper(value: $usageLimitNotificationThresholdPercent, in: 1...50, step: 1) {
+                        Text("\(usageLimitNotificationThresholdPercent)% remaining")
+                            .monospacedDigit()
+                    }
+                    .frame(maxWidth: 220, alignment: .leading)
+                    .help("Alert once per reset window when a 5h or weekly limit reaches this remaining percentage.")
+                }
+                .disabled(!usageLimitNotificationsEnabled || !usageLimitNotificationApproachingEnabled)
+
+                Text("Prediction alerts use fresh usage data and fire when the current burn rate can exhaust a 5h or weekly limit within 60 minutes before reset. Recent cached data can still produce low, exhausted, and 5h reset alerts; stale data is ignored.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            sectionHeader("Cockpit Display")
+            VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Projection") {
+                    Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
+                        .toggleStyle(.checkbox)
+                        .help("Show a compact token such as ▸44m in Cockpit when fresh 5h usage samples project exhaustion within 60 minutes before reset.")
+                }
+
+                Text("Cockpit run-out tokens use the same fresh-sample projection rules as prediction alerts, but this display setting is independent of notification delivery.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            sectionHeader("Diagnostics")
+            VStack(alignment: .leading, spacing: 8) {
+                limitAlertDiagnosticsRow(
+                    provider: "Codex",
+                    source: usageLimitDiagnosticsCodexSource,
+                    freshness: usageLimitDiagnosticsCodexFreshness,
+                    observedAt: usageLimitDiagnosticsCodexObservedAt,
+                    lastAlert: usageLimitDiagnosticsCodexLastAlertSummary,
+                    lastAlertAt: usageLimitDiagnosticsCodexLastAlertAt,
+                    nextResetAt: usageLimitDiagnosticsCodexNextResetReminderAt
+                )
+                Divider()
+                limitAlertDiagnosticsRow(
+                    provider: "Claude",
+                    source: usageLimitDiagnosticsClaudeSource,
+                    freshness: usageLimitDiagnosticsClaudeFreshness,
+                    observedAt: usageLimitDiagnosticsClaudeObservedAt,
+                    lastAlert: usageLimitDiagnosticsClaudeLastAlertSummary,
+                    lastAlertAt: usageLimitDiagnosticsClaudeLastAlertAt,
+                    nextResetAt: usageLimitDiagnosticsClaudeNextResetReminderAt
+                )
+                Text("Updates when usage tracking receives a limit snapshot. Prediction diagnostics require fresh data; reset reminders require banners and 5h reset reminders to be enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            sectionHeader("Delivery")
+            VStack(alignment: .leading, spacing: 12) {
+                toggleRow(
+                    "macOS notification banners",
+                    isOn: $usageLimitNotificationVisualEnabled,
+                    help: "Use macOS notifications for usage limit alerts and scheduled 5h reset reminders."
+                )
+                .disabled(!usageLimitNotificationsEnabled)
+
+                toggleRow(
+                    "Play sound for immediate alerts",
+                    isOn: $usageLimitNotificationSoundEnabled,
+                    help: "Play a sound when a low, predicted, exhausted, or reset-complete alert fires. Scheduled reset reminders use macOS notification sound when banners are enabled."
+                )
+                .disabled(!usageLimitNotificationsEnabled)
+            }
+        }
+        .onAppear(perform: seedProjectedAlertDefault)
+        .onAppear(perform: cancelDisabledLimitResetReminders)
+        .onChange(of: usageLimitNotificationsEnabled) { _, _ in cancelDisabledLimitResetReminders() }
+        .onChange(of: usageLimitNotificationVisualEnabled) { _, _ in cancelDisabledLimitResetReminders() }
+        .onChange(of: usageLimitNotificationFiveHourResetEnabled) { _, _ in cancelDisabledLimitResetReminders() }
+        .onChange(of: usageLimitNotificationCodexEnabled) { _, _ in cancelDisabledLimitResetReminders() }
+        .onChange(of: usageLimitNotificationClaudeEnabled) { _, _ in cancelDisabledLimitResetReminders() }
+    }
+
+    private func limitAlertDiagnosticsRow(provider: String,
+                                          source: String,
+                                          freshness: String,
+                                          observedAt: Double,
+                                          lastAlert: String,
+                                          lastAlertAt: Double,
+                                          nextResetAt: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(provider)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            HStack(alignment: .top, spacing: 16) {
+                diagnosticsField(
+                    "Source",
+                    value: emptyFallback(source, fallback: "Waiting for data")
+                )
+                diagnosticsField(
+                    "Freshness",
+                    value: diagnosticsFreshnessText(freshness: freshness, observedAt: observedAt)
+                )
+            }
+            HStack(alignment: .top, spacing: 16) {
+                diagnosticsField(
+                    "Last Alert",
+                    value: diagnosticsLastAlertText(summary: lastAlert, timestamp: lastAlertAt)
+                )
+                diagnosticsField(
+                    "Next 5h Reminder",
+                    value: diagnosticsNextResetText(timestamp: nextResetAt)
+                )
+            }
+        }
+    }
+
+    private func diagnosticsField(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func diagnosticsLastAlertText(summary: String, timestamp: Double) -> String {
+        guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, timestamp > 0 else {
+            return "None yet"
+        }
+        return "\(summary) / \(relativeTimestamp(timestamp))"
+    }
+
+    private func diagnosticsFreshnessText(freshness: String, observedAt: Double) -> String {
+        let base = emptyFallback(freshness, fallback: "Waiting for data")
+        guard observedAt > 0 else { return base }
+        let age = Date().timeIntervalSince(Date(timeIntervalSince1970: observedAt))
+        let adjusted: String
+        if age > 10 * 60 {
+            adjusted = "stale"
+        } else if age > 3 * 60 {
+            adjusted = base.replacingOccurrences(of: "fresh", with: "stale")
+        } else {
+            adjusted = base
+        }
+        return "\(adjusted) / seen \(relativeTimestamp(observedAt))"
+    }
+
+    private func diagnosticsNextResetText(timestamp: Double) -> String {
+        guard usageLimitNotificationsEnabled,
+              usageLimitNotificationVisualEnabled,
+              usageLimitNotificationFiveHourResetEnabled else {
+            return "Off"
+        }
+        guard timestamp > 0 else { return "None scheduled" }
+        let date = Date(timeIntervalSince1970: timestamp)
+        if date < Date() { return "Expired" }
+        let timeText = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+        return "\(timeText) / \(relativeTimestamp(timestamp))"
+    }
+
+    private func relativeTimestamp(_ timestamp: Double) -> String {
+        let date = Date(timeIntervalSince1970: timestamp)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func emptyFallback(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func seedProjectedAlertDefault() {
+        guard UserDefaults.standard.object(forKey: PreferencesKey.usageLimitNotificationProjectedEnabled) == nil else {
+            return
+        }
+        usageLimitNotificationProjectedEnabled = usageLimitNotificationApproachingEnabled
+    }
+
+    private func cancelDisabledLimitResetReminders() {
+        let resetRemindersGloballyDisabled = !usageLimitNotificationsEnabled
+            || !usageLimitNotificationVisualEnabled
+            || !usageLimitNotificationFiveHourResetEnabled
+        if resetRemindersGloballyDisabled || !usageLimitNotificationCodexEnabled {
+            UsageLimitNotifier.shared.cancelScheduledFiveHourReset(provider: .codex)
+        }
+        if resetRemindersGloballyDisabled || !usageLimitNotificationClaudeEnabled {
+            UsageLimitNotifier.shared.cancelScheduledFiveHourReset(provider: .claude)
         }
     }
 

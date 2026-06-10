@@ -63,6 +63,85 @@ func formatUsageWeeklyResetLabel(_ date: Date?, now: Date = Date()) -> String? {
     return "\(AppDateFormatting.weekdayAbbrev(date)) \(AppDateFormatting.timeShort(date))"
 }
 
+struct UsageLimitProjectionSample: Equatable {
+    let source: UsageTrackingSource
+    let remainingPercent: Int
+    let resetText: String
+    let hasRateLimit: Bool
+    let freshness: UsageLimitAlertFreshness
+    let observedAt: Date
+}
+
+struct UsageLimitProjectionTracker {
+    private var previous: ResolvedSample?
+
+    mutating func update(with sample: UsageLimitProjectionSample,
+                         now: Date = Date()) -> Date? {
+        guard sample.hasRateLimit,
+              sample.freshness.allowsProjectedAlerts,
+              !isResetInfoUnavailable(raw: sample.resetText) else {
+            previous = nil
+            return nil
+        }
+        guard let resetDate = UsageResetText.resetDate(
+            kind: "5h",
+            source: sample.source,
+            raw: sample.resetText,
+            now: sample.observedAt
+        ), resetDate > sample.observedAt,
+           resetDate > now else {
+            previous = nil
+            return nil
+        }
+
+        let current = ResolvedSample(
+            remainingPercent: clampPercent(sample.remainingPercent),
+            resetDate: resetDate,
+            observedAt: sample.observedAt
+        )
+        defer { previous = current }
+
+        guard let previous else { return nil }
+        guard abs(previous.resetDate.timeIntervalSince(current.resetDate)) < 120 else { return nil }
+
+        let elapsed = current.observedAt.timeIntervalSince(previous.observedAt)
+        guard elapsed >= 60 else { return nil }
+        guard previous.remainingPercent > current.remainingPercent else { return nil }
+
+        let percentBurned = Double(previous.remainingPercent - current.remainingPercent)
+        let secondsUntilEmpty = Double(current.remainingPercent) / (percentBurned / elapsed)
+        guard secondsUntilEmpty > 0,
+              secondsUntilEmpty <= 60 * 60 else {
+            return nil
+        }
+
+        let projectedRunoutAt = current.observedAt.addingTimeInterval(secondsUntilEmpty)
+        guard projectedRunoutAt < current.resetDate else { return nil }
+        return projectedRunoutAt
+    }
+
+    mutating func reset() {
+        previous = nil
+    }
+
+    private struct ResolvedSample: Equatable {
+        let remainingPercent: Int
+        let resetDate: Date
+        let observedAt: Date
+    }
+}
+
+func formatUsageProjectionLabel(runoutAt: Date?,
+                                observedAt: Date?,
+                                now: Date = Date()) -> String? {
+    guard let runoutAt, let observedAt else { return nil }
+    guard now.timeIntervalSince(observedAt) <= 3 * 60 else { return nil }
+    let seconds = runoutAt.timeIntervalSince(now)
+    guard seconds > 0, seconds <= 60 * 60 else { return nil }
+    if seconds < 60 { return "▸<1m" }
+    return "▸\(max(1, Int(ceil(seconds / 60))))m"
+}
+
 /// Formats a reset date as ISO 8601 with "resets " prefix.
 /// Used by OAuth and CLI RPC sources so UsageResetText.parse() can round-trip it.
 func formatResetISO8601(_ date: Date) -> String {

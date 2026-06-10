@@ -55,11 +55,14 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var currentSourceLabel: String = ""
     @Published var currentHealthLabel: String = ""
     @Published var lastRawOAuthPayload: String? = nil
+    @Published var fiveHourProjectedRunoutAt: Date? = nil
+    @Published var fiveHourProjectionObservedAt: Date? = nil
 
     private var sourceManager: ClaudeUsageSourceManager?
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
     private let limitNotifier = UsageLimitNotifier.shared
+    private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -188,6 +191,9 @@ final class ClaudeUsageModel: ObservableObject {
         }
         sourceManager = nil
         service = nil
+        fiveHourProjectionTracker.reset()
+        fiveHourProjectedRunoutAt = nil
+        fiveHourProjectionObservedAt = nil
         removeWakeObservers()
     }
 
@@ -357,6 +363,8 @@ final class ClaudeUsageModel: ObservableObject {
 
     /// Apply a normalized ClaudeLimitSnapshot from the source manager.
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
+        let now = Date()
+        let freshness = Self.alertFreshness(for: s, now: now)
         sessionRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weeklyRemainingPercent)
         weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
@@ -370,11 +378,21 @@ final class ClaudeUsageModel: ObservableObject {
         currentSourceLabel = s.source.description
         currentHealthLabel = s.health.description
         dataIsStale = (s.health == .stale || s.health == .degraded)
+        updateFiveHourProjection(
+            remainingPercent: s.fiveHourRemainingPercent,
+            resetText: s.fiveHourResetText,
+            freshness: freshness,
+            observedAt: s.fetchedAt,
+            now: now
+        )
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.fiveHourRemainingPercent,
             fiveHourResetText: s.fiveHourResetText,
             weeklyRemainingPercent: s.weeklyRemainingPercent,
-            weeklyResetText: s.weeklyResetText
+            weeklyResetText: s.weeklyResetText,
+            freshness: freshness,
+            observedAt: s.fetchedAt,
+            sourceDescription: s.source.description
         ))
         if isUpdating { isUpdating = false }
         if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
@@ -410,27 +428,59 @@ final class ClaudeUsageModel: ObservableObject {
 
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
+        let now = Date()
         sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)
         weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
         sessionResetText = s.sessionResetText
         weekAllModelsResetText = s.weekAllModelsResetText
         weekOpusResetText = s.weekOpusResetText
-        lastUpdate = Date()
+        lastUpdate = now
         dataIsStale = false
+        updateFiveHourProjection(
+            remainingPercent: s.sessionRemainingPercent,
+            resetText: s.sessionResetText,
+            freshness: .fresh,
+            observedAt: now,
+            now: now
+        )
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.sessionRemainingPercent,
             fiveHourResetText: s.sessionResetText,
             weeklyRemainingPercent: s.weekAllModelsRemainingPercent,
-            weeklyResetText: s.weekAllModelsResetText
+            weeklyResetText: s.weekAllModelsResetText,
+            freshness: .fresh,
+            observedAt: lastUpdate,
+            sourceDescription: ClaudeUsageSource.tmuxUsage.description
         ))
         if isUpdating { isUpdating = false }
+    }
+
+    private func updateFiveHourProjection(remainingPercent: Int,
+                                          resetText: String,
+                                          freshness: UsageLimitAlertFreshness,
+                                          observedAt: Date,
+                                          now: Date) {
+        let hasFiveHour = !resetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let projectedRunoutAt = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
+            source: .claude,
+            remainingPercent: remainingPercent,
+            resetText: resetText,
+            hasRateLimit: hasFiveHour,
+            freshness: freshness,
+            observedAt: observedAt
+        ), now: now)
+        fiveHourProjectedRunoutAt = projectedRunoutAt
+        fiveHourProjectionObservedAt = projectedRunoutAt == nil ? nil : observedAt
     }
 
     private func usageLimitSnapshot(fiveHourRemainingPercent: Int,
                                     fiveHourResetText: String,
                                     weeklyRemainingPercent: Int,
-                                    weeklyResetText: String) -> UsageLimitSnapshot {
+                                    weeklyResetText: String,
+                                    freshness: UsageLimitAlertFreshness,
+                                    observedAt: Date?,
+                                    sourceDescription: String?) -> UsageLimitSnapshot {
         let hasFiveHour = !fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasWeekly = !weeklyResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return UsageLimitSnapshot(
@@ -440,8 +490,23 @@ final class ClaudeUsageModel: ObservableObject {
             hasFiveHourRateLimit: hasFiveHour,
             weeklyRemainingPercent: weeklyRemainingPercent,
             weeklyResetText: weeklyResetText,
-            hasWeeklyRateLimit: hasWeekly
+            hasWeeklyRateLimit: hasWeekly,
+            freshness: freshness,
+            observedAt: observedAt,
+            sourceDescription: sourceDescription
         )
+    }
+
+    private static func alertFreshness(for snapshot: ClaudeLimitSnapshot, now: Date = Date()) -> UsageLimitAlertFreshness {
+        let age = now.timeIntervalSince(snapshot.fetchedAt)
+        switch (snapshot.source, snapshot.health) {
+        case (.oauthEndpoint, .live), (.webEndpoint, .live), (.tmuxUsage, .live):
+            return age <= 3 * 60 ? .fresh : .stale
+        case (.cachedOAuth, _), (.cachedWeb, _), (_, .degraded):
+            return age <= 10 * 60 ? .recentCached : .stale
+        default:
+            return .stale
+        }
     }
 
 }

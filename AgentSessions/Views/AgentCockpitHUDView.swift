@@ -3168,6 +3168,8 @@ private struct HUDLimitsProviderEntry {
     let isInitialLoading: Bool
     /// For Codex: the JSONL event timestamp. For Claude: the last poll time.
     let lastDataTimestamp: Date?
+    let fiveHourProjectedRunoutAt: Date?
+    let fiveHourProjectionObservedAt: Date?
 }
 
 /// An isolated view that observes usage models independently so that
@@ -3202,6 +3204,8 @@ private struct HUDLimitsBar: View {
                     codexUsageModel.weekResetText,
                     codexUsageModel.lastEventTimestamp?.timeIntervalSinceReferenceDate.description ?? "nil",
                     codexUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    codexUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    codexUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     codexUsageModel.isUpdating ? "updating" : "idle"
                 ].joined(separator: "|")
             )
@@ -3215,6 +3219,8 @@ private struct HUDLimitsBar: View {
                     String(claudeUsageModel.weekAllModelsRemainingPercent),
                     claudeUsageModel.weekAllModelsResetText,
                     claudeUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    claudeUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
+                    claudeUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     claudeUsageModel.isUpdating ? "updating" : "idle"
                 ].joined(separator: "|")
             )
@@ -3233,7 +3239,9 @@ private struct HUDLimitsBar: View {
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
                 weekResetText: codexUsageModel.weekResetText,
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: codexUsageModel.lastEventTimestamp
+                lastDataTimestamp: codexUsageModel.lastEventTimestamp,
+                fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
+                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -3244,7 +3252,9 @@ private struct HUDLimitsBar: View {
                 fiveHourResetText: claudeUsageModel.sessionResetText,
                 weekResetText: claudeUsageModel.weekAllModelsResetText,
                 isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: claudeUsageModel.lastUpdate
+                lastDataTimestamp: claudeUsageModel.lastUpdate,
+                fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
+                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt
             ))
         }
         return out
@@ -3312,7 +3322,9 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
                 weekResetText: codexUsageModel.weekResetText,
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: codexUsageModel.lastEventTimestamp
+                lastDataTimestamp: codexUsageModel.lastEventTimestamp,
+                fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
+                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -3323,7 +3335,9 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourResetText: claudeUsageModel.sessionResetText,
                 weekResetText: claudeUsageModel.weekAllModelsResetText,
                 isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: claudeUsageModel.lastUpdate
+                lastDataTimestamp: claudeUsageModel.lastUpdate,
+                fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
+                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt
             ))
         }
         return out
@@ -3394,6 +3408,7 @@ private struct HUDLimitsDetailPanel: View {
     let mode: UsageDisplayMode
     let now: Date
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3446,6 +3461,15 @@ private struct HUDLimitsDetailPanel: View {
                 Text("5h: ")
                 Text(fiveUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                if projectedRunoutEnabled,
+                   let projection = formatUsageProjectionLabel(
+                    runoutAt: entry.fiveHourProjectedRunoutAt,
+                    observedAt: entry.fiveHourProjectionObservedAt,
+                    now: now
+                   ) {
+                    Text(" \(projection)")
+                        .foregroundStyle(.orange)
+                }
             }
             Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
                 .foregroundStyle(.secondary)
@@ -3506,24 +3530,27 @@ private struct HUDLimitsBarContent: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            // Variant 1: Full — both windows with reset times
-            entriesRow(showResets: true, onlyBottleneck: false)
+            // Variant 1: Full — both windows with reset times and projection when it fits
+            entriesRow(showResets: true, onlyBottleneck: false, showProjection: true)
+                .preference(key: LimitsBarVariantKey.self, value: 1)
+            // Variant 1 fallback: keep reset times before spending width on projection
+            entriesRow(showResets: true, onlyBottleneck: false, showProjection: false)
                 .preference(key: LimitsBarVariantKey.self, value: 1)
             // Variant 2: Bottleneck with reset — keep at least the limiting reset visible
-            entriesRow(showResets: true, onlyBottleneck: true)
+            entriesRow(showResets: true, onlyBottleneck: true, showProjection: false)
                 .preference(key: LimitsBarVariantKey.self, value: 2)
             // Variant 3: No resets — both windows, percent only
-            entriesRow(showResets: false, onlyBottleneck: false)
+            entriesRow(showResets: false, onlyBottleneck: false, showProjection: false)
                 .preference(key: LimitsBarVariantKey.self, value: 3)
             // Variant 4: Bottleneck only — whichever window has fewer % left
-            entriesRow(showResets: false, onlyBottleneck: true)
+            entriesRow(showResets: false, onlyBottleneck: true, showProjection: false)
                 .preference(key: LimitsBarVariantKey.self, value: 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
     }
 
-    @ViewBuilder private func entriesRow(showResets: Bool, onlyBottleneck: Bool) -> some View {
+    @ViewBuilder private func entriesRow(showResets: Bool, onlyBottleneck: Bool, showProjection: Bool) -> some View {
         HStack(spacing: 10) {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                 if index > 0 {
@@ -3531,7 +3558,14 @@ private struct HUDLimitsBarContent: View {
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
-                HUDLimitsProviderText(entry: entry, mode: mode, showResets: showResets, onlyBottleneck: onlyBottleneck, now: now)
+                HUDLimitsProviderText(
+                    entry: entry,
+                    mode: mode,
+                    showResets: showResets,
+                    onlyBottleneck: onlyBottleneck,
+                    showProjection: showProjection,
+                    now: now
+                )
             }
         }
         .lineLimit(1)
@@ -3544,8 +3578,10 @@ private struct HUDLimitsProviderText: View {
     let mode: UsageDisplayMode
     var showResets: Bool = true
     var onlyBottleneck: Bool = false
+    var showProjection: Bool = true
     var now: Date = Date()
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
 
     // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
     private var bottleneckIs5h: Bool { entry.fiveHourLeft <= entry.weekLeft }
@@ -3554,6 +3590,15 @@ private struct HUDLimitsProviderText: View {
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
     private func pctLabel(_ left: Int, unavailable: Bool) -> String { unavailable ? "--" : "\(pct(left))%" }
+    private var fiveHourProjectionLabel: String? {
+        guard showProjection else { return nil }
+        guard projectedRunoutEnabled else { return nil }
+        return formatUsageProjectionLabel(
+            runoutAt: entry.fiveHourProjectedRunoutAt,
+            observedAt: entry.fiveHourProjectionObservedAt,
+            now: now
+        )
+    }
 
     private func fiveHourResetLabel() -> String? {
         if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
@@ -3614,6 +3659,10 @@ private struct HUDLimitsProviderText: View {
                                 Text("5h: ")
                                 Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                                if let projection = fiveHourProjectionLabel {
+                                    Text(" \(projection)")
+                                        .foregroundStyle(.orange)
+                                }
                             }
                             if showResets, let r = fiveHourResetLabel() {
                                 Text("↻ \(r)")

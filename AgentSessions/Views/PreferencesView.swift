@@ -94,8 +94,22 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.usageLimitNotificationCodexEnabled) var usageLimitNotificationCodexEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationClaudeEnabled) var usageLimitNotificationClaudeEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationApproachingEnabled) var usageLimitNotificationApproachingEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitNotificationProjectedEnabled) var usageLimitNotificationProjectedEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) var usageLimitCockpitProjectionEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexSource) var usageLimitDiagnosticsCodexSource: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexFreshness) var usageLimitDiagnosticsCodexFreshness: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexObservedAt) var usageLimitDiagnosticsCodexObservedAt: Double = 0
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexLastAlertSummary) var usageLimitDiagnosticsCodexLastAlertSummary: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexLastAlertAt) var usageLimitDiagnosticsCodexLastAlertAt: Double = 0
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexNextResetReminderAt) var usageLimitDiagnosticsCodexNextResetReminderAt: Double = 0
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeSource) var usageLimitDiagnosticsClaudeSource: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeFreshness) var usageLimitDiagnosticsClaudeFreshness: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeObservedAt) var usageLimitDiagnosticsClaudeObservedAt: Double = 0
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeLastAlertSummary) var usageLimitDiagnosticsClaudeLastAlertSummary: String = ""
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeLastAlertAt) var usageLimitDiagnosticsClaudeLastAlertAt: Double = 0
+    @AppStorage(PreferencesKey.usageLimitDiagnosticsClaudeNextResetReminderAt) var usageLimitDiagnosticsClaudeNextResetReminderAt: Double = 0
     @AppStorage(PreferencesKey.hideZeroMessageSessions) var hideZeroMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.hideLowMessageSessions) var hideLowMessageSessionsPref: Bool = true
     @AppStorage(PreferencesKey.showHousekeepingSessions) var showHousekeepingSessions: Bool = false
@@ -367,6 +381,8 @@ struct PreferencesView: View {
                 generalTab
             case .usageTracking:
                 usageTrackingTab
+            case .limitAlerts:
+                limitAlertsTab
             case .usageProbes:
                 usageProbesTab
             case .menuBar:
@@ -728,6 +744,7 @@ struct PreferencesView: View {
         validatePiSessionsPath()
 
         cockpitReduceTransparency = true
+        usageLimitCockpitProjectionEnabled = true
 
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: PreferencesKey.showClaudeUsageStrip)
@@ -1033,6 +1050,7 @@ struct PreferencesView: View {
 enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
     case usageTracking
+    case limitAlerts
     case usageProbes
     case menuBar
     case unified
@@ -1056,6 +1074,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .usageTracking: return "Usage Tracking"
+        case .limitAlerts: return "Limit Alerts"
         case .usageProbes: return "Usage Probes"
         case .menuBar: return "Menu Bar"
         case .unified: return "Unified Window"
@@ -1079,6 +1098,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .usageTracking: return "chart.bar"
+        case .limitAlerts: return "bell.badge"
         case .usageProbes: return "wrench.and.screwdriver"
         case .menuBar: return "menubar.rectangle"
         case .unified: return "square.grid.2x2"
@@ -1100,8 +1120,8 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
+    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
 }
 
 // MARK: - Probe helpers
@@ -1329,7 +1349,7 @@ extension PreferencesView {
             if cursorVersionString == nil && cursorProbeState != .probing { probeCursor() }
         case .pi:
             if piVersionString == nil && piProbeState != .probing { probePi() }
-        case .menuBar, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
+        case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
     }

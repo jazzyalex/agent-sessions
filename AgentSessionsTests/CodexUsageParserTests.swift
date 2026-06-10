@@ -28,6 +28,7 @@ final class CodexUsageParserTests: XCTestCase {
         defaults.set(true, forKey: PreferencesKey.usageLimitNotificationCodexEnabled)
         defaults.set(true, forKey: PreferencesKey.usageLimitNotificationClaudeEnabled)
         defaults.set(true, forKey: PreferencesKey.usageLimitNotificationApproachingEnabled)
+        defaults.set(true, forKey: PreferencesKey.usageLimitNotificationProjectedEnabled)
         defaults.set(true, forKey: PreferencesKey.usageLimitNotificationExhaustedEnabled)
         defaults.set(true, forKey: PreferencesKey.usageLimitNotificationFiveHourResetEnabled)
         defaults.set(10, forKey: PreferencesKey.usageLimitNotificationThresholdPercent)
@@ -865,6 +866,296 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.kind, .projectedExhaustion)
         XCTAssertEqual(events.first?.window, .fiveHour)
         XCTAssertEqual(events.first?.remainingPercent, 60)
+    }
+
+    func testUsageLimitProjectionTrackerFormatsCompactRunoutToken() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        let first = UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        )
+        let second = UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        )
+
+        XCTAssertNil(tracker.update(with: first, now: firstTime))
+        let runoutAt = tracker.update(with: second, now: secondTime)
+
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: secondTime, now: secondTime), "▸44m")
+    }
+
+    func testUsageLimitProjectionTrackerIgnoresCachedData() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let resetText = formatResetISO8601(firstTime.addingTimeInterval(4.5 * 60 * 60))
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let runoutAt = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .recentCached,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        XCTAssertNil(runoutAt)
+    }
+
+    func testUsageLimitAlertEvaluatorUsesObservedAtForProjectedExhaustionETA() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let firstObservedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondObservedAt = firstObservedAt.addingTimeInterval(6 * 60)
+        let deliveryTime = firstObservedAt.addingTimeInterval(30 * 60)
+        let reset = firstObservedAt.addingTimeInterval(4.5 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 100,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(firstObservedAt.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true,
+            observedAt: firstObservedAt
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 88,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(firstObservedAt.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true,
+            observedAt: secondObservedAt
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: firstObservedAt)
+        let events = evaluator.evaluate(snapshot: second, now: deliveryTime)
+
+        XCTAssertEqual(events.first?.kind, .projectedExhaustion)
+        XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 44 * 60, accuracy: 0.001)
+    }
+
+    func testUsageLimitProjectionLabelExpiresWhenObservationIsStale() {
+        let observedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let runoutAt = observedAt.addingTimeInterval(44 * 60)
+
+        XCTAssertEqual(
+            formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: observedAt, now: observedAt.addingTimeInterval(3 * 60)),
+            "▸41m"
+        )
+        XCTAssertNil(
+            formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: observedAt, now: observedAt.addingTimeInterval(3 * 60 + 1))
+        )
+    }
+
+    func testUsageLimitAlertEvaluatorCanDisablePredictionSeparatelyFromLowThreshold() {
+        let defaults = makeAlertDefaults()
+        defaults.set(false, forKey: PreferencesKey.usageLimitNotificationProjectedEnabled)
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(4.5 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 90,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 60,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events, [])
+    }
+
+    func testUsageLimitAlertEvaluatorFallsBackToLowWarningToggleForProjectedUpgradeDefault() {
+        let defaults = makeAlertDefaults()
+        defaults.set(false, forKey: PreferencesKey.usageLimitNotificationApproachingEnabled)
+        defaults.removeObject(forKey: PreferencesKey.usageLimitNotificationProjectedEnabled)
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(4.5 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 90,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 60,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events, [])
+    }
+
+    func testUsageLimitAlertEvaluatorDoesNotPredictFromCachedUsageData() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(4.5 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 90,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true
+        )
+        let cachedSecond = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 60,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true,
+            freshness: .recentCached,
+            observedAt: now.addingTimeInterval(30 * 60),
+            sourceDescription: "OAuth (cached)"
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: cachedSecond, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events, [])
+    }
+
+    func testUsageLimitAlertEvaluatorAllowsRecentCachedThresholdButIgnoresStaleThreshold() {
+        let defaults = makeAlertDefaults()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(45 * 60)
+        let cachedSnapshot = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 9,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 80,
+            weeklyResetText: "",
+            hasWeeklyRateLimit: false,
+            freshness: .recentCached,
+            observedAt: now.addingTimeInterval(-5 * 60),
+            sourceDescription: "OAuth (cached)"
+        )
+        let staleSnapshot = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 9,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 80,
+            weeklyResetText: "",
+            hasWeeklyRateLimit: false,
+            freshness: .stale,
+            observedAt: now.addingTimeInterval(-20 * 60),
+            sourceDescription: "JSONL fallback"
+        )
+
+        let cachedEvents = UsageLimitAlertEvaluator(defaults: defaults).evaluate(snapshot: cachedSnapshot, now: now)
+        let staleEvents = UsageLimitAlertEvaluator(defaults: defaults).evaluate(snapshot: staleSnapshot, now: now)
+
+        XCTAssertEqual(cachedEvents.first?.kind, .approaching)
+        XCTAssertEqual(staleEvents, [])
+    }
+
+    func testUsageLimitDiagnosticsStoreRecordsSnapshotAlertAndScheduledReset() {
+        let defaults = makeAlertDefaults()
+        let store = UsageLimitAlertDiagnosticsStore(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(45 * 60)
+        let snapshot = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 9,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 72,
+            weeklyResetText: formatResetISO8601(now.addingTimeInterval(2 * 24 * 60 * 60)),
+            hasWeeklyRateLimit: true,
+            fiveHourFreshness: .fresh,
+            weeklyFreshness: .recentCached,
+            observedAt: now,
+            sourceDescription: nil,
+            fiveHourSourceDescription: "OAuth",
+            weeklySourceDescription: "JSONL"
+        )
+        let alert = UsageLimitAlertEvent(
+            provider: .codex,
+            kind: .approaching,
+            window: .fiveHour,
+            remainingPercent: 9,
+            resetDate: reset,
+            identifier: "test-alert"
+        )
+        let scheduled = UsageLimitAlertEvent(
+            provider: .codex,
+            kind: .resetComplete,
+            window: .fiveHour,
+            remainingPercent: 9,
+            resetDate: reset,
+            identifier: "test-reset"
+        )
+
+        store.recordSnapshot(snapshot, now: now)
+        store.recordImmediateAlert(alert, now: now.addingTimeInterval(10))
+        store.recordScheduledReset(scheduled)
+
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexSource), "5h OAuth / Wk JSONL")
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexFreshness), "5h fresh / Wk recent cache")
+        XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexObservedAt), now.timeIntervalSince1970)
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexLastAlertSummary), "5h low, 9% left")
+        XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexLastAlertAt), now.addingTimeInterval(10).timeIntervalSince1970)
+        XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexNextResetReminderAt), reset.timeIntervalSince1970)
+
+        store.clearScheduledReset(provider: .codex)
+
+        XCTAssertEqual(defaults.object(forKey: PreferencesKey.usageLimitDiagnosticsCodexNextResetReminderAt) as? Double, nil)
     }
 
     func testUsageLimitAlertEvaluatorDedupesProjectedExhaustionPerResetWindow() {

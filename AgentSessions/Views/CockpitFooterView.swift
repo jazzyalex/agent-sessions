@@ -49,6 +49,8 @@ struct QuotaData: Equatable {
     var lastUpdate: Date? = nil
     var eventTimestamp: Date? = nil
     var isUpdating: Bool = false
+    var fiveHourProjectedRunoutAt: Date? = nil
+    var fiveHourProjectionObservedAt: Date? = nil
 
     func resetDate(kind: String, raw: String) -> Date? {
         UsageResetText.resetDate(kind: kind, source: provider.usageSource, raw: raw)
@@ -68,7 +70,9 @@ struct QuotaData: Equatable {
             weekResetText: model.weekResetText,
             lastUpdate: model.lastUpdate,
             eventTimestamp: model.lastEventTimestamp,
-            isUpdating: model.isUpdating
+            isUpdating: model.isUpdating,
+            fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
+            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt
         )
     }
 
@@ -82,7 +86,9 @@ struct QuotaData: Equatable {
             weekResetText: model.weekAllModelsResetText,
             lastUpdate: model.lastUpdate,
             eventTimestamp: nil,
-            isUpdating: model.isUpdating
+            isUpdating: model.isUpdating,
+            fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
+            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt
         )
     }
 }
@@ -225,6 +231,7 @@ private struct IndexingIndicator: View {
 		    let showResetIndicators: Bool
 		    let showPill: Bool
 		    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
+		    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled: Bool = true
 		    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var mode: UsageDisplayMode { modeOverride ?? (UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left) }
@@ -240,6 +247,7 @@ private struct IndexingIndicator: View {
 	        var weekPercentLabelText: String
 	        var fiveHourResetLabelText: String
 	        var weekResetLabelText: String
+	        var fiveHourProjectionLabelText: String?
 	    }
 
 	    private var presentation: Presentation {
@@ -319,7 +327,13 @@ private struct IndexingIndicator: View {
 		            fiveHourPercentLabelText: fiveUnavailable ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
 		            weekPercentLabelText: weekUnavailable ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
 		            fiveHourResetLabelText: fiveResetDisplayText,
-		            weekResetLabelText: weekResetDisplayText
+		            weekResetLabelText: weekResetDisplayText,
+		            fiveHourProjectionLabelText: projectedRunoutEnabled
+		                ? formatUsageProjectionLabel(
+		                    runoutAt: data.fiveHourProjectedRunoutAt,
+		                    observedAt: data.fiveHourProjectionObservedAt
+		                )
+		                : nil
 		        )
 		    }
 
@@ -354,7 +368,13 @@ private struct IndexingIndicator: View {
 		            HStack(spacing: 6) {
 		                switch scope {
 		                case .fiveHour:
-		                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                    HStack(spacing: 4) {
+		                        Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                        if let projection = presentation.fiveHourProjectionLabelText {
+		                            Text(projection)
+		                                .foregroundStyle(.orange)
+		                        }
+		                    }
 		                    if showResetIndicators {
 		                        DividerText(baseForeground: baseForeground)
 		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)
@@ -366,7 +386,13 @@ private struct IndexingIndicator: View {
 		                        resetIndicator(labelText: presentation.weekResetLabelText)
 		                    }
 		                case .both:
-		                    Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                    HStack(spacing: 4) {
+		                        Text("5h: \(presentation.fiveHourPercentLabelText)")
+		                        if let projection = presentation.fiveHourProjectionLabelText {
+		                            Text(projection)
+		                                .foregroundStyle(.orange)
+		                        }
+		                    }
 		                    if showResetIndicators {
 		                        DividerText(baseForeground: baseForeground)
 		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)
