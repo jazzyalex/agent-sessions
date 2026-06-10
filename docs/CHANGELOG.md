@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 - Dock: Added a Hide Dock Icon command to the Dock tile right-click menu.
 - Limits Widget: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.
+- Limits Widget: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.
 - Limit Alerts: Added a dedicated Preferences pane with source/freshness diagnostics, split predicted run-out alerts from low-threshold alerts, and gates prediction on fresh usage data while ignoring stale snapshots.
 
 ## [3.9.1] - 2026-06-05

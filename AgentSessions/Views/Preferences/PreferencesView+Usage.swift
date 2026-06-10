@@ -214,10 +214,10 @@ extension PreferencesView {
                 labeledRow("Projection") {
                     Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
                         .toggleStyle(.checkbox)
-                        .help("Show a compact token such as ▸44m in Cockpit when fresh 5h usage samples project exhaustion within 60 minutes before reset.")
+                        .help("Show a compact token such as ▸2h in Cockpit when fresh 5h usage samples project exhaustion before reset.")
                 }
 
-                Text("Cockpit run-out tokens use the same fresh-sample projection rules as prediction alerts, but this display setting is independent of notification delivery.")
+                Text("Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

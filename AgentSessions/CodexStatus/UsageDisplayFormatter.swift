@@ -123,8 +123,7 @@ struct UsageLimitProjectionTracker {
 
         let percentBurned = Double(previous.remainingPercent - current.remainingPercent)
         let secondsUntilEmpty = Double(current.remainingPercent) / (percentBurned / elapsed)
-        guard secondsUntilEmpty > 0,
-              secondsUntilEmpty <= 60 * 60 else {
+        guard secondsUntilEmpty > 0 else {
             lastProjection = nil
             return nil
         }
@@ -184,9 +183,14 @@ func formatUsageProjectionLabel(runoutAt: Date?,
     guard let runoutAt, let observedAt else { return nil }
     guard now.timeIntervalSince(observedAt) <= 3 * 60 else { return nil }
     let seconds = runoutAt.timeIntervalSince(now)
-    guard seconds > 0, seconds <= 60 * 60 else { return nil }
+    guard seconds > 0 else { return nil }
     if seconds < 60 { return "▸<1m" }
-    return "▸\(max(1, Int(ceil(seconds / 60))))m"
+    let minutes = max(1, Int(ceil(seconds / 60)))
+    if minutes < 60 { return "▸\(minutes)m" }
+    let hours = minutes / 60
+    let remainingMinutes = minutes % 60
+    if remainingMinutes == 0 { return "▸\(hours)h" }
+    return "▸\(hours)h \(remainingMinutes)m"
 }
 
 /// Formats a reset date as ISO 8601 with "resets " prefix.
