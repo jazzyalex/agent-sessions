@@ -36,6 +36,30 @@ final class ActivationPolicyDeciderTests: XCTestCase {
         XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Show Dock Icon")
     }
 
+    func testDisablingMenuBarClearsHiddenDockPreference() {
+        let defaults = UserDefaults(suiteName: "DockIconPreferenceControllerMenuBarTests")!
+        defaults.removePersistentDomain(forName: "DockIconPreferenceControllerMenuBarTests")
+        DockIconPreferenceController.setDockIconHidden(true, defaults: defaults)
+
+        DockIconPreferenceController.setMenuBarEnabled(false, defaults: defaults)
+
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.menuBarEnabled))
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.Advanced.hideDockIcon))
+        XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Hide Dock Icon")
+    }
+
+    func testReachabilityReconcileRestoresDockPathWithoutReenablingMenuBar() {
+        let defaults = UserDefaults(suiteName: "DockIconPreferenceControllerReconcileTests")!
+        defaults.removePersistentDomain(forName: "DockIconPreferenceControllerReconcileTests")
+        defaults.set(false, forKey: PreferencesKey.menuBarEnabled)
+        defaults.set(true, forKey: PreferencesKey.Advanced.hideDockIcon)
+
+        DockIconPreferenceController.reconcileReachability(defaults: defaults)
+
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.menuBarEnabled))
+        XCTAssertFalse(defaults.bool(forKey: PreferencesKey.Advanced.hideDockIcon))
+    }
+
     @MainActor
     func testDockMenuAlwaysOffersHideDockIcon() {
         let delegate = AgentSessionsApplicationDelegate()

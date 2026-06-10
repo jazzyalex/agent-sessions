@@ -144,9 +144,9 @@ extension OnboardingContent {
                 body: "Enable the agents you use. Disabled agents will not appear in filters or analytics."
             ),
             Screen(
-                symbolName: "sparkles.tv",
-                title: "Agent Cockpit (Beta)",
-                body: "Open a live HUD for active sessions in iTerm2. Beta scope currently covers Codex CLI, Claude Code, and OpenCode."
+                symbolName: "gauge",
+                title: "Limits Cockpit",
+                body: "Keep Codex and Claude limits visible, including 5h run-out predictions when fresh usage velocity is available."
             ),
             primaryPowerTipsScreen(),
             Screen(
@@ -191,9 +191,9 @@ extension OnboardingContent {
         [
             randomPowerTipsScreen(),
             Screen(
-                symbolName: "sparkles.tv",
-                title: "Agent Cockpit (Beta)",
-                body: "Live session HUD for iTerm2, currently scoped to Codex CLI, Claude Code, and OpenCode."
+                symbolName: "gauge",
+                title: "Limits Cockpit",
+                body: "See 5h and weekly usage at a glance, with prediction markers and alert settings for fresh limit data."
             ),
             Screen(
                 symbolName: "heart.text.square",

@@ -7,6 +7,10 @@ enum ActivationPolicyDecider {
 }
 
 enum DockIconPreferenceController {
+    static func isMenuBarEnabled(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
+    }
+
     static func isDockIconHidden(defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
     }
@@ -20,6 +24,19 @@ enum DockIconPreferenceController {
             defaults.set(true, forKey: PreferencesKey.menuBarEnabled)
         }
         defaults.set(hidden, forKey: PreferencesKey.Advanced.hideDockIcon)
+    }
+
+    static func setMenuBarEnabled(_ enabled: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: PreferencesKey.menuBarEnabled)
+        if !enabled {
+            defaults.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
+        }
+    }
+
+    static func reconcileReachability(defaults: UserDefaults = .standard) {
+        if !isMenuBarEnabled(defaults: defaults), isDockIconHidden(defaults: defaults) {
+            defaults.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
+        }
     }
 
     @discardableResult

@@ -102,7 +102,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(titles.count, 6)
         XCTAssertEqual(titles[0], "Sessions Found")
         XCTAssertEqual(titles[1], "Connect Your Agents")
-        XCTAssertEqual(titles[2], "Agent Cockpit (Beta)")
+        XCTAssertEqual(titles[2], "Limits Cockpit")
         XCTAssertEqual(titles[3], "Power Tips")
         XCTAssertEqual(titles[4], "Analytics & Usage")
         XCTAssertEqual(titles[5], "Feedback & Community Support")
@@ -126,7 +126,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(updateTour?.screens.first?.title, "Power Tips")
         XCTAssertEqual(updateTour?.screens.first?.body, "Two quick tips from Agent Sessions.")
         XCTAssertEqual(updateTour?.screens.first?.bullets.count, 2)
-        XCTAssertEqual(updateTour?.screens[1].title, "Agent Cockpit (Beta)")
+        XCTAssertEqual(updateTour?.screens[1].title, "Limits Cockpit")
         XCTAssertEqual(updateTour?.screens[2].title, "Feedback & Community Support")
         XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
     }
@@ -162,7 +162,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(fallback.screens.first?.title, "Power Tips")
         XCTAssertEqual(fallback.screens.first?.body, "Two quick tips from Agent Sessions.")
         XCTAssertEqual(fallback.screens.first?.bullets.count, 2)
-        XCTAssertEqual(fallback.screens[1].title, "Agent Cockpit (Beta)")
+        XCTAssertEqual(fallback.screens[1].title, "Limits Cockpit")
         XCTAssertEqual(fallback.screens.last?.title, "Feedback & Community Support")
     }
 

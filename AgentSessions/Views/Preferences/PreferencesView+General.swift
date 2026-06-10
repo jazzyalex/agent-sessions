@@ -260,16 +260,7 @@ extension PreferencesView {
 
             Toggle("Hide Dock icon", isOn: Binding(
                 get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
-                set: { newValue in
-                    if newValue {
-                        // Ensure there is always a persistent way to reopen app windows.
-                        let menuBarEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.menuBarEnabled)
-                        if !menuBarEnabled {
-                            UserDefaults.standard.set(true, forKey: PreferencesKey.menuBarEnabled)
-                        }
-                    }
-                    UserDefaults.standard.set(newValue, forKey: PreferencesKey.Advanced.hideDockIcon)
-                }
+                set: { DockIconPreferenceController.setDockIconHidden($0) }
             ))
             .help("Removes Agent Sessions from the Dock when the menu bar item is visible. If macOS cannot fit the menu bar item, Agent Sessions restores the Dock icon so the app remains accessible.")
 

@@ -239,6 +239,7 @@ struct AgentSessionsApp: App {
     init() {
         guard !AppRuntime.isRunningTests else { return }
         let defaults = UserDefaults.standard
+        DockIconPreferenceController.reconcileReachability(defaults: defaults)
         let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
         let menuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
         Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
@@ -805,10 +806,8 @@ extension AgentSessionsApp {
 
     private func handleMenuBarEnabledChange(_ enabled: Bool) {
         guard !AppRuntime.isRunningTests else { return }
+        DockIconPreferenceController.setMenuBarEnabled(enabled)
         let effectiveHideDockIcon = enabled ? hideDockIcon : false
-        if !enabled && hideDockIcon {
-            UserDefaults.standard.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
-        }
         lastObservedMenuBarEnabled = enabled
         lastObservedHideDockIcon = effectiveHideDockIcon
         updateUsageModels(menuBarEnabledOverride: enabled)
@@ -842,7 +841,11 @@ extension AgentSessionsApp {
             queue: .main
         ) { [self] _ in
             let nextMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
-            let nextHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+            var nextHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+            if !nextMenuBarEnabled && nextHideDockIcon {
+                DockIconPreferenceController.reconcileReachability(defaults: defaults)
+                nextHideDockIcon = false
+            }
 
             guard nextMenuBarEnabled != self.lastObservedMenuBarEnabled
                 || nextHideDockIcon != self.lastObservedHideDockIcon else { return }

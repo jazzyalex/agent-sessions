@@ -73,9 +73,9 @@ struct OnboardingSheetView: View {
 
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .agentCockpit, .powerTips(0), .analyticsUsage, .feedbackSupport]
+            return [.sessionsFound, .connectAgents, .limitsCockpit, .powerTips(0), .analyticsUsage, .feedbackSupport]
         case .updateTour:
-            return [.powerTips(0), .agentCockpit, .feedbackSupport]
+            return [.powerTips(0), .limitsCockpit, .feedbackSupport]
         case .powerTips:
             return powerTipScreens.indices.map { .powerTips($0) }
         }
@@ -163,8 +163,8 @@ struct OnboardingSheetView: View {
                 sessionsFoundSlide
             case .connectAgents:
                 connectAgentsSlide
-            case .agentCockpit:
-                agentCockpitSlide
+            case .limitsCockpit:
+                limitsCockpitSlide
             case .powerTips(let index):
                 powerTipsSlide(index: index)
             case .workWithSessions:
@@ -317,73 +317,61 @@ struct OnboardingSheetView: View {
         }
     }
 
-    private var agentCockpitSlide: some View {
+    private var limitsCockpitSlide: some View {
         let isUpdateTour = content.kind == .updateTour
-        let cockpitImageName = colorScheme == .dark
-            ? "OnboardingCockpitScreenshot"
-            : "OnboardingCockpitScreenshotDark"
 
         return VStack(spacing: 18) {
             SlideHeader(
                 palette: palette,
-                icon: .symbol("sparkles.tv"),
+                icon: .symbol("gauge"),
                 iconGradient: palette.iconGradientBlue,
-                title: "Agent Cockpit (Beta)",
+                title: "Limits Cockpit",
                 subtitle: isUpdateTour
-                    ? "A focused live HUD for active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
-                    : "A focused live HUD for active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+                    ? "See Codex and Claude limits, predictions, and alerts without opening Settings."
+                    : "Keep Codex and Claude limits visible while Agent Sessions watches for fresh prediction data."
             )
 
-            GeometryReader { rowGeometry in
-                let columnGap: CGFloat = 26
-                let minDetailsWidth: CGFloat = 250
-                let targetScreenshotWidth = rowGeometry.size.width * 0.48
-                let maxScreenshotWidth = max(210, rowGeometry.size.width - minDetailsWidth - columnGap)
-                let screenshotWidth = min(max(220, targetScreenshotWidth), maxScreenshotWidth)
-                let detailsWidth = max(minDetailsWidth, rowGeometry.size.width - screenshotWidth - columnGap)
+            CockpitScreenshotCard(
+                palette: palette,
+                imageName: "OnboardingLimitsCockpitPredictionMarkers",
+                preferredHeight: 132
+            )
+            .frame(maxWidth: 560)
+            .padding(.top, 4)
 
-                HStack(alignment: .top, spacing: columnGap) {
-                    CockpitScreenshotCard(
-                        palette: palette,
-                        imageName: cockpitImageName,
-                        preferredHeight: isUpdateTour ? 296 : 288
-                    )
-                    .frame(width: screenshotWidth)
-
-                    VStack(spacing: 10) {
-                        CockpitQuickRow(
-                            palette: palette,
-                            icon: "keyboard",
-                            iconColor: palette.accentBlue,
-                            title: "Open Agent Cockpit",
-                            description: "Use View → Agent Cockpit (⌥⌘⇧C) or the toolbar button in the main window"
-                        )
-                        CockpitQuickRow(
-                            palette: palette,
-                            icon: "dot.radiowaves.left.and.right",
-                            iconColor: palette.accentGreen,
-                            title: "Read Live Status",
-                            description: "Rows update active and waiting state so you can scan work in progress without tab hopping"
-                        )
-                        CockpitQuickRow(
-                            palette: palette,
-                            icon: "arrowshape.turn.up.right.fill",
-                            iconColor: palette.accentOrange,
-                            title: "Jump to the Right Place",
-                            description: "Go to Session to open it in Agent Sessions, then Focus in iTerm2 when you need the terminal"
-                        )
-                        CockpitBetaScopeRow(palette: palette)
-                    }
-                    .frame(width: detailsWidth, alignment: .top)
-                    .layoutPriority(1)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                CockpitQuickRow(
+                    palette: palette,
+                    icon: "clock.badge.exclamationmark",
+                    iconColor: palette.accentOrange,
+                    title: "5h Prediction Marker",
+                    description: "When fresh velocity data projects a run-out before reset, Cockpit shows the remaining time."
+                )
+                CockpitQuickRow(
+                    palette: palette,
+                    icon: "chart.line.uptrend.xyaxis",
+                    iconColor: palette.accentGreen,
+                    title: "Weekly Context",
+                    description: "The compact strip keeps 5h and weekly limit pressure visible together."
+                )
+                CockpitQuickRow(
+                    palette: palette,
+                    icon: "bell.badge.fill",
+                    iconColor: palette.accentBlue,
+                    title: "Limit Alerts",
+                    description: "Settings separate predicted run-out alerts from low-threshold warnings."
+                )
+                CockpitQuickRow(
+                    palette: palette,
+                    icon: "checkmark.shield.fill",
+                    iconColor: palette.accentPurple,
+                    title: "Freshness Gated",
+                    description: "Prediction alerts use fresh usage snapshots and ignore stale limit data."
+                )
             }
-            .padding(.top, 8)
-            .frame(height: isUpdateTour ? 304 : 296)
 
             TipBox(
-                text: "Live sessions + cockpit is controlled in Settings → Agent Cockpit. You can disable it anytime.",
+                text: "Open View → Agent Cockpit, then choose Limits mode. Tune alerts in Settings → Limit Alerts.",
                 palette: palette
             )
         }
@@ -908,7 +896,7 @@ private final class OnboardingAgentAvailabilityModel: ObservableObject {
 private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
-    case agentCockpit
+    case limitsCockpit
     case powerTips(Int)
     case workWithSessions
     case analyticsUsage

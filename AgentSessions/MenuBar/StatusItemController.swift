@@ -382,9 +382,7 @@ final class StatusItemController: NSObject {
         pb.setString("claude", forType: .string)
     }
     @objc private func hideMenuBar() {
-        let d = UserDefaults.standard
-        d.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
-        d.set(false, forKey: PreferencesKey.menuBarEnabled)
+        DockIconPreferenceController.setMenuBarEnabled(false)
         // The App listens to this key and hides the status item.
     }
     @objc private func toggleHideDockIcon() {

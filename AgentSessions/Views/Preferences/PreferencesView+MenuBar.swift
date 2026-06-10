@@ -10,7 +10,10 @@ extension PreferencesView {
 
             sectionHeader("Menu Bar Item")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show menu bar item", isOn: $menuBarEnabled, help: "Add a menu bar item that shows live session counts and usage details when available")
+                toggleRow("Show menu bar item", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false },
+                    set: { DockIconPreferenceController.setMenuBarEnabled($0) }
+                ), help: "Add a menu bar item that shows live session counts and usage details when available")
                 Text("The menu bar item shows active and waiting sessions first. Usage controls and reset details appear below when usage tracking is enabled.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
