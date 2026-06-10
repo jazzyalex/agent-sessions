@@ -3,16 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-### Highlights
-- Limit Alerts and Predictions: Added freshness-aware Codex and Claude run-out predictions, earlier Cockpit ETA markers, and separate notification controls for predicted exhaustion versus low-threshold warnings.
 
+## [3.9.2] - 2026-06-10
 ### Improvements
+- Limit Alerts and Predictions: Added freshness-aware Codex and Claude run-out predictions, earlier Cockpit ETA markers, and separate notification controls for predicted exhaustion versus low-threshold warnings.
 - Onboarding: Replaced the Agent Cockpit slide in fresh-install and update tours with a Limits Cockpit slide covering prediction markers and Limit Alerts.
 - Limits Widget: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.
 - Limits Widget: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.
 - Limit Alerts: Added a dedicated Preferences pane with source/freshness diagnostics, split predicted run-out alerts from low-threshold alerts, and gates prediction on fresh usage data while ignoring stale snapshots.
-
-### Minor Updates
 - Dock: Added a Hide Dock Icon command to the Dock tile right-click menu.
 - Menu bar: Turning off the menu bar item now stays off across relaunches by clearing Hide Dock icon instead of letting the safety path re-enable the menu bar.
 
