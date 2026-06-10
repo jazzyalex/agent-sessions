@@ -137,7 +137,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
             visible: true
         )
 
-        XCTAssertEqual(plan, .timed(delay: 5 * 60))
+        XCTAssertEqual(plan, .timed(delay: 3 * 60))
     }
 
     func testOAuthRetryPlan_coldStartStillUsesFastRetry() {
@@ -257,7 +257,9 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
 
         let restored = delivered.first
         XCTAssertNotNil(restored, "Cached snapshot should be published on cold start")
+        XCTAssertEqual(restored?.source, .cachedOAuth)
         XCTAssertNotEqual(restored?.health, .failed)
+        XCTAssertEqual(restored?.fetchedAt.timeIntervalSince1970 ?? 0, seed.fetchedAt.timeIntervalSince1970, accuracy: 0.001)
         XCTAssertEqual(restored?.fiveHourUsedRatio ?? 0, 0.4, accuracy: 0.001)
     }
 }

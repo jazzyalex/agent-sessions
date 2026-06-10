@@ -76,7 +76,7 @@ enum ClaudeUsageMode: String, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .auto: return "Auto (OAuth + tmux)"
+        case .auto: return "Auto (OAuth + Web/tmux)"
         case .oauthOnly: return "OAuth only"
         case .tmuxOnly: return "tmux only"
         case .webOnly: return "Web API only"

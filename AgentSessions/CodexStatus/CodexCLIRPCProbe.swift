@@ -92,10 +92,14 @@ actor CodexCLIRPCProbe {
         case processError(String)
     }
 
+    private nonisolated static var appServerArguments: [String] {
+        ["app-server", "--listen", "stdio://"]
+    }
+
     private func runRPC(binary: URL) async throws -> CodexUsageSnapshot? {
         let process = Process()
         process.executableURL = binary
-        process.arguments = ["app-server", "--listen", "stdio://", "--session-source", "vscode"]
+        process.arguments = Self.appServerArguments
 
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -252,6 +256,10 @@ actor CodexCLIRPCProbe {
 #if DEBUG
     nonisolated static func parseRateLimitsResponseForTesting(_ data: Data) -> CodexUsageSnapshot? {
         parseRateLimitsResponseData(data)
+    }
+
+    nonisolated static var appServerArgumentsForTesting: [String] {
+        appServerArguments
     }
 #endif
 }

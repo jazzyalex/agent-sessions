@@ -61,10 +61,10 @@ actor ClaudeWebUsageClient {
         cachedOrgId = nil
     }
 
-    func fetch(sessionKey: String) async throws -> (response: ClaudeWebRawUsageResponse, bodyHash: String, fromCache: Bool) {
+    func fetch(sessionKey: String) async throws -> (response: ClaudeWebRawUsageResponse, bodyHash: String, fromCache: Bool, fetchedAt: Date) {
         if let cached = readSharedCache() {
             os_log("ClaudeOAuth: web API — serving from cache", log: log, type: .debug)
-            return (cached.response, cached.bodyHash, true)
+            return (cached.response, cached.bodyHash, true, cached.fetchedAt)
         }
 
         let orgId = try await resolveOrgId(sessionKey: sessionKey)
@@ -102,7 +102,7 @@ actor ClaudeWebUsageClient {
 
         writeSharedCache(data: data)
         os_log("ClaudeOAuth: web API fetch succeeded", log: log, type: .debug)
-        return (parsed, bodyHash, false)
+        return (parsed, bodyHash, false, Date())
     }
 
     // MARK: - Org ID resolution
@@ -145,6 +145,7 @@ actor ClaudeWebUsageClient {
     private struct CachedResult {
         let response: ClaudeWebRawUsageResponse
         let bodyHash: String
+        let fetchedAt: Date
     }
 
     private func readSharedCache() -> CachedResult? {
@@ -157,7 +158,7 @@ actor ClaudeWebUsageClient {
               let parsed = try? JSONDecoder().decode(ClaudeWebRawUsageResponse.self, from: data)
         else { return nil }
         let bodyHash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
-        return CachedResult(response: parsed, bodyHash: bodyHash)
+        return CachedResult(response: parsed, bodyHash: bodyHash, fetchedAt: mtime)
     }
 
     private nonisolated static func isCacheFresh(modificationDate: Date, now: Date = Date()) -> Bool {

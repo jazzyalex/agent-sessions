@@ -221,10 +221,36 @@ final class ClaudeUsageModel: ObservableObject {
     private func handleWake() {
         guard !AppRuntime.isRunningTests else { return }
         guard isEnabled else { return }
-        guard stripVisible || menuVisible else { return }
-        if UserDefaults.standard.bool(forKey: PreferencesKey.claudeUsageEnabled) == false { return }
-        guard Self.onACPower() else { return }
+        guard Self.shouldRefreshOnWake(
+            isRunningTests: AppRuntime.isRunningTests,
+            isEnabled: isEnabled,
+            stripVisible: stripVisible,
+            menuVisible: menuVisible,
+            cockpitVisible: cockpitVisible,
+            cockpitPinned: cockpitPinned,
+            appIsActive: appIsActive,
+            claudeUsageEnabled: UserDefaults.standard.bool(forKey: PreferencesKey.claudeUsageEnabled),
+            onACPower: Self.onACPower()
+        ) else { return }
         refreshNow()
+    }
+
+    private static func shouldRefreshOnWake(isRunningTests: Bool,
+                                            isEnabled: Bool,
+                                            stripVisible: Bool,
+                                            menuVisible: Bool,
+                                            cockpitVisible: Bool,
+                                            cockpitPinned: Bool,
+                                            appIsActive: Bool,
+                                            claudeUsageEnabled: Bool,
+                                            onACPower: Bool) -> Bool {
+        guard !isRunningTests else { return false }
+        guard isEnabled else { return false }
+        let effectiveVisible = menuVisible || cockpitPinned || ((stripVisible || cockpitVisible) && appIsActive)
+        guard effectiveVisible else { return false }
+        guard claudeUsageEnabled else { return false }
+        guard onACPower else { return false }
+        return true
     }
 
     private static func onACPower() -> Bool {
@@ -340,7 +366,7 @@ final class ClaudeUsageModel: ObservableObject {
         weekAllModelsResetText = s.weeklyResetText
         weekOpusResetText = s.weekOpusResetText
 
-        lastUpdate = Date()
+        lastUpdate = s.fetchedAt
         currentSourceLabel = s.source.description
         currentHealthLabel = s.health.description
         dataIsStale = (s.health == .stale || s.health == .degraded)
@@ -353,6 +379,34 @@ final class ClaudeUsageModel: ObservableObject {
         if isUpdating { isUpdating = false }
         if s.source == .oauthEndpoint { fetchRawOAuthPayload() }
     }
+
+#if DEBUG
+    static func shouldRefreshOnWakeForTesting(isRunningTests: Bool,
+                                              isEnabled: Bool,
+                                              stripVisible: Bool,
+                                              menuVisible: Bool,
+                                              cockpitVisible: Bool,
+                                              cockpitPinned: Bool,
+                                              appIsActive: Bool,
+                                              claudeUsageEnabled: Bool,
+                                              onACPower: Bool) -> Bool {
+        shouldRefreshOnWake(
+            isRunningTests: isRunningTests,
+            isEnabled: isEnabled,
+            stripVisible: stripVisible,
+            menuVisible: menuVisible,
+            cockpitVisible: cockpitVisible,
+            cockpitPinned: cockpitPinned,
+            appIsActive: appIsActive,
+            claudeUsageEnabled: claudeUsageEnabled,
+            onACPower: onACPower
+        )
+    }
+
+    func applyLimitSnapshotForTesting(_ snapshot: ClaudeLimitSnapshot) {
+        applyLimitSnapshot(snapshot)
+    }
+#endif
 
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {

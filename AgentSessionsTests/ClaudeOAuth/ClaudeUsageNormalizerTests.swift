@@ -126,6 +126,37 @@ final class ClaudeUsageNormalizerTests: XCTestCase {
         XCTAssertEqual(snap.weeklyRemainingPercent, 73)     // 100 - 27
     }
 
+    // MARK: - OAuth client cache
+
+    func testOAuthClientCacheFreshnessUsesThreeMinuteTTL() {
+        XCTAssertEqual(ClaudeOAuthUsageClient.cacheMaxAgeForTesting, 3 * 60)
+        XCTAssertTrue(ClaudeOAuthUsageClient.isCacheFreshForTesting(age: 60))
+        XCTAssertTrue(ClaudeOAuthUsageClient.isCacheFreshForTesting(age: 3 * 60 - 1))
+        XCTAssertFalse(ClaudeOAuthUsageClient.isCacheFreshForTesting(age: 3 * 60 + 1))
+    }
+
+    func testOAuthSourceManagerMarksCacheHitsAsCachedOAuth() {
+        let raw = makeResponse(fiveHourUtil: 42, sevenDayUtil: 22)
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let live = ClaudeUsageSourceManager.normalizedOAuthSnapshotForTesting(
+            raw,
+            bodyHash: "live",
+            fromCache: false,
+            fetchedAt: fetchedAt
+        )
+        let cached = ClaudeUsageSourceManager.normalizedOAuthSnapshotForTesting(
+            raw,
+            bodyHash: "cached",
+            fromCache: true,
+            fetchedAt: fetchedAt
+        )
+
+        XCTAssertEqual(live?.source, .oauthEndpoint)
+        XCTAssertEqual(cached?.source, .cachedOAuth)
+        XCTAssertEqual(cached?.fetchedAt, fetchedAt)
+    }
+
     // MARK: - Helpers
 
     private func makeResponse(

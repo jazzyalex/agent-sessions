@@ -41,7 +41,7 @@ actor ClaudeUsageSourceManager {
     private static let cacheStaleThreshold: TimeInterval = 10 * 60    // 10 minutes
     private static let cacheHardExpire: TimeInterval = 30 * 60        // 30 minutes
     private static let credentialWatchInterval: TimeInterval = 30     // 30s watch poll
-    private static let visibleFailureRetryInterval: TimeInterval = 5 * 60
+    private static let visibleFailureRetryInterval: TimeInterval = 3 * 60
     // Fast retries during cold start (first 90s) to close the blank-screen gap.
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
@@ -233,9 +233,9 @@ actor ClaudeUsageSourceManager {
         }
 
         do {
-            let (raw, bodyHash, rawBody) = try await usageClient.fetch(token: resolved.token)
+            let (raw, bodyHash, rawBody, fromCache, fetchedAt) = try await usageClient.fetch(token: resolved.token)
             lastRawOAuthPayload = rawBody
-            guard let snapshot = ClaudeUsageNormalizer.normalize(raw, bodyHash: bodyHash) else {
+            guard let snapshot = Self.normalizedOAuthSnapshot(raw, bodyHash: bodyHash, fromCache: fromCache, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: normalizer returned nil (empty payload)", log: log, type: .error)
                 await handleOAuthFailure(reason: "empty payload")
                 return
@@ -251,14 +251,14 @@ actor ClaudeUsageSourceManager {
             lastOAuthSnapshot = snapshot
             await store.save(snapshot)
 
-            if usingWebFallback && mode != .webOnly {
+            if !fromCache, usingWebFallback && mode != .webOnly {
                 os_log("ClaudeOAuth: OAuth recovered, deactivating web API fallback", log: log, type: .info)
                 usingWebFallback = false
                 webRefreshTask?.cancel()
                 webRefreshTask = nil
                 webFailureCount = 0
             }
-            if usingTmuxFallback {
+            if !fromCache, usingTmuxFallback {
                 os_log("ClaudeOAuth: OAuth recovered, deactivating tmux fallback", log: log, type: .info)
                 await deactivateTmuxFallback()
             }
@@ -446,6 +446,17 @@ actor ClaudeUsageSourceManager {
         }
     }
 
+    private nonisolated static func normalizedOAuthSnapshot(_ raw: ClaudeOAuthRawUsageResponse,
+                                                            bodyHash: String,
+                                                            fromCache: Bool,
+                                                            fetchedAt: Date) -> ClaudeLimitSnapshot? {
+        guard var snapshot = ClaudeUsageNormalizer.normalize(raw, bodyHash: bodyHash, fetchedAt: fetchedAt) else {
+            return nil
+        }
+        if fromCache { snapshot.source = .cachedOAuth }
+        return snapshot
+    }
+
     private func wakeOAuthForVisibleTransition() {
         // Visibility should wake credential-gated failures, but not cancel a server-imposed 429 backoff.
         if let deadline = oauthRateLimitRetryDeadline, deadline > Date() {
@@ -508,8 +519,8 @@ actor ClaudeUsageSourceManager {
         }
 
         do {
-            let (raw, bodyHash, fromCache) = try await webUsageClient.fetch(sessionKey: cookie.sessionKey)
-            guard var snapshot = ClaudeWebUsageNormalizer.normalize(raw, bodyHash: bodyHash) else {
+            let (raw, bodyHash, fromCache, fetchedAt) = try await webUsageClient.fetch(sessionKey: cookie.sessionKey)
+            guard var snapshot = ClaudeWebUsageNormalizer.normalize(raw, bodyHash: bodyHash, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: web normalizer returned nil", log: log, type: .error)
                 await handleWebFailure(reason: "empty web payload")
                 return
@@ -632,6 +643,15 @@ actor ClaudeUsageSourceManager {
     func saveSnapshot(_ snapshot: ClaudeLimitSnapshot) async {
         await store.save(snapshot)
     }
+
+#if DEBUG
+    nonisolated static func normalizedOAuthSnapshotForTesting(_ raw: ClaudeOAuthRawUsageResponse,
+                                                              bodyHash: String,
+                                                              fromCache: Bool,
+                                                              fetchedAt: Date) -> ClaudeLimitSnapshot? {
+        normalizedOAuthSnapshot(raw, bodyHash: bodyHash, fromCache: fromCache, fetchedAt: fetchedAt)
+    }
+#endif
 
     // MARK: - Private
 

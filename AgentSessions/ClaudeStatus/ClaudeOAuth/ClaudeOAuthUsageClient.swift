@@ -53,7 +53,7 @@ actor ClaudeOAuthUsageClient {
     // shared across all consumers rather than each one burning quota independently.
     private static let sharedCacheURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.json")
     private static let sharedCacheTokenURL = URL(fileURLWithPath: "/tmp/claude/statusline-usage-cache.token")
-    private static let cacheMaxAge: TimeInterval = 240  // 4 minutes — reduces API calls across shared consumers
+    private static let cacheMaxAge: TimeInterval = 3 * 60
 
     /// Resolved once at init from `claude --version`; falls back to a safe default.
     private let userAgent: String
@@ -94,7 +94,7 @@ actor ClaudeOAuthUsageClient {
         return "claude-code/\(version)"
     }
 
-    func fetch(token: String) async throws -> (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String) {
+    func fetch(token: String) async throws -> (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String, fromCache: Bool, fetchedAt: Date) {
         let tokenFP = tokenFingerprint(token)
 
         // Check shared file cache first — avoids redundant API calls across
@@ -162,13 +162,13 @@ actor ClaudeOAuthUsageClient {
         writeSharedCache(data: data, tokenFingerprint: tokenFP)
 
         os_log("ClaudeOAuth: fetch succeeded", log: log, type: .debug)
-        return (parsed, bodyHash, rawBody)
+        return (parsed, bodyHash, rawBody, false, Date())
     }
 
     // MARK: - Shared File Cache
 
     private struct CachedResult {
-        let result: (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String)
+        let result: (response: ClaudeOAuthRawUsageResponse, bodyHash: String, rawBody: String, fromCache: Bool, fetchedAt: Date)
         let age: TimeInterval
     }
 
@@ -221,8 +221,19 @@ actor ClaudeOAuthUsageClient {
             rawBody = String(data: data, encoding: .utf8) ?? "<undecodable>"
         }
 
-        return CachedResult(result: (parsed, bodyHash, rawBody), age: age)
+        return CachedResult(result: (parsed, bodyHash, rawBody, true, mtime), age: age)
     }
+
+#if DEBUG
+    nonisolated static var cacheMaxAgeForTesting: TimeInterval {
+        cacheMaxAge
+    }
+
+    nonisolated static func isCacheFreshForTesting(age: TimeInterval) -> Bool {
+        let now = Date(timeIntervalSinceReferenceDate: 10_000)
+        return now.timeIntervalSince(now.addingTimeInterval(-age)) < cacheMaxAge
+    }
+#endif
 
     /// Write a successful API response to the shared cache with token fingerprint.
     /// Sidecar is written AFTER the JSON so readers that see a new sidecar are

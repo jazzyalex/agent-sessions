@@ -316,6 +316,14 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
     }
 
+    func testCLIRPCProbeUsesCurrentAppServerArguments() {
+        XCTAssertEqual(
+            CodexCLIRPCProbe.appServerArgumentsForTesting,
+            ["app-server", "--listen", "stdio://"]
+        )
+        XCTAssertFalse(CodexCLIRPCProbe.appServerArgumentsForTesting.contains("--session-source"))
+    }
+
     func testStatusProbeParserMarksReturnedWindowsAsAvailable() async {
         let json = """
         {
@@ -982,6 +990,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(CodexCLIRPCProbe.defaultSuccessCooldownForTesting, 60)
 
         XCTAssertEqual(ClaudeUsageSourceManager.refreshIntervalForTesting, 60)
+        XCTAssertEqual(ClaudeOAuthUsageClient.cacheMaxAgeForTesting, 3 * 60)
         XCTAssertEqual(ClaudeWebUsageClient.cacheMaxAgeForTesting, 3 * 60)
         XCTAssertTrue(ClaudeWebUsageClient.isCacheFreshForTesting(age: 60))
         XCTAssertFalse(ClaudeWebUsageClient.isCacheFreshForTesting(age: 3 * 60 + 1))
@@ -1361,6 +1370,72 @@ final class CodexUsageParserTests: XCTestCase {
         model.setStripVisible(false)
         XCTAssertNotNil(model)
         XCTAssertNotNil(ClaudeUsageModel.shared)
+    }
+
+    @MainActor
+    func testClaudeUsageModelWakeRefreshTreatsCockpitAsVisible() {
+        XCTAssertTrue(
+            ClaudeUsageModel.shouldRefreshOnWakeForTesting(
+                isRunningTests: false,
+                isEnabled: true,
+                stripVisible: false,
+                menuVisible: false,
+                cockpitVisible: true,
+                cockpitPinned: false,
+                appIsActive: true,
+                claudeUsageEnabled: true,
+                onACPower: true
+            )
+        )
+        XCTAssertFalse(
+            ClaudeUsageModel.shouldRefreshOnWakeForTesting(
+                isRunningTests: false,
+                isEnabled: true,
+                stripVisible: false,
+                menuVisible: false,
+                cockpitVisible: true,
+                cockpitPinned: false,
+                appIsActive: false,
+                claudeUsageEnabled: true,
+                onACPower: true
+            )
+        )
+        XCTAssertTrue(
+            ClaudeUsageModel.shouldRefreshOnWakeForTesting(
+                isRunningTests: false,
+                isEnabled: true,
+                stripVisible: false,
+                menuVisible: false,
+                cockpitVisible: false,
+                cockpitPinned: true,
+                appIsActive: false,
+                claudeUsageEnabled: true,
+                onACPower: true
+            )
+        )
+    }
+
+    @MainActor
+    func testClaudeUsageModelUsesSnapshotFetchedAtForLastUpdate() {
+        let model = ClaudeUsageModel()
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        model.applyLimitSnapshotForTesting(
+            ClaudeLimitSnapshot(
+                fetchedAt: fetchedAt,
+                source: .cachedOAuth,
+                health: .stale,
+                fiveHourUsedRatio: 0.25,
+                fiveHourResetText: "",
+                weeklyUsedRatio: 0.5,
+                weeklyResetText: "",
+                weekOpusUsedRatio: nil,
+                weekOpusResetText: nil,
+                rawPayloadHash: nil
+            )
+        )
+
+        XCTAssertEqual(model.lastUpdate, fetchedAt)
+        XCTAssertTrue(model.dataIsStale)
     }
 
 #if DEBUG
