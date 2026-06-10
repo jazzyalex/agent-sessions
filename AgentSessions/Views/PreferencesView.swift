@@ -107,8 +107,8 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Transcript.enableCodeDiffLineNumbers) var transcriptEnableCodeDiffLineNumbers: Bool = true
     @AppStorage(PreferencesKey.Transcript.enableLinkification) var transcriptEnableLinkification: Bool = true
     // Per-agent polling intervals
-    @AppStorage(PreferencesKey.codexPollingInterval) var codexPollingInterval: Int = 300   // 1/5/15 min options, default 5m
-    @AppStorage(PreferencesKey.claudePollingInterval) var claudePollingInterval: Int = 900 // 3/15/30 min options, default 15m
+    @AppStorage(PreferencesKey.codexPollingInterval) var codexPollingInterval: Int = 60    // 1/2/3 min options, default 1m
+    @AppStorage(PreferencesKey.claudePollingInterval) var claudePollingInterval: Int = 180 // tmux fallback options, default 3m
     // Star / Pin behavior
     @AppStorage(PreferencesKey.Archives.starPinsSessions) var starPinsSessions: Bool = true
     @AppStorage(PreferencesKey.Archives.stopSyncAfterInactivityMinutes) var stopSyncAfterInactivityMinutes: Int = 30
@@ -332,7 +332,7 @@ struct PreferencesView: View {
             .help("Enable the experimental Claude usage tracker despite the warning")
         } message: {
             Text("""
-            This feature runs Claude Code headlessly via tmux to fetch `/usage` data (default: every 15 minutes).
+            This feature runs Claude Code headlessly via tmux to fetch `/usage` data (default: every 3 minutes while visible).
 
             Requirements: Claude CLI + tmux installed and authenticated
 

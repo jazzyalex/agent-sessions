@@ -29,11 +29,11 @@ extension PreferencesView {
                 labeledRow("Refresh every") {
                     Picker("", selection: $codexPollingInterval) {
                         Text("1 minute").tag(60)
-                        Text("5 minutes").tag(300)
-                        Text("15 minutes").tag(900)
+                        Text("2 minutes").tag(120)
+                        Text("3 minutes").tag(180)
                     }
                     .pickerStyle(.segmented)
-                    .help("How often to refresh Codex usage")
+                    .help("How often to refresh Codex usage while a usage surface is visible. Automatic /status probes keep their separate cooldowns.")
                 }
                 .disabled(!codexAgentEnabled)
 
@@ -88,12 +88,11 @@ extension PreferencesView {
                 }
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
+                        Text("2 minutes").tag(120)
                         Text("3 minutes").tag(180)
-                        Text("15 minutes").tag(900)
-                        Text("30 minutes").tag(1800)
                     }
                     .pickerStyle(.segmented)
-                    .help("How often to refresh Claude usage (applies to tmux path; OAuth always refreshes every 60s)")
+                    .help("How often to refresh Claude tmux fallback while a usage surface is visible. OAuth and Web API sources refresh every 60 seconds.")
                 }
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
             }
@@ -195,6 +194,16 @@ extension PreferencesView {
             }
 
             // Menu Bar controls moved to the Menu Bar pane
+        }
+        .onAppear(perform: normalizeUsagePollingIntervals)
+    }
+
+    private func normalizeUsagePollingIntervals() {
+        if ![60, 120, 180].contains(codexPollingInterval) {
+            codexPollingInterval = 60
+        }
+        if ![120, 180].contains(claudePollingInterval) {
+            claudePollingInterval = 180
         }
     }
 

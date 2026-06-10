@@ -14,7 +14,7 @@ import IOKit.ps
 //    - Uses tmux to run `claude` CLI and send `/usage` command
 //    - WARNING: Not guaranteed free. Running Claude Code and invoking `/usage` may
 //      generate server requests and may count toward Claude Code usage limits.
-//    - Frequency: Every 15 minutes (reduced on battery, disabled when hidden)
+//    - Frequency: Every 2-3 minutes while visible, disabled when hidden
 //    - Limitation: Requires active polling and launches Claude Code
 //    - Note: Unlike Codex, Claude CLI doesn't expose usage logs for passive parsing
 //
@@ -1204,8 +1204,9 @@ actor ClaudeStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Read Claude-specific polling interval (defaults to 900s = 15 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int ?? 900)
+        // Read Claude-specific polling interval. Visible limits surfaces are capped
+        // at 3 minutes so pinned cockpits and menu-bar tracking stay current.
+        let storedInterval = UserDefaults.standard.object(forKey: "ClaudePollingInterval") as? Int
 
         // Strict policy: auto polling is idle when no valid usage surface is visible.
         if !autoPollingAllowed {
@@ -1217,7 +1218,7 @@ actor ClaudeStatusService {
             return batteryRecheckIntervalNanoseconds
         }
 
-        let clampedBase = max(UInt64(60), userInterval)
+        let clampedBase = Self.visiblePollingIntervalSeconds(storedInterval: storedInterval)
         let multiplier: UInt64
         switch unchangedAutoProbeStreak {
         case 0:
@@ -1227,9 +1228,20 @@ actor ClaudeStatusService {
         default:
             multiplier = 4
         }
-        let backedOffSeconds = min(maxBackoffSeconds, clampedBase * multiplier)
+        let backedOffSeconds = min(maxBackoffSeconds, 3 * 60, clampedBase * multiplier)
         return jitteredIntervalNanoseconds(baseSeconds: backedOffSeconds)
     }
+
+    private nonisolated static func visiblePollingIntervalSeconds(storedInterval: Int?) -> UInt64 {
+        let userInterval = UInt64(storedInterval ?? 180)
+        return min(max(UInt64(60), userInterval), 3 * 60)
+    }
+
+#if DEBUG
+    nonisolated static func visiblePollingIntervalSecondsForTesting(storedInterval: Int?) -> UInt64 {
+        visiblePollingIntervalSeconds(storedInterval: storedInterval)
+    }
+#endif
 
     private func updateBackoffStreak(previous: ClaudeUsageSnapshot?, current: ClaudeUsageSnapshot) {
         guard let previous else {

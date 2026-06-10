@@ -17,7 +17,7 @@ import IOKit.ps
 //    - Scans ~/.codex/sessions/YYYY/MM/DD/*.jsonl files for rate_limit events
 //    - Extracts 5-hour and weekly limit percentages from log events
 //    - Zero token cost (reads existing logs, no API calls)
-//    - Frequency: Every 5 minutes (reduced on battery)
+//    - Frequency: Every 60 seconds while visible (3-minute ceiling on battery/background)
 //    - Limitation: Only reflects usage from recent local Codex sessions
 //
 // 2. **SECONDARY: Auto /status Probe** (Active, 1-2 messages)
@@ -452,6 +452,7 @@ enum UsageLimitAlertWindow: String {
 
 enum UsageLimitAlertKind {
     case approaching
+    case projectedExhaustion
     case exhausted
     case resetComplete
 }
@@ -463,11 +464,30 @@ struct UsageLimitAlertEvent: Equatable {
     let remainingPercent: Int
     let resetDate: Date?
     let identifier: String
+    let projectedSecondsUntilEmpty: TimeInterval?
+
+    init(provider: UsageLimitAlertProvider,
+         kind: UsageLimitAlertKind,
+         window: UsageLimitAlertWindow,
+         remainingPercent: Int,
+         resetDate: Date?,
+         identifier: String,
+         projectedSecondsUntilEmpty: TimeInterval? = nil) {
+        self.provider = provider
+        self.kind = kind
+        self.window = window
+        self.remainingPercent = remainingPercent
+        self.resetDate = resetDate
+        self.identifier = identifier
+        self.projectedSecondsUntilEmpty = projectedSecondsUntilEmpty
+    }
 
     var title: String {
         switch kind {
         case .approaching:
             return "\(provider.title) \(window.title) limit is low"
+        case .projectedExhaustion:
+            return "\(provider.title) \(window.title) limit may run out soon"
         case .exhausted:
             return "\(provider.title) \(window.title) limit is exhausted"
         case .resetComplete:
@@ -479,17 +499,36 @@ struct UsageLimitAlertEvent: Equatable {
         switch kind {
         case .approaching:
             return "\(remainingPercent)% remaining before the \(window.title) limit."
+        case .projectedExhaustion:
+            if let projectedSecondsUntilEmpty {
+                return "\(remainingPercent)% remaining. At the current pace, the \(window.title) limit may run out in \(Self.formatProjectionETA(projectedSecondsUntilEmpty)) before reset."
+            }
+            return "\(remainingPercent)% remaining. At the current pace, the \(window.title) limit may run out before reset."
         case .exhausted:
             return "The \(window.title) limit has reached 0% remaining."
         case .resetComplete:
             return "The 5h limit window has reset."
         }
     }
+
+    private static func formatProjectionETA(_ seconds: TimeInterval) -> String {
+        let minutes = max(1, Int(ceil(seconds / 60)))
+        if minutes < 60 {
+            return "about \(minutes)m"
+        }
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        if remainingMinutes == 0 {
+            return "about \(hours)h"
+        }
+        return "about \(hours)h \(remainingMinutes)m"
+    }
 }
 
 final class UsageLimitAlertEvaluator {
     private var previousSnapshots: [UsageLimitAlertProvider: UsageLimitSnapshot] = [:]
     private let defaults: UserDefaults
+    private var previousSnapshotTimes: [UsageLimitAlertProvider: Date] = [:]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -498,10 +537,12 @@ final class UsageLimitAlertEvaluator {
     func evaluate(snapshot: UsageLimitSnapshot, now: Date = Date()) -> [UsageLimitAlertEvent] {
         guard alertsEnabled, providerEnabled(snapshot.provider) else {
             previousSnapshots[snapshot.provider] = snapshot
+            previousSnapshotTimes[snapshot.provider] = now
             return []
         }
 
         var events: [UsageLimitAlertEvent] = []
+        events.append(contentsOf: projectedExhaustionEvents(snapshot: snapshot, now: now))
         events.append(contentsOf: pressureEvents(
             window: .fiveHour,
             provider: snapshot.provider,
@@ -524,6 +565,7 @@ final class UsageLimitAlertEvaluator {
         }
 
         previousSnapshots[snapshot.provider] = snapshot
+        previousSnapshotTimes[snapshot.provider] = now
         return events
     }
 
@@ -580,6 +622,94 @@ final class UsageLimitAlertEvaluator {
             ?? defaults.object(forKey: PreferencesKey.codexLimitNotificationThresholdPercent) as? Int
             ?? 10
         return min(max(stored, 1), 50)
+    }
+
+    private var predictionHorizonSeconds: TimeInterval { 60 * 60 }
+
+    private func projectedExhaustionEvents(snapshot: UsageLimitSnapshot, now: Date) -> [UsageLimitAlertEvent] {
+        guard approachingEnabled,
+              let previous = previousSnapshots[snapshot.provider],
+              let previousTime = previousSnapshotTimes[snapshot.provider] else {
+            return []
+        }
+
+        return [
+            projectedExhaustionEvent(
+                window: .fiveHour,
+                provider: snapshot.provider,
+                previousRemainingPercent: previous.fiveHourRemainingPercent,
+                currentRemainingPercent: snapshot.fiveHourRemainingPercent,
+                resetText: snapshot.fiveHourResetText,
+                hasRateLimit: snapshot.hasFiveHourRateLimit,
+                previousTime: previousTime,
+                now: now
+            ),
+            projectedExhaustionEvent(
+                window: .weekly,
+                provider: snapshot.provider,
+                previousRemainingPercent: previous.weeklyRemainingPercent,
+                currentRemainingPercent: snapshot.weeklyRemainingPercent,
+                resetText: snapshot.weeklyResetText,
+                hasRateLimit: snapshot.hasWeeklyRateLimit,
+                previousTime: previousTime,
+                now: now
+            )
+        ].compactMap { $0 }
+    }
+
+    private func projectedExhaustionEvent(window: UsageLimitAlertWindow,
+                                          provider: UsageLimitAlertProvider,
+                                          previousRemainingPercent: Int,
+                                          currentRemainingPercent: Int,
+                                          resetText: String,
+                                          hasRateLimit: Bool,
+                                          previousTime: Date,
+                                          now: Date) -> UsageLimitAlertEvent? {
+        guard hasRateLimit else { return nil }
+        let elapsed = now.timeIntervalSince(previousTime)
+        guard elapsed >= 60 else { return nil }
+
+        let previousRemaining = clampPercent(previousRemainingPercent)
+        let currentRemaining = clampPercent(currentRemainingPercent)
+        guard currentRemaining > thresholdPercent,
+              previousRemaining > currentRemaining else {
+            return nil
+        }
+
+        let percentBurned = Double(previousRemaining - currentRemaining)
+        let secondsUntilEmpty = Double(currentRemaining) / (percentBurned / elapsed)
+        guard secondsUntilEmpty > 0,
+              secondsUntilEmpty <= predictionHorizonSeconds else {
+            return nil
+        }
+
+        let resetDate = UsageResetText.resetDate(kind: window == .fiveHour ? "5h" : "Wk", source: provider.resetSource, raw: resetText, now: now)
+        guard let resetDate,
+              now.addingTimeInterval(secondsUntilEmpty) < resetDate else {
+            return nil
+        }
+
+        let key = resetKey(raw: resetText, date: resetDate)
+        let urgencyBucket = projectionUrgencyBucket(secondsUntilEmpty: secondsUntilEmpty)
+        let dedupeKey = "\(provider.rawValue)-limit-alert-\(window.rawValue)-projectedExhaustion-\(urgencyBucket)-\(key)"
+        guard !defaults.bool(forKey: dedupeKey) else { return nil }
+        defaults.set(true, forKey: dedupeKey)
+
+        return UsageLimitAlertEvent(
+            provider: provider,
+            kind: .projectedExhaustion,
+            window: window,
+            remainingPercent: currentRemaining,
+            resetDate: resetDate,
+            identifier: dedupeKey,
+            projectedSecondsUntilEmpty: secondsUntilEmpty
+        )
+    }
+
+    private func projectionUrgencyBucket(secondsUntilEmpty: TimeInterval) -> String {
+        if secondsUntilEmpty <= 10 * 60 { return "10m" }
+        if secondsUntilEmpty <= 30 * 60 { return "30m" }
+        return "60m"
     }
 
     private func pressureEvents(window: UsageLimitAlertWindow,
@@ -1355,15 +1485,15 @@ actor CodexStatusService {
         if let snap = await codexOAuthFetcher.fetchUsage(cooldownSuccess: oauthSuccessCooldown) {
             return snap
         }
-        if let snap = await codexRPCProbe.fetchRateLimits() {
+        if let snap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: oauthSuccessCooldown) {
             return snap
         }
         return nil
     }
 
     @discardableResult
-    private func refreshPreferredLiveLimits(visibleFastPath: Bool) async -> CodexUsageSnapshot? {
-        let successCooldown: TimeInterval = visibleFastPath ? 60 : 5 * 60
+    private func refreshPreferredLiveLimits(visibleFastPath _: Bool) async -> CodexUsageSnapshot? {
+        let successCooldown: TimeInterval = 60
         guard let preferredSnap = await fetchPreferredRateLimits(oauthSuccessCooldown: successCooldown) else {
             return nil
         }
@@ -2089,8 +2219,10 @@ actor CodexStatusService {
     }
 
     private func nextInterval() -> UInt64 {
-        // Read Codex-specific polling interval (defaults to 300s = 5 min)
-        let userInterval = UInt64(UserDefaults.standard.object(forKey: "CodexPollingInterval") as? Int ?? 300)
+        // Read Codex-specific polling interval. Visible limits surfaces are capped
+        // at 3 minutes so pinned cockpits and menu-bar tracking stay current.
+        let storedInterval = UserDefaults.standard.object(forKey: "CodexPollingInterval") as? Int
+        let visibleInterval = Self.visiblePollingIntervalSeconds(storedInterval: storedInterval)
 
         // Energy optimization: Stop polling entirely when nothing is visible
         // (menu bar and strips both hidden)
@@ -2103,20 +2235,31 @@ actor CodexStatusService {
         // Energy optimization: Menu-bar background visibility should tick rarely and cheaply.
         if visibilityMode == .menuBackground && !urgent {
             if !Self.onACPower() {
-                return 10 * 60 * 1_000_000_000
+                return 3 * 60 * 1_000_000_000
             }
-            // Clamp to at least 60s on AC power; JSONL parse is mtime-guarded so fast ticks are cheap.
-            return max(UInt64(60), userInterval) * 1_000_000_000
+            // JSONL parse is mtime-guarded and preferred live-limit fetches have their own cooldown.
+            return visibleInterval * 1_000_000_000
         }
 
         // Policy when visible or urgent:
         // - On AC power: use userInterval
-        // - On battery: 300s
+        // - On battery: 3 minutes
         if !Self.onACPower() {
-            return 300 * 1_000_000_000
+            return 3 * 60 * 1_000_000_000
         }
-        return userInterval * 1_000_000_000
+        return visibleInterval * 1_000_000_000
     }
+
+    private nonisolated static func visiblePollingIntervalSeconds(storedInterval: Int?) -> UInt64 {
+        let userInterval = UInt64(storedInterval ?? 60)
+        return min(max(UInt64(60), userInterval), 3 * 60)
+    }
+
+#if DEBUG
+    nonisolated static func visiblePollingIntervalSecondsForTesting(storedInterval: Int?) -> UInt64 {
+        visiblePollingIntervalSeconds(storedInterval: storedInterval)
+    }
+#endif
 
     private func isUrgent() -> Bool {
         // Urgent if 5-hour limit is running low (≤20% remaining = ≥80% used)

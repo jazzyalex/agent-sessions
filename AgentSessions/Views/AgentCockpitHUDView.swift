@@ -3180,17 +3180,14 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
+    @State private var clockNow = Date()
     @State private var isHovering = false
     @State private var activeVariant: Int = 0
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
-    private var hasConstrainedIndicator: Bool {
-        entries.contains { $0.fiveHourLeft < 30 || $0.weekLeft < 30 }
-    }
-
     private var autoExpandNeeded: Bool {
-        activeVariant > 1 && hasConstrainedIndicator
+        activeVariant > 1
     }
 
     private var contentRefreshID: String {
@@ -3223,7 +3220,6 @@ private struct HUDLimitsBar: View {
             )
         }
         parts.append(isHovering ? "hover" : "rest")
-        parts.append(autoExpandNeeded ? "autoExpand" : "normal")
         return parts.joined(separator: "||")
     }
 
@@ -3262,13 +3258,14 @@ private struct HUDLimitsBar: View {
                 Rectangle()
                     .fill(Color.primary.opacity(0.10))
                     .frame(height: 0.5)
-                HUDLimitsBarContent(entries: entries, mode: mode)
+                HUDLimitsBarContent(entries: entries, mode: mode, now: clockNow)
                     .id(contentRefreshID)
                     .frame(height: 22)
                     .clipped()
                     .onPreferenceChange(LimitsBarVariantKey.self) { activeVariant = $0 }
             }
             .onHover { isHovering = $0 }
+            .onReceive(Self.clockTimer) { clockNow = $0 }
             .onTapGesture(count: 2) {
                 if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
                     codexUsageModel.hardProbeNow { _ in }
@@ -3279,7 +3276,7 @@ private struct HUDLimitsBar: View {
             }
             .overlay(alignment: .bottom) {
                 if isHovering || autoExpandNeeded {
-                    HUDLimitsDetailPanel(entries: entries, mode: mode)
+                    HUDLimitsDetailPanel(entries: entries, mode: mode, now: clockNow)
                         .id(contentRefreshID)
                         .frame(maxWidth: .infinity)
                         .alignmentGuide(.bottom) { d in d[.bottom] + 22.5 }
@@ -3289,6 +3286,8 @@ private struct HUDLimitsBar: View {
             }
         }
     }
+
+    private static let clockTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 }
 
 private struct HUDLimitsRowsPanel: View {
@@ -3299,6 +3298,7 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
+    @State private var clockNow = Date()
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
@@ -3349,6 +3349,7 @@ private struct HUDLimitsRowsPanel: View {
         }
         .frame(maxWidth: .infinity)
         .background(Color.primary.opacity(0.025))
+        .onReceive(Self.clockTimer) { clockNow = $0 }
         .onTapGesture(count: 2) {
             if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
                 codexUsageModel.hardProbeNow { _ in }
@@ -3361,18 +3362,17 @@ private struct HUDLimitsRowsPanel: View {
 
     private func row(entry: HUDLimitsProviderEntry) -> some View {
         HStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HUDLimitsProviderText(entry: entry, mode: mode, showResets: true, onlyBottleneck: false)
-                    .fixedSize(horizontal: true, vertical: false)
-                HUDLimitsProviderText(entry: entry, mode: mode, showResets: false, onlyBottleneck: false)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .lineLimit(1)
+            HUDLimitsProviderText(entry: entry, mode: mode, showResets: true, onlyBottleneck: false, now: clockNow)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .frame(height: 30)
     }
+
+    private static let clockTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private var emptyRow: some View {
         HStack(spacing: 8) {
@@ -3392,6 +3392,7 @@ private struct HUDLimitsRowsPanel: View {
 private struct HUDLimitsDetailPanel: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
+    let now: Date
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -3467,19 +3468,22 @@ private struct HUDLimitsDetailPanel: View {
     private func fiveResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
         if unavailable { return UsageStaleThresholds.unavailableCopy }
         return formatUsageRelativeTimeLabel(
-            UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
+            UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now),
+            now: now
         ) ?? "—"
     }
 
     private func weekResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
         if unavailable { return UsageStaleThresholds.unavailableCopy }
         return formatUsageWeeklyResetLabel(
-            UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
+            UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now),
+            now: now
         ) ?? "—"
     }
 }
 
-/// Reports which ViewThatFits variant the HUD limits bar chose (1 = full, 2 = no resets, 3 = bottleneck).
+/// Reports which ViewThatFits variant the HUD limits bar chose
+/// (1 = full resets, 2 = bottleneck reset, 3 = no resets, 4 = bottleneck only).
 private struct LimitsBarVariantKey: PreferenceKey {
     static let defaultValue: Int = 0
     static func reduce(value: inout Int, nextValue: () -> Int) {
@@ -3498,18 +3502,22 @@ private func hudPctColor(_ left: Int) -> Color {
 private struct HUDLimitsBarContent: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
+    let now: Date
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
             // Variant 1: Full — both windows with reset times
             entriesRow(showResets: true, onlyBottleneck: false)
                 .preference(key: LimitsBarVariantKey.self, value: 1)
-            // Variant 2: No resets — both windows, percent only
-            entriesRow(showResets: false, onlyBottleneck: false)
+            // Variant 2: Bottleneck with reset — keep at least the limiting reset visible
+            entriesRow(showResets: true, onlyBottleneck: true)
                 .preference(key: LimitsBarVariantKey.self, value: 2)
-            // Variant 3: Bottleneck only — whichever window has fewer % left
-            entriesRow(showResets: false, onlyBottleneck: true)
+            // Variant 3: No resets — both windows, percent only
+            entriesRow(showResets: false, onlyBottleneck: false)
                 .preference(key: LimitsBarVariantKey.self, value: 3)
+            // Variant 4: Bottleneck only — whichever window has fewer % left
+            entriesRow(showResets: false, onlyBottleneck: true)
+                .preference(key: LimitsBarVariantKey.self, value: 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
@@ -3523,7 +3531,7 @@ private struct HUDLimitsBarContent: View {
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
-                HUDLimitsProviderText(entry: entry, mode: mode, showResets: showResets, onlyBottleneck: onlyBottleneck)
+                HUDLimitsProviderText(entry: entry, mode: mode, showResets: showResets, onlyBottleneck: onlyBottleneck, now: now)
             }
         }
         .lineLimit(1)
@@ -3536,6 +3544,7 @@ private struct HUDLimitsProviderText: View {
     let mode: UsageDisplayMode
     var showResets: Bool = true
     var onlyBottleneck: Bool = false
+    var now: Date = Date()
     @Environment(\.colorScheme) private var colorScheme
 
     // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
@@ -3549,21 +3558,21 @@ private struct HUDLimitsProviderText: View {
     private func fiveHourResetLabel() -> String? {
         if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
         let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-        let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
-        if let relative = formatRelativeTimeUntil(date) { return relative }
-        let fallback = UsageResetText.displayText(kind: "5h", source: entry.source, raw: entry.fiveHourResetText)
-        return fallback.isEmpty ? nil : fallback
+        guard !raw.isEmpty else { return "—" }
+        let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now)
+        if let relative = formatRelativeTimeUntil(date, now: now) { return relative }
+        let fallback = UsageResetText.displayText(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now)
+        return fallback.isEmpty ? "—" : fallback
     }
 
     private func weekResetLabel() -> String? {
         if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
         let raw = entry.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return nil }
-        let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText)
-        if let weekly = formatWeeklyReset(date) { return weekly }
-        let fallback = UsageResetText.displayText(kind: "Wk", source: entry.source, raw: entry.weekResetText)
-        return fallback.isEmpty ? nil : fallback
+        guard !raw.isEmpty else { return "—" }
+        let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now)
+        if let weekly = formatWeeklyReset(date, now: now) { return weekly }
+        let fallback = UsageResetText.displayText(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now)
+        return fallback.isEmpty ? "—" : fallback
     }
 
     // Matches CockpitFooterView.QuotaWidget.formatRelativeTimeUntil exactly

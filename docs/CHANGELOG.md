@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Improvements
+- Limits Widget: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude tmux/Web fallback request pressure at a 3-minute ceiling, repaints reset countdowns without requiring hover, and warns with an ETA when current burn rate projects a limit exhaustion before reset.
 
 ## [3.9.1] - 2026-06-05
 ### Bug Fixes

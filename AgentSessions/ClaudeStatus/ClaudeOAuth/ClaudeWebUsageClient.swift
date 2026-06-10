@@ -41,14 +41,14 @@ struct ClaudeWebRawUsageResponse: Decodable {
 //
 // Shares the same error type as ClaudeOAuthUsageClient (same semantics).
 // Org UUID is cached in-memory (doesn't change within a session).
-// Response is cached in /tmp/claude/statusline-webapi-cache.json (60s TTL).
+// Response is cached in /tmp/claude/statusline-webapi-cache.json (3m TTL).
 
 actor ClaudeWebUsageClient {
     private let session: URLSession
     private var cachedOrgId: String?
 
     private static let sharedCacheURL = URL(fileURLWithPath: "/tmp/claude/statusline-webapi-cache.json")
-    private static let cacheMaxAge: TimeInterval = 60
+    private static let cacheMaxAge: TimeInterval = 3 * 60
 
     init() {
         let config = URLSessionConfiguration.ephemeral
@@ -152,13 +152,32 @@ actor ClaudeWebUsageClient {
         guard FileManager.default.fileExists(atPath: url.path),
               let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let mtime = attrs[.modificationDate] as? Date,
-              Date().timeIntervalSince(mtime) < Self.cacheMaxAge,
+              Self.isCacheFresh(modificationDate: mtime),
               let data = try? Data(contentsOf: url),
               let parsed = try? JSONDecoder().decode(ClaudeWebRawUsageResponse.self, from: data)
         else { return nil }
         let bodyHash = SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
         return CachedResult(response: parsed, bodyHash: bodyHash)
     }
+
+    private nonisolated static func isCacheFresh(modificationDate: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(modificationDate) < cacheMaxAge
+    }
+
+#if DEBUG
+    nonisolated static var cacheMaxAgeForTesting: TimeInterval {
+        cacheMaxAge
+    }
+
+    nonisolated static var sharedCacheURLForTesting: URL {
+        sharedCacheURL
+    }
+
+    nonisolated static func isCacheFreshForTesting(age: TimeInterval) -> Bool {
+        let now = Date(timeIntervalSinceReferenceDate: 10_000)
+        return isCacheFresh(modificationDate: now.addingTimeInterval(-age), now: now)
+    }
+#endif
 
     private func writeSharedCache(data: Data) {
         let dir = Self.sharedCacheURL.deletingLastPathComponent()

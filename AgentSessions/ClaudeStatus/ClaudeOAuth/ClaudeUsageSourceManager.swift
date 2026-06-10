@@ -37,7 +37,7 @@ actor ClaudeUsageSourceManager {
 
     // MARK: - Thresholds
 
-    private static let refreshInterval: TimeInterval = 5 * 60         // 5 minutes (OAuth + Web)
+    private static let refreshInterval: TimeInterval = 60             // 60 seconds (OAuth + Web)
     private static let cacheStaleThreshold: TimeInterval = 10 * 60    // 10 minutes
     private static let cacheHardExpire: TimeInterval = 30 * 60        // 30 minutes
     private static let credentialWatchInterval: TimeInterval = 30     // 30s watch poll
@@ -45,6 +45,12 @@ actor ClaudeUsageSourceManager {
     // Fast retries during cold start (first 90s) to close the blank-screen gap.
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
+
+#if DEBUG
+    nonisolated static var refreshIntervalForTesting: TimeInterval {
+        refreshInterval
+    }
+#endif
 
     // MARK: - State
 

@@ -87,6 +87,15 @@ final class ClaudeWebUsageNormalizerTests: XCTestCase {
         XCTAssertEqual(snap.weeklyResetText, "2026-03-19T20:00:00Z")
     }
 
+    // MARK: - Web client cache
+
+    func testWebClientCacheFreshnessUsesThreeMinuteTTL() {
+        XCTAssertEqual(ClaudeWebUsageClient.cacheMaxAgeForTesting, 3 * 60)
+        XCTAssertTrue(ClaudeWebUsageClient.isCacheFreshForTesting(age: 60))
+        XCTAssertTrue(ClaudeWebUsageClient.isCacheFreshForTesting(age: 3 * 60 - 1))
+        XCTAssertFalse(ClaudeWebUsageClient.isCacheFreshForTesting(age: 3 * 60 + 1))
+    }
+
     // MARK: - Helpers
 
     private func makeResponse(
