@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.1/AgentSessions-3.9.1.dmg"><b>Download Agent Sessions 3.9.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.2/AgentSessions-3.9.2.dmg"><b>Download Agent Sessions 3.9.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -136,7 +136,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.9.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.1/AgentSessions-3.9.1.dmg)
+1. [Download AgentSessions-3.9.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.2/AgentSessions-3.9.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
