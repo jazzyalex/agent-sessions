@@ -22,6 +22,28 @@ final class ActivationPolicyDeciderTests: XCTestCase {
         XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool, true)
     }
 
+    func testDockIconPreferenceToggleEnablesMenuBarBeforeHidingDockIcon() {
+        let defaults = UserDefaults(suiteName: "DockIconPreferenceControllerTests")!
+        defaults.removePersistentDomain(forName: "DockIconPreferenceControllerTests")
+
+        XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Hide Dock Icon")
+
+        let hidden = DockIconPreferenceController.toggleDockIconHidden(defaults: defaults)
+
+        XCTAssertTrue(hidden)
+        XCTAssertTrue(defaults.bool(forKey: PreferencesKey.menuBarEnabled))
+        XCTAssertTrue(defaults.bool(forKey: PreferencesKey.Advanced.hideDockIcon))
+        XCTAssertEqual(DockIconPreferenceController.dockIconMenuTitle(defaults: defaults), "Show Dock Icon")
+    }
+
+    @MainActor
+    func testDockMenuAlwaysOffersHideDockIcon() {
+        let delegate = AgentSessionsApplicationDelegate()
+        let menu = delegate.applicationDockMenu(NSApplication.shared)
+
+        XCTAssertEqual(menu?.items.first?.title, "Hide Dock Icon")
+    }
+
     func testDockRecentAppCleanerRemovesOnlyAgentSessionsEntries() {
         let currentApp: [String: Any] = [
             "tile-data": [

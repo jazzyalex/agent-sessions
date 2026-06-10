@@ -271,9 +271,8 @@ final class StatusItemController: NSObject {
 
         menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openMenuBarPreferences)))
         menu.addItem(makeActionItem(title: "Hide Menu Bar Item", action: #selector(hideMenuBar)))
-        let dockIconHidden = d.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
         menu.addItem(makeActionItem(
-            title: dockIconHidden ? "Show Dock Icon" : "Hide Dock Icon",
+            title: DockIconPreferenceController.dockIconMenuTitle(defaults: d),
             action: #selector(toggleHideDockIcon)
         ))
         menu.addItem(NSMenuItem.separator())
@@ -389,12 +388,7 @@ final class StatusItemController: NSObject {
         // The App listens to this key and hides the status item.
     }
     @objc private func toggleHideDockIcon() {
-        let d = UserDefaults.standard
-        let nextValue = !(d.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false)
-        if nextValue {
-            d.set(true, forKey: PreferencesKey.menuBarEnabled)
-        }
-        d.set(nextValue, forKey: PreferencesKey.Advanced.hideDockIcon)
+        DockIconPreferenceController.toggleDockIconHidden()
     }
     @objc private func quitApp() {
         NSApp.terminate(nil)

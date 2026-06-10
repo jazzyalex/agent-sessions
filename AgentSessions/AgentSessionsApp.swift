@@ -168,6 +168,7 @@ enum CockpitNavigationBridge {
 
 @main
 struct AgentSessionsApp: App {
+    @NSApplicationDelegateAdaptor(AgentSessionsApplicationDelegate.self) private var appDelegate
     @StateObject private var indexer = SessionIndexer()
     @StateObject private var claudeIndexer = ClaudeSessionIndexer()
     @StateObject private var opencodeIndexer = OpenCodeSessionIndexer()
@@ -556,6 +557,25 @@ private struct OpenPinnedSessionsWindowButton: View {
             openWindow(id: "PinnedSessions")
         }
         .keyboardShortcut("p", modifiers: [.command, .option, .shift])
+    }
+}
+
+@MainActor
+final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let item = NSMenuItem(
+            title: "Hide Dock Icon",
+            action: #selector(toggleDockIconHiddenFromDockMenu),
+            keyEquivalent: ""
+        )
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func toggleDockIconHiddenFromDockMenu() {
+        DockIconPreferenceController.setDockIconHidden(true)
     }
 }
 

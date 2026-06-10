@@ -6,6 +6,30 @@ enum ActivationPolicyDecider {
     }
 }
 
+enum DockIconPreferenceController {
+    static func isDockIconHidden(defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+    }
+
+    static func dockIconMenuTitle(defaults: UserDefaults = .standard) -> String {
+        isDockIconHidden(defaults: defaults) ? "Show Dock Icon" : "Hide Dock Icon"
+    }
+
+    static func setDockIconHidden(_ hidden: Bool, defaults: UserDefaults = .standard) {
+        if hidden {
+            defaults.set(true, forKey: PreferencesKey.menuBarEnabled)
+        }
+        defaults.set(hidden, forKey: PreferencesKey.Advanced.hideDockIcon)
+    }
+
+    @discardableResult
+    static func toggleDockIconHidden(defaults: UserDefaults = .standard) -> Bool {
+        let nextValue = !isDockIconHidden(defaults: defaults)
+        setDockIconHidden(nextValue, defaults: defaults)
+        return nextValue
+    }
+}
+
 enum DockRecentAppCleaner {
     static func removingApp(
         from recentApps: [Any],
