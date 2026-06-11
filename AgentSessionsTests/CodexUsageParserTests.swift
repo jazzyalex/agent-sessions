@@ -893,9 +893,9 @@ final class CodexUsageParserTests: XCTestCase {
         )
 
         XCTAssertNil(tracker.update(with: first, now: firstTime))
-        let runoutAt = tracker.update(with: second, now: secondTime)
+        let estimate = tracker.update(with: second, now: secondTime)
 
-        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: secondTime, now: secondTime), "▸44m")
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: estimate?.runoutAt, observedAt: estimate?.observedAt, now: secondTime), "▸44m")
     }
 
     func testUsageLimitProjectionTrackerShowsBeforeResetMultiHourToken() {
@@ -914,7 +914,7 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: firstTime
         ), now: firstTime)
 
-        let runoutAt = tracker.update(with: UsageLimitProjectionSample(
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: 96,
             resetText: resetText,
@@ -923,7 +923,7 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: secondTime
         ), now: secondTime)
 
-        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: secondTime, now: secondTime), "▸2h")
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: estimate?.runoutAt, observedAt: estimate?.observedAt, now: secondTime), "▸2h")
     }
 
     func testUsageLimitProjectionTrackerStillHidesRunoutAfterReset() {
@@ -942,7 +942,7 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: firstTime
         ), now: firstTime)
 
-        let runoutAt = tracker.update(with: UsageLimitProjectionSample(
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: 96,
             resetText: resetText,
@@ -951,10 +951,69 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: secondTime
         ), now: secondTime)
 
-        XCTAssertNil(runoutAt)
+        XCTAssertNil(estimate)
+        XCTAssertEqual(tracker.lastDiagnostics, "Run-out after reset")
     }
 
-    func testUsageLimitProjectionTrackerRetainsProjectionAcrossSameRoundedPercentRefresh() {
+    func testUsageLimitProjectionTrackerHidesRunoutWhenResetHappensFirst() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000) // 4:24 equivalent
+        let secondTime = firstTime.addingTimeInterval(6 * 60) // 4:30 equivalent
+        let reset = secondTime.addingTimeInterval(50 * 60) // 5:20 equivalent
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 66,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 60,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        XCTAssertNil(estimate)
+        XCTAssertEqual(tracker.lastDiagnostics, "Run-out after reset")
+    }
+
+    func testUsageLimitProjectionTrackerHidesRunoutExactlyAtReset() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let reset = secondTime.addingTimeInterval(60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 66,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 60,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        XCTAssertNil(estimate)
+        XCTAssertEqual(tracker.lastDiagnostics, "Run-out after reset")
+    }
+
+    func testUsageLimitProjectionTrackerRetainsProjectionAcrossBriefSameRoundedPercentRefresh() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
         let secondTime = firstTime.addingTimeInterval(6 * 60)
@@ -990,10 +1049,173 @@ final class CodexUsageParserTests: XCTestCase {
         ), now: thirdTime)
 
         XCTAssertEqual(retained, projected)
-        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: retained, observedAt: thirdTime, now: thirdTime), "▸43m")
+        XCTAssertEqual(retained?.observedAt, secondTime)
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: retained?.runoutAt, observedAt: retained?.observedAt, now: thirdTime), "▸43m")
     }
 
-    func testUsageLimitProjectionTrackerIgnoresCachedData() {
+    func testUsageLimitProjectionTrackerDoesNotUseSamePercentRefreshAsNextBurnBaseline() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let passiveTime = secondTime.addingTimeInterval(60)
+        let nextBurnTime = secondTime.addingTimeInterval(6 * 60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 21,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 21,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: passiveTime
+        ), now: passiveTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 20,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: nextBurnTime
+        ), now: nextBurnTime)
+
+        XCTAssertEqual(estimate?.observedAt, nextBurnTime)
+        XCTAssertEqual(
+            formatUsageProjectionLabel(runoutAt: estimate?.runoutAt, observedAt: estimate?.observedAt, now: nextBurnTime),
+            "▸2h"
+        )
+        XCTAssertEqual(tracker.lastDiagnostics, "Active ▸2h")
+    }
+
+    func testUsageLimitProjectionTrackerStopsFormattingRetainedProjectionWhenBurnIsStale() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let staleTime = secondTime.addingTimeInterval(3 * 60 + 1)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        let retained = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: staleTime
+        ), now: staleTime)
+
+        XCTAssertEqual(retained?.observedAt, secondTime)
+        XCTAssertNil(formatUsageProjectionLabel(runoutAt: retained?.runoutAt, observedAt: retained?.observedAt, now: staleTime))
+    }
+
+    func testUsageLimitProjectionTrackerReportsResetFirstForRetainedProjection() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let thirdTime = secondTime.addingTimeInterval(60)
+        let initialReset = secondTime.addingTimeInterval(61 * 60)
+        let resetMovedBeforeRunout = initialReset.addingTimeInterval(-119)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 11,
+            resetText: formatResetISO8601(initialReset),
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let projected = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 10,
+            resetText: formatResetISO8601(initialReset),
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+        XCTAssertNotNil(projected)
+
+        let retained = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 10,
+            resetText: formatResetISO8601(resetMovedBeforeRunout),
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: thirdTime
+        ), now: thirdTime)
+
+        XCTAssertNil(retained)
+        XCTAssertEqual(tracker.lastDiagnostics, "Run-out after reset")
+    }
+
+    func testUsageLimitProjectionTrackerUsesExactRemainingPercentForClaudeRecentCache() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(2 * 60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .claude,
+            remainingPercent: 82,
+            remainingPercentExact: 82.4,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .claude,
+            remainingPercent: 82,
+            remainingPercentExact: 81.6,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .recentCached,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        XCTAssertEqual(formatUsageProjectionLabel(runoutAt: estimate?.runoutAt, observedAt: estimate?.observedAt, now: secondTime), "▸3h 24m")
+    }
+
+    func testUsageLimitProjectionTrackerIgnoresStaleCachedData() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
         let secondTime = firstTime.addingTimeInterval(6 * 60)
@@ -1008,16 +1230,29 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: firstTime
         ), now: firstTime)
 
-        let runoutAt = tracker.update(with: UsageLimitProjectionSample(
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: 88,
             resetText: resetText,
             hasRateLimit: true,
-            freshness: .recentCached,
+            freshness: .stale,
             observedAt: secondTime
         ), now: secondTime)
 
-        XCTAssertNil(runoutAt)
+        XCTAssertNil(estimate)
+        XCTAssertEqual(tracker.lastDiagnostics, "Stale data")
+
+        let afterStale = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 76,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime.addingTimeInterval(6 * 60)
+        ), now: secondTime.addingTimeInterval(6 * 60))
+
+        XCTAssertNil(afterStale)
+        XCTAssertEqual(tracker.lastDiagnostics, "Waiting for next sample")
     }
 
     func testUsageLimitAlertEvaluatorUsesObservedAtForProjectedExhaustionETA() {
@@ -1065,6 +1300,39 @@ final class CodexUsageParserTests: XCTestCase {
         )
         XCTAssertNil(
             formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: observedAt, now: observedAt.addingTimeInterval(3 * 60 + 1))
+        )
+    }
+
+    func testUsageProjectionDiagnosticsTextRecomputesActiveState() {
+        let observedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let runoutAt = observedAt.addingTimeInterval(44 * 60)
+
+        XCTAssertEqual(
+            formatUsageProjectionDiagnosticsText(
+                "Active ▸44m",
+                runoutAt: runoutAt.timeIntervalSince1970,
+                observedAt: observedAt.timeIntervalSince1970,
+                now: observedAt.addingTimeInterval(60)
+            ),
+            "Active ▸43m"
+        )
+        XCTAssertEqual(
+            formatUsageProjectionDiagnosticsText(
+                "Active ▸44m",
+                runoutAt: runoutAt.timeIntervalSince1970,
+                observedAt: observedAt.timeIntervalSince1970,
+                now: observedAt.addingTimeInterval(3 * 60 + 1)
+            ),
+            "Projection stale"
+        )
+        XCTAssertEqual(
+            formatUsageProjectionDiagnosticsText(
+                "Run-out after reset",
+                runoutAt: 0,
+                observedAt: 0,
+                now: observedAt
+            ),
+            "Run-out after reset"
         )
     }
 
@@ -1239,6 +1507,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         store.recordSnapshot(snapshot, now: now)
         store.recordImmediateAlert(alert, now: now.addingTimeInterval(10))
+        store.recordDelivery("Banner queued", provider: .codex, now: now.addingTimeInterval(11))
         store.recordScheduledReset(scheduled)
 
         XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexSource), "5h OAuth / Wk JSONL")
@@ -1246,6 +1515,8 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexObservedAt), now.timeIntervalSince1970)
         XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexLastAlertSummary), "5h low, 9% left")
         XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexLastAlertAt), now.addingTimeInterval(10).timeIntervalSince1970)
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexDelivery), "Banner queued")
+        XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexDeliveryAt), now.addingTimeInterval(11).timeIntervalSince1970)
         XCTAssertEqual(defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexNextResetReminderAt), reset.timeIntervalSince1970)
 
         store.clearScheduledReset(provider: .codex)
@@ -1822,6 +2093,128 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(model.lastUpdate, fetchedAt)
         XCTAssertTrue(model.dataIsStale)
+    }
+
+    @MainActor
+    func testClaudeUsageModelProjectsFromRecentCachedOAuthAndWebSnapshots() {
+        let defaults = makeAlertDefaults()
+        ClaudeUsageModel.projectionDiagnosticsDefaultsForTesting = defaults
+        defer {
+            ClaudeUsageModel.projectionDiagnosticsDefaultsForTesting = nil
+        }
+
+        for source in [ClaudeUsageSource.cachedOAuth, .cachedWeb] {
+            let model = ClaudeUsageModel()
+            let secondFetchedAt = Date().addingTimeInterval(-1)
+            let firstFetchedAt = secondFetchedAt.addingTimeInterval(-2 * 60)
+            let resetText = formatResetISO8601(firstFetchedAt.addingTimeInterval(4.5 * 60 * 60))
+
+            model.applyLimitSnapshotForTesting(
+                ClaudeLimitSnapshot(
+                    fetchedAt: firstFetchedAt,
+                    source: source,
+                    health: .live,
+                    fiveHourUsedRatio: 0.176,
+                    fiveHourResetText: resetText,
+                    weeklyUsedRatio: 0.5,
+                    weeklyResetText: resetText,
+                    weekOpusUsedRatio: nil,
+                    weekOpusResetText: nil,
+                    rawPayloadHash: nil
+                )
+            )
+            XCTAssertNil(model.fiveHourProjectedRunoutAt, "\(source) first sample should seed history only")
+
+            model.applyLimitSnapshotForTesting(
+                ClaudeLimitSnapshot(
+                    fetchedAt: secondFetchedAt,
+                    source: source,
+                    health: .live,
+                    fiveHourUsedRatio: 0.184,
+                    fiveHourResetText: resetText,
+                    weeklyUsedRatio: 0.5,
+                    weeklyResetText: resetText,
+                    weekOpusUsedRatio: nil,
+                    weekOpusResetText: nil,
+                    rawPayloadHash: nil
+                )
+            )
+
+            XCTAssertEqual(model.sessionRemainingPercent, 82)
+            XCTAssertEqual(model.fiveHourProjectionObservedAt, secondFetchedAt)
+            XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjection), "Active ▸3h 24m")
+            XCTAssertEqual(
+                defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjectionObservedAt),
+                secondFetchedAt.timeIntervalSince1970,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(
+                model.fiveHourProjectedRunoutAt?.timeIntervalSince1970 ?? 0,
+                secondFetchedAt.addingTimeInterval(3 * 60 * 60 + 24 * 60).timeIntervalSince1970,
+                accuracy: 0.001,
+                "\(source) should use exact cached ratio changes even when rounded percent is unchanged"
+            )
+            XCTAssertEqual(
+                defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjectionRunoutAt),
+                secondFetchedAt.addingTimeInterval(3 * 60 * 60 + 24 * 60).timeIntervalSince1970,
+                accuracy: 0.001
+            )
+        }
+    }
+
+    @MainActor
+    func testCodexUsageModelRecordsProjectionDiagnosticsToInjectedDefaults() {
+        let defaults = makeAlertDefaults()
+        CodexUsageModel.projectionDiagnosticsDefaultsForTesting = defaults
+        defer {
+            CodexUsageModel.projectionDiagnosticsDefaultsForTesting = nil
+        }
+
+        let model = CodexUsageModel()
+        let secondObservedAt = Date().addingTimeInterval(-1)
+        let firstObservedAt = secondObservedAt.addingTimeInterval(-2 * 60)
+        let resetText = formatResetISO8601(firstObservedAt.addingTimeInterval(4.5 * 60 * 60))
+
+        model.applySnapshotForTesting(CodexUsageSnapshot(
+            fiveHourRemainingPercent: 90,
+            fiveHourResetText: resetText,
+            hasFiveHourRateLimit: true,
+            fiveHourLimitsSource: .oauth,
+            weekRemainingPercent: 90,
+            weekResetText: resetText,
+            hasWeekRateLimit: true,
+            weekLimitsSource: .oauth,
+            limitsSource: .oauth,
+            eventTimestamp: firstObservedAt
+        ))
+        XCTAssertNil(model.fiveHourProjectedRunoutAt)
+
+        model.applySnapshotForTesting(CodexUsageSnapshot(
+            fiveHourRemainingPercent: 89,
+            fiveHourResetText: resetText,
+            hasFiveHourRateLimit: true,
+            fiveHourLimitsSource: .oauth,
+            weekRemainingPercent: 90,
+            weekResetText: resetText,
+            hasWeekRateLimit: true,
+            weekLimitsSource: .oauth,
+            limitsSource: .oauth,
+            eventTimestamp: secondObservedAt
+        ))
+
+        let expectedRunoutAt = secondObservedAt.addingTimeInterval(89 * 2 * 60)
+        XCTAssertEqual(model.fiveHourProjectionObservedAt, secondObservedAt)
+        XCTAssertEqual(defaults.string(forKey: PreferencesKey.usageLimitDiagnosticsCodexProjection)?.hasPrefix("Active ▸"), true)
+        XCTAssertEqual(
+            defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexProjectionObservedAt),
+            secondObservedAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            defaults.double(forKey: PreferencesKey.usageLimitDiagnosticsCodexProjectionRunoutAt),
+            expectedRunoutAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
     }
 
 #if DEBUG

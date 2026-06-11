@@ -3182,6 +3182,7 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
+    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @State private var clockNow = Date()
     @State private var isHovering = false
     @State private var activeVariant: Int = 0
@@ -3189,11 +3190,23 @@ private struct HUDLimitsBar: View {
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
 
     private var autoExpandNeeded: Bool {
-        activeVariant > 1
+        activeVariant >= 3 || (activeVariant == 2 && hasActiveProjection)
+    }
+
+    private var hasActiveProjection: Bool {
+        guard projectedRunoutEnabled else { return false }
+        return entries.contains { entry in
+            formatUsageProjectionLabel(
+                runoutAt: entry.fiveHourProjectedRunoutAt,
+                observedAt: entry.fiveHourProjectionObservedAt,
+                now: clockNow
+            ) != nil
+        }
     }
 
     private var contentRefreshID: String {
         var parts: [String] = [mode.rawValue]
+        parts.append(projectedRunoutEnabled ? "projection-on" : "projection-off")
         if codexAgentEnabled && codexUsageEnabled {
             parts.append(
                 [
@@ -3468,7 +3481,8 @@ private struct HUDLimitsDetailPanel: View {
                     now: now
                    ) {
                     Text(" \(projection)")
-                        .foregroundStyle(.orange)
+                        .fontWeight(.bold)
+                        .foregroundStyle(hudProjectionColor(colorScheme))
                 }
             }
             Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
@@ -3507,7 +3521,8 @@ private struct HUDLimitsDetailPanel: View {
 }
 
 /// Reports which ViewThatFits variant the HUD limits bar chose
-/// (1 = full resets, 2 = bottleneck reset, 3 = no resets, 4 = bottleneck only).
+/// (1 = full resets + projection, 2 = full resets without projection,
+///  3 = bottleneck reset, 4 = no resets, 5 = bottleneck only).
 private struct LimitsBarVariantKey: PreferenceKey {
     static let defaultValue: Int = 0
     static func reduce(value: inout Int, nextValue: () -> Int) {
@@ -3523,6 +3538,12 @@ private func hudPctColor(_ left: Int) -> Color {
     return .primary
 }
 
+private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark
+        ? Color(red: 1.0, green: 0.60, blue: 0.12)
+        : Color(red: 0.82, green: 0.30, blue: 0.00)
+}
+
 private struct HUDLimitsBarContent: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
@@ -3535,16 +3556,16 @@ private struct HUDLimitsBarContent: View {
                 .preference(key: LimitsBarVariantKey.self, value: 1)
             // Variant 1 fallback: keep reset times before spending width on projection
             entriesRow(showResets: true, onlyBottleneck: false, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 1)
+                .preference(key: LimitsBarVariantKey.self, value: 2)
             // Variant 2: Bottleneck with reset — keep at least the limiting reset visible
             entriesRow(showResets: true, onlyBottleneck: true, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 2)
+                .preference(key: LimitsBarVariantKey.self, value: 3)
             // Variant 3: No resets — both windows, percent only
             entriesRow(showResets: false, onlyBottleneck: false, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 3)
+                .preference(key: LimitsBarVariantKey.self, value: 4)
             // Variant 4: Bottleneck only — whichever window has fewer % left
             entriesRow(showResets: false, onlyBottleneck: true, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 4)
+                .preference(key: LimitsBarVariantKey.self, value: 5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
@@ -3661,7 +3682,8 @@ private struct HUDLimitsProviderText: View {
                                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                                 if let projection = fiveHourProjectionLabel {
                                     Text(" \(projection)")
-                                        .foregroundStyle(.orange)
+                                        .fontWeight(.bold)
+                                        .foregroundStyle(hudProjectionColor(colorScheme))
                                 }
                             }
                             if showResets, let r = fiveHourResetLabel() {

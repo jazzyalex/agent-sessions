@@ -224,30 +224,42 @@ extension PreferencesView {
             }
 
             sectionHeader("Diagnostics")
-            VStack(alignment: .leading, spacing: 8) {
-                limitAlertDiagnosticsRow(
-                    provider: "Codex",
-                    source: usageLimitDiagnosticsCodexSource,
-                    freshness: usageLimitDiagnosticsCodexFreshness,
-                    observedAt: usageLimitDiagnosticsCodexObservedAt,
-                    lastAlert: usageLimitDiagnosticsCodexLastAlertSummary,
-                    lastAlertAt: usageLimitDiagnosticsCodexLastAlertAt,
-                    nextResetAt: usageLimitDiagnosticsCodexNextResetReminderAt
-                )
-                Divider()
-                limitAlertDiagnosticsRow(
-                    provider: "Claude",
-                    source: usageLimitDiagnosticsClaudeSource,
-                    freshness: usageLimitDiagnosticsClaudeFreshness,
-                    observedAt: usageLimitDiagnosticsClaudeObservedAt,
-                    lastAlert: usageLimitDiagnosticsClaudeLastAlertSummary,
-                    lastAlertAt: usageLimitDiagnosticsClaudeLastAlertAt,
-                    nextResetAt: usageLimitDiagnosticsClaudeNextResetReminderAt
-                )
-                Text("Updates when usage tracking receives a limit snapshot. Prediction diagnostics require fresh data; reset reminders require banners and 5h reset reminders to be enabled.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            TimelineView(.periodic(from: Date(), by: 30)) { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    limitAlertDiagnosticsRow(
+                        provider: "Codex",
+                        source: usageLimitDiagnosticsCodexSource,
+                        freshness: usageLimitDiagnosticsCodexFreshness,
+                        observedAt: usageLimitDiagnosticsCodexObservedAt,
+                        projection: usageLimitDiagnosticsCodexProjection,
+                        projectionRunoutAt: usageLimitDiagnosticsCodexProjectionRunoutAt,
+                        projectionObservedAt: usageLimitDiagnosticsCodexProjectionObservedAt,
+                        lastAlert: usageLimitDiagnosticsCodexLastAlertSummary,
+                        lastAlertAt: usageLimitDiagnosticsCodexLastAlertAt,
+                        delivery: usageLimitDiagnosticsCodexDelivery,
+                        deliveryAt: usageLimitDiagnosticsCodexDeliveryAt,
+                        nextResetAt: usageLimitDiagnosticsCodexNextResetReminderAt
+                    )
+                    Divider()
+                    limitAlertDiagnosticsRow(
+                        provider: "Claude",
+                        source: usageLimitDiagnosticsClaudeSource,
+                        freshness: usageLimitDiagnosticsClaudeFreshness,
+                        observedAt: usageLimitDiagnosticsClaudeObservedAt,
+                        projection: usageLimitDiagnosticsClaudeProjection,
+                        projectionRunoutAt: usageLimitDiagnosticsClaudeProjectionRunoutAt,
+                        projectionObservedAt: usageLimitDiagnosticsClaudeProjectionObservedAt,
+                        lastAlert: usageLimitDiagnosticsClaudeLastAlertSummary,
+                        lastAlertAt: usageLimitDiagnosticsClaudeLastAlertAt,
+                        delivery: usageLimitDiagnosticsClaudeDelivery,
+                        deliveryAt: usageLimitDiagnosticsClaudeDeliveryAt,
+                        nextResetAt: usageLimitDiagnosticsClaudeNextResetReminderAt
+                    )
+                    Text("Updates when usage tracking receives a limit snapshot. Projection diagnostics use fresh or recent cached data; reset reminders require banners and 5h reset reminders to be enabled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             sectionHeader("Delivery")
@@ -280,8 +292,13 @@ extension PreferencesView {
                                           source: String,
                                           freshness: String,
                                           observedAt: Double,
+                                          projection: String,
+                                          projectionRunoutAt: Double,
+                                          projectionObservedAt: Double,
                                           lastAlert: String,
                                           lastAlertAt: Double,
+                                          delivery: String,
+                                          deliveryAt: Double,
                                           nextResetAt: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(provider)
@@ -297,11 +314,23 @@ extension PreferencesView {
                     "Freshness",
                     value: diagnosticsFreshnessText(freshness: freshness, observedAt: observedAt)
                 )
+                diagnosticsField(
+                    "5h Projection",
+                    value: formatUsageProjectionDiagnosticsText(
+                        projection,
+                        runoutAt: projectionRunoutAt,
+                        observedAt: projectionObservedAt
+                    )
+                )
             }
             HStack(alignment: .top, spacing: 16) {
                 diagnosticsField(
                     "Last Alert",
                     value: diagnosticsLastAlertText(summary: lastAlert, timestamp: lastAlertAt)
+                )
+                diagnosticsField(
+                    "Delivery",
+                    value: diagnosticsDeliveryText(summary: delivery, timestamp: deliveryAt)
                 )
                 diagnosticsField(
                     "Next 5h Reminder",
@@ -327,6 +356,13 @@ extension PreferencesView {
     }
 
     private func diagnosticsLastAlertText(summary: String, timestamp: Double) -> String {
+        guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, timestamp > 0 else {
+            return "None yet"
+        }
+        return "\(summary) / \(relativeTimestamp(timestamp))"
+    }
+
+    private func diagnosticsDeliveryText(summary: String, timestamp: Double) -> String {
         guard !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, timestamp > 0 else {
             return "None yet"
         }

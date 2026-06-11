@@ -174,6 +174,19 @@ final class CodexUsageModel: ObservableObject {
     // NSApp is an IUO and can be nil this early in startup.
     private var appIsActive: Bool = false
 
+#if DEBUG
+    static var projectionDiagnosticsDefaultsForTesting: UserDefaults?
+#endif
+
+    private static var projectionDiagnosticsDefaults: UserDefaults {
+#if DEBUG
+        if let projectionDiagnosticsDefaultsForTesting {
+            return projectionDiagnosticsDefaultsForTesting
+        }
+#endif
+        return .standard
+    }
+
     func setEnabled(_ enabled: Bool) {
         if AppRuntime.isRunningTests {
             if !enabled { stop() }
@@ -382,7 +395,14 @@ final class CodexUsageModel: ObservableObject {
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
+        Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil, provider: .codex)
     }
+
+#if DEBUG
+    func applySnapshotForTesting(_ snapshot: CodexUsageSnapshot) {
+        apply(snapshot)
+    }
+#endif
 
     private func apply(_ s: CodexUsageSnapshot) {
         let now = Date()
@@ -404,7 +424,7 @@ final class CodexUsageModel: ObservableObject {
         lastOutputTokens = s.lastOutputTokens
         lastReasoningOutputTokens = s.lastReasoningOutputTokens
         lastTotalTokens = s.lastTotalTokens
-        let projectedRunoutAt = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
+        let projectionEstimate = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: s.fiveHourRemainingPercent,
             resetText: s.fiveHourResetText,
@@ -412,8 +432,9 @@ final class CodexUsageModel: ObservableObject {
             freshness: fiveHourFreshness,
             observedAt: observedAt
         ), now: now)
-        fiveHourProjectedRunoutAt = projectedRunoutAt
-        fiveHourProjectionObservedAt = projectedRunoutAt == nil ? nil : observedAt
+        fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
+        fiveHourProjectionObservedAt = projectionEstimate?.observedAt
+        Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
         limitNotifier.handle(snapshot: UsageLimitSnapshot(
             provider: .codex,
             fiveHourRemainingPercent: s.fiveHourRemainingPercent,
@@ -446,6 +467,28 @@ final class CodexUsageModel: ObservableObject {
         case nil:
             return .stale
         }
+    }
+
+    private static func recordProjectionDiagnostics(_ value: String,
+                                                    estimate: UsageLimitProjectionEstimate?,
+                                                    provider: UsageLimitAlertProvider) {
+        let defaults = projectionDiagnosticsDefaults
+        let textKey: String
+        let runoutKey: String
+        let observedKey: String
+        switch provider {
+        case .codex:
+            textKey = PreferencesKey.usageLimitDiagnosticsCodexProjection
+            runoutKey = PreferencesKey.usageLimitDiagnosticsCodexProjectionRunoutAt
+            observedKey = PreferencesKey.usageLimitDiagnosticsCodexProjectionObservedAt
+        case .claude:
+            textKey = PreferencesKey.usageLimitDiagnosticsClaudeProjection
+            runoutKey = PreferencesKey.usageLimitDiagnosticsClaudeProjectionRunoutAt
+            observedKey = PreferencesKey.usageLimitDiagnosticsClaudeProjectionObservedAt
+        }
+        defaults.set(value, forKey: textKey)
+        defaults.set(estimate?.runoutAt.timeIntervalSince1970 ?? 0, forKey: runoutKey)
+        defaults.set(estimate?.observedAt.timeIntervalSince1970 ?? 0, forKey: observedKey)
     }
 
 }
@@ -520,6 +563,11 @@ enum UsageLimitAlertFreshness: Equatable {
     case stale
 
     var allowsImmediateAlerts: Bool {
+        self != .stale
+    }
+
+    /// Display-only burn projections can use recent cache; notification projections remain fresh-only.
+    var allowsProjectedDisplay: Bool {
         self != .stale
     }
 
@@ -641,6 +689,11 @@ struct UsageLimitAlertDiagnosticsStore {
         defaults.set(now.timeIntervalSince1970, forKey: keys(for: event.provider).lastAlertAt)
     }
 
+    func recordDelivery(_ summary: String, provider: UsageLimitAlertProvider, now: Date = Date()) {
+        defaults.set(summary, forKey: keys(for: provider).delivery)
+        defaults.set(now.timeIntervalSince1970, forKey: keys(for: provider).deliveryAt)
+    }
+
     func recordScheduledReset(_ event: UsageLimitAlertEvent) {
         guard let resetDate = event.resetDate else {
             clearScheduledReset(provider: event.provider)
@@ -706,6 +759,8 @@ struct UsageLimitAlertDiagnosticsStore {
                 observedAt: PreferencesKey.usageLimitDiagnosticsCodexObservedAt,
                 lastAlertSummary: PreferencesKey.usageLimitDiagnosticsCodexLastAlertSummary,
                 lastAlertAt: PreferencesKey.usageLimitDiagnosticsCodexLastAlertAt,
+                delivery: PreferencesKey.usageLimitDiagnosticsCodexDelivery,
+                deliveryAt: PreferencesKey.usageLimitDiagnosticsCodexDeliveryAt,
                 nextResetReminderAt: PreferencesKey.usageLimitDiagnosticsCodexNextResetReminderAt
             )
         case .claude:
@@ -715,6 +770,8 @@ struct UsageLimitAlertDiagnosticsStore {
                 observedAt: PreferencesKey.usageLimitDiagnosticsClaudeObservedAt,
                 lastAlertSummary: PreferencesKey.usageLimitDiagnosticsClaudeLastAlertSummary,
                 lastAlertAt: PreferencesKey.usageLimitDiagnosticsClaudeLastAlertAt,
+                delivery: PreferencesKey.usageLimitDiagnosticsClaudeDelivery,
+                deliveryAt: PreferencesKey.usageLimitDiagnosticsClaudeDeliveryAt,
                 nextResetReminderAt: PreferencesKey.usageLimitDiagnosticsClaudeNextResetReminderAt
             )
         }
@@ -726,6 +783,8 @@ struct UsageLimitAlertDiagnosticsStore {
         let observedAt: String
         let lastAlertSummary: String
         let lastAlertAt: String
+        let delivery: String
+        let deliveryAt: String
         let nextResetReminderAt: String
     }
 }
@@ -1031,7 +1090,6 @@ final class UsageLimitNotifier: NSObject, UNUserNotificationCenterDelegate {
     private let defaults: UserDefaults
     private let center: UNUserNotificationCenter
     private let diagnosticsStore: UsageLimitAlertDiagnosticsStore
-    private var didRequestAuthorization = false
 
     init(defaults: UserDefaults = .standard,
          center: UNUserNotificationCenter = .current()) {
@@ -1085,15 +1143,24 @@ final class UsageLimitNotifier: NSObject, UNUserNotificationCenterDelegate {
             NSSound(named: "Glass")?.play()
             attemptedDelivery = true
         }
-        guard visualAlertsEnabled else { return attemptedDelivery }
-        ensureAuthorization()
+        guard visualAlertsEnabled else {
+            let summary = attemptedDelivery ? "Sound only; banners off" : "Delivery off"
+            diagnosticsStore.recordDelivery(summary, provider: event.provider)
+            return attemptedDelivery
+        }
 
         let content = UNMutableNotificationContent()
         content.title = event.title
         content.body = event.body
         if soundEnabled { content.sound = .default }
         let request = UNNotificationRequest(identifier: event.identifier, content: content, trigger: nil)
-        center.add(request)
+        enqueueNotificationRequest(
+            request,
+            provider: event.provider,
+            soundAttempted: attemptedDelivery,
+            queuedSummary: "Banner queued",
+            failedPrefix: "Banner failed"
+        )
         return true
     }
 
@@ -1102,7 +1169,6 @@ final class UsageLimitNotifier: NSObject, UNUserNotificationCenterDelegate {
             cancelScheduledFiveHourReset(provider: event.provider)
             return
         }
-        ensureAuthorization()
 
         let content = UNMutableNotificationContent()
         content.title = event.title
@@ -1111,7 +1177,14 @@ final class UsageLimitNotifier: NSObject, UNUserNotificationCenterDelegate {
         let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: resetDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         let request = UNNotificationRequest(identifier: event.identifier, content: content, trigger: trigger)
-        center.add(request)
+        enqueueNotificationRequest(
+            request,
+            provider: event.provider,
+            soundAttempted: false,
+            queuedSummary: "Reset reminder queued",
+            failedPrefix: "Reset reminder failed",
+            recordDeliveryStatus: false
+        )
         removePendingFiveHourResetRequests(provider: event.provider, excluding: event.identifier)
         diagnosticsStore.recordScheduledReset(event)
     }
@@ -1137,13 +1210,72 @@ final class UsageLimitNotifier: NSObject, UNUserNotificationCenterDelegate {
         "\(provider.rawValue)-limit-reset-five-hour-"
     }
 
-    private func ensureAuthorization() {
-        guard !didRequestAuthorization else { return }
-        didRequestAuthorization = true
+    private func enqueueNotificationRequest(_ request: UNNotificationRequest,
+                                            provider: UsageLimitAlertProvider,
+                                            soundAttempted: Bool,
+                                            queuedSummary: String,
+                                            failedPrefix: String,
+                                            recordDeliveryStatus: Bool = true) {
         let center = self.center
         center.getNotificationSettings { settings in
-            guard settings.authorizationStatus == .notDetermined else { return }
-            center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                center.add(request) { [weak self] error in
+                    guard recordDeliveryStatus else { return }
+                    let summary: String
+                    if let error {
+                        summary = "\(soundAttempted ? "Sound played; " : "")\(failedPrefix): \(error.localizedDescription)"
+                    } else {
+                        summary = soundAttempted ? "Sound + \(queuedSummary.lowercased())" : queuedSummary
+                    }
+                    Task { @MainActor in
+                        self?.diagnosticsStore.recordDelivery(summary, provider: provider)
+                    }
+                }
+            case .denied:
+                guard recordDeliveryStatus else { return }
+                let summary = soundAttempted ? "Sound played; banners denied" : "Banners denied"
+                Task { @MainActor in
+                    self.diagnosticsStore.recordDelivery(summary, provider: provider)
+                }
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+                    if let error {
+                        guard recordDeliveryStatus else { return }
+                        let summary = "\(soundAttempted ? "Sound played; " : "")Authorization failed: \(error.localizedDescription)"
+                        Task { @MainActor in
+                            self?.diagnosticsStore.recordDelivery(summary, provider: provider)
+                        }
+                        return
+                    }
+                    guard granted else {
+                        guard recordDeliveryStatus else { return }
+                        let summary = soundAttempted ? "Sound played; banners denied" : "Banners denied"
+                        Task { @MainActor in
+                            self?.diagnosticsStore.recordDelivery(summary, provider: provider)
+                        }
+                        return
+                    }
+                    center.add(request) { [weak self] error in
+                        guard recordDeliveryStatus else { return }
+                        let summary: String
+                        if let error {
+                            summary = "\(soundAttempted ? "Sound played; " : "")\(failedPrefix): \(error.localizedDescription)"
+                        } else {
+                            summary = soundAttempted ? "Sound + \(queuedSummary.lowercased())" : queuedSummary
+                        }
+                        Task { @MainActor in
+                            self?.diagnosticsStore.recordDelivery(summary, provider: provider)
+                        }
+                    }
+                }
+            @unknown default:
+                guard recordDeliveryStatus else { return }
+                let summary = soundAttempted ? "Sound played; banner status unknown" : "Banner status unknown"
+                Task { @MainActor in
+                    self.diagnosticsStore.recordDelivery(summary, provider: provider)
+                }
+            }
         }
     }
 }

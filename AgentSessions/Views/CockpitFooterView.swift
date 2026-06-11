@@ -337,13 +337,19 @@ private struct IndexingIndicator: View {
 		        )
 		    }
 
-	    @ViewBuilder
-	    private func resetIndicator(labelText: String) -> some View {
-	        HStack(spacing: 4) {
-	            Text("↻")
-	            Text(labelText)
-	        }
-	    }
+		    @ViewBuilder
+		    private func resetIndicator(labelText: String) -> some View {
+		        HStack(spacing: 4) {
+		            Text("↻")
+		            Text(labelText)
+		        }
+		    }
+
+            private var projectionColor: Color {
+                isDarkMode
+                    ? Color(red: 1.0, green: 0.60, blue: 0.12)
+                    : Color(red: 0.82, green: 0.30, blue: 0.00)
+            }
 
 		    @ViewBuilder
 		    private var inner: some View {
@@ -368,13 +374,14 @@ private struct IndexingIndicator: View {
 		            HStack(spacing: 6) {
 		                switch scope {
 		                case .fiveHour:
-		                    HStack(spacing: 4) {
-		                        Text("5h: \(presentation.fiveHourPercentLabelText)")
-		                        if let projection = presentation.fiveHourProjectionLabelText {
-		                            Text(projection)
-		                                .foregroundStyle(.orange)
-		                        }
-		                    }
+			                    HStack(spacing: 4) {
+			                        Text("5h: \(presentation.fiveHourPercentLabelText)")
+			                        if let projection = presentation.fiveHourProjectionLabelText {
+			                            Text(projection)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(projectionColor)
+			                        }
+			                    }
 		                    if showResetIndicators {
 		                        DividerText(baseForeground: baseForeground)
 		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)
@@ -386,13 +393,14 @@ private struct IndexingIndicator: View {
 		                        resetIndicator(labelText: presentation.weekResetLabelText)
 		                    }
 		                case .both:
-		                    HStack(spacing: 4) {
-		                        Text("5h: \(presentation.fiveHourPercentLabelText)")
-		                        if let projection = presentation.fiveHourProjectionLabelText {
-		                            Text(projection)
-		                                .foregroundStyle(.orange)
-		                        }
-		                    }
+			                    HStack(spacing: 4) {
+			                        Text("5h: \(presentation.fiveHourPercentLabelText)")
+			                        if let projection = presentation.fiveHourProjectionLabelText {
+			                            Text(projection)
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(projectionColor)
+			                        }
+			                    }
 		                    if showResetIndicators {
 		                        DividerText(baseForeground: baseForeground)
 		                        resetIndicator(labelText: presentation.fiveHourResetLabelText)

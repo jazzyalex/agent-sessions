@@ -73,6 +73,19 @@ final class ClaudeUsageModel: ObservableObject {
     private var appIsActive: Bool = false
     private var wakeObservers: [NSObjectProtocol] = []
 
+#if DEBUG
+    static var projectionDiagnosticsDefaultsForTesting: UserDefaults?
+#endif
+
+    private static var projectionDiagnosticsDefaults: UserDefaults {
+#if DEBUG
+        if let projectionDiagnosticsDefaultsForTesting {
+            return projectionDiagnosticsDefaultsForTesting
+        }
+#endif
+        return .standard
+    }
+
     func setEnabled(_ enabled: Bool) {
         if AppRuntime.isRunningTests {
             if !enabled { stop() }
@@ -194,6 +207,7 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
+        recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
 
@@ -380,6 +394,7 @@ final class ClaudeUsageModel: ObservableObject {
         dataIsStale = (s.health == .stale || s.health == .degraded)
         updateFiveHourProjection(
             remainingPercent: s.fiveHourRemainingPercent,
+            remainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },
             resetText: s.fiveHourResetText,
             freshness: freshness,
             observedAt: s.fetchedAt,
@@ -439,6 +454,7 @@ final class ClaudeUsageModel: ObservableObject {
         dataIsStale = false
         updateFiveHourProjection(
             remainingPercent: s.sessionRemainingPercent,
+            remainingPercentExact: nil,
             resetText: s.sessionResetText,
             freshness: .fresh,
             observedAt: now,
@@ -457,21 +473,37 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func updateFiveHourProjection(remainingPercent: Int,
+                                          remainingPercentExact: Double?,
                                           resetText: String,
                                           freshness: UsageLimitAlertFreshness,
                                           observedAt: Date,
                                           now: Date) {
         let hasFiveHour = !resetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let projectedRunoutAt = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
+        let projectionEstimate = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
             source: .claude,
             remainingPercent: remainingPercent,
+            remainingPercentExact: remainingPercentExact,
             resetText: resetText,
             hasRateLimit: hasFiveHour,
             freshness: freshness,
             observedAt: observedAt
         ), now: now)
-        fiveHourProjectedRunoutAt = projectedRunoutAt
-        fiveHourProjectionObservedAt = projectedRunoutAt == nil ? nil : observedAt
+        fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
+        fiveHourProjectionObservedAt = projectionEstimate?.observedAt
+        recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate)
+    }
+
+    private func recordProjectionDiagnostics(_ value: String, estimate: UsageLimitProjectionEstimate?) {
+        let defaults = Self.projectionDiagnosticsDefaults
+        defaults.set(value, forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjection)
+        defaults.set(
+            estimate?.runoutAt.timeIntervalSince1970 ?? 0,
+            forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjectionRunoutAt
+        )
+        defaults.set(
+            estimate?.observedAt.timeIntervalSince1970 ?? 0,
+            forKey: PreferencesKey.usageLimitDiagnosticsClaudeProjectionObservedAt
+        )
     }
 
     private func usageLimitSnapshot(fiveHourRemainingPercent: Int,

@@ -66,23 +66,30 @@ func formatUsageWeeklyResetLabel(_ date: Date?, now: Date = Date()) -> String? {
 struct UsageLimitProjectionSample: Equatable {
     let source: UsageTrackingSource
     let remainingPercent: Int
+    var remainingPercentExact: Double? = nil
     let resetText: String
     let hasRateLimit: Bool
     let freshness: UsageLimitAlertFreshness
     let observedAt: Date
 }
 
+struct UsageLimitProjectionEstimate: Equatable {
+    let runoutAt: Date
+    let observedAt: Date
+}
+
 struct UsageLimitProjectionTracker {
     private var previous: ResolvedSample?
     private var lastProjection: Projection?
+    private(set) var lastDiagnostics: String = "Waiting for data"
 
     mutating func update(with sample: UsageLimitProjectionSample,
-                         now: Date = Date()) -> Date? {
+                         now: Date = Date()) -> UsageLimitProjectionEstimate? {
         guard sample.hasRateLimit,
-              sample.freshness.allowsProjectedAlerts,
               !isResetInfoUnavailable(raw: sample.resetText) else {
             previous = nil
             lastProjection = nil
+            lastDiagnostics = "Waiting for 5h limit"
             return nil
         }
         guard let resetDate = UsageResetText.resetDate(
@@ -94,78 +101,122 @@ struct UsageLimitProjectionTracker {
            resetDate > now else {
             previous = nil
             lastProjection = nil
+            lastDiagnostics = "Waiting for valid reset"
             return nil
         }
 
         let current = ResolvedSample(
-            remainingPercent: clampPercent(sample.remainingPercent),
+            remainingPercent: Self.remainingPercent(for: sample),
             resetDate: resetDate,
             observedAt: sample.observedAt
         )
-        defer { previous = current }
 
-        guard let previous else { return nil }
+        guard sample.freshness.allowsProjectedDisplay else {
+            previous = nil
+            lastProjection = nil
+            lastDiagnostics = "Stale data"
+            return nil
+        }
+        guard let previous else {
+            self.previous = current
+            lastDiagnostics = "Waiting for next sample"
+            return nil
+        }
         guard abs(previous.resetDate.timeIntervalSince(current.resetDate)) < 120 else {
             lastProjection = nil
+            self.previous = current
+            lastDiagnostics = "Reset changed; waiting for next sample"
             return nil
         }
 
         if current.remainingPercent > previous.remainingPercent {
             lastProjection = nil
+            self.previous = current
+            lastDiagnostics = "Usage recovered; waiting for next burn"
             return nil
         }
 
         let elapsed = current.observedAt.timeIntervalSince(previous.observedAt)
-        guard elapsed >= 60 else { return retainedProjection(for: current, now: now) }
+        guard elapsed >= 60 else { return retainedProjection(for: current, now: now, fallback: "Waiting for 60s sample") }
         guard previous.remainingPercent > current.remainingPercent else {
-            return retainedProjection(for: current, now: now)
+            return retainedProjection(for: current, now: now, fallback: "Waiting for usage drop")
         }
 
         let percentBurned = Double(previous.remainingPercent - current.remainingPercent)
         let secondsUntilEmpty = Double(current.remainingPercent) / (percentBurned / elapsed)
         guard secondsUntilEmpty > 0 else {
             lastProjection = nil
+            lastDiagnostics = "Waiting for usage drop"
             return nil
         }
 
         let projectedRunoutAt = current.observedAt.addingTimeInterval(secondsUntilEmpty)
         guard projectedRunoutAt < current.resetDate else {
             lastProjection = nil
+            self.previous = current
+            lastDiagnostics = "Run-out after reset"
             return nil
         }
+        self.previous = current
         lastProjection = Projection(
             runoutAt: projectedRunoutAt,
             resetDate: current.resetDate,
-            remainingPercent: current.remainingPercent
+            remainingPercent: current.remainingPercent,
+            observedAt: current.observedAt
         )
-        return projectedRunoutAt
+        lastDiagnostics = Self.diagnosticsLabel(runoutAt: projectedRunoutAt, observedAt: current.observedAt, now: now)
+        return UsageLimitProjectionEstimate(runoutAt: projectedRunoutAt, observedAt: current.observedAt)
     }
 
     mutating func reset() {
         previous = nil
         lastProjection = nil
+        lastDiagnostics = "Waiting for data"
     }
 
-    private mutating func retainedProjection(for current: ResolvedSample, now: Date) -> Date? {
-        guard let projection = lastProjection else { return nil }
+    private mutating func retainedProjection(for current: ResolvedSample, now: Date, fallback: String) -> UsageLimitProjectionEstimate? {
+        guard let projection = lastProjection else {
+            lastDiagnostics = fallback
+            return nil
+        }
         guard abs(projection.resetDate.timeIntervalSince(current.resetDate)) < 120 else {
             lastProjection = nil
+            lastDiagnostics = "Reset changed; waiting for next sample"
             return nil
         }
         guard current.remainingPercent <= projection.remainingPercent else {
             lastProjection = nil
+            lastDiagnostics = "Usage recovered; waiting for next burn"
             return nil
         }
-        guard projection.runoutAt > now,
-              projection.runoutAt < current.resetDate else {
+        guard projection.runoutAt > now else {
             lastProjection = nil
+            lastDiagnostics = fallback
             return nil
         }
-        return projection.runoutAt
+        guard projection.runoutAt < current.resetDate else {
+            lastProjection = nil
+            lastDiagnostics = "Run-out after reset"
+            return nil
+        }
+        lastDiagnostics = Self.diagnosticsLabel(runoutAt: projection.runoutAt, observedAt: projection.observedAt, now: now)
+        return UsageLimitProjectionEstimate(runoutAt: projection.runoutAt, observedAt: projection.observedAt)
+    }
+
+    private static func remainingPercent(for sample: UsageLimitProjectionSample) -> Double {
+        let fallback = Double(clampPercent(sample.remainingPercent))
+        guard let exact = sample.remainingPercentExact else { return fallback }
+        guard exact.isFinite else { return fallback }
+        return max(0, min(100, exact))
+    }
+
+    private static func diagnosticsLabel(runoutAt: Date, observedAt: Date, now: Date) -> String {
+        let label = formatUsageProjectionLabel(runoutAt: runoutAt, observedAt: observedAt, now: now)
+        return label.map { "Active \($0)" } ?? "Projection stale"
     }
 
     private struct ResolvedSample: Equatable {
-        let remainingPercent: Int
+        let remainingPercent: Double
         let resetDate: Date
         let observedAt: Date
     }
@@ -173,7 +224,8 @@ struct UsageLimitProjectionTracker {
     private struct Projection: Equatable {
         let runoutAt: Date
         let resetDate: Date
-        let remainingPercent: Int
+        let remainingPercent: Double
+        let observedAt: Date
     }
 }
 
@@ -191,6 +243,24 @@ func formatUsageProjectionLabel(runoutAt: Date?,
     let remainingMinutes = minutes % 60
     if remainingMinutes == 0 { return "▸\(hours)h" }
     return "▸\(hours)h \(remainingMinutes)m"
+}
+
+func formatUsageProjectionDiagnosticsText(_ diagnostics: String,
+                                           runoutAt: Double,
+                                           observedAt: Double,
+                                           now: Date = Date()) -> String {
+    let trimmed = diagnostics.trimmingCharacters(in: .whitespacesAndNewlines)
+    if runoutAt > 0 || observedAt > 0 {
+        let runoutDate = runoutAt > 0 ? Date(timeIntervalSince1970: runoutAt) : nil
+        let observedDate = observedAt > 0 ? Date(timeIntervalSince1970: observedAt) : nil
+        if let label = formatUsageProjectionLabel(runoutAt: runoutDate, observedAt: observedDate, now: now) {
+            return "Active \(label)"
+        }
+        if trimmed.hasPrefix("Active ") {
+            return "Projection stale"
+        }
+    }
+    return trimmed.isEmpty ? "Waiting for data" : trimmed
 }
 
 /// Formats a reset date as ISO 8601 with "resets " prefix.
