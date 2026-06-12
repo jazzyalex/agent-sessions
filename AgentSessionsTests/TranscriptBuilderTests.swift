@@ -11,6 +11,96 @@ final class TranscriptBuilderTests: XCTestCase {
         return Session(id: "s-1", startTime: Date(), endTime: Date(), model: "test", filePath: "/tmp/x.jsonl", eventCount: events.count, events: events)
     }
 
+    func testMarkdownExportBuildsTerminalBodyWhenRenderedTranscriptIsEmpty() throws {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .user,
+                         role: "user",
+                         text: "Export this transcript",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}"),
+            SessionEvent(id: "e2",
+                         timestamp: nil,
+                         kind: .assistant,
+                         role: "assistant",
+                         text: "Here is the answer.",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m2",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-export-terminal",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/export-terminal.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "",
+            viewMode: .terminal,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in "[]" }
+        )
+
+        XCTAssertTrue(md.hasPrefix("# "))
+        XCTAssertTrue(md.contains("> Export this transcript"))
+        XCTAssertTrue(md.contains("Here is the answer."))
+    }
+
+    func testMarkdownExportKeepsRenderedTranscriptOutsideTerminalMode() throws {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .user,
+                         role: "user",
+                         text: "Raw event text",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-export-rendered",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/export-rendered.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "Rendered body",
+            viewMode: .transcript,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in "[]" }
+        )
+
+        XCTAssertTrue(md.contains("Rendered body"))
+        let body = md.components(separatedBy: "\n\n").dropFirst().joined(separator: "\n\n")
+        XCTAssertFalse(body.contains("Raw event text"))
+    }
+
     func testAssistantContentArraysConcatenate() throws {
         let line = "{" +
         "\"timestamp\":\"2025-09-10T00:00:00Z\",\"role\":\"assistant\",\"content\":[{" +

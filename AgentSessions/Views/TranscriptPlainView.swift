@@ -29,6 +29,47 @@ enum TranscriptSessionRenderKey {
     }
 }
 
+enum TranscriptMarkdownExporter {
+    static func markdownContent(session: Session,
+                                renderedTranscript: String,
+                                viewMode: SessionViewMode,
+                                showTimestamps: Bool,
+                                decorate: (String, Session) -> String,
+                                jsonBuilder: (Session) -> String) -> String {
+        let body = transcriptBody(session: session,
+                                  renderedTranscript: renderedTranscript,
+                                  viewMode: viewMode,
+                                  showTimestamps: showTimestamps,
+                                  decorate: decorate,
+                                  jsonBuilder: jsonBuilder)
+        return "# \(session.listTitle)\n\n" + body
+    }
+
+    private static func transcriptBody(session: Session,
+                                       renderedTranscript: String,
+                                       viewMode: SessionViewMode,
+                                       showTimestamps: Bool,
+                                       decorate: (String, Session) -> String,
+                                       jsonBuilder: (Session) -> String) -> String {
+        if viewMode != .terminal,
+           !renderedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return renderedTranscript
+        }
+
+        if viewMode == .json {
+            return jsonBuilder(session)
+        }
+
+        let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
+        let raw = SessionTranscriptBuilder.buildPlainTerminalTranscript(
+            session: session,
+            filters: filters,
+            mode: viewMode.transcriptRenderMode
+        )
+        return decorate(raw, session)
+    }
+}
+
 struct TranscriptTailUpdateState: Equatable {
     enum BottomProximity: Equatable {
         case unknown
@@ -1608,7 +1649,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func exportMarkdown(session: Session) {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.plainText]
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = markdownFilename(for: session)
@@ -1616,8 +1657,14 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard let window = NSApp.keyWindow else { return }
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
-            let header = "# \(session.listTitle)\n\n"
-            let content = header + transcript
+            let content = TranscriptMarkdownExporter.markdownContent(
+                session: session,
+                renderedTranscript: transcript,
+                viewMode: viewMode,
+                showTimestamps: showTimestamps,
+                decorate: decorateTranscriptIfNeeded,
+                jsonBuilder: prettyJSONForSession
+            )
             try? content.write(to: url, atomically: true, encoding: .utf8)
         }
     }
