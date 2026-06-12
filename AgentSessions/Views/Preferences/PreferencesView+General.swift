@@ -262,7 +262,7 @@ extension PreferencesView {
                 get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
                 set: { DockIconPreferenceController.setDockIconHidden($0) }
             ))
-            .help("Removes Agent Sessions from the Dock when the menu bar item is visible. If macOS cannot fit the menu bar item, Agent Sessions restores the Dock icon so the app remains accessible.")
+            .help("Removes Agent Sessions from the Dock when the menu bar item or a pinned Cockpit keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.")
 
             Toggle("Show Git Context button", isOn: Binding(
                 get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },

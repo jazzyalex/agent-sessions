@@ -192,6 +192,7 @@ struct AgentSessionsApp: App {
     @State private var menuBarDefaultsObserver: NSObjectProtocol?
     @State private var lastObservedMenuBarEnabled: Bool?
     @State private var lastObservedHideDockIcon: Bool?
+    @State private var lastObservedPinnedCockpitAvailable: Bool?
     @State private var didRestoreDockForUnavailableMenuBar: Bool = false
     @State private var didRunStartupTasks: Bool = false
     @State private var isDockRecentCleanupScheduled: Bool = false
@@ -242,7 +243,12 @@ struct AgentSessionsApp: App {
         DockIconPreferenceController.reconcileReachability(defaults: defaults)
         let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
         let menuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
-        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+        let pinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults)
+        Self.applyActivationPolicy(
+            hideDockIcon: hideDockIcon,
+            menuBarEnabled: menuBarEnabled,
+            pinnedCockpitAvailable: pinnedCockpitAvailable
+        )
 
         // Fallback: if no window appears within 3 seconds, open the gate anyway
         // so startup tasks are never blocked indefinitely in a windowless launch.
@@ -324,6 +330,7 @@ struct AgentSessionsApp: App {
             handleMenuBarEnabledChange(newValue)
         }
         .onChange(of: liveSessionsEnabled) { _, _ in
+            DockIconPreferenceController.reconcileReachability()
             updateUsageModels()
         }
         .onChange(of: hideDockIcon) { _, newValue in
@@ -603,11 +610,16 @@ extension AgentSessionsApp {
     private static let crashSupportRecipient = "jazzyalex@gmail.com"
     private static let crashIssueURL = URL(string: "https://github.com/jazzyalex/agent-sessions/issues/new?title=Crash%20Report&body=Please%20attach%20the%20exported%20crash%20report%20JSON%20file%20and%20steps%20to%20reproduce.")!
 
-    private static func applyActivationPolicy(hideDockIcon: Bool, menuBarEnabled: Bool) {
+    private static func applyActivationPolicy(
+        hideDockIcon: Bool,
+        menuBarEnabled: Bool,
+        pinnedCockpitAvailable: Bool = DockIconPreferenceController.isPinnedCockpitAvailable()
+    ) {
         let apply: () -> Void = {
             let policy = ActivationPolicyDecider.policy(
                 hideDockIcon: hideDockIcon,
-                menuBarEnabled: menuBarEnabled
+                menuBarEnabled: menuBarEnabled,
+                pinnedCockpitAvailable: pinnedCockpitAvailable
             )
             NSApplication.shared.setActivationPolicy(policy)
         }
@@ -620,10 +632,16 @@ extension AgentSessionsApp {
 
     @MainActor
     private func applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: Bool, menuBarEnabled: Bool) {
-        Self.applyActivationPolicy(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)
+        let pinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable()
+        Self.applyActivationPolicy(
+            hideDockIcon: hideDockIcon,
+            menuBarEnabled: menuBarEnabled,
+            pinnedCockpitAvailable: pinnedCockpitAvailable
+        )
         let policy = ActivationPolicyDecider.policy(
             hideDockIcon: hideDockIcon,
-            menuBarEnabled: menuBarEnabled
+            menuBarEnabled: menuBarEnabled,
+            pinnedCockpitAvailable: pinnedCockpitAvailable
         )
         if policy == .accessory {
             scheduleDockRecentCleanup()
@@ -807,9 +825,11 @@ extension AgentSessionsApp {
     private func handleMenuBarEnabledChange(_ enabled: Bool) {
         guard !AppRuntime.isRunningTests else { return }
         DockIconPreferenceController.setMenuBarEnabled(enabled)
-        let effectiveHideDockIcon = enabled ? hideDockIcon : false
+        let pinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable()
+        let effectiveHideDockIcon = (enabled || pinnedCockpitAvailable) ? hideDockIcon : false
         lastObservedMenuBarEnabled = enabled
         lastObservedHideDockIcon = effectiveHideDockIcon
+        lastObservedPinnedCockpitAvailable = pinnedCockpitAvailable
         updateUsageModels(menuBarEnabledOverride: enabled)
         applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: effectiveHideDockIcon, menuBarEnabled: enabled)
     }
@@ -822,6 +842,7 @@ extension AgentSessionsApp {
             return
         }
         guard hideDockIcon, menuBarEnabled, !didRestoreDockForUnavailableMenuBar else { return }
+        guard !DockIconPreferenceController.isPinnedCockpitAvailable() else { return }
         didRestoreDockForUnavailableMenuBar = true
         UserDefaults.standard.set(false, forKey: PreferencesKey.Advanced.hideDockIcon)
         Self.applyActivationPolicy(hideDockIcon: false, menuBarEnabled: menuBarEnabled)
@@ -834,6 +855,7 @@ extension AgentSessionsApp {
         let defaults = UserDefaults.standard
         lastObservedMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
         lastObservedHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
+        lastObservedPinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults)
 
         menuBarDefaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
@@ -842,16 +864,19 @@ extension AgentSessionsApp {
         ) { [self] _ in
             let nextMenuBarEnabled = defaults.object(forKey: PreferencesKey.menuBarEnabled) as? Bool ?? false
             var nextHideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false
-            if !nextMenuBarEnabled && nextHideDockIcon {
+            let nextPinnedCockpitAvailable = DockIconPreferenceController.isPinnedCockpitAvailable(defaults: defaults)
+            if !DockIconPreferenceController.hasDockHiddenReachability(defaults: defaults), nextHideDockIcon {
                 DockIconPreferenceController.reconcileReachability(defaults: defaults)
                 nextHideDockIcon = false
             }
 
             guard nextMenuBarEnabled != self.lastObservedMenuBarEnabled
-                || nextHideDockIcon != self.lastObservedHideDockIcon else { return }
+                || nextHideDockIcon != self.lastObservedHideDockIcon
+                || nextPinnedCockpitAvailable != self.lastObservedPinnedCockpitAvailable else { return }
 
             self.lastObservedMenuBarEnabled = nextMenuBarEnabled
             self.lastObservedHideDockIcon = nextHideDockIcon
+            self.lastObservedPinnedCockpitAvailable = nextPinnedCockpitAvailable
             self.updateUsageModels(menuBarEnabledOverride: nextMenuBarEnabled)
             Task { @MainActor in
                 self.applyActivationPolicyAndCleanupIfNeeded(
