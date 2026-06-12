@@ -1,5 +1,58 @@
 import SwiftUI
 
+struct LimitAlertReadinessFormatter {
+    static func text(provider: String,
+                     source: String,
+                     freshness: String,
+                     observedAt: Double,
+                     projection: String,
+                     projectionRunoutAt: Double,
+                     projectionObservedAt: Double,
+                     delivery: String,
+                     deliveryAt: Double,
+                     notificationsEnabled: Bool,
+                     providerEnabled: Bool,
+                     visualEnabled: Bool,
+                     soundEnabled: Bool,
+                     now: Date = Date()) -> String {
+        guard notificationsEnabled else { return "Alerts off" }
+        guard providerEnabled else { return "Alerts off for \(provider)" }
+        if !visualEnabled && !soundEnabled { return "Delivery off" }
+
+        if observedAt <= 0 || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Waiting for usage data"
+        }
+
+        let age = now.timeIntervalSince(Date(timeIntervalSince1970: observedAt))
+        if age > 10 * 60 || freshness.localizedCaseInsensitiveContains("stale") {
+            return "Stale; alerts may be delayed"
+        }
+
+        let deliveryText = delivery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if visualEnabled,
+           deliveryAt > 0,
+           deliveryText.contains("denied")
+            || deliveryText.contains("failed")
+            || deliveryText.contains("unknown") {
+            return "Notifications need attention"
+        }
+
+        let projectionText = formatUsageProjectionDiagnosticsText(
+            projection,
+            runoutAt: projectionRunoutAt,
+            observedAt: projectionObservedAt,
+            now: now
+        )
+        if projectionText.hasPrefix("Active ") {
+            return "Watching active 5h burn"
+        }
+        if !visualEnabled {
+            return "Ready; sound only"
+        }
+        return "Ready"
+    }
+}
+
 extension PreferencesView {
 
     private var webApiEffectivelyEnabled: Bool {
@@ -304,6 +357,20 @@ extension PreferencesView {
             Text(provider)
                 .font(.subheadline)
                 .fontWeight(.semibold)
+            Text(limitAlertReadinessText(
+                provider: provider,
+                source: source,
+                freshness: freshness,
+                observedAt: observedAt,
+                projection: projection,
+                projectionRunoutAt: projectionRunoutAt,
+                projectionObservedAt: projectionObservedAt,
+                delivery: delivery,
+                deliveryAt: deliveryAt
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
 
             HStack(alignment: .top, spacing: 16) {
                 diagnosticsField(
@@ -338,6 +405,32 @@ extension PreferencesView {
                 )
             }
         }
+    }
+
+    private func limitAlertReadinessText(provider: String,
+                                         source: String,
+                                         freshness: String,
+                                         observedAt: Double,
+                                         projection: String,
+                                         projectionRunoutAt: Double,
+                                         projectionObservedAt: Double,
+                                         delivery: String,
+                                         deliveryAt: Double) -> String {
+        LimitAlertReadinessFormatter.text(
+            provider: provider,
+            source: source,
+            freshness: freshness,
+            observedAt: observedAt,
+            projection: projection,
+            projectionRunoutAt: projectionRunoutAt,
+            projectionObservedAt: projectionObservedAt,
+            delivery: delivery,
+            deliveryAt: deliveryAt,
+            notificationsEnabled: usageLimitNotificationsEnabled,
+            providerEnabled: provider == "Codex" ? usageLimitNotificationCodexEnabled : usageLimitNotificationClaudeEnabled,
+            visualEnabled: usageLimitNotificationVisualEnabled,
+            soundEnabled: usageLimitNotificationSoundEnabled
+        )
     }
 
     private func diagnosticsField(_ title: String, value: String) -> some View {

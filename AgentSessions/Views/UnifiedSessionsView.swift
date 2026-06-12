@@ -1594,7 +1594,7 @@ struct UnifiedSessionsView: View {
             }
             .accessibilityLabel(Text("Toggle Dark/Light"))
 
-            ToolbarIconButton(help: "Open preferences for appearance, indexing, and agents (⌘,)") { isHovering in
+            ToolbarIconButton(help: "Open settings for appearance, indexing, and agents (⌘,)") { isHovering in
                 ToolbarIcon(systemName: "gearshape", opacity: isHovering ? 1 : 0.4)
             } action: {
                 PreferencesWindowController.shared.show(indexer: codexIndexer, updaterController: updaterController)

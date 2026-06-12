@@ -412,7 +412,7 @@ struct UsageMenuBarMenuContent: View {
             }) { refreshLabel }
             Toggle("Show in-app usage strip", isOn: $showUsageStrip)
             Divider()
-            Button("Open Preferences…") {
+            Button("Open Settings…") {
                 if let updater = UpdaterController.shared {
                     PreferencesWindowController.shared.show(indexer: indexer, updaterController: updater, initialTab: .usageTracking)
                 }

@@ -43,7 +43,7 @@ import AppKit
             defer: false
         )
         win.contentView = hv
-        win.title = "Preferences"
+        win.title = "Settings"
         win.isReleasedWhenClosed = false
         win.center()
         win.setFrameAutosaveName("PreferencesWindow")

@@ -438,14 +438,14 @@ struct PreferencesView: View {
             Spacer()
             Button("Reset to Defaults") { showingResetConfirm = true }
                 .buttonStyle(.bordered)
-                .help("Revert all preferences to their original values")
+                .help("Revert all settings to their original values")
             Button("Close", action: closeWindow)
                 .buttonStyle(.borderedProminent)
-                .help("Dismiss preferences without additional changes")
+                .help("Dismiss settings without additional changes")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .alert("Reset All Preferences?", isPresented: $showingResetConfirm) {
+        .alert("Reset All Settings?", isPresented: $showingResetConfirm) {
             Button("Reset", role: .destructive) { resetToDefaults() }
                 .help("Confirm and restore default settings across all tabs")
             Button("Cancel", role: .cancel) {}

@@ -269,7 +269,7 @@ final class StatusItemController: NSObject {
             menu.addItem(NSMenuItem.separator())
         }
 
-        menu.addItem(makeActionItem(title: "Open Preferences…", action: #selector(openMenuBarPreferences)))
+        menu.addItem(makeActionItem(title: "Open Settings…", action: #selector(openMenuBarPreferences)))
         menu.addItem(makeActionItem(title: "Hide Menu Bar Item", action: #selector(hideMenuBar)))
         menu.addItem(makeActionItem(
             title: DockIconPreferenceController.dockIconMenuTitle(defaults: d),

@@ -631,9 +631,9 @@ struct UsageLimitAlertEvent: Equatable {
     var title: String {
         switch kind {
         case .approaching:
-            return "\(provider.title) \(window.title) limit is low"
+            return "\(provider.title) \(window.title) usage is low"
         case .projectedExhaustion:
-            return "\(provider.title) \(window.title) limit may run out soon"
+            return "\(provider.title) \(window.title) usage is burning fast"
         case .exhausted:
             return "\(provider.title) \(window.title) limit is exhausted"
         case .resetComplete:
@@ -644,30 +644,73 @@ struct UsageLimitAlertEvent: Equatable {
     var body: String {
         switch kind {
         case .approaching:
-            return "\(remainingPercent)% remaining before the \(window.title) limit."
+            return Self.limitPressureBody(
+                remainingPercent: remainingPercent,
+                window: window,
+                resetDate: resetDate,
+                projectedSecondsUntilEmpty: projectedSecondsUntilEmpty
+            )
         case .projectedExhaustion:
-            if let projectedSecondsUntilEmpty {
-                return "\(remainingPercent)% remaining. At the current pace, the \(window.title) limit may run out in \(Self.formatProjectionETA(projectedSecondsUntilEmpty)) before reset."
-            }
-            return "\(remainingPercent)% remaining. At the current pace, the \(window.title) limit may run out before reset."
+            return Self.limitPressureBody(
+                remainingPercent: remainingPercent,
+                window: window,
+                resetDate: resetDate,
+                projectedSecondsUntilEmpty: projectedSecondsUntilEmpty
+            )
         case .exhausted:
-            return "The \(window.title) limit has reached 0% remaining."
+            if let resetText = Self.formatResetETA(resetDate) {
+                return "0% remaining. Reset \(resetText)."
+            }
+            return "0% remaining."
         case .resetComplete:
             return "The 5h limit window has reset."
         }
     }
 
+    private static func limitPressureBody(remainingPercent: Int,
+                                          window: UsageLimitAlertWindow,
+                                          resetDate: Date?,
+                                          projectedSecondsUntilEmpty: TimeInterval?) -> String {
+        var parts = ["\(remainingPercent)% remaining"]
+        if let projectedSecondsUntilEmpty {
+            parts.append("burning to empty in \(formatProjectionETA(projectedSecondsUntilEmpty))")
+        } else {
+            parts.append("for the \(window.title) limit")
+        }
+        if let resetText = formatResetETA(resetDate) {
+            parts.append("reset \(resetText)")
+        }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    private static func formatResetETA(_ resetDate: Date?) -> String? {
+        guard let resetDate else { return nil }
+        let seconds = resetDate.timeIntervalSince(Date())
+        guard seconds > 0 else { return nil }
+        return "in \(formatDuration(seconds))"
+    }
+
     private static func formatProjectionETA(_ seconds: TimeInterval) -> String {
+        "about \(formatDuration(seconds))"
+    }
+
+    private static func formatDuration(_ seconds: TimeInterval) -> String {
         let minutes = max(1, Int(ceil(seconds / 60)))
+        let days = minutes / (24 * 60)
+        if days > 0 {
+            let hours = (minutes % (24 * 60)) / 60
+            if hours == 0 { return "\(days)d" }
+            return "\(days)d \(hours)h"
+        }
         if minutes < 60 {
-            return "about \(minutes)m"
+            return "\(minutes)m"
         }
         let hours = minutes / 60
         let remainingMinutes = minutes % 60
         if remainingMinutes == 0 {
-            return "about \(hours)h"
+            return "\(hours)h"
         }
-        return "about \(hours)h \(remainingMinutes)m"
+        return "\(hours)h \(remainingMinutes)m"
     }
 }
 
@@ -723,6 +766,9 @@ struct UsageLimitAlertDiagnosticsStore {
     private func alertSummary(for event: UsageLimitAlertEvent) -> String {
         switch event.kind {
         case .approaching:
+            if let seconds = event.projectedSecondsUntilEmpty {
+                return "\(event.window.title) low, \(event.remainingPercent)% left, empty in \(Self.formatDuration(seconds))"
+            }
             return "\(event.window.title) low, \(event.remainingPercent)% left"
         case .projectedExhaustion:
             if let seconds = event.projectedSecondsUntilEmpty {
@@ -738,6 +784,12 @@ struct UsageLimitAlertDiagnosticsStore {
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {
         let minutes = max(1, Int(ceil(seconds / 60)))
+        let days = minutes / (24 * 60)
+        if days > 0 {
+            let hours = (minutes % (24 * 60)) / 60
+            if hours == 0 { return "\(days)d" }
+            return "\(days)d \(hours)h"
+        }
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         let remainingMinutes = minutes % 60
@@ -806,6 +858,9 @@ final class UsageLimitAlertEvaluator {
         }
 
         var events: [UsageLimitAlertEvent] = []
+        let previous = previousSnapshots[snapshot.provider]
+        let previousTime = previous?.observedAt ?? previousSnapshotTimes[snapshot.provider]
+        let currentTime = snapshot.observedAt ?? now
         events.append(contentsOf: projectedExhaustionEvents(snapshot: snapshot, now: now))
         events.append(contentsOf: pressureEvents(
             window: .fiveHour,
@@ -814,6 +869,10 @@ final class UsageLimitAlertEvaluator {
             resetText: snapshot.fiveHourResetText,
             hasRateLimit: snapshot.hasFiveHourRateLimit,
             freshness: snapshot.fiveHourFreshness,
+            previousRemainingPercent: previous?.fiveHourRemainingPercent,
+            previousFreshness: previous?.fiveHourFreshness,
+            previousTime: previousTime,
+            currentTime: currentTime,
             now: now
         ))
         events.append(contentsOf: pressureEvents(
@@ -823,6 +882,10 @@ final class UsageLimitAlertEvaluator {
             resetText: snapshot.weeklyResetText,
             hasRateLimit: snapshot.hasWeeklyRateLimit,
             freshness: snapshot.weeklyFreshness,
+            previousRemainingPercent: previous?.weeklyRemainingPercent,
+            previousFreshness: previous?.weeklyFreshness,
+            previousTime: previousTime,
+            currentTime: currentTime,
             now: now
         ))
 
@@ -1011,6 +1074,10 @@ final class UsageLimitAlertEvaluator {
                                 resetText: String,
                                 hasRateLimit: Bool,
                                 freshness: UsageLimitAlertFreshness,
+                                previousRemainingPercent: Int?,
+                                previousFreshness: UsageLimitAlertFreshness?,
+                                previousTime: Date?,
+                                currentTime: Date,
                                 now: Date) -> [UsageLimitAlertEvent] {
         guard hasRateLimit else { return [] }
         guard freshness.allowsImmediateAlerts else { return [] }
@@ -1018,6 +1085,16 @@ final class UsageLimitAlertEvaluator {
         guard remaining <= thresholdPercent else { return [] }
 
         let resetDate = UsageResetText.resetDate(kind: window == .fiveHour ? "5h" : "Wk", source: provider.resetSource, raw: resetText, now: now)
+        let projectedSecondsUntilEmpty = pressureProjectionSecondsUntilEmpty(
+            currentRemainingPercent: remaining,
+            resetDate: resetDate,
+            currentFreshness: freshness,
+            previousRemainingPercent: previousRemainingPercent,
+            previousFreshness: previousFreshness,
+            previousTime: previousTime,
+            currentTime: currentTime,
+            now: now
+        )
         let key = resetKey(raw: resetText, date: resetDate)
         let kind: UsageLimitAlertKind = remaining <= 0 ? .exhausted : .approaching
         guard (kind == .approaching && approachingEnabled) || (kind == .exhausted && exhaustedEnabled) else { return [] }
@@ -1032,9 +1109,42 @@ final class UsageLimitAlertEvaluator {
                 window: window,
                 remainingPercent: remaining,
                 resetDate: resetDate,
-                identifier: dedupeKey
+                identifier: dedupeKey,
+                projectedSecondsUntilEmpty: projectedSecondsUntilEmpty
             )
         ]
+    }
+
+    private func pressureProjectionSecondsUntilEmpty(currentRemainingPercent: Int,
+                                                     resetDate: Date?,
+                                                     currentFreshness: UsageLimitAlertFreshness,
+                                                     previousRemainingPercent: Int?,
+                                                     previousFreshness: UsageLimitAlertFreshness?,
+                                                     previousTime: Date?,
+                                                     currentTime: Date,
+                                                     now: Date) -> TimeInterval? {
+        guard currentRemainingPercent > 0,
+              let resetDate,
+              resetDate > now,
+              currentFreshness.allowsProjectedAlerts,
+              previousFreshness?.allowsProjectedAlerts == true,
+              let previousRemainingPercent,
+              let previousTime else {
+            return nil
+        }
+        let elapsed = currentTime.timeIntervalSince(previousTime)
+        guard elapsed >= 60 else { return nil }
+        let previousRemaining = clampPercent(previousRemainingPercent)
+        guard previousRemaining > currentRemainingPercent else { return nil }
+        let percentBurned = Double(previousRemaining - currentRemainingPercent)
+        let secondsUntilEmpty = Double(currentRemainingPercent) / (percentBurned / elapsed)
+        let projectedRunoutAt = currentTime.addingTimeInterval(secondsUntilEmpty)
+        guard secondsUntilEmpty > 0,
+              projectedRunoutAt > now,
+              projectedRunoutAt < resetDate else {
+            return nil
+        }
+        return secondsUntilEmpty
     }
 
     private func fiveHourResetCompleteEvent(snapshot: UsageLimitSnapshot, now: Date) -> UsageLimitAlertEvent? {

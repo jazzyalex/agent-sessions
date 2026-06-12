@@ -34,7 +34,7 @@ struct AnalyticsView: View {
                 if !hasEnabledSources {
                     buildStateView(
                         message: "No analytics sources enabled",
-                        detail: "Enable at least one agent in Preferences to view analytics.",
+                        detail: "Enable at least one agent in Settings to view analytics.",
                         showProgress: false
                     )
                 } else {

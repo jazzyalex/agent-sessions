@@ -815,6 +815,142 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.window, .weekly)
     }
 
+    func testUsageLimitAlertEvaluatorKeepsBurnETAOnLowAlert() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(4 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 40,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 80,
+            weeklyResetText: "",
+            hasWeeklyRateLimit: false
+        )
+        let second = UsageLimitSnapshot(
+            provider: .codex,
+            fiveHourRemainingPercent: 8,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 80,
+            weeklyResetText: "",
+            hasWeeklyRateLimit: false
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(24 * 60))
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.kind, .approaching)
+        XCTAssertEqual(events.first?.window, .fiveHour)
+        XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 6 * 60, accuracy: 0.001)
+        XCTAssertEqual(events.first?.title, "Codex 5h usage is low")
+        XCTAssertTrue(events.first?.body.contains("8% remaining, burning to empty in about 6m") ?? false)
+    }
+
+    func testUsageLimitAlertEvaluatorUsesReadableWeeklyProjectionCopy() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let weeklyReset = now.addingTimeInterval(4 * 24 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 80,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 40,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true
+        )
+        let second = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 80,
+            fiveHourResetText: "",
+            hasFiveHourRateLimit: false,
+            weeklyRemainingPercent: 20,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: now)
+        let events = evaluator.evaluate(snapshot: second, now: now.addingTimeInterval(30 * 60))
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.kind, .projectedExhaustion)
+        XCTAssertEqual(events.first?.window, .weekly)
+        XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 30 * 60, accuracy: 0.001)
+        XCTAssertTrue(events.first?.title.contains("weekly usage is burning fast") ?? false)
+        XCTAssertTrue(events.first?.body.contains("20% remaining, burning to empty in about 30m") ?? false)
+    }
+
+    func testLimitAlertReadinessFormatterReportsUserFacingStates() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let observedAt = now.addingTimeInterval(-60).timeIntervalSince1970
+        let runoutAt = now.addingTimeInterval(20 * 60).timeIntervalSince1970
+
+        func readiness(source: String = "OAuth",
+                       freshness: String = "fresh",
+                       observedAt: Double = observedAt,
+                       projection: String = "Waiting for next sample",
+                       projectionRunoutAt: Double = 0,
+                       projectionObservedAt: Double = 0,
+                       delivery: String = "",
+                       deliveryAt: Double = 0,
+                       notificationsEnabled: Bool = true,
+                       providerEnabled: Bool = true,
+                       visualEnabled: Bool = true,
+                       soundEnabled: Bool = true) -> String {
+            LimitAlertReadinessFormatter.text(
+                provider: "Codex",
+                source: source,
+                freshness: freshness,
+                observedAt: observedAt,
+                projection: projection,
+                projectionRunoutAt: projectionRunoutAt,
+                projectionObservedAt: projectionObservedAt,
+                delivery: delivery,
+                deliveryAt: deliveryAt,
+                notificationsEnabled: notificationsEnabled,
+                providerEnabled: providerEnabled,
+                visualEnabled: visualEnabled,
+                soundEnabled: soundEnabled,
+                now: now
+            )
+        }
+
+        XCTAssertEqual(readiness(notificationsEnabled: false), "Alerts off")
+        XCTAssertEqual(readiness(providerEnabled: false), "Alerts off for Codex")
+        XCTAssertEqual(readiness(visualEnabled: false, soundEnabled: false), "Delivery off")
+        XCTAssertEqual(readiness(source: "", observedAt: 0), "Waiting for usage data")
+        XCTAssertEqual(readiness(freshness: "stale"), "Stale; alerts may be delayed")
+        XCTAssertEqual(readiness(observedAt: now.addingTimeInterval(-11 * 60).timeIntervalSince1970), "Stale; alerts may be delayed")
+        XCTAssertEqual(readiness(
+            projection: "Active ▸21m",
+            projectionRunoutAt: runoutAt,
+            projectionObservedAt: observedAt
+        ), "Watching active 5h burn")
+        XCTAssertEqual(readiness(
+            delivery: "Banners denied",
+            deliveryAt: observedAt,
+            visualEnabled: false,
+            soundEnabled: true
+        ), "Ready; sound only")
+        XCTAssertEqual(readiness(
+            delivery: "Banners denied",
+            deliveryAt: observedAt
+        ), "Notifications need attention")
+        XCTAssertEqual(readiness(
+            projection: "Active ▸21m",
+            projectionRunoutAt: runoutAt,
+            projectionObservedAt: observedAt,
+            delivery: "Banners denied",
+            deliveryAt: observedAt
+        ), "Notifications need attention")
+        XCTAssertEqual(readiness(), "Ready")
+    }
+
     func testUsageLimitAlertEvaluatorRespectsWarningTypeToggles() {
         let defaults = makeAlertDefaults()
         defaults.set(false, forKey: PreferencesKey.usageLimitNotificationApproachingEnabled)
