@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [3.9.3] - 2026-06-12
 - Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.
 - Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.
 - Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.
