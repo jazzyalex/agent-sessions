@@ -441,6 +441,10 @@ struct SessionTranscriptBuilder {
         coalesce(session: session, includeMeta: includeMeta)
     }
 
+    static func displayLines(for block: LogicalBlock, source: SessionSource?) -> [String] {
+        toolDisplayLines(for: block, source: source)
+    }
+
     private static func canMerge(_ a: LogicalBlock, _ b: LogicalBlock) -> Bool {
         // Only merge assistant/toolOut/meta streams
         guard a.kind == b.kind else { return false }

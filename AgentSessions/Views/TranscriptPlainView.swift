@@ -35,13 +35,15 @@ enum TranscriptMarkdownExporter {
                                 viewMode: SessionViewMode,
                                 showTimestamps: Bool,
                                 decorate: (String, Session) -> String,
-                                jsonBuilder: (Session) -> String) -> String {
+                                jsonBuilder: (Session) -> String,
+                                imageReferenceBuilder: ((InlineSessionImage) -> String?)? = nil) -> String {
         let body = transcriptBody(session: session,
                                   renderedTranscript: renderedTranscript,
                                   viewMode: viewMode,
                                   showTimestamps: showTimestamps,
                                   decorate: decorate,
-                                  jsonBuilder: jsonBuilder)
+                                  jsonBuilder: jsonBuilder,
+                                  imageReferenceBuilder: imageReferenceBuilder)
         return "# \(session.listTitle)\n\n" + body
     }
 
@@ -50,23 +52,271 @@ enum TranscriptMarkdownExporter {
                                        viewMode: SessionViewMode,
                                        showTimestamps: Bool,
                                        decorate: (String, Session) -> String,
-                                       jsonBuilder: (Session) -> String) -> String {
-        if viewMode != .terminal,
-           !renderedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return renderedTranscript
+                                       jsonBuilder: (Session) -> String,
+                                       imageReferenceBuilder: ((InlineSessionImage) -> String?)?) -> String {
+        if !session.events.isEmpty {
+            return humanReadableMarkdown(session: session,
+                                         showTimestamps: showTimestamps,
+                                         imageReferenceBuilder: imageReferenceBuilder)
         }
 
-        if viewMode == .json {
-            return jsonBuilder(session)
+        let fallback = renderedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fallback.isEmpty {
+            return "## Transcript\n\n" + fallback
         }
 
         let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
-        let raw = SessionTranscriptBuilder.buildPlainTerminalTranscript(
-            session: session,
-            filters: filters,
-            mode: viewMode.transcriptRenderMode
+        let raw = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: session, filters: filters, mode: viewMode.transcriptRenderMode)
+        let decorated = decorate(raw, session).trimmingCharacters(in: .whitespacesAndNewlines)
+        if decorated.isEmpty, viewMode == .json {
+            let json = jsonBuilder(session).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !json.isEmpty { return "## Raw JSON\n\n" + fenced(json, language: "json") }
+        }
+        if decorated.isEmpty { return "_No transcript content._" }
+        return "## Transcript\n\n" + decorated
+    }
+
+    private static func humanReadableMarkdown(session: Session,
+                                              showTimestamps: Bool,
+                                              imageReferenceBuilder: ((InlineSessionImage) -> String?)?) -> String {
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let imagesByUserBlockIndex = SessionInlineImageMapper.imagesByUserBlockIndex(for: session)
+        var parts: [String] = [metadataTable(for: session)]
+
+        for (blockIndex, block) in blocks.enumerated() {
+            let images = imagesByUserBlockIndex[blockIndex] ?? []
+            guard !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || block.kind == .toolCall
+                    || !images.isEmpty else {
+                continue
+            }
+            switch block.kind {
+            case .user:
+                let userPart = renderUser(block, showTimestamps: showTimestamps)
+                if !images.isEmpty {
+                    parts.append(userPart + "\n\n" + renderImages(images, imageReferenceBuilder: imageReferenceBuilder))
+                } else {
+                    parts.append(userPart)
+                }
+            case .assistant:
+                parts.append(renderAssistant(block, showTimestamps: showTimestamps))
+            case .toolCall:
+                parts.append(renderToolCall(block, showTimestamps: showTimestamps))
+            case .toolOut:
+                parts.append(renderToolOutput(block, source: session.source, showTimestamps: showTimestamps))
+            case .error:
+                parts.append(renderError(block, showTimestamps: showTimestamps))
+            case .meta:
+                parts.append(renderDetails(summary: "Metadata", body: block.text, language: "text"))
+            }
+        }
+
+        return parts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func metadataTable(for session: Session) -> String {
+        var rows: [(String, String)] = [
+            ("Source", session.source.displayName),
+            ("Model", emptyFallback(session.model)),
+            ("Events", "\(session.eventCount)")
+        ]
+        if let startTime = session.startTime {
+            rows.append(("Started", AppDateFormatting.dateTimeMedium(startTime)))
+        }
+        if let endTime = session.endTime {
+            rows.append(("Ended", AppDateFormatting.dateTimeMedium(endTime)))
+        }
+        if let cwd = session.lightweightCwd, !cwd.isEmpty {
+            rows.append(("Working directory", inlineCode(cwd)))
+        }
+        rows.append(("File", inlineCode(session.filePath)))
+
+        let body = rows.map { "| \($0.0) | \(escapeTableCell($0.1)) |" }.joined(separator: "\n")
+        return """
+| Field | Value |
+| --- | --- |
+\(body)
+"""
+    }
+
+    private static func renderUser(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
+        let heading = headingLine("User", timestamp: block.timestamp, showTimestamps: showTimestamps)
+        let text = normalizedBody(block.text)
+        guard !text.isEmpty else { return heading }
+        if shouldBlockquoteUserText(text) {
+            return heading + "\n\n" + blockquote(text)
+        }
+        return heading + "\n\n" + text
+    }
+
+    private static func renderAssistant(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
+        headingLine("Assistant", timestamp: block.timestamp, showTimestamps: showTimestamps)
+            + "\n\n"
+            + normalizedBody(block.text)
+    }
+
+    private static func renderToolCall(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
+        let summary = detailSummary(
+            label: "Tool call",
+            toolName: block.toolName,
+            timestamp: block.timestamp,
+            showTimestamps: showTimestamps
         )
-        return decorate(raw, session)
+        let input = block.toolInput?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = input?.isEmpty == false ? prettyStructuredText(input!) : "No input."
+        return renderDetails(summary: summary, body: body, language: languageHint(for: body))
+    }
+
+    private static func renderImages(_ images: [InlineSessionImage],
+                                     imageReferenceBuilder: ((InlineSessionImage) -> String?)?) -> String {
+        images.map { image in
+            let alt = "Image \(image.sessionImageIndex)"
+            let details = "_\(image.payload.mediaType), \(formattedByteCount(image.payload.approxBytes))_"
+            guard let reference = imageReferenceBuilder?(image) ?? defaultImageReference(for: image) else {
+                return "\(details)\n\n_Image data could not be exported._"
+            }
+            return "\(details)\n\n![\(alt)](\(reference))"
+        }
+        .joined(separator: "\n\n")
+    }
+
+    private static func renderToolOutput(_ block: SessionTranscriptBuilder.LogicalBlock,
+                                         source: SessionSource,
+                                         showTimestamps: Bool) -> String {
+        let summary = detailSummary(
+            label: block.isErrorOutput ? "Tool output warning" : "Tool output",
+            toolName: block.toolName,
+            timestamp: block.timestamp,
+            showTimestamps: showTimestamps
+        )
+        let lines = SessionTranscriptBuilder.displayLines(for: block, source: source)
+        let body = lines.isEmpty ? prettyStructuredText(block.text) : lines.joined(separator: "\n")
+        return renderDetails(summary: summary, body: body, language: languageHint(for: body))
+    }
+
+    private static func renderError(_ block: SessionTranscriptBuilder.LogicalBlock, showTimestamps: Bool) -> String {
+        let heading = headingLine("Error", timestamp: block.timestamp, showTimestamps: showTimestamps)
+        let warning = blockquote("[!WARNING]\n" + normalizedBody(block.text))
+        return heading + "\n\n" + warning
+    }
+
+    private static func headingLine(_ title: String, timestamp: Date?, showTimestamps: Bool) -> String {
+        guard showTimestamps, let timestamp else { return "## \(title)" }
+        return "## \(title) (\(AppDateFormatting.transcriptTimestamp(timestamp)))"
+    }
+
+    private static func detailSummary(label: String, toolName: String?, timestamp: Date?, showTimestamps: Bool) -> String {
+        var summary = label
+        if let toolName, !toolName.isEmpty {
+            summary += ": `\(escapeInlineCode(toolName))`"
+        }
+        if showTimestamps, let timestamp {
+            summary += " (\(AppDateFormatting.transcriptTimestamp(timestamp)))"
+        }
+        return summary
+    }
+
+    private static func renderDetails(summary: String, body: String, language: String) -> String {
+        """
+<details>
+<summary>\(summary)</summary>
+
+\(fenced(body, language: language))
+
+</details>
+"""
+    }
+
+    private static func shouldBlockquoteUserText(_ text: String) -> Bool {
+        let lines = text.components(separatedBy: .newlines)
+        return text.count <= 1_000 && lines.count <= 8 && !text.contains("```")
+    }
+
+    private static func blockquote(_ text: String) -> String {
+        text.components(separatedBy: .newlines)
+            .map { $0.isEmpty ? ">" : "> \($0)" }
+            .joined(separator: "\n")
+    }
+
+    private static func prettyStructuredText(_ text: String) -> String {
+        let trimmed = normalizedBody(text)
+        guard looksLikeJSON(trimmed) else { return trimmed }
+        return PrettyJSON.prettyPrinted(trimmed)
+    }
+
+    private static func normalizedBody(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func languageHint(for text: String) -> String {
+        looksLikeJSON(text) ? "json" : "text"
+    }
+
+    private static func defaultImageReference(for image: InlineSessionImage) -> String? {
+        guard case .file(let fileURL, _, _) = image.payload else { return nil }
+        return markdownLinkDestination(for: fileURL.path)
+    }
+
+    static func markdownLinkDestination(for path: String) -> String {
+        path.addingPercentEncoding(withAllowedCharacters: markdownPathAllowedCharacters) ?? path
+    }
+
+    private static let markdownPathAllowedCharacters: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.insert(charactersIn: ":")
+        allowed.remove(charactersIn: "()")
+        return allowed
+    }()
+
+    private static func formattedByteCount(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private static func looksLikeJSON(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed.hasPrefix("{") && trimmed.hasSuffix("}"))
+            || (trimmed.hasPrefix("[") && trimmed.hasSuffix("]"))
+    }
+
+    private static func fenced(_ text: String, language: String) -> String {
+        let fence = String(repeating: "`", count: max(3, longestBacktickRun(in: text) + 1))
+        return "\(fence)\(language)\n\(normalizedBody(text))\n\(fence)"
+    }
+
+    private static func longestBacktickRun(in text: String) -> Int {
+        var longest = 0
+        var current = 0
+        for character in text {
+            if character == "`" {
+                current += 1
+                longest = max(longest, current)
+            } else {
+                current = 0
+            }
+        }
+        return longest
+    }
+
+    private static func inlineCode(_ text: String) -> String {
+        "`\(escapeInlineCode(text))`"
+    }
+
+    private static func escapeInlineCode(_ text: String) -> String {
+        text.replacingOccurrences(of: "`", with: "\\`")
+    }
+
+    private static func escapeTableCell(_ text: String) -> String {
+        text.replacingOccurrences(of: "|", with: "\\|")
+            .replacingOccurrences(of: "\n", with: "<br>")
+    }
+
+    private static func emptyFallback(_ text: String?) -> String {
+        guard let value = text?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return "-"
+        }
+        return value
     }
 }
 
@@ -1657,16 +1907,74 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         guard let window = NSApp.keyWindow else { return }
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
+            let assetDirectory = markdownAssetDirectory(for: url)
             let content = TranscriptMarkdownExporter.markdownContent(
                 session: session,
                 renderedTranscript: transcript,
                 viewMode: viewMode,
                 showTimestamps: showTimestamps,
                 decorate: decorateTranscriptIfNeeded,
-                jsonBuilder: prettyJSONForSession
+                jsonBuilder: prettyJSONForSession,
+                imageReferenceBuilder: { image in
+                    exportImageReference(for: image, markdownURL: url, assetDirectory: assetDirectory)
+                }
             )
             try? content.write(to: url, atomically: true, encoding: .utf8)
         }
+    }
+
+    private func markdownAssetDirectory(for markdownURL: URL) -> URL {
+        let name = markdownURL.deletingPathExtension().lastPathComponent + "-assets"
+        return markdownURL.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+    }
+
+    private func exportImageReference(for image: InlineSessionImage, markdownURL: URL, assetDirectory: URL) -> String? {
+        switch image.payload {
+        case .file(let fileURL, _, _):
+            return TranscriptMarkdownExporter.markdownLinkDestination(for: fileURL.path)
+        case .base64:
+            let ext = CodexSessionImagePayload.suggestedFileExtension(for: image.payload.mediaType)
+            let filename = "image-\(String(image.sessionID.prefix(6)))-\(image.sessionImageIndex).\(ext)"
+            do {
+                try FileManager.default.createDirectory(at: assetDirectory, withIntermediateDirectories: true)
+                let data = try CodexSessionImagePayload.decodeImageData(payload: image.payload, maxDecodedBytes: 25 * 1024 * 1024)
+                let destination = uniqueDestinationURL(in: assetDirectory, filename: filename)
+                try data.write(to: destination, options: [.atomic])
+                let relative = relativePath(from: markdownURL.deletingLastPathComponent(), to: destination)
+                return TranscriptMarkdownExporter.markdownLinkDestination(for: relative)
+            } catch {
+                return nil
+            }
+        }
+    }
+
+    private func relativePath(from baseDirectory: URL, to destination: URL) -> String {
+        let baseComponents = baseDirectory.standardizedFileURL.pathComponents
+        let destinationComponents = destination.standardizedFileURL.pathComponents
+        var index = 0
+        while index < baseComponents.count,
+              index < destinationComponents.count,
+              baseComponents[index] == destinationComponents[index] {
+            index += 1
+        }
+
+        let upward = Array(repeating: "..", count: max(0, baseComponents.count - index))
+        let downward = destinationComponents.dropFirst(index)
+        let components = upward + downward
+        return components.isEmpty ? destination.lastPathComponent : components.joined(separator: "/")
+    }
+
+    private func uniqueDestinationURL(in dir: URL, filename: String) -> URL {
+        let base = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        var candidate = dir.appendingPathComponent(filename)
+        var idx = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let name = ext.isEmpty ? "\(base)-\(idx)" : "\(base)-\(idx).\(ext)"
+            candidate = dir.appendingPathComponent(name)
+            idx += 1
+        }
+        return candidate
     }
 
     private func markdownFilename(for session: Session) -> String {

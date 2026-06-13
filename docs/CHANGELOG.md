@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.
+- Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.
 - Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.
 - Dock: Hide Dock icon can now rely on a pinned Agent Cockpit as the app's reopen path, so hiding the Dock no longer forces the menu bar item on when Cockpit is pinned.
 - Limits Widget: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.

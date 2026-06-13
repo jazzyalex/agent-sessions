@@ -17,16 +17,6 @@ private struct TextSnapshot {
     static let empty = TextSnapshot(text: "", lineRanges: [:], orderedLineRanges: [], orderedLineIDs: [])
 }
 
-private struct InlineSessionImage: Identifiable, Hashable, Sendable {
-    let sessionID: String
-    let imageEventID: String
-    let userPromptIndex: Int?
-    let sessionImageIndex: Int
-    let payload: SessionImagePayload
-
-    var id: String { "\(sessionID)-\(payload.stableID)" }
-}
-
 private func renderedTranscriptLineText(_ line: TerminalLine,
                                         showCodeDiffLineNumbers: Bool,
                                         isFirstLineOfBlock: Bool,
@@ -601,238 +591,35 @@ struct SessionTerminalView: View {
         }
 
         let sessionSnapshot = session
-        let sessionFileURL = URL(fileURLWithPath: sessionSnapshot.filePath)
         hasInlineImagesInSession = false
         inlineImagesByUserBlockIndex = [:]
         inlineImagesSignature = 0
 
-        inlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot, sessionFileURL] in
+        inlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot] in
             try? await Task.sleep(nanoseconds: 650_000_000)
             guard !Task.isCancelled else { return }
 
             let outcome: (Bool, [Int: [InlineSessionImage]], Int) = { () -> (Bool, [Int: [InlineSessionImage]], Int) in
-                guard FileManager.default.fileExists(atPath: sessionFileURL.path) else { return (false, [:], 0) }
-
-                struct InlineScanResult: Hashable, Sendable {
-                    let payload: SessionImagePayload
-                    let lineIndex: Int
-                }
-
-                let hasAny: Bool = {
-                    switch sessionSnapshot.source {
-                    case .codex:
-                        return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: sessionFileURL, shouldCancel: { Task.isCancelled })
-                    case .claude:
-                        return ClaudeBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: { Task.isCancelled })
-                    case .opencode:
-                        let messageIDs = Array(Set(sessionSnapshot.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
-                        return OpenCodeBase64ImageScanner.fileContainsBase64ImageDataURL(sessionFileURL: sessionFileURL,
-                                                                                        messageIDs: messageIDs,
-                                                                                        shouldCancel: { Task.isCancelled })
-                    case .gemini:
-                        return GeminiInlineDataImageScanner.fileContainsInlineDataImage(at: sessionFileURL, shouldCancel: { Task.isCancelled })
-                    case .copilot:
-                        do {
-                            return try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: 1, shouldCancel: { Task.isCancelled }).isEmpty == false
-                        } catch {
-                            return false
+                let out = SessionInlineImageMapper.imagesByUserBlockIndex(for: sessionSnapshot, shouldCancel: { Task.isCancelled })
+                let images = out.values
+                    .flatMap { $0 }
+                    .sorted { lhs, rhs in
+                        if lhs.sessionImageIndex != rhs.sessionImageIndex {
+                            return lhs.sessionImageIndex < rhs.sessionImageIndex
                         }
-                    case .openclaw:
-                        return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: { Task.isCancelled })
-                    default:
-                        return false
+                        return lhs.id < rhs.id
                     }
-                }()
-                guard hasAny, !Task.isCancelled else { return (hasAny, [:], 0) }
-
-                let located: [InlineScanResult] = {
-                    do {
-                        switch sessionSnapshot.source {
-                        case .codex:
-                            return try Base64ImageDataURLScanner
-                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
-                        case .claude:
-                            return try ClaudeBase64ImageScanner
-                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
-                        case .opencode:
-                            let messageIDs = Array(Set(sessionSnapshot.events.compactMap(\.messageID)).filter { $0.hasPrefix("msg_") })
-
-                            var messageToUserEventIndex: [String: Int] = [:]
-                            var messageToFirstEventIndex: [String: Int] = [:]
-                            for (idx, ev) in sessionSnapshot.events.enumerated() {
-                                guard let mid = ev.messageID, mid.hasPrefix("msg_") else { continue }
-                                if messageToFirstEventIndex[mid] == nil { messageToFirstEventIndex[mid] = idx }
-                                if ev.kind == .user, messageToUserEventIndex[mid] == nil { messageToUserEventIndex[mid] = idx }
-                            }
-
-                            let parts = try OpenCodeBase64ImageScanner.scanSessionPartFiles(sessionFileURL: sessionFileURL,
-                                                                                           messageIDs: messageIDs,
-                                                                                           maxMatches: 400,
-                                                                                           shouldCancel: { Task.isCancelled })
-                            return parts.map { part in
-                                let mid = part.messageID
-                                let eventIndex = messageToUserEventIndex[mid] ?? messageToFirstEventIndex[mid] ?? 0
-                                return InlineScanResult(payload: .base64(sourceURL: part.partFileURL, span: part.span), lineIndex: eventIndex)
-                            }
-                        case .gemini:
-                            let located = try GeminiInlineDataImageScanner.scanFile(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                            var eventIndexByID: [String: Int] = [:]
-                            eventIndexByID.reserveCapacity(min(sessionSnapshot.events.count, 512))
-                            for (idx, ev) in sessionSnapshot.events.enumerated() {
-                                eventIndexByID[ev.id] = idx
-                            }
-                            return located.map { item in
-                                let baseID = sessionSnapshot.id + String(format: "-%04d", item.itemIndex)
-                                let eventIndex = eventIndexByID[baseID] ?? 0
-                                return InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: item.span), lineIndex: eventIndex)
-                            }
-                        case .copilot:
-                            let located = try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                            var eventIndexByID: [String: Int] = [:]
-                            eventIndexByID.reserveCapacity(min(sessionSnapshot.events.count, 512))
-                            for (idx, ev) in sessionSnapshot.events.enumerated() {
-                                eventIndexByID[ev.id] = idx
-                            }
-                            return located.compactMap { att in
-                                let baseID = sessionSnapshot.id + String(format: "-%04d", att.eventSequenceIndex)
-                                let eventIndex = eventIndexByID[baseID] ?? 0
-                                return InlineScanResult(payload: .file(fileURL: att.fileURL, mediaType: att.mediaType, fileSizeBytes: att.fileSizeBytes),
-                                                       lineIndex: eventIndex)
-                            }
-                        case .openclaw:
-                            return try OpenClawBase64ImageScanner
-                                .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: 400, shouldCancel: { Task.isCancelled })
-                                .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
-                        default:
-                            return []
-                        }
-                    } catch {
-                        return []
-                    }
-                }()
-
-                let filtered: [InlineScanResult] = {
-                    switch sessionSnapshot.source {
-                    case .codex:
-                        return located.filter { item in
-                            guard case .base64(_, let span) = item.payload else { return false }
-                            return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
-                        }
-                    case .claude, .opencode, .gemini, .copilot, .openclaw:
-                        return located
-                    default:
-                        return []
-                    }
-                }()
-                guard !filtered.isEmpty, !Task.isCancelled else { return (false, [:], 0) }
-
-                let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
-                var userEventIDToBlockIndex: [String: Int] = [:]
-                userEventIDToBlockIndex.reserveCapacity(64)
-                for (idx, block) in blocks.enumerated() where block.kind == .user {
-                    userEventIDToBlockIndex[block.eventID] = idx
-                }
-
-                let userEventIndices: [Int] = sessionSnapshot.events.enumerated().compactMap { (idx, ev) in
-                    ev.kind == .user ? idx : nil
-                }
-
-                let openClawEventBase: String? = {
-                    guard sessionSnapshot.source == .openclaw else { return nil }
-                    return sha256Hex(sessionFileURL.path)
-                }()
-
-                func openClawUserEventID(forFileLineIndex fileLineIndex: Int) -> String? {
-                    guard let openClawEventBase else { return nil }
-                    return openClawEventBase + String(format: "-%06d", fileLineIndex + 1)
-                }
-
-                func isPreambleUserEventIndex(_ idx: Int) -> Bool {
-                    guard sessionSnapshot.source == .codex || sessionSnapshot.source == .droid || sessionSnapshot.source == .claude || sessionSnapshot.source == .opencode else { return false }
-                    guard sessionSnapshot.events.indices.contains(idx) else { return false }
-                    guard sessionSnapshot.events[idx].kind == .user else { return false }
-                    return Session.isAgentsPreambleText(sessionSnapshot.events[idx].text ?? "")
-                }
-
-                func nearestUserEventIndex(for lineIndex: Int) -> Int? {
-                    guard !userEventIndices.isEmpty else { return nil }
-
-                    let prior = userEventIndices.filter { $0 <= lineIndex }
-                    if let preferred = prior.last(where: { !isPreambleUserEventIndex($0) }) ?? prior.last {
-                        return preferred
-                    }
-
-                    let after = userEventIndices.filter { $0 > lineIndex }
-                    if let preferred = after.first(where: { !isPreambleUserEventIndex($0) }) ?? after.first {
-                        return preferred
-                    }
-                    return nil
-                }
-
-                func userPromptIndexForLineIndex(_ lineIndex: Int) -> Int? {
-                    guard lineIndex >= 0 else { return nil }
-                    var userIndex: Int? = nil
-                    var seenUsers = 0
-                    for (idx, event) in sessionSnapshot.events.enumerated() {
-                        if event.kind == .user {
-                            if idx <= lineIndex {
-                                userIndex = seenUsers
-                            } else if userIndex == nil {
-                                userIndex = seenUsers
-                            }
-                            seenUsers += 1
-                        }
-                        if idx > lineIndex, userIndex != nil { break }
-                    }
-                    return userIndex
-                }
-
-                var out: [Int: [InlineSessionImage]] = [:]
-                out.reserveCapacity(min(16, userEventIDToBlockIndex.count))
-                var sessionImageIndex = 1
-
-	                for item in filtered {
-	                    if Task.isCancelled { break }
-
-	                    let openClawEventID = openClawUserEventID(forFileLineIndex: item.lineIndex)
-	                    let resolved: (String, Int?, Int)? = {
-	                        if let openClawEventID, let blockIndex = userEventIDToBlockIndex[openClawEventID] {
-	                            let eventIndex = sessionSnapshot.events.firstIndex(where: { $0.id == openClawEventID })
-	                            return (openClawEventID,
-	                                    eventIndex.flatMap { userPromptIndexForLineIndex($0) },
-	                                    blockIndex)
-	                        }
-
-	                        guard let targetUserEventIndex = nearestUserEventIndex(for: item.lineIndex) else { return nil }
-	                        let targetUserEventID = sessionSnapshot.events[targetUserEventIndex].id
-	                        guard let blockIndex = userEventIDToBlockIndex[targetUserEventID] else { return nil }
-	                        return (targetUserEventID, userPromptIndexForLineIndex(targetUserEventIndex), blockIndex)
-	                    }()
-	                    guard let (imageEventID, userPromptIndex, targetUserBlockIndex) = resolved else { continue }
-
-                    let img = InlineSessionImage(
-                        sessionID: sessionSnapshot.id,
-                        imageEventID: imageEventID,
-                        userPromptIndex: userPromptIndex,
-                        sessionImageIndex: sessionImageIndex,
-                        payload: item.payload
-                    )
-                    out[targetUserBlockIndex, default: []].append(img)
-                    sessionImageIndex += 1
-                }
 
                 var hasher = Hasher()
-                hasher.combine(out.values.reduce(0) { $0 + $1.count })
-                if let first = located.first {
+                hasher.combine(images.count)
+                if let first = images.first {
                     hasher.combine(first.payload.stableID)
                 }
-                if let last = located.last {
+                if let last = images.last {
                     hasher.combine(last.payload.stableID)
                 }
 
-                return (true, out, hasher.finalize())
+                return (!out.isEmpty, out, hasher.finalize())
             }()
 
             guard !Task.isCancelled else { return }

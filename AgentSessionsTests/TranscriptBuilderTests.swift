@@ -11,7 +11,15 @@ final class TranscriptBuilderTests: XCTestCase {
         return Session(id: "s-1", startTime: Date(), endTime: Date(), model: "test", filePath: "/tmp/x.jsonl", eventCount: events.count, events: events)
     }
 
-    func testMarkdownExportBuildsTerminalBodyWhenRenderedTranscriptIsEmpty() throws {
+    private func writeTempJSONL(_ text: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptBuilderTests-\(UUID().uuidString)")
+            .appendingPathExtension("jsonl")
+        try text.data(using: .utf8)?.write(to: url)
+        return url
+    }
+
+    func testMarkdownExportBuildsHumanReadableDocumentFromSessionEvents() throws {
         let events: [SessionEvent] = [
             SessionEvent(id: "e1",
                          timestamp: nil,
@@ -58,11 +66,16 @@ final class TranscriptBuilderTests: XCTestCase {
         )
 
         XCTAssertTrue(md.hasPrefix("# "))
+        XCTAssertTrue(md.contains("| Source | Codex CLI |"))
+        XCTAssertTrue(md.contains("## User"))
         XCTAssertTrue(md.contains("> Export this transcript"))
+        XCTAssertTrue(md.contains("## Assistant"))
         XCTAssertTrue(md.contains("Here is the answer."))
+        XCTAssertFalse(md.contains("[assistant]"))
+        XCTAssertFalse(md.contains("› tool:"))
     }
 
-    func testMarkdownExportKeepsRenderedTranscriptOutsideTerminalMode() throws {
+    func testMarkdownExportDoesNotDumpRenderedUITranscriptOutsideTerminalMode() throws {
         let events: [SessionEvent] = [
             SessionEvent(id: "e1",
                          timestamp: nil,
@@ -96,9 +109,223 @@ final class TranscriptBuilderTests: XCTestCase {
             jsonBuilder: { _ in "[]" }
         )
 
-        XCTAssertTrue(md.contains("Rendered body"))
-        let body = md.components(separatedBy: "\n\n").dropFirst().joined(separator: "\n\n")
-        XCTAssertFalse(body.contains("Raw event text"))
+        XCTAssertTrue(md.contains("## User"))
+        XCTAssertTrue(md.contains("> Raw event text"))
+        XCTAssertFalse(md.contains("Rendered body"))
+    }
+
+    func testMarkdownExportFormatsToolsAsReadableDetails() throws {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .tool_call,
+                         role: "assistant",
+                         text: nil,
+                         toolName: "exec_command",
+                         toolInput: #"{"cmd":"swift test","yield_time_ms":1000}"#,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}"),
+            SessionEvent(id: "e2",
+                         timestamp: nil,
+                         kind: .tool_result,
+                         role: "tool",
+                         text: nil,
+                         toolName: "session_search",
+                         toolInput: nil,
+                         toolOutput: #"{"success":true,"query":"export-formatting","results":[{"session_id":"s1","summary":"**Important**\n\n*   Readable output"}]}"#,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-export-tools",
+                        source: .hermes,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/export-tools.json",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "",
+            viewMode: .terminal,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in "[]" }
+        )
+
+        XCTAssertTrue(md.contains("<summary>Tool call: `exec_command`</summary>"))
+        XCTAssertTrue(md.contains(#""cmd" : "swift test""#))
+        XCTAssertTrue(md.contains("<summary>Tool output: `session_search`</summary>"))
+        XCTAssertTrue(md.contains("query: export-formatting"))
+        XCTAssertTrue(md.contains("- Readable output"))
+        XCTAssertFalse(md.contains("*   Readable output"))
+    }
+
+    func testMarkdownExportUsesHumanReadableFormattingEvenFromJSONView() throws {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1",
+                         timestamp: nil,
+                         kind: .assistant,
+                         role: "assistant",
+                         text: "Readable answer.",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: "m1",
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: #"{"role":"assistant"}"#)
+        ]
+        let s = Session(id: "s-export-json-view",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: "/tmp/export-json-view.jsonl",
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "",
+            viewMode: .json,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in #"[{"role":"assistant"}]"# }
+        )
+
+        XCTAssertTrue(md.contains("## Assistant"))
+        XCTAssertTrue(md.contains("Readable answer."))
+        XCTAssertFalse(md.contains(#"[{"role":"assistant"}]"#))
+    }
+
+    func testMarkdownExportIncludesImagesAfterMatchingUserPrompt() throws {
+        let jsonl = """
+        {"type":"user","content":[{"type":"input_text","text":"Describe this image"},{"type":"input_image","image_url":"data:image/png;base64,QUJDRA=="}]}
+        {"type":"assistant","text":"It is a small sample."}
+        """
+        let url = try writeTempJSONL(jsonl + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let events: [SessionEvent] = [
+            SessionEvent(id: SessionIndexer.eventID(forPath: url.path, index: 0),
+                         timestamp: nil,
+                         kind: .user,
+                         role: "user",
+                         text: "Describe this image",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: nil,
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}"),
+            SessionEvent(id: SessionIndexer.eventID(forPath: url.path, index: 1),
+                         timestamp: nil,
+                         kind: .assistant,
+                         role: "assistant",
+                         text: "It is a small sample.",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: nil,
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-export-image",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: url.path,
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "",
+            viewMode: .terminal,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in "[]" },
+            imageReferenceBuilder: { image in "export-assets/image-\(image.sessionImageIndex).png" }
+        )
+
+        XCTAssertTrue(md.contains("## User"))
+        XCTAssertTrue(md.contains("> Describe this image"))
+        XCTAssertTrue(md.contains("_image/png,"))
+        XCTAssertTrue(md.contains("![Image 1](export-assets/image-1.png)"))
+        XCTAssertTrue(md.contains("## Assistant"))
+    }
+
+    func testMarkdownExportIncludesImageOnlyUserPrompt() throws {
+        let jsonl = """
+        {"type":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,QUJDRA=="}]}
+        {"type":"assistant","text":"I can see it."}
+        """
+        let url = try writeTempJSONL(jsonl + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let events: [SessionEvent] = [
+            SessionEvent(id: SessionIndexer.eventID(forPath: url.path, index: 0),
+                         timestamp: nil,
+                         kind: .user,
+                         role: "user",
+                         text: "",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: nil,
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}"),
+            SessionEvent(id: SessionIndexer.eventID(forPath: url.path, index: 1),
+                         timestamp: nil,
+                         kind: .assistant,
+                         role: "assistant",
+                         text: "I can see it.",
+                         toolName: nil,
+                         toolInput: nil,
+                         toolOutput: nil,
+                         messageID: nil,
+                         parentID: nil,
+                         isDelta: false,
+                         rawJSON: "{}")
+        ]
+        let s = Session(id: "s-export-image-only",
+                        source: .codex,
+                        startTime: nil,
+                        endTime: nil,
+                        model: "test",
+                        filePath: url.path,
+                        fileSizeBytes: nil,
+                        eventCount: events.count,
+                        events: events)
+
+        let md = TranscriptMarkdownExporter.markdownContent(
+            session: s,
+            renderedTranscript: "",
+            viewMode: .terminal,
+            showTimestamps: false,
+            decorate: { text, _ in text },
+            jsonBuilder: { _ in "[]" },
+            imageReferenceBuilder: { image in "assets/image-\(image.sessionImageIndex).png" }
+        )
+
+        XCTAssertTrue(md.contains("## User\n\n_image/png,"))
+        XCTAssertTrue(md.contains("![Image 1](assets/image-1.png)"))
+        XCTAssertFalse(md.contains("\n>\n"))
+        XCTAssertTrue(md.contains("I can see it."))
     }
 
     func testAssistantContentArraysConcatenate() throws {
