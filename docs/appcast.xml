@@ -3,18 +3,18 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>3.9.2</title>
-            <pubDate>Wed, 10 Jun 2026 14:32:15 -0700</pubDate>
+            <title>3.9.3</title>
+            <pubDate>Fri, 12 Jun 2026 20:45:03 -0700</pubDate>
             <description><![CDATA[
-<h2>What&#x27;s New in 3.9.2</h2>
+<h2>What&#x27;s New in 3.9.3</h2>
 <h3>Improvements</h3>
 <ul>
-<li>Limit Alerts and Predictions: Added freshness-aware Codex and Claude run-out predictions, earlier Cockpit ETA markers, and separate notification controls for predicted exhaustion versus low-threshold warnings.</li>
-<li>Onboarding: Replaced the Agent Cockpit slide in fresh-install and update tours with a Limits Cockpit slide covering prediction markers and Limit Alerts.</li>
-<li>Limits Widget: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.</li>
-<li>Limits Widget: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.</li>
-<li>Limit Alerts: Added a dedicated Preferences pane with source/freshness diagnostics, split predicted run-out alerts from low-threshold alerts, and gates prediction on fresh usage data while ignoring stale snapshots.</li>
-<li>Dock: Added a Hide Dock Icon command to the Dock tile right-click menu.</li>
+<li>Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.</li>
+<li>Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.</li>
+<li>Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.</li>
+<li>Dock: Hide Dock icon can now rely on a pinned Agent Cockpit as the app&#x27;s reopen path, so hiding the Dock no longer forces the menu bar item on when Cockpit is pinned.</li>
+<li>Limits Widget: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.</li>
+<li>Settings: Standardized visible app copy on Settings instead of mixing Settings and Preferences labels.</li>
 </ul>
 <h3>Reminder: What You Got in 3.9</h3>
 <ul>
@@ -23,12 +23,12 @@
 <li>Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.</li>
 <li>Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.</li>
 </ul>
-<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9.2</a></p>
+<p>Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v3.9.3</a></p>
             ]]></description>
-            <sparkle:version>51</sparkle:version>
-            <sparkle:shortVersionString>3.9.2</sparkle:shortVersionString>
+            <sparkle:version>52</sparkle:version>
+            <sparkle:shortVersionString>3.9.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.2/AgentSessions-3.9.2.dmg" length="18105116" type="application/octet-stream" sparkle:edSignature="qhMxJjRCc9jCWUtuwYXwzxE306lpMlWsdy8oGTB2P7hGdfT/jXYO5LAqm/BWm/pGfr+BIag88ASpExAuh70/Bg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.3/AgentSessions-3.9.3.dmg" length="18241417" type="application/octet-stream" sparkle:edSignature="QeZY4xYQDrGwIaVAanwFmxzVxd+Mvtj4iXRixW+jdM8a0y2L9ny6V+kD2e5BNUhqh6yX+dco44gXAsqGN6WNDg=="/>
         </item>
     </channel>
 </rss>
