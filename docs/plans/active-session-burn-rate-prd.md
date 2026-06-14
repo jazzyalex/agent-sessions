@@ -119,7 +119,7 @@ Meaning:
 
 ### Multiple Providers
 
-Group by provider because each provider has its own 5h clock and reset:
+Group by provider because each provider has its own 5h clock and reset. This mockup shows the intended future shape once a provider has proven per-session attribution:
 
 ```text
 ┌────────────────────────────────────────────────┐
@@ -137,6 +137,8 @@ Group by provider because each provider has its own 5h clock and reset:
 ```
 
 If space is tight, show providers with active 5h pressure first. Providers with no pressure can be collapsed or omitted from the compact view.
+
+MVP note: Codex is the first provider with per-session pause-impact rows. Claude may show provider-level baseline clocks where existing usage data supports them, but Claude per-session rows should wait for a proven per-session quota source.
 
 ## Compact UI Rules
 
@@ -398,7 +400,7 @@ Confidence labels:
 Compact UI should not foreground these labels. Hover/detail should explain:
 
 ```text
-Pausing this session would likely move Codex 5h run-out
+Pausing this session is estimated to move Codex 5h run-out
 from >1h35m to after the reset at ↻3h33m.
 
 Attribution: mixed
@@ -422,6 +424,19 @@ Later:
 - OpenCode per-session runway only after a proven source exists.
 
 Unsupported providers must show `--`, omit rows, or use `unsupported` in detail. They must never imply zero consumption.
+
+## Implementation Evidence
+
+Existing code paths that make this feasible:
+
+- [CodexActiveSessionsModel.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Services/CodexActiveSessionsModel.swift:22): `CodexActivePresence` already carries `sessionId`, `sessionLogPath`, `workspaceRoot`, and `openSessionLogPaths`.
+- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:71): `HUDRow` already carries display name, source, resolved/runtime session IDs, log path, working directory, last activity, and active subagent count.
+- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:2011): `makeRowsSnapshot` joins active presences to indexed sessions and builds the active HUD rows Runway can reuse.
+- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:3162): `HUDLimitsProviderEntry` already carries 5h/weekly percentages, reset text, and 5h projected run-out timestamps.
+- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:3419): `HUDLimitsDetailPanel` is the existing expanded Limits surface where Runway can be added without changing collapsed rows.
+- [UsageDisplayFormatter.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/UsageDisplayFormatter.swift:66): `UsageLimitProjectionTracker` already computes provider-level 5h run-out from consecutive usage samples.
+- [CodexStatusService.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/CodexStatusService.swift:2954): Codex JSONL tail parsing already extracts `rate_limits`; Runway should extract shared parsing rather than duplicate it.
+- [CodexStatusService.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/CodexStatusService.swift:3139): `makeRateLimitSummary` and `decodeWindow` already normalize primary/weekly window fields, reset times, and remaining percentages.
 
 ## UI Placement
 
