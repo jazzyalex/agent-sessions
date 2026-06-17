@@ -104,8 +104,8 @@ Also new in 3.9:
 Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Limits Widget for Codex and Claude usage predictions</em></p>
-  <img src="docs/assets/limits-widget-light.png" alt="Small Limits Widget showing Codex and Claude 5h usage predictions" width="100%" style="max-width:700px;border-radius:8px;margin:5px 0 22px;"/>
+  <p style="margin:0 0 0px 0;"><em>Limits Widget with 5h burn predictions</em></p>
+  <img src="docs/assets/limits-widget-light.png" alt="Small Limits Widget showing Codex and Claude 5h burn predictions, reset timing, and weekly pressure" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
 
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>

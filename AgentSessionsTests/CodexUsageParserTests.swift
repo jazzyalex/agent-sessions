@@ -2353,6 +2353,589 @@ final class CodexUsageParserTests: XCTestCase {
         )
     }
 
+    func testCodexRunwayCalculatorRanksByPauseImpact() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let small = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "small", displayName: "academy", isGoal: true, logPaths: ["/tmp/a.jsonl"]),
+            percentPerSecond: 1.0 / 3600.0,
+            confidence: .direct,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+        let large = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "large", displayName: "auth-flow", isGoal: true, logPaths: ["/tmp/b.jsonl"]),
+            percentPerSecond: 3.0 / 3600.0,
+            confidence: .direct,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: [small, large], maxRows: 2)
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["large", "small"])
+        XCTAssertGreaterThan(snapshot?.rows.first?.gainedSeconds ?? 0, snapshot?.rows.last?.gainedSeconds ?? 0)
+        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 9, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.rows.last?.quotaMinutesPerHour ?? 0, 3, accuracy: 0.001)
+    }
+
+    func testCodexRunwayCalculatorCapsDeadlineAfterReset() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 10,
+            resetAt: now.addingTimeInterval(2 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(30 * 60),
+            observedAt: now
+        )
+        let burn = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "main", displayName: "auth-flow", isGoal: false, logPaths: ["/tmp/a.jsonl"]),
+            percentPerSecond: 10.0 / (30 * 60),
+            confidence: .mixed,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+
+        let row = CodexRunwayCalculator.snapshot(baseline: baseline, burns: [burn])?.rows.first
+
+        XCTAssertEqual(row?.deadline, .afterReset)
+        XCTAssertEqual(row?.gainedSeconds ?? 0, 90 * 60, accuracy: 0.001)
+        XCTAssertEqual(row?.quotaMinutesPerHour ?? 0, 60, accuracy: 0.001)
+    }
+
+    func testCodexRunwayCalculatorShowsBurnersWhenBaselineAlreadyAfterReset() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 80,
+            resetAt: now.addingTimeInterval(60 * 60),
+            currentRunoutAt: now.addingTimeInterval(4 * 60 * 60),
+            observedAt: now
+        )
+        let small = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "small", displayName: "academy", isGoal: true, logPaths: ["/tmp/a.jsonl"]),
+            percentPerSecond: 1.0 / 3600.0,
+            confidence: .mixed,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+        let large = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "large", displayName: "auth-flow", isGoal: true, logPaths: ["/tmp/b.jsonl"]),
+            percentPerSecond: 3.0 / 3600.0,
+            confidence: .mixed,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: [small, large], maxRows: 2)
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["large", "small"])
+        XCTAssertEqual(snapshot?.rows.map(\.deadline), [.afterReset, .afterReset])
+        XCTAssertEqual(snapshot?.rows.map(\.gainedSeconds), [0, 0])
+    }
+
+    func testCodexRunwayCalculatorSummarizesHiddenBurstsAsCombinedImpact() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 10,
+            resetAt: now.addingTimeInterval(60 * 60),
+            currentRunoutAt: now.addingTimeInterval(30 * 60),
+            observedAt: now
+        )
+        let burns = ["one", "two", "three"].map { id in
+            RunwaySessionBurn(
+                identity: RunwaySessionIdentity(id: id, displayName: id, isGoal: false, logPaths: ["/tmp/\(id).jsonl"]),
+                percentPerSecond: 0.001,
+                confidence: .direct,
+                sampleStart: now.addingTimeInterval(-120),
+                sampleEnd: now
+            )
+        }
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: burns, maxRows: 1)
+
+        XCTAssertEqual(snapshot?.rows.count, 1)
+        XCTAssertEqual(snapshot?.burstSummary?.count, 2)
+        XCTAssertEqual(snapshot?.burstSummary?.gainedSeconds ?? 0, 1012.5, accuracy: 0.1)
+        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 21.6, accuracy: 0.001)
+    }
+
+    func testCodexRunwayCalculatorHidesSubMinuteImpactRows() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let tiny = RunwaySessionBurn(
+            identity: RunwaySessionIdentity(id: "tiny", displayName: "tiny", isGoal: false, logPaths: ["/tmp/tiny.jsonl"]),
+            percentPerSecond: 0.000001,
+            confidence: .direct,
+            sampleStart: now.addingTimeInterval(-120),
+            sampleEnd: now
+        )
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: [tiny], maxRows: 3)
+
+        XCTAssertEqual(snapshot?.rows, [])
+        XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testCodexRunwayParserExtractsRecentRateLimitSamples() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(120)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(first))","primary":{"remaining_percent":80.0,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(second))","primary":{"remaining_percent":78.5,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let burn = CodexRunwayRateLimitParser.burn(identity: identity, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(burn?.percentPerSecond ?? 0, 1.5 / 120.0, accuracy: 0.000001)
+        XCTAssertEqual(burn?.confidence, .direct)
+    }
+
+    func testCodexRunwayTokenActivityParserExtractsFlatPercentTokenMovement() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-token-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000},"last_token_usage":{"total_tokens":100000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000},"last_token_usage":{"total_tokens":150000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let activity = CodexRunwayTokenActivityParser.activity(identity: identity, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(activity?.tokensPerSecond ?? 0, 150000.0 / 30.0, accuracy: 0.001)
+    }
+
+    func testCodexRunwayTokenActivityParserIgnoresStaleTokenMovement() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-token-stale-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let staleNow = second.addingTimeInterval(CodexRunwayTokenActivityParser.maximumSampleAge + 1)
+        let activity = CodexRunwayTokenActivityParser.activity(identity: identity, now: staleNow)
+
+        XCTAssertNil(activity)
+    }
+
+    func testCodexRunwayRecentSessionScannerDiscoversRecentLogs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-scan-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-123","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"audit exported pricing and program facts"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "session-123")
+        XCTAssertEqual(
+            identities.first?.logPaths.first.map { URL(fileURLWithPath: $0).standardizedFileURL.path },
+            log.standardizedFileURL.path
+        )
+        XCTAssertEqual(identities.first?.displayName.hasPrefix("audit exported pricing"), true)
+    }
+
+    func testCodexRunwayRecentSessionScannerPrefersCliRenameOverFirstPrompt() throws {
+        let codexHome = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-rename-\(UUID().uuidString)")
+        let root = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/06", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+
+        let index = codexHome.appendingPathComponent("session_index.jsonl")
+        try """
+        {"id":"renamed-session","thread_name":"Track active session burn rates"}
+        """.write(to: index, atomically: true, encoding: .utf8)
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"renamed-session","cwd":"/Users/alexm/Repository/Codex-History","originator":"codex_cli_rs"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"i have an idea - can we track and show burning rate"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.first?.displayName.hasPrefix("Track active session burn"), true)
+    }
+
+    func testCodexRunwayRecentSessionScannerGroupsSubagentsByParentThread() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-subagents-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/17", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let first = dir.appendingPathComponent("rollout-first.jsonl")
+        let second = dir.appendingPathComponent("rollout-second.jsonl")
+        let firstText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"child-a","cwd":"/Users/alexm/Repository/tennis-academy-map-ops","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-session","agent_role":"qa"}}}}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"QA and collect academy data"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        let secondText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"child-b","cwd":"/Users/alexm/Repository/tennis-academy-map-ops","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-session","agent_role":"qa"}}}}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Tennis Academy Map ops continuation"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":150000}}}}
+        """
+        try firstText.write(to: first, atomically: true, encoding: .utf8)
+        try secondText.write(to: second, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: first.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-1)], ofItemAtPath: second.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "parent-session")
+        XCTAssertEqual(identities.first?.displayName, "QA and collect academy data")
+        XCTAssertEqual(
+            identities.first?.logPaths.map { URL(fileURLWithPath: $0).lastPathComponent }.sorted(),
+            ["rollout-first.jsonl", "rollout-second.jsonl"]
+        )
+    }
+
+    func testCodexRunwayRecentSessionScannerIgnoresCompletedRecentLogs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-complete-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-complete","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"finished runway repair"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"task_complete"}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities, [])
+    }
+
+    func testCodexRunwayRecentSessionScannerKeepsRecentCompletedGoalDuringGrace() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-goal-complete-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"goal-session","cwd":"/Users/alexm/Repository/Codex-History","goal":{"objective":"repair runway"}}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"repair runway until clean"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"task_complete"}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.first?.id, "goal-session")
+        XCTAssertEqual(identities.first?.isGoal, true)
+    }
+
+    func testCodexRunwayRecentSessionScannerDropsCompletedGoalAfterGrace() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-goal-stale-\(UUID().uuidString)")
+        let now = Date()
+        let sampleAt = now.addingTimeInterval(-(CodexRunwayRecentSessionScanner.maximumGoalCompletionGrace + 5))
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(sampleAt))","type":"session_meta","payload":{"id":"goal-session","cwd":"/Users/alexm/Repository/Codex-History","goal":{"objective":"repair runway"}}}
+        {"timestamp":"\(iso(sampleAt))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        {"timestamp":"\(iso(sampleAt))","type":"event_msg","payload":{"type":"task_complete"}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities, [])
+    }
+
+    func testCodexRunwayRecentSessionScannerKeepsLogsActiveAfterPriorTurnCompletion() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-reopened-\(UUID().uuidString)")
+        let now = Date()
+        let prior = now.addingTimeInterval(-120)
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(prior))","type":"session_meta","payload":{"id":"session-reopened","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(prior))","type":"event_msg","payload":{"type":"task_complete"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"continue runway repair"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":350000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.first?.id, "session-reopened")
+    }
+
+    func testCodexRunwayRecentSessionScannerSkipsSetupContextForNames() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-setup-name-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-setup","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/alexm/Repository/Codex-History\\n\\n<INSTRUCTIONS>setup</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>setup</environment_context>"}]}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix Runway session naming"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identity = CodexRunwayRecentSessionScanner.identities(root: root, now: now).first
+
+        XCTAssertEqual(identity?.displayName, "fix Runway session naming")
+    }
+
+    func testCodexRunwayRecentSessionScannerPrefersSubagentNickname() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-nickname-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-nick","cwd":"/Users/alexm/Repository/tennis-academy-map-ops","originator":"Codex Desktop","agent_nickname":"Feynman"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/alexm/Repository/tennis-academy-map-ops"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identity = CodexRunwayRecentSessionScanner.identities(root: root, now: now).first
+
+        XCTAssertEqual(identity?.displayName.hasPrefix("Feynman / tennis-academy"), true)
+    }
+
+    func testCodexRunwayLoaderFallsBackToTokenActivityWhenPercentIsFlat() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-loader-token-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(3 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}},"rate_limits":{"limit_id":"codex","primary":{"used_percent":55.0,"window_minutes":300,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 45,
+            resetAt: reset,
+            currentRunoutAt: second.addingTimeInterval(45 * 60),
+            observedAt: second
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [identity],
+            now: second.addingTimeInterval(1),
+            maxRows: 3
+        )
+
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        XCTAssertEqual(snapshot?.rows.first?.id, "session")
+        XCTAssertEqual(snapshot?.rows.first?.deadline, .afterReset)
+        XCTAssertEqual(snapshot?.rows.first?.confidence, .mixed)
+    }
+
+    func testCodexRunwayLoaderDoesNotInventTokenBurnWithoutProjectedRunout() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-loader-fallback-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(3 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 45,
+            resetAt: reset,
+            currentRunoutAt: reset,
+            observedAt: second,
+            hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [identity],
+            now: second.addingTimeInterval(1),
+            maxRows: 3
+        )
+
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        XCTAssertEqual(snapshot?.rows, [])
+        XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testCodexRunwayLoaderPrefersDirectPercentBurnOverTokenAllocation() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-loader-direct-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(120)
+        let reset = first.addingTimeInterval(3 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}},"rate_limits":{"limit_id":"codex","captured_at":"\(iso(first))","primary":{"remaining_percent":80.0,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":600000}},"rate_limits":{"limit_id":"codex","captured_at":"\(iso(second))","primary":{"remaining_percent":79.0,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: reset,
+            currentRunoutAt: second.addingTimeInterval(30 * 60),
+            observedAt: second
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [identity],
+            now: second.addingTimeInterval(1),
+            maxRows: 3
+        )
+
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        XCTAssertEqual(snapshot?.rows.first?.confidence, .direct)
+        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 90, accuracy: 0.001)
+    }
+
+    func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-stale-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(120)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(first))","primary":{"remaining_percent":80.0,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(second))","primary":{"remaining_percent":78.5,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let staleNow = second.addingTimeInterval(CodexRunwayRateLimitParser.maximumSampleAge + 1)
+        let burn = CodexRunwayRateLimitParser.burn(identity: identity, now: staleNow)
+
+        XCTAssertNil(burn)
+    }
+
+    func testCodexRunwayParserIgnoresOverwideRateLimitSamplePair() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-wide-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(CodexRunwayRateLimitParser.maximumPairInterval + 1)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(first))","primary":{"remaining_percent":80.0,"resets_at":"\(iso(reset))"}}}}
+        {"timestamp":"\(iso(second))","payload":{"rate_limits":{"limit_id":"codex","captured_at":"\(iso(second))","primary":{"remaining_percent":78.5,"resets_at":"\(iso(reset))"}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        let burn = CodexRunwayRateLimitParser.burn(identity: identity, now: second.addingTimeInterval(1))
+
+        XCTAssertNil(burn)
+    }
+
+    private func iso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
 #if DEBUG
     func testCodexStatusRegexFactoryFallbackAndValidPattern() {
         let invalid = CodexStatusService.buildRegexForTesting(

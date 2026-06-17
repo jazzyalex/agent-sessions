@@ -7,7 +7,7 @@ import Foundation
 // - Server-side changes ensure usage data is always fresh when sessions exist
 // - These thresholds serve UI display purposes (age warnings), not accuracy gates
 
-enum UsageTrackingSource {
+enum UsageTrackingSource: Sendable {
     case codex  // Passive file scanning — staleness tied to event timestamps only
     case claude // Active polling — staleness tied to last poll time
 }

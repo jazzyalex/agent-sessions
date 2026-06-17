@@ -2116,6 +2116,155 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(idleWithQuery.map(\.id), ["idle-two"])
     }
 
+    func testRunwayIdentitiesGroupsSubagentsUnderParentSession() {
+        let child = makeHUDRow(
+            id: "child-row",
+            project: "Alpha",
+            name: "Review subagent",
+            state: .active,
+            resolvedSessionID: "child-session",
+            parentSessionID: "parent-session",
+            logPath: "/tmp/child.jsonl"
+        )
+        let parent = makeHUDRow(
+            id: "parent-row",
+            project: "Alpha",
+            name: "Parent Work",
+            state: .active,
+            resolvedSessionID: "parent-session",
+            logPath: "/tmp/parent.jsonl"
+        )
+
+        let identities = HUDRunwayIdentityReducer.identities(from: [child, parent])
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "parent-session")
+        XCTAssertEqual(identities.first?.displayName, "Parent Work")
+        XCTAssertEqual(identities.first?.logPaths.sorted(), ["/tmp/child.jsonl", "/tmp/parent.jsonl"])
+    }
+
+    func testRunwayIdentitiesPreferIndexedTitleOverTabTitle() {
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Track active session burn rates",
+            state: .active,
+            resolvedSessionID: "session",
+            logPath: "/tmp/session.jsonl",
+            cleanedTabTitle: "codex - Codex-History"
+        )
+
+        let identities = HUDRunwayIdentityReducer.identities(from: [row])
+
+        XCTAssertEqual(identities.first?.displayName.hasPrefix("Track active session burn"), true)
+    }
+
+    func testRunwayIdentitiesUseTabTitleWhenIndexedTitleIsPlaceholder() {
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active Codex session",
+            state: .active,
+            resolvedSessionID: "session",
+            logPath: "/tmp/session.jsonl",
+            cleanedTabTitle: "codex - Codex-History"
+        )
+
+        let identities = HUDRunwayIdentityReducer.identities(from: [row])
+
+        XCTAssertEqual(identities.first?.displayName, "codex - Codex-History")
+    }
+
+    func testRunwayRequestFallsBackToResetWindowWithoutProjectedRunout() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active Work",
+            state: .active,
+            resolvedSessionID: "active-session",
+            logPath: "/tmp/active.jsonl"
+        )
+
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [row],
+            projectedRunoutEnabled: true,
+            codexAgentEnabled: true,
+            codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67,
+            fiveHourResetText: iso8601(reset),
+            fiveHourProjectedRunoutAt: nil,
+            fiveHourProjectionObservedAt: nil,
+            now: now,
+            maxRows: 5
+        )
+
+        XCTAssertEqual(request?.identities.first?.id, "active-session")
+        XCTAssertEqual(request?.baseline.observedAt, now)
+        XCTAssertEqual(request?.baseline.currentRunoutAt, request?.baseline.resetAt)
+        XCTAssertEqual(request?.baseline.remainingPercent, 67)
+    }
+
+    func testRunwayRequestAllowsScannerFallbackWithoutHUDIdentities() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let rowWithoutLogPath = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active Work",
+            state: .active,
+            resolvedSessionID: nil,
+            logPath: nil
+        )
+
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [rowWithoutLogPath],
+            projectedRunoutEnabled: true,
+            codexAgentEnabled: true,
+            codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67,
+            fiveHourResetText: iso8601(reset),
+            fiveHourProjectedRunoutAt: nil,
+            fiveHourProjectionObservedAt: nil,
+            now: now,
+            maxRows: 5
+        )
+
+        XCTAssertNotNil(request)
+        XCTAssertEqual(request?.identities, [])
+        XCTAssertEqual(request?.baseline.currentRunoutAt, request?.baseline.resetAt)
+    }
+
+    func testRunwayRequestIDChangesWhenDisplayNameChanges() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 67,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(60 * 60),
+            observedAt: now
+        )
+        let old = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [
+                RunwaySessionIdentity(id: "active-session", displayName: "Old title", isGoal: false, logPaths: ["/tmp/active.jsonl"])
+            ],
+            now: now,
+            maxRows: 5
+        )
+        let renamed = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [
+                RunwaySessionIdentity(id: "active-session", displayName: "New title", isGoal: false, logPaths: ["/tmp/active.jsonl"])
+            ],
+            now: now,
+            maxRows: 5
+        )
+
+        XCTAssertNotEqual(old.id, renamed.id)
+    }
+
     func testAgentCockpitHUDRowEquality_includesElapsedAndLastActivityTooltip() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let a = HUDRow(
@@ -2574,7 +2723,13 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                             project: String,
                             name: String,
                             state: HUDLiveState,
-                            lastActivityAt: Date? = Date()) -> HUDRow {
+                            lastActivityAt: Date? = Date(),
+                            resolvedSessionID: String? = nil,
+                            runtimeSessionID: String? = nil,
+                            parentSessionID: String? = nil,
+                            logPath: String? = nil,
+                            cleanedTabTitle: String? = nil,
+                            workingDirectory: String? = nil) -> HUDRow {
         HUDRow(
             id: id,
             source: .codex,
@@ -2589,6 +2744,12 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             revealURL: nil,
             tty: nil,
             termProgram: nil,
+            cleanedTabTitle: cleanedTabTitle,
+            resolvedSessionID: resolvedSessionID,
+            runtimeSessionID: runtimeSessionID,
+            parentSessionID: parentSessionID,
+            logPath: logPath,
+            workingDirectory: workingDirectory,
             lastActivityAt: lastActivityAt
         )
     }
@@ -2747,6 +2908,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             tabTitle: nil,
             resolvedSessionID: resolvedSessionID,
             sessionID: sessionID,
+            parentSessionID: nil,
             logPath: nil,
             workingDirectory: nil,
             lastActivityAt: nil,

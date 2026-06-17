@@ -131,6 +131,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let limitsMinimumWidth: CGFloat = 220
         private let limitsDefaultFrameWidth: CGFloat = 380
         private let limitsRowHeight: CGFloat = 30
+        private let limitsMaximumRows: CGFloat = 9
         private let compactHeaderHeight: CGFloat = 44.5
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
@@ -520,7 +521,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                         includesToolbar: Bool) -> CGFloat {
             let chromeHeight = max(window.frame.height - window.contentLayoutRect.height, 0)
             let calloutHeight = includesDisabledCallout ? compactDisabledCalloutHeight : 0
-            let rows = CGFloat(max(1, min(rowCount, 2)))
+            let rows = max(1, min(CGFloat(rowCount), limitsMaximumRows))
             let rowSeparators = max(rows - 1, 0) * 0.5
             return (includesToolbar ? compactHeaderHeight + 0.5 : 0)
                 + (rows * limitsRowHeight)
