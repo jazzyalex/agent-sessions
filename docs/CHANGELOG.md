@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Unified Window: Codex side chats can now be recovered from Codex Desktop logs as searchable side-chat rows with readable transcripts and a distinct `side` badge, without labeling them as subagents.
 - Agent Cockpit: Added Runway EQ above the Limits Cockpit and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Limits rows; Runway now stays available during reset-first 5h windows when active session burn exists.
 - Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation, fallback reset clocks no longer produce synthetic burn rates, and the EQ avoids blanking between refreshes.
 - Agent Cockpit: Runway session labels now prefer Codex app/indexed titles and CLI `/rename` names before falling back to the first prompt, tab title, or project directory, and recent Codex subagent logs now roll up under their parent session instead of appearing as duplicate Runway consumers.

@@ -181,6 +181,7 @@ enum SubagentHierarchyBuilder {
             for session in sessions {
                 guard session.source == .codex,
                       !session.isSubagent,
+                      !session.isSideChat,
                       let cwd = SubagentHierarchyBuilder.normalizedCwd(session.cwd) else {
                     continue
                 }

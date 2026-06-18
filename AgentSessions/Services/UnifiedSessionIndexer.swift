@@ -981,8 +981,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
-                if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 || CursorSessionIndexer.isDBOnlySession($0) } }
-                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 || CursorSessionIndexer.isDBOnlySession($0) } }
+                if self.hideZeroMessageSessionsPref { results = results.filter { $0.isSideChat || $0.messageCount > 0 || CursorSessionIndexer.isDBOnlySession($0) } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.isSideChat || $0.messageCount == 0 || $0.messageCount > 2 || CursorSessionIndexer.isDBOnlySession($0) } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
 
                 // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
@@ -2414,6 +2414,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             results = results.filter { s in
                 // Do not drop OpenCode sessions purely on message-count heuristics yet.
                 if s.source == .opencode { return true }
+                if s.isSideChat { return true }
                 // Cursor DB-only sessions have no transcript; keep them visible.
                 if CursorSessionIndexer.isDBOnlySession(s) { return true }
                 return s.messageCount > 0
@@ -2422,6 +2423,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hideLowMessageSessionsPref {
             results = results.filter { s in
                 if s.source == .opencode { return true }
+                if s.isSideChat { return true }
                 if CursorSessionIndexer.isDBOnlySession(s) { return true }
                 return s.messageCount == 0 || s.messageCount > 2
             }

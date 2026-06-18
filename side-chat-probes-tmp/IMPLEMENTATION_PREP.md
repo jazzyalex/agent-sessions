@@ -1,6 +1,6 @@
 # Codex Side Chat Recovery Prep
 
-This is a disposable implementation-prep note. It does not modify Agent Sessions app code.
+This is a disposable implementation-prep note. It describes the pre-implementation state; the follow-up V1 implementation now modifies Agent Sessions app code.
 
 ## User Problem
 

@@ -51,7 +51,8 @@ final class SessionParserTests: XCTestCase {
         timestamp: String,
         cwd: String,
         parentSessionID: String? = nil,
-        subagentType: String? = nil
+        subagentType: String? = nil,
+        relationshipKind: SessionRelationshipKind? = nil
     ) -> Session {
         Session(
             id: id,
@@ -67,7 +68,8 @@ final class SessionParserTests: XCTestCase {
             lightweightTitle: id,
             codexInternalSessionIDHint: runtimeID,
             parentSessionID: parentSessionID,
-            subagentType: subagentType
+            subagentType: subagentType,
+            relationshipKind: relationshipKind
         )
     }
 
@@ -1391,6 +1393,33 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(result.sessions.map(\.id), ["review-child", "parent"])
         XCTAssertEqual(result.rowMeta["review-child"]?.depth, 0)
         XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, false)
+    }
+
+    func testSubagentHierarchyDoesNotInferSideChatAsRoleOnlyParent() {
+        let cwd = "/tmp/repo"
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-2247-7ad3-9b32-00a7875ffa77",
+            timestamp: "2026-06-18T10-00-00",
+            cwd: cwd,
+            relationshipKind: .sideChat
+        )
+        let roleOnlyChild = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: "019ed789-2247-7ad3-9b32-00a7875ffa88",
+            timestamp: "2026-06-18T10-05-00",
+            cwd: cwd,
+            subagentType: "review"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [roleOnlyChild, sideChat],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["review-child", "side-chat"])
+        XCTAssertEqual(result.rowMeta["review-child"]?.depth, 0)
+        XCTAssertEqual(result.rowMeta["side-chat"]?.hasChildren, false)
     }
 
     func testSubagentHierarchyInfersRoleOnlyParentAfterLongGap() {

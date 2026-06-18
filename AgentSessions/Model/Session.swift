@@ -22,6 +22,12 @@ public enum SessionSurface: String, Codable, Sendable {
 
 public typealias CodexSessionSurface = SessionSurface
 
+public enum SessionRelationshipKind: String, Codable, Sendable {
+    case root
+    case subagent
+    case sideChat
+}
+
 public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let source: SessionSource
@@ -55,7 +61,12 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Subagent hierarchy
     public let parentSessionID: String?   // Raw ID of parent session (UUID for Claude/Codex, ses_ID for OpenCode)
     public let subagentType: String?      // e.g. "Explore", "review", "thread_spawn", "general"
-    public var isSubagent: Bool { parentSessionID != nil || subagentType != nil }
+    public let relationshipKind: SessionRelationshipKind?
+    public var effectiveRelationshipKind: SessionRelationshipKind {
+        relationshipKind ?? ((parentSessionID != nil || subagentType != nil) ? .subagent : .root)
+    }
+    public var isSubagent: Bool { effectiveRelationshipKind == .subagent }
+    public var isSideChat: Bool { effectiveRelationshipKind == .sideChat }
 
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
@@ -78,6 +89,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
+                relationshipKind: SessionRelationshipKind? = nil,
                 customTitle: String? = nil,
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
@@ -112,6 +124,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightCommands = nil
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
+        self.relationshipKind = relationshipKind
         self.isFavorite = false
         self.deletedAt = deletedAt
     }
@@ -134,6 +147,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 codexInternalSessionIDHint: String? = nil,
                 parentSessionID: String? = nil,
                 subagentType: String? = nil,
+                relationshipKind: SessionRelationshipKind? = nil,
                 customTitle: String? = nil,
                 codexOriginator: String? = nil,
                 codexSource: String? = nil,
@@ -168,6 +182,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.lightweightCommands = lightweightCommands
         self.parentSessionID = parentSessionID
         self.subagentType = subagentType
+        self.relationshipKind = relationshipKind
         self.isFavorite = false
         self.deletedAt = deletedAt
     }
@@ -196,6 +211,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case reasoningEffort
         case parentSessionID
         case subagentType
+        case relationshipKind
         case customTitle
         case deletedAt
         // isFavorite intentionally excluded (runtime only)
@@ -543,6 +559,9 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         // after full parse as well; transcript event scraping is not authoritative.
         if (source == .gemini || source == .opencode || source == .copilot || source == .openclaw || source == .hermes),
            let lightCwd = lightweightCwd, !lightCwd.isEmpty {
+            return lightCwd
+        }
+        if isSideChat, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
         // 0) Claude sessions: use cwd extracted during parsing

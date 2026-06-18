@@ -249,8 +249,8 @@ final class SessionIndexer: ObservableObject {
                                                          transcriptCache: self?.transcriptCache,
                                                          allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
 
-                if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.messageCount > 0 } }
-                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
+                if self?.hideZeroMessageSessionsPref ?? true { results = results.filter { $0.isSideChat || $0.messageCount > 0 } }
+                if self?.hideLowMessageSessionsPref ?? true { results = results.filter { $0.isSideChat || $0.messageCount == 0 || $0.messageCount > 2 } }
                 if !(self?.showHousekeepingSessionsPref ?? false) { results = results.filter { !$0.isHousekeeping } }
 
                 return results
@@ -463,6 +463,7 @@ final class SessionIndexer: ObservableObject {
                             lightweightCommands: current.lightweightCommands,
                             parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
                             subagentType: fullSession.subagentType ?? current.subagentType,
+                            relationshipKind: fullSession.relationshipKind ?? current.relationshipKind,
                             customTitle: fullSession.customTitle ?? current.customTitle,
                             codexOriginator: fullSession.codexOriginator ?? current.codexOriginator,
                             codexSource: fullSession.codexSource ?? current.codexSource,
@@ -590,8 +591,8 @@ final class SessionIndexer: ObservableObject {
                                                          filters: filters,
                                                          transcriptCache: self.transcriptCache,
                                                          allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
-                if self.hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
-                if self.hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
+                if self.hideZeroMessageSessionsPref { results = results.filter { $0.isSideChat || $0.messageCount > 0 } }
+                if self.hideLowMessageSessionsPref { results = results.filter { $0.isSideChat || $0.messageCount == 0 || $0.messageCount > 2 } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
                 // FilterEngine now preserves order, so filtered results maintain allSessions sort order
                 DispatchQueue.main.async {
@@ -700,10 +701,10 @@ final class SessionIndexer: ObservableObject {
                 var hydratedSessions = existingSessions
                 Self.applyCodexStateMetadata(&hydratedSessions, from: stateThreads)
                 Self.applyCodexThreadNames(&hydratedSessions, from: threadNames)
-                let finalHydratedSessions = hydratedSessions
+                let hydratedSnapshot = hydratedSessions
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
-                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: finalHydratedSessions, source: .codex)
+                    self.allSessions = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: hydratedSnapshot, source: .codex)
                     self.scheduleCodexInternalSessionIDBackfillIfNeeded(in: self.allSessions)
                     self.totalFiles = existingSessions.count
                     self.filesProcessed = existingSessions.count
@@ -852,6 +853,7 @@ final class SessionIndexer: ObservableObject {
                         codexInternalSessionIDHint: session.codexInternalSessionIDHint ?? existing.codexInternalSessionIDHint,
                         parentSessionID: session.parentSessionID ?? existing.parentSessionID,
                         subagentType: session.subagentType ?? existing.subagentType,
+                        relationshipKind: session.relationshipKind ?? existing.relationshipKind,
                         customTitle: session.customTitle ?? existing.customTitle,
                         codexOriginator: session.codexOriginator ?? existing.codexOriginator,
                         codexSource: session.codexSource ?? existing.codexSource,
@@ -871,6 +873,8 @@ final class SessionIndexer: ObservableObject {
             // Reuse Codex state/thread_name lookups loaded earlier in this refresh cycle.
             Self.applyCodexStateMetadata(&allParsedSessions, from: stateThreads)
             Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
+            let sideChatSessions = CodexSideChatLogReader.loadSideChatSessions(sessionsRoot: self.sessionsRoot())
+            allParsedSessions = Self.appendingCodexSideChats(sideChatSessions, to: allParsedSessions)
             let totalParsedCount = allParsedSessions.count
 
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
@@ -882,7 +886,7 @@ final class SessionIndexer: ObservableObject {
 
             // Persist lightweight session_meta so subsequent hydration is complete.
             // Excludes probe sessions to match analytics policy.
-            let sessionsForMeta = allParsedSessions.filter { !CodexProbeConfig.isProbeSession($0) }
+            let sessionsForMeta = allParsedSessions.filter { !CodexProbeConfig.isProbeSession($0) && !$0.isSideChat }
             if !sessionsForMeta.isEmpty {
                 do {
                     let db = try IndexDB()
@@ -1324,6 +1328,7 @@ final class SessionIndexer: ObservableObject {
                 codexInternalSessionIDHint: internalID,
                 parentSessionID: session.parentSessionID,
                 subagentType: session.subagentType,
+                relationshipKind: session.relationshipKind,
                 customTitle: session.customTitle,
                 codexOriginator: session.codexOriginator,
                 codexSource: session.codexSource,
@@ -1515,6 +1520,7 @@ final class SessionIndexer: ObservableObject {
                 codexInternalSessionIDHint: sessions[i].codexInternalSessionIDHint,
                 parentSessionID: sessions[i].parentSessionID,
                 subagentType: sessions[i].subagentType,
+                relationshipKind: sessions[i].relationshipKind,
                 customTitle: sessions[i].customTitle,
                 codexOriginator: sessions[i].codexOriginator,
                 codexSource: sessions[i].codexSource,
@@ -1527,6 +1533,18 @@ final class SessionIndexer: ObservableObject {
             rebuilt.isFavorite = wasFavorite
             sessions[i] = rebuilt
         }
+    }
+
+    private static func appendingCodexSideChats(_ sideChats: [Session], to sessions: [Session]) -> [Session] {
+        guard !sideChats.isEmpty else { return sessions }
+        var merged = sessions
+        var existingIDs = Set(sessions.map(\.id))
+        merged.reserveCapacity(sessions.count + sideChats.count)
+        for sideChat in sideChats {
+            guard existingIDs.insert(sideChat.id).inserted else { continue }
+            merged.append(sideChat)
+        }
+        return merged
     }
 
     private static func nonEmptyCodexStateCwd(_ value: String?) -> String? {
@@ -1720,6 +1738,7 @@ final class SessionIndexer: ObservableObject {
                 codexInternalSessionIDHint: hint,
                 parentSessionID: sessions[i].parentSessionID,
                 subagentType: sessions[i].subagentType,
+                relationshipKind: sessions[i].relationshipKind,
                 customTitle: name,
                 codexOriginator: sessions[i].codexOriginator,
                 codexSource: sessions[i].codexSource,

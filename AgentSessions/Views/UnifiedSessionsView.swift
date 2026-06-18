@@ -2278,6 +2278,9 @@ struct UnifiedSessionsView: View {
     }
 
     static func surfacePills(for session: Session) -> [CodexSurfacePill] {
+        if session.isSideChat {
+            return [.standard(label: "desk", accessibilityLabel: "Desktop")]
+        }
         if let claudeDesktopPill = claudeDesktopSurfacePill(for: session) {
             return [claudeDesktopPill]
         }
@@ -2529,7 +2532,7 @@ struct UnifiedSessionsView: View {
     }
 
     private func canResumeCodexInCLI(_ session: Session) -> Bool {
-        session.codexSurface != .vscode
+        !session.isSideChat && session.codexSurface != .vscode
     }
 
     private func resume(_ s: Session) {
@@ -3285,28 +3288,28 @@ private struct TranscriptHostView: View {
             let onToggleExpand: ((String) -> Void)?
 		    @State private var hover: Bool = false
 
-		    var body: some View {
+            var body: some View {
                 let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
                 let showFlatSubagentMarker = session.isSubagent && !isNestedSubagent
-		        HStack(spacing: 4) {
-	                // Disclosure chevron for parents with children
-	                if let meta = rowMeta, meta.hasChildren {
-                    Button(action: { onToggleExpand?(session.id) }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .medium))
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            .animation(.easeInOut(duration: 0.15), value: isExpanded)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 16)
-                    .foregroundStyle(.secondary)
-                    Text("(\(meta.childCount))")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                HStack(spacing: 4) {
+                    // Disclosure chevron for parents with children
+                    if let meta = rowMeta, meta.hasChildren {
+                        Button(action: { onToggleExpand?(session.id) }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .medium))
+                                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                                .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: 16)
                         .foregroundStyle(.secondary)
-	                } else if isNestedSubagent {
-	                    // Indent for subagent children
-	                    Spacer().frame(width: 20)
-	                }
+                        Text("(\(meta.childCount))")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    } else if isNestedSubagent {
+                        // Indent for subagent children
+                        Spacer().frame(width: 20)
+                    }
 
                     if showFlatSubagentMarker {
                         Text("sub")
@@ -3320,61 +3323,73 @@ private struct TranscriptHostView: View {
                             .help(subagentPillHelp)
                     }
 
-	                // Subagent type badge (only when hierarchy nesting is active)
-	                if isNestedSubagent {
-	                    if let agentType = session.subagentType, !agentType.isEmpty {
-	                        Text(agentType)
+                    if session.isSideChat {
+                        Text("side")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.green.opacity(0.18))
+                            .foregroundStyle(.green)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .accessibilityLabel("Side chat")
+                            .help("Codex side chat")
+                    }
+
+                    // Subagent type badge (only when hierarchy nesting is active)
+                    if isNestedSubagent {
+                        if let agentType = session.subagentType, !agentType.isEmpty {
+                            Text(agentType)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.15))
+                                .foregroundStyle(.purple)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                .help(subagentPillHelp)
+                        }
+                        // Model badge
+                        if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
+                            Text(abbreviated)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.blue.opacity(0.12))
+                                .foregroundStyle(.blue)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+
+                    if session.isDeleted {
+                        Text("deleted")
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(Color.purple.opacity(0.15))
-                            .foregroundStyle(.purple)
+                            .background(Color.red.opacity(0.12))
+                            .foregroundStyle(.red)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .help(subagentPillHelp)
+                            .accessibilityLabel("Deleted session")
                     }
-                    // Model badge
-                    if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
-                        Text(abbreviated)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
-                            .foregroundStyle(.blue)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    Text(session.listTitle)
+                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .background(Color.clear)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
+                        Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
+                            Text("Refresh")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.teal)
+                        .opacity(hover ? 1 : 0)
+                        .help("Update this session's preview to reflect the latest file contents")
                     }
                 }
-
-                if session.isDeleted {
-                    Text("deleted")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.red.opacity(0.12))
-                        .foregroundStyle(.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                        .accessibilityLabel("Deleted session")
-                }
-
-	            Text(session.listTitle)
-	                .font(.system(size: 13, weight: .regular, design: .monospaced))
-	                .lineLimit(1)
-	                .truncationMode(.tail)
-	                .background(Color.clear)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-	            if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
-	                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
-	                    Text("Refresh")
-	                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-	                }
-	                .buttonStyle(.bordered)
-	                .tint(.teal)
-	                .opacity(hover ? 1 : 0)
-	                .help("Update this session's preview to reflect the latest file contents")
-	            }
-	        }
-	        .onHover { hover = $0 }
-	    }
+                .onHover { hover = $0 }
+            }
 
             private var subagentPillHelp: String {
                 guard let effort = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -3383,7 +3398,7 @@ private struct TranscriptHostView: View {
                 }
                 return "Subagent\nReasoning effort: \(effort)"
             }
-	}
+        }
 
 // Stable cell to prevent Table reuse glitches in Project column
 private struct ProjectCellView: View {

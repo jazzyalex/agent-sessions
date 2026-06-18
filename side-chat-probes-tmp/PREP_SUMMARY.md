@@ -1,6 +1,6 @@
 # Side Chat Recovery Prep Summary
 
-Disposable prep artifacts live in this folder only. Agent Sessions source was not modified.
+Disposable prep artifacts live in this folder. The initial investigation was read-only; the follow-up V1 implementation now modifies Agent Sessions app source and tests.
 
 ## Files
 
@@ -9,6 +9,8 @@ Disposable prep artifacts live in this folder only. Agent Sessions source was no
 - `RESULTS.md`: current probe findings.
 - `SIDE_CHAT_LOG_FINDINGS.md`: real `/side` marker evidence from `logs_2.sqlite`.
 - `probe_side_chat_logs.sh`: literal phrase probe for side-chat log recovery.
+- `FULL_REVIEW.md`: full review across discovery, parent linkage, indexing, UI, and risk.
+- `V1_FULL_PLAN.md`: concrete V1 implementation plan.
 - `IMPLEMENTATION_PREP.md`: next-step app implementation plan.
 - `mockups/side-chat-ui-mockup.html`: static UI mockup for parent-scoped side-chat recovery and phrase search.
 - `mockups/side-chat-ui-mockup-desktop.png`: desktop render check screenshot.
@@ -23,13 +25,12 @@ The feature is feasible for phrase recovery today through `logs_2.sqlite`, becau
 
 Parent-scoped browsing remains the harder part: the current logs prove a side thread exists, but do not yet prove a clean `parent_thread_id` field for side chats. The next AS implementation step should either find a better fork-parent source or implement parent linkage only after it is evidence-backed.
 
-The recommended first UI is not a broad side-chat filter. It is a parent-scoped recovery surface inside the existing Sessions window:
+The V1 UI should stay simple:
 
-- select parent session
-- see that parent's recent side chats as related child rows and in a compact side-chat strip
-- open/read/copy the side-chat transcript
-- export Markdown or reveal the log when needed
-- search globally by a remembered phrase when needed
+- phrase search shows `side` rows from logs-backed discovery
+- side chats appear next to subagents in hierarchy only when parent linkage is proven
+- no side rail, no separate recovery window, no global side-chat dashboard in V1
+- side chats are never modeled or labeled as subagents
 
 ## Next Commands
 
