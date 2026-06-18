@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Sessions Side Chat Recovery Mockup</title>
+  <style>
+    :root {
+      --bg: #f3f4f2;
+      --surface: #fbfbfa;
+      --surface-2: #ecefed;
+      --line: #d7ddd9;
+      --line-strong: #b9c3be;
+      --text: #18201d;
+      --muted: #65706b;
+      --faint: #8e9994;
+      --accent: #147d73;
+      --accent-soft: #dcefeb;
+      --amber: #a26214;
+      --amber-soft: #f3e6d2;
+      --blue: #2f5f9d;
+      --blue-soft: #e1e9f7;
+      --danger: #a33c38;
+      --shadow: 0 12px 34px rgba(20, 28, 24, 0.14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      padding: 28px;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .window {
+      width: min(1360px, calc(100vw - 56px));
+      height: min(880px, calc(100vh - 56px));
+      min-height: 680px;
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 42px 48px 1fr;
+    }
+
+    .titlebar {
+      background: linear-gradient(#f8f9f7, #eef1ef);
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 88px 1fr 280px;
+      align-items: center;
+      padding: 0 12px;
+      gap: 12px;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(0,0,0,0.16);
+    }
+
+    .red { background: #ff5f57; }
+    .yellow { background: #ffbd2e; }
+    .green { background: #28c840; }
+
+    .title {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #33403b;
+    }
+
+    .status {
+      justify-self: end;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f8f9f7;
+    }
+
+    .toolgroup {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .icon-button,
+    .pill-button,
+    .seg-button {
+      border: 1px solid var(--line-strong);
+      background: #ffffff;
+      color: var(--text);
+      border-radius: 6px;
+      height: 30px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .icon-button {
+      width: 32px;
+      padding: 0;
+      font-weight: 700;
+    }
+
+    .icon-button.active,
+    .pill-button.active,
+    .seg-button.active {
+      border-color: #7eb7ae;
+      background: var(--accent-soft);
+      color: #0c5e56;
+    }
+
+    .search {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      align-items: center;
+      gap: 6px;
+      max-width: 520px;
+      min-width: 260px;
+      height: 30px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: #fff;
+      padding: 0 9px;
+      color: var(--muted);
+      justify-self: end;
+    }
+
+    .search input {
+      border: 0;
+      outline: 0;
+      min-width: 0;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(420px, 0.96fr) minmax(560px, 1.28fr);
+      min-height: 0;
+    }
+
+    .list-pane {
+      border-right: 1px solid var(--line);
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 34px 1fr;
+      background: #f8f9f7;
+    }
+
+    .table-head {
+      display: grid;
+      grid-template-columns: 1fr 112px 88px;
+      align-items: center;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .rows {
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 112px 88px;
+      gap: 8px;
+      padding: 9px 12px;
+      border-bottom: 1px solid #e7ebe8;
+      min-height: 58px;
+      align-items: center;
+      cursor: default;
+    }
+
+    .row.selected {
+      background: #dfece9;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .row.child {
+      background: #fbfcfb;
+    }
+
+    .row.child.selected {
+      background: #d9eee9;
+    }
+
+    .row.hidden {
+      display: none;
+    }
+
+    .cell-main {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+
+    .line {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .subline {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .time,
+    .model {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .badge {
+      height: 19px;
+      min-width: 36px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid transparent;
+      flex: 0 0 auto;
+    }
+
+    .badge.side {
+      color: #0c5e56;
+      background: var(--accent-soft);
+      border-color: #9fcfc7;
+    }
+
+    .badge.sub {
+      color: #4f4a91;
+      background: #e7e5f4;
+      border-color: #c5c0eb;
+    }
+
+    .badge.parent {
+      color: #2f5f9d;
+      background: var(--blue-soft);
+      border-color: #b7c9ec;
+    }
+
+    .badge.warn {
+      color: var(--amber);
+      background: var(--amber-soft);
+      border-color: #e0c599;
+    }
+
+    .chev {
+      color: var(--muted);
+      font-size: 12px;
+      flex: 0 0 auto;
+    }
+
+    .indent {
+      width: 18px;
+      flex: 0 0 auto;
+    }
+
+    .detail-pane {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background: var(--surface);
+    }
+
+    .detail-head {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .detail-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+
+    .detail-title strong,
+    .rail-title strong {
+      font-size: 14px;
+    }
+
+    .crumb {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .detail-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(300px, 0.84fr) minmax(360px, 1fr);
+    }
+
+    .rail {
+      border-right: 1px solid var(--line);
+      background: #f7f8f6;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    .rail-title {
+      padding: 12px 12px 8px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .scope-tabs {
+      padding: 0 12px 10px;
+      display: flex;
+      gap: 6px;
+    }
+
+    .scope-tabs .seg-button {
+      height: 27px;
+      font-size: 12px;
+      padding: 0 8px;
+    }
+
+    .cards {
+      min-height: 0;
+      overflow: auto;
+      padding: 0 10px 12px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .group-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 2px 2px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .side-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 9px;
+      display: grid;
+      gap: 5px;
+      cursor: default;
+    }
+
+    .side-card.active {
+      border-color: #7eb7ae;
+      background: #edf7f4;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .side-card .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .side-card .title-line {
+      font-size: 13px;
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .snippet {
+      color: #3d4743;
+      font-size: 12px;
+      line-height: 1.32;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .meta {
+      display: flex;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      min-width: 0;
+    }
+
+    .transcript {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .transcript-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .transcript-scroll {
+      overflow: auto;
+      padding: 14px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .bubble {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px 11px;
+      max-width: 760px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .bubble.user {
+      background: #f6faf9;
+      border-color: #cde4df;
+    }
+
+    .role {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .msg {
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    mark {
+      background: #f6dc9b;
+      color: inherit;
+      padding: 0 2px;
+      border-radius: 3px;
+    }
+
+    .mode-parent .search-row,
+    .mode-parent .global-only {
+      display: none;
+    }
+
+    .mode-search .parent-expanded,
+    .mode-search .parent-child,
+    .mode-search .parent-only {
+      display: none;
+    }
+
+    .mode-global .parent-child,
+    .mode-global .search-row,
+    .mode-global .parent-only {
+      display: none;
+    }
+
+    .mode-global .global-only {
+      display: grid;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        padding: 12px;
+      }
+
+      .window {
+        width: calc(100vw - 24px);
+        height: calc(100vh - 24px);
+        min-height: 640px;
+      }
+
+      .titlebar {
+        grid-template-columns: 80px 1fr;
+      }
+
+      .status {
+        display: none;
+      }
+
+      .content {
+        grid-template-columns: 1fr;
+      }
+
+      .list-pane {
+        display: none;
+      }
+
+      .detail-body {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        max-height: 320px;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .toolgroup {
+        flex-wrap: wrap;
+      }
+
+      .search {
+        justify-self: stretch;
+        max-width: none;
+      }
+
+      .detail-head,
+      .transcript-head {
+        grid-template-columns: 1fr;
+      }
+
+      .detail-actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="window mode-parent" id="app">
+    <section class="titlebar">
+      <div class="traffic" aria-hidden="true">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <div class="title">Agent Sessions</div>
+      <div class="status">Index updated 11:42 AM</div>
+    </section>
+
+    <section class="toolbar" aria-label="Toolbar">
+      <div class="toolgroup">
+        <button class="icon-button active" title="Show related chats and subagents">H</button>
+        <button class="pill-button active" title="Show Codex sessions">Codex</button>
+        <button class="pill-button" title="Saved sessions">Saved</button>
+      </div>
+      <div class="toolgroup">
+        <button class="seg-button active" data-mode="parent">Parent</button>
+        <button class="seg-button" data-mode="search">Phrase search</button>
+        <button class="seg-button" data-mode="global">Recent side chats</button>
+      </div>
+      <label class="search" title="Search sessions and side chats">
+        <span>Q</span>
+        <input id="searchBox" value="vector clock recap" aria-label="Search">
+      </label>
+    </section>
+
+    <section class="content">
+      <aside class="list-pane">
+        <div class="table-head">
+          <span>Session</span>
+          <span>Modified</span>
+          <span>Model</span>
+        </div>
+        <div class="rows">
+          <div class="row selected parent-expanded parent-only">
+            <div class="cell-main">
+              <div class="line">
+                <span class="chev">v</span>
+                <span class="badge parent">parent</span>
+                <span class="name">Resume sync engine refactor</span>
+              </div>
+              <div class="subline">2 side, 1 sub - Codex-History</div>
+            </div>
+            <div class="time">Today 11:38</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row child parent-child">
+            <div class="cell-main">
+              <div class="line">
+                <span class="indent"></span>
+                <span class="badge side">side</span>
+                <span class="name">Vector clock answer</span>
+              </div>
+              <div class="subline">What was the exact migration note for vector clock?</div>
+            </div>
+            <div class="time">Today 11:16</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row child parent-child">
+            <div class="cell-main">
+              <div class="line">
+                <span class="indent"></span>
+                <span class="badge side">side</span>
+                <span class="name">Copy command from side chat</span>
+              </div>
+              <div class="subline">Command needed from the closed parent</div>
+            </div>
+            <div class="time">Today 10:52</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row child parent-child">
+            <div class="cell-main">
+              <div class="line">
+                <span class="indent"></span>
+                <span class="badge sub">sub</span>
+                <span class="name">Read-only implementation map</span>
+              </div>
+              <div class="subline">Explorer result, not a side chat</div>
+            </div>
+            <div class="time">Today 10:40</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row search-row selected">
+            <div class="cell-main">
+              <div class="line">
+                <span class="badge side">side</span>
+                <span class="name">Vector clock answer</span>
+              </div>
+              <div class="subline">Parent: Resume sync engine refactor - match: vector clock recap</div>
+            </div>
+            <div class="time">Today 11:16</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row search-row">
+            <div class="cell-main">
+              <div class="line">
+                <span class="badge parent">parent</span>
+                <span class="name">Resume sync engine refactor</span>
+              </div>
+              <div class="subline">Parent session matched nearby terms but not the exact answer</div>
+            </div>
+            <div class="time">Today 11:38</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row global-only selected">
+            <div class="cell-main">
+              <div class="line">
+                <span class="badge side">side</span>
+                <span class="name">Vector clock answer</span>
+              </div>
+              <div class="subline">Parent: Resume sync engine refactor</div>
+            </div>
+            <div class="time">Today 11:16</div>
+            <div class="model">gpt-5.5</div>
+          </div>
+
+          <div class="row global-only">
+            <div class="cell-main">
+              <div class="line">
+                <span class="badge side">side</span>
+                <span class="name">Terminal command snippet</span>
+              </div>
+              <div class="subline">Parent: Package release checklist</div>
+            </div>
+            <div class="time">Today 9:24</div>
+            <div class="model">gpt-5.4</div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="detail-pane">
+        <header class="detail-head">
+          <div class="detail-title">
+            <strong id="detailTitle">Resume sync engine refactor</strong>
+            <span class="crumb" id="detailCrumb">Codex - Today 11:38 AM - /Users/alexm/Repository/Codex-History</span>
+          </div>
+          <div class="detail-actions">
+            <button class="icon-button" title="Reveal log">R</button>
+            <button class="icon-button" title="Copy id">ID</button>
+            <button class="pill-button" title="Open selected transcript">Open</button>
+          </div>
+        </header>
+
+        <div class="detail-body">
+          <aside class="rail">
+            <div class="rail-title">
+              <strong id="railTitle">Side chats for this parent</strong>
+              <span class="crumb" id="railCrumb">2 today - newest first</span>
+            </div>
+            <div class="scope-tabs">
+              <button class="seg-button active">Today</button>
+              <button class="seg-button">7 days</button>
+              <button class="seg-button">All</button>
+            </div>
+            <div class="cards">
+              <div class="group-label">Today</div>
+              <article class="side-card active">
+                <div class="top">
+                  <span class="title-line">Vector clock answer</span>
+                  <span class="time">11:16</span>
+                </div>
+                <div class="snippet">Need the exact wording from the side answer about the migration guard and vector clock recap.</div>
+                <div class="meta">
+                  <span>gpt-5.5</span>
+                  <span>8 messages</span>
+                  <span>side-a1</span>
+                </div>
+              </article>
+              <article class="side-card">
+                <div class="top">
+                  <span class="title-line">Copy command from side chat</span>
+                  <span class="time">10:52</span>
+                </div>
+                <div class="snippet">Command to rerun the targeted parser tests without touching the whole app build.</div>
+                <div class="meta">
+                  <span>gpt-5.5</span>
+                  <span>5 messages</span>
+                  <span>side-a2</span>
+                </div>
+              </article>
+              <div class="group-label">Earlier</div>
+              <article class="side-card">
+                <div class="top">
+                  <span class="title-line">Untitled side chat</span>
+                  <span class="time">Mon</span>
+                </div>
+                <div class="snippet">First prompt unavailable. Showing short id until transcript is indexed.</div>
+                <div class="meta">
+                  <span>model unknown</span>
+                  <span>3 messages</span>
+                  <span>side-f03</span>
+                </div>
+              </article>
+            </div>
+          </aside>
+
+          <section class="transcript">
+            <header class="transcript-head">
+              <div class="detail-title">
+                <strong id="transcriptTitle">Side Chat - Vector clock answer</strong>
+                <span class="crumb" id="transcriptCrumb">Parent: Resume sync engine refactor</span>
+              </div>
+              <div class="detail-actions">
+                <button class="pill-button" title="Select parent session">Open parent</button>
+                <button class="pill-button" title="Copy side-chat transcript">Copy transcript</button>
+                <button class="pill-button" title="Export side-chat Markdown">Export Markdown</button>
+              </div>
+            </header>
+            <div class="transcript-scroll" id="transcriptScroll">
+              <article class="bubble user">
+                <span class="role">User</span>
+                <span class="msg">What was the exact migration note for the <mark>vector clock recap</mark>? I just need to copy the final answer.</span>
+              </article>
+              <article class="bubble">
+                <span class="role">Assistant</span>
+                <span class="msg">Keep the relationship migration scoped to Codex rows, preserve parent ids, and reindex only rows whose thread metadata changed. Do not classify by text hits.</span>
+              </article>
+              <article class="bubble">
+                <span class="role">Assistant</span>
+                <span class="msg">Copyable command: ./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests</span>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const app = document.getElementById("app");
+    const buttons = Array.from(document.querySelectorAll("[data-mode]"));
+    const searchBox = document.getElementById("searchBox");
+    const detailTitle = document.getElementById("detailTitle");
+    const detailCrumb = document.getElementById("detailCrumb");
+    const railTitle = document.getElementById("railTitle");
+    const railCrumb = document.getElementById("railCrumb");
+    const transcriptTitle = document.getElementById("transcriptTitle");
+    const transcriptCrumb = document.getElementById("transcriptCrumb");
+
+    const content = {
+      parent: {
+        detailTitle: "Resume sync engine refactor",
+        detailCrumb: "Codex - Today 11:38 - Codex-History",
+        railTitle: "Side chats for this parent",
+        railCrumb: "2 today - newest first",
+        transcriptTitle: "Side Chat - Vector clock answer",
+        transcriptCrumb: "Parent: Resume sync refactor",
+        search: "vector clock recap"
+      },
+      search: {
+        detailTitle: "Search result in side chat",
+        detailCrumb: "Phrase match - Parent: Resume sync engine refactor",
+        railTitle: "Matched side chat",
+        railCrumb: "1 side chat matched this phrase",
+        transcriptTitle: "Side Chat - Vector clock answer",
+        transcriptCrumb: "Matched: vector clock recap",
+        search: "vector clock recap"
+      },
+      global: {
+        detailTitle: "Recent side chats",
+        detailCrumb: "Codex - Today - all parents",
+        railTitle: "Recent side chats",
+        railCrumb: "Filtered to today - parent shown on each result",
+        transcriptTitle: "Side Chat - Vector clock answer",
+        transcriptCrumb: "Parent: Resume sync refactor",
+        search: ""
+      }
+    };
+
+    function setMode(mode) {
+      app.className = "window mode-" + mode;
+      for (const button of buttons) {
+        button.classList.toggle("active", button.dataset.mode === mode);
+      }
+      const next = content[mode];
+      detailTitle.textContent = next.detailTitle;
+      detailCrumb.textContent = next.detailCrumb;
+      railTitle.textContent = next.railTitle;
+      railCrumb.textContent = next.railCrumb;
+      transcriptTitle.textContent = next.transcriptTitle;
+      transcriptCrumb.textContent = next.transcriptCrumb;
+      searchBox.value = next.search;
+    }
+
+    for (const button of buttons) {
+      button.addEventListener("click", () => setMode(button.dataset.mode));
+    }
+  </script>
+</body>
+</html>
