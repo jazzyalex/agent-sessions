@@ -274,15 +274,33 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         if let light = lightweightTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !light.isEmpty {
             return light
         }
-        if let user = events.first(where: { $0.kind == .user })?.text?.collapsedWhitespace(), !user.isEmpty {
-            return user
+        var firstAssistant: String?
+        var firstToolName: String?
+        for index in events.indices {
+            let event = events[index]
+            switch event.kind {
+            case .user:
+                if let user = event.text?.collapsedWhitespace(), !user.isEmpty {
+                    return user
+                }
+            case .assistant:
+                if firstAssistant == nil,
+                   let assistant = event.text?.collapsedWhitespace(),
+                   !assistant.isEmpty {
+                    firstAssistant = assistant
+                }
+            case .tool_call:
+                if firstToolName == nil,
+                   let toolName = event.toolName,
+                   !toolName.isEmpty {
+                    firstToolName = toolName
+                }
+            default:
+                break
+            }
         }
-        if let assistant = events.first(where: { $0.kind == .assistant })?.text?.collapsedWhitespace(), !assistant.isEmpty {
-            return assistant
-        }
-        if let name = events.first(where: { $0.kind == .tool_call && ($0.toolName?.isEmpty == false) })?.toolName {
-            return name
-        }
+        if let firstAssistant { return firstAssistant }
+        if let firstToolName { return firstToolName }
         return "No prompt"
     }
 
@@ -654,7 +672,13 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var isWorktree: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isWorktree }) ?? false }
     public var isSubmodule: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isSubmodule }) ?? false }
 
-    public var nonMetaCount: Int { events.filter { $0.kind != .meta }.count }
+    public var nonMetaCount: Int {
+        var count = 0
+        for index in events.indices where events[index].kind != .meta {
+            count += 1
+        }
+        return count
+    }
 
     // Effective message count: use actual nonMetaCount when events loaded, otherwise eventCount estimate.
     // This must be stable: loading events should not cause a previously-visible session to disappear under
