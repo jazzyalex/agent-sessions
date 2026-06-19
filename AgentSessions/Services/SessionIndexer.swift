@@ -113,6 +113,7 @@ final class SessionIndexer: ObservableObject {
     private let transcriptCache = TranscriptCache()
     private let progressThrottler = ProgressThrottler()
     private var refreshTask: Task<Void, Never>? = nil
+    private var sideChatRefreshTask: Task<Void, Never>? = nil
 
     // Expose cache for SearchCoordinator (internal - not public API)
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
@@ -648,6 +649,8 @@ final class SessionIndexer: ObservableObject {
         refreshToken = token
         refreshTask?.cancel()
         refreshTask = nil
+        sideChatRefreshTask?.cancel()
+        sideChatRefreshTask = nil
         transcriptPrewarmTask?.cancel()
         transcriptPrewarmTask = nil
         launchPhase = .hydrating
@@ -873,8 +876,6 @@ final class SessionIndexer: ObservableObject {
             // Reuse Codex state/thread_name lookups loaded earlier in this refresh cycle.
             Self.applyCodexStateMetadata(&allParsedSessions, from: stateThreads)
             Self.applyCodexThreadNames(&allParsedSessions, from: threadNames)
-            let sideChatSessions = CodexSideChatLogReader.loadSideChatSessions(sessionsRoot: self.sessionsRoot())
-            allParsedSessions = Self.appendingCodexSideChats(sideChatSessions, to: allParsedSessions)
             let totalParsedCount = allParsedSessions.count
 
             let hideProbes = !(UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions"))
@@ -903,7 +904,11 @@ final class SessionIndexer: ObservableObject {
             }
             await MainActor.run {
                 guard self.refreshToken == token else { return }
-                LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithArchives.count))")
+                let priorSideChats = self.allSessions.filter(\.isSideChat)
+                let mergedWithPreviousSideChats = Self.sortedByModifiedDescending(
+                    Self.appendingCodexSideChats(priorSideChats, to: mergedWithArchives)
+                )
+                LaunchProfiler.log("Codex.refresh: sessions merged (total=\(mergedWithPreviousSideChats.count))")
 
                 // Preserve in-memory backfilled codex internal IDs if this merged snapshot
                 // was assembled from an older session snapshot.
@@ -918,8 +923,8 @@ final class SessionIndexer: ObservableObject {
 
                 var missingHintUpdates: [String: String] = [:]
                 if !priorCodexHintsByID.isEmpty {
-                    missingHintUpdates.reserveCapacity(mergedWithArchives.count)
-                    for session in mergedWithArchives {
+                    missingHintUpdates.reserveCapacity(mergedWithPreviousSideChats.count)
+                    for session in mergedWithPreviousSideChats {
                         guard session.source == .codex,
                               (session.codexInternalSessionIDHint?.isEmpty ?? true),
                               let hint = priorCodexHintsByID[session.id] else { continue }
@@ -927,7 +932,7 @@ final class SessionIndexer: ObservableObject {
                     }
                 }
 
-                self.allSessions = mergedWithArchives
+                self.allSessions = mergedWithPreviousSideChats
                 if !missingHintUpdates.isEmpty {
                     self.applyCodexInternalSessionIDHintUpdates(missingHintUpdates)
                 }
@@ -1007,6 +1012,7 @@ final class SessionIndexer: ObservableObject {
                     self.filesProcessed = self.totalFiles
                     self.progressText = "Indexed \(self.totalFiles)/\(self.totalFiles)"
                 }
+                self.scheduleSideChatRefresh(token: token, sessionsRoot: root)
 
                 // Wait a moment for filters to apply, then check what's visible
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -1029,6 +1035,8 @@ final class SessionIndexer: ObservableObject {
         refreshToken = UUID()
         refreshTask?.cancel()
         refreshTask = nil
+        sideChatRefreshTask?.cancel()
+        sideChatRefreshTask = nil
         codexInternalIDBackfillTask?.cancel()
         codexInternalIDBackfillTask = nil
         transcriptPrewarmTask?.cancel()
@@ -1039,6 +1047,36 @@ final class SessionIndexer: ObservableObject {
         if launchPhase != .error {
             launchPhase = .ready
         }
+    }
+
+    @MainActor
+    private func scheduleSideChatRefresh(token: UUID, sessionsRoot: URL) {
+        sideChatRefreshTask?.cancel()
+        sideChatRefreshTask = Task.detached(priority: .utility) { [weak self, token, sessionsRoot] in
+            let cachedSideChats = CodexSideChatLogReader.loadCachedSideChatSessions(sessionsRoot: sessionsRoot)
+            if Task.isCancelled { return }
+            if !cachedSideChats.isEmpty {
+                await self?.publishSideChats(cachedSideChats, token: token, source: "cache")
+            }
+
+            LaunchProfiler.log("Codex.sideChats: refresh start")
+            let sideChatSessions = CodexSideChatLogReader.loadSideChatSessions(sessionsRoot: sessionsRoot)
+            if Task.isCancelled { return }
+            await self?.publishSideChats(sideChatSessions, token: token, source: "sqlite")
+        }
+    }
+
+    @MainActor
+    private func publishSideChats(_ sideChats: [Session], token: UUID, source: String) {
+        guard refreshToken == token else { return }
+        if source == "sqlite" {
+            sideChatRefreshTask = nil
+        }
+
+        let base = allSessions.filter { !$0.isSideChat }
+        let merged = Self.sortedByModifiedDescending(Self.appendingCodexSideChats(sideChats, to: base))
+        allSessions = merged
+        LaunchProfiler.log("Codex.sideChats: \(source) publish (sideChats=\(sideChats.count), total=\(merged.count))")
     }
 
     private func seedKnownFileStatsIfNeeded() async {
@@ -1545,6 +1583,13 @@ final class SessionIndexer: ObservableObject {
             merged.append(sideChat)
         }
         return merged
+    }
+
+    private static func sortedByModifiedDescending(_ sessions: [Session]) -> [Session] {
+        sessions.sorted { lhs, rhs in
+            if lhs.modifiedAt == rhs.modifiedAt { return lhs.id > rhs.id }
+            return lhs.modifiedAt > rhs.modifiedAt
+        }
     }
 
     private static func nonEmptyCodexStateCwd(_ value: String?) -> String? {

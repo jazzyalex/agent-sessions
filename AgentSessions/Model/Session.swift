@@ -274,24 +274,24 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         if let light = lightweightTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !light.isEmpty {
             return light
         }
-        var firstAssistant: String?
+        var sawFirstUser = false
+        var firstAssistantIndex: Int?
         var firstToolName: String?
         for index in events.indices {
-            let event = events[index]
-            switch event.kind {
+            switch events[index].kind {
             case .user:
-                if let user = event.text?.collapsedWhitespace(), !user.isEmpty {
+                guard !sawFirstUser else { continue }
+                sawFirstUser = true
+                if let user = events[index].text?.collapsedWhitespace(), !user.isEmpty {
                     return user
                 }
             case .assistant:
-                if firstAssistant == nil,
-                   let assistant = event.text?.collapsedWhitespace(),
-                   !assistant.isEmpty {
-                    firstAssistant = assistant
+                if firstAssistantIndex == nil {
+                    firstAssistantIndex = index
                 }
             case .tool_call:
                 if firstToolName == nil,
-                   let toolName = event.toolName,
+                   let toolName = events[index].toolName,
                    !toolName.isEmpty {
                     firstToolName = toolName
                 }
@@ -299,7 +299,11 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 break
             }
         }
-        if let firstAssistant { return firstAssistant }
+        if let firstAssistantIndex,
+           let assistant = events[firstAssistantIndex].text?.collapsedWhitespace(),
+           !assistant.isEmpty {
+            return assistant
+        }
         if let firstToolName { return firstToolName }
         return "No prompt"
     }

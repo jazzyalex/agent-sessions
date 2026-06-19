@@ -8,27 +8,66 @@ enum CodexSideChatLogReader {
     static let sideConversationBoundary = "You are a side-conversation assistant"
     private static let sideConversationActiveMarker = "Only messages submitted after this boundary are active user instructions for this side conversation."
     private static let maxLogDatabasesPerRefresh = 3
+    private static let coldSideChatDiscoveryRowIDWindow: Int64 = 7_500_000
+    static var cacheURLOverride: URL?
 
     static func loadSideChatSessions(sessionsRoot: URL,
                                      maxThreads: Int = 200,
-                                     maxRowsPerThread: Int = 1_000) -> [Session] {
+                                     maxRowsPerThread: Int = 1_000,
+                                     useCache: Bool = true) -> [Session] {
         loadSideChatSessions(codexHome: codexHome(fromSessionsRoot: sessionsRoot),
                              maxThreads: maxThreads,
-                             maxRowsPerThread: maxRowsPerThread)
+                             maxRowsPerThread: maxRowsPerThread,
+                             useCache: useCache)
     }
 
     static func loadSideChatSessions(codexHome: URL,
                                      maxThreads: Int = 200,
-                                     maxRowsPerThread: Int = 1_000) -> [Session] {
+                                     maxRowsPerThread: Int = 1_000,
+                                     useCache: Bool = true) -> [Session] {
         let dbURLs = logDatabaseURLs(codexHome: codexHome)
         guard !dbURLs.isEmpty else { return [] }
 
+        var cache = useCache ? ThreadDiscoveryCache.load() : nil
         var sessions: [Session] = []
         var seenIDs: Set<String> = []
         for dbURL in dbURLs {
             for session in loadSideChatSessions(from: dbURL,
                                                 maxThreads: maxThreads,
-                                                maxRowsPerThread: maxRowsPerThread) {
+                                                maxRowsPerThread: maxRowsPerThread,
+                                                cache: useCache ? cache : nil) {
+                guard seenIDs.insert(session.id).inserted else { continue }
+                sessions.append(session)
+                if sessions.count >= maxThreads { return sessions.sorted { $0.modifiedAt > $1.modifiedAt } }
+            }
+            if useCache {
+                cache = ThreadDiscoveryCache.load()
+            }
+        }
+        return sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    static func loadCachedSideChatSessions(sessionsRoot: URL,
+                                           maxThreads: Int = 200) -> [Session] {
+        loadCachedSideChatSessions(codexHome: codexHome(fromSessionsRoot: sessionsRoot),
+                                   maxThreads: maxThreads)
+    }
+
+    static func loadCachedSideChatSessions(codexHome: URL,
+                                           maxThreads: Int = 200) -> [Session] {
+        let dbURLs = logDatabaseURLs(codexHome: codexHome)
+        guard !dbURLs.isEmpty else { return [] }
+
+        let cache = ThreadDiscoveryCache.load()
+        var sessions: [Session] = []
+        var seenIDs: Set<String> = []
+        for dbURL in dbURLs {
+            guard let entry = cache.entry(for: dbURL),
+                  fileSizeBytes(dbURL) >= entry.fileSizeBytes,
+                  let cachedSessions = entry.sideChatSessions else {
+                continue
+            }
+            for session in cachedSessions {
                 guard seenIDs.insert(session.id).inserted else { continue }
                 sessions.append(session)
                 if sessions.count >= maxThreads { return sessions.sorted { $0.modifiedAt > $1.modifiedAt } }
@@ -74,7 +113,8 @@ enum CodexSideChatLogReader {
 
     private static func loadSideChatSessions(from dbURL: URL,
                                              maxThreads: Int,
-                                             maxRowsPerThread: Int) -> [Session] {
+                                             maxRowsPerThread: Int,
+                                             cache: ThreadDiscoveryCache?) -> [Session] {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(dbURL.path, &db, flags, nil) == SQLITE_OK else {
@@ -83,7 +123,10 @@ enum CodexSideChatLogReader {
         }
         defer { sqlite3_close(db) }
 
-        let sideThreadIDs = readSideThreadIDs(db: db, maxThreads: maxThreads)
+        let sideThreadIDs = discoverSideThreadIDs(db: db,
+                                                  dbURL: dbURL,
+                                                  maxThreads: maxThreads,
+                                                  cache: cache)
         guard !sideThreadIDs.isEmpty else { return [] }
 
         var sessions: [Session] = []
@@ -96,10 +139,62 @@ enum CodexSideChatLogReader {
                 sessions.append(session)
             }
         }
+        if var cache {
+            let latest = latestLogPositionByRowID(db: db)
+            cache.update(dbURL: dbURL,
+                         fileSizeBytes: fileSizeBytes(dbURL),
+                         highWater: latest,
+                         threadIDs: sideThreadIDs,
+                         sideChatSessions: sessions)
+            cache.save()
+        }
         return sessions
     }
 
-    private static func readSideThreadIDs(db: OpaquePointer?, maxThreads: Int) -> [String] {
+    private static func discoverSideThreadIDs(db: OpaquePointer?,
+                                              dbURL: URL,
+                                              maxThreads: Int,
+                                              cache: ThreadDiscoveryCache?) -> [String] {
+        guard let latest = latestLogPositionByRowID(db: db) else {
+            return []
+        }
+        let newestRowID = latest.id
+        let fileSize = fileSizeBytes(dbURL)
+        let cached = cache?.entry(for: dbURL)
+        var ids: [String] = []
+        if let cached,
+           let highWater = cached.highWater,
+           cached.fileSizeBytes <= fileSize,
+           highWater.id <= newestRowID {
+            ids = cached.threadIDs
+            if highWater.id < newestRowID {
+                ids = mergeThreadIDs(readSideThreadIDs(db: db,
+                                                       maxThreads: maxThreads,
+                                                       after: highWater,
+                                                       newestRowID: newestRowID),
+                                     withCached: ids)
+            }
+        } else {
+            ids = readSideThreadIDs(db: db, maxThreads: maxThreads, after: nil, newestRowID: newestRowID)
+        }
+
+        let capped = Array(ids.prefix(maxThreads))
+        if var cache {
+            cache.update(dbURL: dbURL,
+                         fileSizeBytes: fileSize,
+                         highWater: latest,
+                         threadIDs: capped,
+                         sideChatSessions: nil)
+            cache.save()
+        }
+        return capped
+    }
+
+    private static func readSideThreadIDs(db: OpaquePointer?,
+                                          maxThreads: Int,
+                                          after position: LogPosition?,
+                                          newestRowID: Int64) -> [String] {
+        let minimumRowID = position?.id ?? max(0, newestRowID - coldSideChatDiscoveryRowIDWindow)
         let sql = """
         SELECT thread_id, feedback_log_body
         FROM logs
@@ -107,15 +202,20 @@ enum CodexSideChatLogReader {
           AND target = 'codex_api::endpoint::responses_websocket'
           AND feedback_log_body LIKE '%websocket request:%'
           AND feedback_log_body LIKE ?
-        ORDER BY ts DESC, ts_nanos DESC, id DESC
+          AND id > ?
+        ORDER BY id DESC
         LIMIT ?;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        sqlite3_bind_text(stmt, 1, "%\(sideConversationHeader)%", -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(stmt, 2, Int32(maxThreads * 10))
+        var bindIndex: Int32 = 1
+        sqlite3_bind_text(stmt, bindIndex, "%\(sideConversationHeader)%", -1, SQLITE_TRANSIENT)
+        bindIndex += 1
+        sqlite3_bind_int64(stmt, bindIndex, minimumRowID)
+        bindIndex += 1
+        sqlite3_bind_int(stmt, bindIndex, Int32(maxThreads * 10))
 
         var ids: [String] = []
         var seen: Set<String> = []
@@ -132,6 +232,36 @@ enum CodexSideChatLogReader {
             if ids.count >= maxThreads { break }
         }
         return ids
+    }
+
+    private static func mergeThreadIDs(_ newIDs: [String], withCached cachedIDs: [String]) -> [String] {
+        var merged: [String] = []
+        var seen: Set<String> = []
+        for id in newIDs + cachedIDs where seen.insert(id).inserted {
+            merged.append(id)
+        }
+        return merged
+    }
+
+    private static func latestLogPositionByRowID(db: OpaquePointer?) -> LogPosition? {
+        let sql = """
+        SELECT ts, ts_nanos, id
+        FROM logs
+        ORDER BY id DESC
+        LIMIT 1;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return LogPosition(ts: sqlite3_column_int64(stmt, 0),
+                           tsNanos: sqlite3_column_int64(stmt, 1),
+                           id: sqlite3_column_int64(stmt, 2))
+    }
+
+    private static func fileSizeBytes(_ url: URL) -> Int64 {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return Int64(values?.fileSize ?? 0)
     }
 
     private static func buildSession(db: OpaquePointer?,
@@ -221,6 +351,101 @@ enum CodexSideChatLogReader {
         var timestamp: Date {
             Date(timeIntervalSince1970: TimeInterval(ts) + (TimeInterval(tsNanos) / 1_000_000_000))
         }
+    }
+
+    private struct LogPosition: Codable, Comparable {
+        let ts: Int64
+        let tsNanos: Int64
+        let id: Int64
+
+        static func < (lhs: LogPosition, rhs: LogPosition) -> Bool {
+            if lhs.ts != rhs.ts { return lhs.ts < rhs.ts }
+            if lhs.tsNanos != rhs.tsNanos { return lhs.tsNanos < rhs.tsNanos }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private struct ThreadDiscoveryCache: Codable {
+        private static let currentSchemaVersion = 2
+
+        var schemaVersion: Int = currentSchemaVersion
+        var databases: [String: CachedDatabase] = [:]
+
+        static func load() -> ThreadDiscoveryCache {
+            for url in cacheReadURLs() {
+                guard let data = try? Data(contentsOf: url),
+                      let cache = try? JSONDecoder().decode(ThreadDiscoveryCache.self, from: data),
+                      cache.schemaVersion == currentSchemaVersion else {
+                    continue
+                }
+                return cache
+            }
+            return ThreadDiscoveryCache()
+        }
+
+        func entry(for dbURL: URL) -> CachedDatabase? {
+            databases[Self.cacheKey(for: dbURL)]
+        }
+
+        mutating func update(dbURL: URL,
+                             fileSizeBytes: Int64,
+                             highWater: LogPosition?,
+                             threadIDs: [String],
+                             sideChatSessions: [Session]?) {
+            let key = Self.cacheKey(for: dbURL)
+            let existing = databases[key]
+            databases[key] = CachedDatabase(fileSizeBytes: fileSizeBytes,
+                                            highWater: highWater ?? existing?.highWater,
+                                            threadIDs: threadIDs,
+                                            sideChatSessions: sideChatSessions ?? existing?.sideChatSessions)
+        }
+
+        func save() {
+            guard let url = Self.cacheURL() else { return }
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                        withIntermediateDirectories: true)
+                let data = try JSONEncoder().encode(self)
+                try data.write(to: url, options: [.atomic])
+            } catch {
+                return
+            }
+        }
+
+        private static func cacheURL() -> URL? {
+            if let override = CodexSideChatLogReader.cacheURLOverride {
+                return override
+            }
+            guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                            in: .userDomainMask).first else {
+                return nil
+            }
+            return appSupport
+                .appendingPathComponent("AgentSessions", isDirectory: true)
+                .appendingPathComponent("codex-side-chat-cache-v2.json")
+        }
+
+        private static func cacheReadURLs() -> [URL] {
+            guard let primary = cacheURL() else { return [] }
+            if CodexSideChatLogReader.cacheURLOverride != nil {
+                return [primary]
+            }
+            let legacy = primary
+                .deletingLastPathComponent()
+                .appendingPathComponent("codex-side-chat-thread-cache-v1.json")
+            return [primary, legacy]
+        }
+
+        private static func cacheKey(for url: URL) -> String {
+            url.standardizedFileURL.path
+        }
+    }
+
+    private struct CachedDatabase: Codable {
+        let fileSizeBytes: Int64
+        let highWater: LogPosition?
+        let threadIDs: [String]
+        let sideChatSessions: [Session]?
     }
 
     private static func readRows(db: OpaquePointer?, threadID: String, maxRows: Int) -> [LogRow] {
