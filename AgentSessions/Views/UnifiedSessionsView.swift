@@ -292,8 +292,14 @@ struct UnifiedSessionsView: View {
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
 		@State private var cachedRows: [Session] = []
-    @State private var collapsedParents: Set<String> = []
-    @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
+        @State private var cachedRowIDs: [String] = []
+        @State private var cachedVisibleRowIDs: Set<String> = []
+        @State private var cachedTotalSessionCount: Int = 0
+        @State private var cachedLatestModifiedAt: Date? = nil
+	    @State private var collapsedParents: Set<String> = []
+	    @State private var hasLoadedPersistedCollapsedParents: Bool = false
+	    @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
+        @State private var cachedExpandableParentIDs: Set<String> = []
 	@State private var columnLayoutID: UUID = UUID()
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
 	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
@@ -301,6 +307,7 @@ struct UnifiedSessionsView: View {
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
+    @AppStorage(PreferencesKey.Unified.collapsedHierarchyParents) private var collapsedHierarchyParentsRaw: String = ""
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 	@AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 	@AppStorage("ModifiedDisplay") private var modifiedDisplayRaw: String = SessionIndexer.ModifiedDisplay.relative.rawValue
@@ -494,6 +501,7 @@ struct UnifiedSessionsView: View {
 				                    updateFooterUsageVisibility()
 				                    if sortOrder.isEmpty { sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)] }
 				                    if !liveSessionsFeatureEnabled { showActiveSessionsOnly = false }
+                                    loadPersistedCollapsedParentsIfNeeded()
 				                    updateCachedRows()
 				                    ensureDefaultSelectionIfNeeded()
 				                    unified.setAppActive(NSApp.isActive)
@@ -566,13 +574,11 @@ struct UnifiedSessionsView: View {
                 updateFocusedSessionIfNeeded(selectedSession)
             }
             .onChange(of: showSubagentHierarchy) { _, newValue in
-                if newValue {
-                    // Reset collapsed state so all parents start expanded
-                    collapsedParents.removeAll()
-                }
+                if !newValue { persistCollapsedParents() }
                 updateCachedRows()
             }
             .onChange(of: collapsedParents) { _, _ in
+                persistCollapsedParents()
                 updateCachedRows()
             }
 
@@ -871,13 +877,13 @@ struct UnifiedSessionsView: View {
                    ideal: showModified ? 120 : 0,
                    max: showModified ? 140 : 0)
 
-            TableColumn("Project", value: \Session.repoDisplay) { s in
+            TableColumn("Project", value: \Session.rowRepoDisplay) { s in
                 let display: String = {
                     if s.source == .gemini {
-                        if let name = s.repoName, !name.isEmpty { return name }
+                        if let name = s.rowRepoName, !name.isEmpty { return name }
                         return "—"
                     } else {
-                        return s.repoDisplay
+                        return s.rowRepoDisplay
                     }
                 }()
                 let isNestedHierarchyRow = showSubagentHierarchy
@@ -886,10 +892,10 @@ struct UnifiedSessionsView: View {
                 ProjectCellView(
                     id: s.id,
                     display: display,
-                    worktree: isNestedHierarchyRow ? nil : s.projectWorktreeDisplayName
+                    worktree: isNestedHierarchyRow ? nil : s.rowProjectWorktreeDisplayName
                 )
                     .onTapGesture(count: 2) {
-                        if let name = s.repoName { unified.projectFilter = name; unified.recomputeNow() }
+                        if let name = s.rowRepoName { unified.projectFilter = name; unified.recomputeNow() }
                     }
             }
             .width(min: showProject ? 120 : 0,
@@ -965,7 +971,7 @@ struct UnifiedSessionsView: View {
                     Button("Show Git Context") { showGitInspector(s) }
                         .help("Show historical and current git context with safety analysis")
                 }
-                if let name = s.repoName, !name.isEmpty {
+                if let name = s.rowRepoName, !name.isEmpty {
                     Divider()
                     Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
                         .keyboardShortcut("p", modifiers: [.command, .option])
@@ -996,7 +1002,7 @@ struct UnifiedSessionsView: View {
                 let key: UnifiedSessionIndexer.SessionSortDescriptor.Key
                 if first.keyPath == \Session.modifiedAt { key = .modified }
                 else if first.keyPath == \Session.messageCount { key = .msgs }
-                else if first.keyPath == \Session.repoDisplay { key = .repo }
+                else if first.keyPath == \Session.rowRepoDisplay { key = .repo }
                 else if first.keyPath == \Session.fileSizeSortKey { key = .size }
                 else if first.keyPath == \Session.sourceKey { key = .agent }
                 else if first.keyPath == \Session.listTitle { key = .title }
@@ -1019,6 +1025,7 @@ struct UnifiedSessionsView: View {
 				.onChange(of: unified.sessions) { _, _ in
 					// Update cached rows first, then reconcile canonical selection with fresh data.
 					selectionTrace("sessions changed begin selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
+                    restartSearchForSideChatDatasetChangeIfNeeded()
 					isDatasetChurning = true
 					let heldRows = updateCachedRows()
 					ensureDefaultSelectionIfNeeded()
@@ -1107,7 +1114,7 @@ struct UnifiedSessionsView: View {
 
 	    private var footerSessionCountText: String {
 	        let visible = cachedRows.count
-	        let total = unified.sessions.count
+	        let total = cachedTotalSessionCount
 	        let countText = visible != total
 	            ? "\(visible) / \(total) Sessions"
 	            : "\(total) Sessions"
@@ -1118,8 +1125,7 @@ struct UnifiedSessionsView: View {
 	    }
 
 	    private var footerFreshnessText: String? {
-	        let date = unified.sessions.map(\.modifiedAt).max() ?? cachedRows.map(\.modifiedAt).max()
-	        guard let date else { return nil }
+	        guard let date = cachedLatestModifiedAt else { return nil }
 	        return "Last: \(timeAgoShort(date))"
 	    }
 
@@ -1410,6 +1416,20 @@ struct UnifiedSessionsView: View {
                 .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
 
+                ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
+                    ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
+                } action: {
+                    collapseAllHierarchyParents()
+                }
+                .disabled(!isHierarchyBrowsing || currentExpandableParentIDs.isEmpty)
+
+                ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
+                    ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
+                } action: {
+                    expandAllHierarchyParents()
+                }
+                .disabled(!isHierarchyBrowsing || collapsedParents.isEmpty)
+
                 if codexAgentEnabled {
                     Button("") { unified.includeCodex.toggle() }
                         .keyboardShortcut("1", modifiers: .command)
@@ -1604,22 +1624,16 @@ struct UnifiedSessionsView: View {
         }
     }
 
-	    private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
-
-		    private var visibleRowIDs: Set<String> {
-		        Set(cachedRows.map(\.id))
-		    }
+		    private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
             private var currentExpandableParentIDs: Set<String> {
                 guard isHierarchyBrowsing else { return [] }
-                return Set(cachedRows.compactMap { session in
-                    hierarchyRowMeta[session.id]?.hasChildren == true ? session.id : nil
-                })
+                return cachedExpandableParentIDs
             }
 
             private var parentIDForSelectedHierarchyChild: String? {
                 UnifiedHierarchyCommandPolicy.parentIDForSelectedHierarchyChild(
-                    rowIDs: cachedRows.map(\.id),
+                    rowIDs: cachedRowIDs,
                     rowMeta: hierarchyRowMeta,
                     selectedID: selection
                 )
@@ -1647,6 +1661,24 @@ struct UnifiedSessionsView: View {
                 )
             }
 
+            private func loadPersistedCollapsedParentsIfNeeded() {
+                guard !hasLoadedPersistedCollapsedParents else { return }
+                hasLoadedPersistedCollapsedParents = true
+                collapsedParents = Self.decodeCollapsedHierarchyParents(collapsedHierarchyParentsRaw)
+            }
+
+            private func persistCollapsedParents() {
+                collapsedHierarchyParentsRaw = Self.encodeCollapsedHierarchyParents(collapsedParents)
+            }
+
+            private static func encodeCollapsedHierarchyParents(_ ids: Set<String>) -> String {
+                ids.sorted().joined(separator: "\n")
+            }
+
+            private static func decodeCollapsedHierarchyParents(_ raw: String) -> Set<String> {
+                Set(raw.split(separator: "\n").map(String.init))
+            }
+
 		    private var tableSingleSelection: Binding<String?> {
 	        Binding(
 	            get: {
@@ -1656,7 +1688,7 @@ struct UnifiedSessionsView: View {
                     ) else {
                         return nil
                     }
-	                guard let id = selection, visibleRowIDs.contains(id) else { return nil }
+		                guard let id = selection, cachedVisibleRowIDs.contains(id) else { return nil }
 	                return id
 	            },
 	            set: { newID in
@@ -1673,11 +1705,11 @@ struct UnifiedSessionsView: View {
 	                    .shouldClearCanonicalSelectionOnTableDeselection(
 	                        isDatasetChurning: isDatasetChurning,
 	                        currentSelectionID: selection,
-	                        visibleRowIDs: visibleRowIDs
-	                    )
+		                        visibleRowIDs: cachedVisibleRowIDs
+		                    )
 	                let userInitiated = isLikelyUserInitiatedTableDeselection()
 	                selectionTrace(
-	                    "table clear-request current=\(selection ?? "nil") shouldClear=\(shouldClearSelection) userInitiated=\(userInitiated) churning=\(isDatasetChurning) visibleCount=\(visibleRowIDs.count)"
+		                    "table clear-request current=\(selection ?? "nil") shouldClear=\(shouldClearSelection) userInitiated=\(userInitiated) churning=\(isDatasetChurning) visibleCount=\(cachedVisibleRowIDs.count)"
 	                )
 	                guard userInitiated else { return }
 	                guard shouldClearSelection else { return }
@@ -2030,9 +2062,9 @@ struct UnifiedSessionsView: View {
         unified.setFocusedSession(session)
     }
 
-	    @discardableResult
-	    private func updateCachedRows() -> Bool {
-        rebuildCachedFallbackPresences()
+		    @discardableResult
+		    private func updateCachedRows() -> Bool {
+	        rebuildCachedFallbackPresences()
 #if DEBUG
         let startedAt = Date()
         defer {
@@ -2061,13 +2093,15 @@ struct UnifiedSessionsView: View {
             }
         }
 #endif
-		        let nextRows: [Session]
-	        if FeatureFlags.coalesceListResort {
-            // unified.sessions is already sorted by the view model's descriptor
-            nextRows = rows
-        } else {
-            nextRows = rows.sorted(using: sortOrder)
-        }
+			        let nextRows: [Session]
+		        if FeatureFlags.coalesceListResort {
+	            // unified.sessions is already sorted by the view model's descriptor
+	            nextRows = rows
+	        } else {
+	            nextRows = rows.sorted(using: sortOrder)
+	        }
+            cachedTotalSessionCount = unified.sessions.count
+            cachedLatestModifiedAt = latestModifiedAt(in: unified.sessions) ?? latestModifiedAt(in: nextRows)
 
         let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
@@ -2094,9 +2128,10 @@ struct UnifiedSessionsView: View {
                     collapsedParents: collapsedParents,
                     hierarchyEnabled: showSubagentHierarchy && !searchActive
                 )
-	            cachedRows = hierarchyResult.sessions
+		            cachedRows = hierarchyResult.sessions
                 hierarchyRowMeta = hierarchyResult.rowMeta
-	        }
+                refreshCachedRowDerivedState()
+		        }
 	        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
 
 	        if let selectedID = selection,
@@ -2115,8 +2150,34 @@ struct UnifiedSessionsView: View {
 
 		        ensureDefaultSelectionIfNeeded()
 		        refreshSelectionSourceFromCachedRows()
-        return heldRows
-	    }
+	        return heldRows
+		    }
+
+    private func refreshCachedRowDerivedState() {
+        cachedRowIDs = cachedRows.map(\.id)
+        cachedVisibleRowIDs = Set(cachedRowIDs)
+        guard isHierarchyBrowsing else {
+            cachedExpandableParentIDs = []
+            return
+        }
+        cachedExpandableParentIDs = Set(cachedRows.compactMap { session in
+            hierarchyRowMeta[session.id]?.hasChildren == true ? session.id : nil
+        })
+    }
+
+    private func latestModifiedAt(in sessions: [Session]) -> Date? {
+        var latest: Date?
+        for session in sessions {
+            guard let current = latest else {
+                latest = session.modifiedAt
+                continue
+            }
+            if session.modifiedAt > current {
+                latest = session.modifiedAt
+            }
+        }
+        return latest
+    }
 
     private var isHierarchyBrowsing: Bool {
         showSubagentHierarchy && searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -2710,6 +2771,13 @@ struct UnifiedSessionsView: View {
         restartSearch(onlyIfRunning: false)
     }
 
+    private func restartSearchForSideChatDatasetChangeIfNeeded() {
+        let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        guard FilterEngine.parseOperators(q).sideChatsOnly else { return }
+        restartSearchForActiveQuery()
+    }
+
     private func restartSearch(onlyIfRunning: Bool) {
         guard !onlyIfRunning || searchCoordinator.isRunning else { return }
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2721,7 +2789,8 @@ struct UnifiedSessionsView: View {
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
                               pathContains: nil,
-                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
+                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
+                              sideChatsOnly: false)
         searchCoordinator.start(query: q,
                                 filters: filters,
                                 includeCodex: unified.includeCodex && codexAgentEnabled,
@@ -3551,7 +3620,8 @@ private struct UnifiedSearchFiltersView: View {
                               kinds: unified.selectedKinds,
                               repoName: unified.projectFilter,
                               pathContains: nil,
-                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
+                              archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
+                              sideChatsOnly: false)
         search.start(query: q,
                      filters: filters,
                      includeCodex: unified.includeCodex,
@@ -3586,7 +3656,8 @@ private struct UnifiedSearchFiltersView: View {
                                   kinds: unified.selectedKinds,
                                   repoName: unified.projectFilter,
                                   pathContains: nil,
-                                  archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly)
+                                  archivedCodexDesktopOnly: unified.showArchivedCodexDesktopOnly,
+                                  sideChatsOnly: false)
             search.start(query: q,
                          filters: filters,
                          includeCodex: unified.includeCodex,

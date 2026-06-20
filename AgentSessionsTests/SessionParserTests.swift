@@ -2,6 +2,21 @@ import XCTest
 import SQLite3
 @testable import AgentSessions
 
+private final class SearchCoordinatorTestStore: SearchSessionStoring {
+    private(set) var parseFullCallCount = 0
+
+    func transcriptCache(for source: SessionSource) -> TranscriptCache? {
+        nil
+    }
+
+    func updateSession(_ session: Session) {}
+
+    func parseFull(session: Session) async -> Session? {
+        parseFullCallCount += 1
+        return session
+    }
+}
+
 final class SessionParserTests: XCTestCase {
     func fixtureURL(_ name: String) -> URL {
         let bundle = Bundle(for: type(of: self))
@@ -52,7 +67,8 @@ final class SessionParserTests: XCTestCase {
         cwd: String,
         parentSessionID: String? = nil,
         subagentType: String? = nil,
-        relationshipKind: SessionRelationshipKind? = nil
+        relationshipKind: SessionRelationshipKind? = nil,
+        events: [SessionEvent] = []
     ) -> Session {
         Session(
             id: id,
@@ -61,8 +77,8 @@ final class SessionParserTests: XCTestCase {
             endTime: nil,
             model: nil,
             filePath: "/tmp/rollout-\(timestamp)-\(runtimeID).jsonl",
-            eventCount: 0,
-            events: [],
+            eventCount: events.count,
+            events: events,
             cwd: cwd,
             repoName: nil,
             lightweightTitle: id,
@@ -282,6 +298,255 @@ final class SessionParserTests: XCTestCase {
         filtered = FilterEngine.filterSessions(all, filters: filters)
         XCTAssertEqual(filtered.count, 1)
         XCTAssertEqual(filtered.first?.id, s2.id)
+    }
+
+    func testSideChatFilterOnlyShowsSideChats() throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-00-00",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat
+        )
+
+        let filtered = FilterEngine.filterSessions(
+            [root, sideChat],
+            filters: Filters(sideChatsOnly: true),
+            allowTranscriptGeneration: false
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["side-chat"])
+    }
+
+    func testSideSearchTagOnlyShowsSideChatsWithoutSearchingSideText() throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-00-00",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat
+        )
+
+        let filtered = FilterEngine.filterSessions(
+            [root, sideChat],
+            filters: Filters(query: "#side"),
+            allowTranscriptGeneration: false
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["side-chat"])
+        XCTAssertEqual(FilterEngine.parseOperators("#side").freeText, "")
+    }
+
+    func testSideSearchTagIgnoresArchivedCodexDesktopFilter() throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-00-00",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat
+        )
+
+        let filtered = FilterEngine.filterSessions(
+            [root, sideChat],
+            filters: Filters(query: "#side", archivedCodexDesktopOnly: true),
+            allowTranscriptGeneration: false
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["side-chat"])
+    }
+
+    func testSearchCoordinatorSideTagOnlyUsesMetadataPath() async throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-00-00",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat
+        )
+        let store = SearchCoordinatorTestStore()
+        let coordinator = SearchCoordinator(store: store)
+
+        coordinator.start(query: "#side",
+                          filters: Filters(query: "#side"),
+                          includeCodex: true,
+                          includeClaude: false,
+                          includeGemini: false,
+                          includeOpenCode: false,
+                          includeHermes: false,
+                          includeCopilot: false,
+                          includeDroid: false,
+                          includeOpenClaw: false,
+                          includeCursor: false,
+                          includePi: false,
+                          enableDeepScan: false,
+                          all: [root, sideChat])
+
+        try await waitForSearchResults(coordinator, expectedIDs: ["side-chat"])
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertEqual(store.parseFullCallCount, 0)
+    }
+
+    func testSearchCoordinatorSideTagIgnoresArchivedCodexDesktopFilter() async throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-00-00",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat
+        )
+        let store = SearchCoordinatorTestStore()
+        let coordinator = SearchCoordinator(store: store)
+
+        coordinator.start(query: "#side",
+                          filters: Filters(query: "#side", archivedCodexDesktopOnly: true),
+                          includeCodex: true,
+                          includeClaude: false,
+                          includeGemini: false,
+                          includeOpenCode: false,
+                          includeHermes: false,
+                          includeCopilot: false,
+                          includeDroid: false,
+                          includeOpenClaw: false,
+                          includeCursor: false,
+                          includePi: false,
+                          enableDeepScan: false,
+                          all: [root, sideChat])
+
+        try await waitForSearchResults(coordinator, expectedIDs: ["side-chat"])
+        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertEqual(store.parseFullCallCount, 0)
+    }
+
+    private func waitForSearchResults(_ coordinator: SearchCoordinator,
+                                      expectedIDs: [String],
+                                      file: StaticString = #filePath,
+                                      line: UInt = #line) async throws {
+        for _ in 0..<50 {
+            if coordinator.results.map(\.id) == expectedIDs {
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for search results. Got \(coordinator.results.map(\.id))",
+                file: file,
+                line: line)
+    }
+
+    func testSideSearchTagCombinesWithRemainingPhrase() throws {
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019ed789-0000-7000-8000-000000000002",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            relationshipKind: .sideChat,
+            events: [
+                SessionEvent(id: "side-marker",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "ABRACADABRA side-chat note",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ]
+        )
+        let matchingRoot = makeCodexHierarchySession(
+            id: "matching-root",
+            runtimeID: "019ed789-0000-7000-8000-000000000003",
+            timestamp: "2026-06-18T12-02-00",
+            cwd: "/tmp/repo",
+            events: [
+                SessionEvent(id: "root-marker",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "ABRACADABRA root note",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ]
+        )
+
+        let filtered = FilterEngine.filterSessions(
+            [matchingRoot, sideChat],
+            filters: Filters(query: "#side ABRACADABRA"),
+            allowTranscriptGeneration: false
+        )
+
+        XCTAssertEqual(filtered.map(\.id), ["side-chat"])
+        XCTAssertEqual(FilterEngine.parseOperators("#side ABRACADABRA").freeText, "ABRACADABRA")
+    }
+
+    func testQuotedSideSearchTagRemainsLiteralText() throws {
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019ed789-0000-7000-8000-000000000001",
+            timestamp: "2026-06-18T12-01-00",
+            cwd: "/tmp/repo",
+            events: [
+                SessionEvent(id: "quoted-side",
+                             timestamp: nil,
+                             kind: .user,
+                             role: "user",
+                             text: "literal #side tag",
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: "{}")
+            ]
+        )
+
+        let parsed = FilterEngine.parseOperators("\"#side\"")
+        let filtered = FilterEngine.filterSessions(
+            [root],
+            filters: Filters(query: "\"#side\""),
+            allowTranscriptGeneration: false
+        )
+
+        XCTAssertFalse(parsed.sideChatsOnly)
+        XCTAssertEqual(parsed.freeText, "\"#side\"")
+        XCTAssertEqual(filtered.map(\.id), ["root"])
     }
 
     func testSearchMatchesLightweightSessionTitle() throws {

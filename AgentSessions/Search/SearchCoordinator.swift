@@ -198,6 +198,33 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             if includePi { set.insert(.pi) }
             return set
         }()
+
+        let parsedForMetadata = FilterEngine.parseOperators(filters.query)
+        let metadataFreeText = parsedForMetadata.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let metadataRepo = filters.repoName ?? parsedForMetadata.repo
+        let metadataPath = filters.pathContains ?? parsedForMetadata.path
+        let metadataSideChatsOnly = filters.sideChatsOnly || parsedForMetadata.sideChatsOnly
+        let hasMetadataOnlyFilters = filters.model != nil ||
+            filters.dateFrom != nil ||
+            filters.dateTo != nil ||
+            metadataRepo != nil ||
+            metadataPath != nil ||
+            metadataSideChatsOnly
+        if metadataFreeText.isEmpty, hasMetadataOnlyFilters {
+            let candidates = Self.candidates(from: all, allowed: allowed, filters: filters)
+            let out = Self.metadataFilteredCandidates(candidates,
+                                                       filters: filters,
+                                                       effectiveRepo: metadataRepo,
+                                                       effectivePath: metadataPath,
+                                                       effectiveSideChatsOnly: metadataSideChatsOnly)
+            Task { @MainActor [weak self] in
+                guard let self, self.runID == newRunID else { return }
+                self.results = out
+                self.isRunning = false
+                self.progress = .init()
+            }
+            return
+        }
         
         // Flip running state immediately for early user feedback
         Task { @MainActor [weak self] in
@@ -219,7 +246,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             let effectiveFTSQuery = Self.makeInstantFTSQuery(from: freeText)
             let effectiveRepo = filters.repoName ?? parsed.repo
             let effectivePath = filters.pathContains ?? parsed.path
-            let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil)
+            let effectiveSideChatsOnly = filters.sideChatsOnly || parsed.sideChatsOnly
+            let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil) || effectiveSideChatsOnly
             let includeSystemProbes = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
 
             let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
@@ -242,7 +270,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 let searchableCandidates = Self.metadataFilteredCandidates(candidates,
                                                                            filters: filters,
                                                                            effectiveRepo: effectiveRepo,
-                                                                           effectivePath: effectivePath)
+                                                                           effectivePath: effectivePath,
+                                                                           effectiveSideChatsOnly: effectiveSideChatsOnly)
                 var byID: [String: Session] = [:]
                 byID.reserveCapacity(searchableCandidates.count)
                 for s in searchableCandidates { byID[s.id] = s }
@@ -653,10 +682,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     }
 
     private static func candidates(from all: [Session], allowed: Set<SessionSource>, filters: Filters) -> [Session] {
-        all.filter { session in
+        let sideChatsOnly = filters.sideChatsOnly || FilterEngine.parseOperators(filters.query).sideChatsOnly
+        return all.filter { session in
             guard allowed.contains(session.source) else { return false }
-            // Archive filter scopes only Codex; other agents pass through unaffected.
-            if filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession {
+            // Archive filter scopes only Codex; explicit side-chat searches should include
+            // recovered log rows even though those rows are not archived JSONL sessions.
+            if !sideChatsOnly, filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession {
                 return false
             }
             return true
@@ -666,7 +697,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     private static func metadataFilteredCandidates(_ candidates: [Session],
                                                    filters: Filters,
                                                    effectiveRepo: String?,
-                                                   effectivePath: String?) -> [Session] {
+                                                   effectivePath: String?,
+                                                   effectiveSideChatsOnly: Bool? = nil) -> [Session] {
         let metadataFilters = Filters(query: "",
                                       dateFrom: filters.dateFrom,
                                       dateTo: filters.dateTo,
@@ -674,7 +706,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                       kinds: filters.kinds,
                                       repoName: effectiveRepo,
                                       pathContains: effectivePath,
-                                      archivedCodexDesktopOnly: filters.archivedCodexDesktopOnly)
+                                      archivedCodexDesktopOnly: filters.archivedCodexDesktopOnly,
+                                      sideChatsOnly: effectiveSideChatsOnly ?? filters.sideChatsOnly)
         return FilterEngine.filterSessions(candidates,
                                            filters: metadataFilters,
                                            transcriptCache: nil,

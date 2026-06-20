@@ -459,7 +459,7 @@ final class SessionIndexer: ObservableObject {
                             eventCount: max(current.eventCount, fullSession.nonMetaCount),
                             events: fullSession.events,
                             cwd: current.lightweightCwd ?? fullSession.cwd,
-                            repoName: current.repoName,
+                            repoName: current.lightweightRepoName,
                             lightweightTitle: current.lightweightTitle,
                             lightweightCommands: current.lightweightCommands,
                             parentSessionID: fullSession.parentSessionID ?? current.parentSessionID,
@@ -1107,7 +1107,7 @@ final class SessionIndexer: ObservableObject {
             endTS: Int64((s.endTime ?? s.modifiedAt).timeIntervalSince1970),
             model: s.model,
             cwd: s.lightweightCwd,
-            repo: s.repoName,
+            repo: s.rowRepoName,
             title: s.lightweightTitle,
             codexInternalSessionID: s.codexInternalSessionIDHint,
             isHousekeeping: s.isHousekeeping,
@@ -1899,13 +1899,14 @@ final class SessionIndexer: ObservableObject {
         var codexSurfaceMetadata: CodexSurfaceMetadata? = nil
         var reasoningEffort: String? = nil
         var idx = 0
+        let eventIDBase = Self.hash(path: url.path)
         DBG("    📖 parseFileFull: Starting forEachLine...")
         do {
             try reader.forEachLine { rawLine in
                 idx += 1
                 // Only sanitize very large lines (>100KB) - sanitizeLargeLine has its own guards for smaller lines
                 let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
-                let (event, maybeModel) = Self.parseLine(safeLine, eventID: self.eventID(for: url, index: idx))
+                let (event, maybeModel) = Self.parseLine(safeLine, eventID: Self.eventID(base: eventIDBase, index: idx))
                 if let m = maybeModel, modelSeen == nil { modelSeen = m }
 
                 // Extract subagent info and turn_context model from early lines
@@ -1946,7 +1947,7 @@ final class SessionIndexer: ObservableObject {
             }
         } catch {
             // If file can't be read, emit a single error meta event
-            let event = SessionEvent(id: eventID(for: url, index: 0), timestamp: Date(), kind: .error, role: "system", text: "Failed to read: \(error.localizedDescription)", toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+            let event = SessionEvent(id: Self.eventID(base: eventIDBase, index: 0), timestamp: Date(), kind: .error, role: "system", text: "Failed to read: \(error.localizedDescription)", toolName: nil, toolInput: nil, toolOutput: nil, messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
             events.append(event)
         }
 
@@ -2559,12 +2560,16 @@ final class SessionIndexer: ObservableObject {
 
     private func eventID(for url: URL, index: Int) -> String {
         let base = Self.hash(path: url.path)
-        return base + String(format: "-%04d", index)
+        return Self.eventID(base: base, index: index)
     }
 
     static func eventID(forPath path: String, index: Int) -> String {
         let base = hash(path: path)
-        return base + String(format: "-%04d", index)
+        return eventID(base: base, index: index)
+    }
+
+    private static func eventID(base: String, index: Int) -> String {
+        base + String(format: "-%04d", index)
     }
 
     private static func hash(path: String) -> String {

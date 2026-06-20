@@ -219,6 +219,46 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         // isDeleted is a computed property (deletedAt != nil)
     }
 
+    public static func == (lhs: Session, rhs: Session) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.source == rhs.source &&
+            lhs.startTime == rhs.startTime &&
+            lhs.endTime == rhs.endTime &&
+            lhs.model == rhs.model &&
+            lhs.filePath == rhs.filePath &&
+            lhs.fileSizeBytes == rhs.fileSizeBytes &&
+            lhs.eventCount == rhs.eventCount &&
+            lhs.events.count == rhs.events.count &&
+            sameEventEdge(lhs.events.first, rhs.events.first) &&
+            sameEventEdge(lhs.events.last, rhs.events.last) &&
+            lhs.isHousekeeping == rhs.isHousekeeping &&
+            lhs.lightweightCommands == rhs.lightweightCommands &&
+            lhs.lightweightCwd == rhs.lightweightCwd &&
+            lhs.lightweightRepoName == rhs.lightweightRepoName &&
+            lhs.lightweightTitle == rhs.lightweightTitle &&
+            lhs.customTitle == rhs.customTitle &&
+            lhs.codexInternalSessionIDHint == rhs.codexInternalSessionIDHint &&
+            lhs.codexOriginator == rhs.codexOriginator &&
+            lhs.codexSource == rhs.codexSource &&
+            lhs.codexSurface == rhs.codexSurface &&
+            lhs.originator == rhs.originator &&
+            lhs.originSource == rhs.originSource &&
+            lhs.surface == rhs.surface &&
+            lhs.reasoningEffort == rhs.reasoningEffort &&
+            lhs.parentSessionID == rhs.parentSessionID &&
+            lhs.subagentType == rhs.subagentType &&
+            lhs.relationshipKind == rhs.relationshipKind &&
+            lhs.isFavorite == rhs.isFavorite &&
+            lhs.deletedAt == rhs.deletedAt
+    }
+
+    private static func sameEventEdge(_ lhs: SessionEvent?, _ rhs: SessionEvent?) -> Bool {
+        lhs?.id == rhs?.id &&
+            lhs?.timestamp == rhs?.timestamp &&
+            lhs?.kind == rhs?.kind &&
+            lhs?.role == rhs?.role
+    }
+
     public var shortID: String { String(id.prefix(6)) }
 
     public var isCodexDesktopSession: Bool {
@@ -643,10 +683,11 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             return stored
         }
 
+        return repoNameFromCwd()
+    }
+
+    private func repoNameFromCwd() -> String? {
         guard let cwd else { return nil }
-        // Avoid implicit filesystem probing here. This property is read per-row
-        // during startup/indexing and probing arbitrary cwd paths can trigger TCC prompts.
-        // Prefer lightweight metadata and path-based heuristics only.
         let url = URL(fileURLWithPath: cwd)
         let dirName = url.lastPathComponent
 
@@ -672,6 +713,34 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     public var repoDisplay: String {
         repoName ?? (cwd != nil ? "Other" : "—")
+    }
+
+    public var rowRepoName: String? {
+        if let override = CodexDesktopProjectClassifier.projectNameOverride(for: self) {
+            return override
+        }
+        if let override = ClaudeDesktopProjectClassifier.projectNameOverride(for: self) {
+            return override
+        }
+        if let normalized = ProjectPathNormalizer.normalizedProjectNameWithoutEventMetadata(for: self) {
+            return normalized
+        }
+        if ProjectPathNormalizer.shouldSuppressStoredProjectNameWithoutEventMetadata(for: self) {
+            return nil
+        }
+        if let stored = lightweightRepoName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !stored.isEmpty {
+            return stored
+        }
+        return repoNameFromCwd()
+    }
+
+    public var rowProjectWorktreeDisplayName: String? {
+        ProjectPathNormalizer.worktreeDisplayNameWithoutEventMetadata(for: self)
+    }
+
+    public var rowRepoDisplay: String {
+        rowRepoName ?? (cwd != nil ? "Other" : "—")
     }
     public var isWorktree: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isWorktree }) ?? false }
     public var isSubmodule: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isSubmodule }) ?? false }
@@ -714,10 +783,14 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var modifiedAt: Date {
         // Restored Codex sessions can keep an old rollout filename while receiving fresh
         // state/transcript updates, so sort by the newest known activity timestamp.
-        let filenameDate = source == .codex ? codexFilenameTimestamp : nil
-        let candidates = [endTime, startTime, filenameDate].compactMap { $0 }
-
-        return candidates.max() ?? .distantPast
+        var latest = endTime ?? startTime ?? .distantPast
+        if let startTime, startTime > latest {
+            latest = startTime
+        }
+        if source == .codex, let filenameDate = codexFilenameTimestamp, filenameDate > latest {
+            latest = filenameDate
+        }
+        return latest
     }
 
     // Best-effort git branch detection
@@ -1033,8 +1106,23 @@ enum ProjectPathNormalizer {
         return worktree
     }
 
+    static func normalizedProjectNameWithoutEventMetadata(for session: Session) -> String? {
+        guard case let .name(name, _) = resolveWithoutEventMetadata(for: session) else { return nil }
+        return name
+    }
+
+    static func worktreeDisplayNameWithoutEventMetadata(for session: Session) -> String? {
+        guard case let .name(_, worktree) = resolveWithoutEventMetadata(for: session) else { return nil }
+        return worktree
+    }
+
     static func shouldSuppressStoredProjectName(for session: Session) -> Bool {
         guard case .suppress = resolve(for: session) else { return false }
+        return true
+    }
+
+    static func shouldSuppressStoredProjectNameWithoutEventMetadata(for session: Session) -> Bool {
+        guard case .suppress = resolveWithoutEventMetadata(for: session) else { return false }
         return true
     }
 
@@ -1045,6 +1133,16 @@ enum ProjectPathNormalizer {
             storedProjectName: session.lightweightRepoName,
             gitRepositoryURL: session.gitRepositoryURL,
             gitBranch: session.gitBranch
+        )
+    }
+
+    private static func resolveWithoutEventMetadata(for session: Session) -> Resolution? {
+        resolve(
+            cwd: session.cwd,
+            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession,
+            storedProjectName: session.lightweightRepoName,
+            gitRepositoryURL: nil,
+            gitBranch: nil
         )
     }
 

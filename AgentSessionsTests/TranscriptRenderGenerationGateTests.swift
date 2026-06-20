@@ -315,6 +315,56 @@ final class TranscriptSessionRenderKeyTests: XCTestCase {
     }
 }
 
+final class SessionEquatablePayloadTests: XCTestCase {
+    func testSessionEqualityUsesLightweightEventEdgesNotTranscriptText() {
+        let base = makeSession(text: String(repeating: "a", count: 120_000))
+        let updatedText = makeSession(text: String(repeating: "b", count: 120_000))
+
+        XCTAssertEqual(base, updatedText)
+    }
+
+    func testSessionEqualityChangesWhenEventEdgesChange() {
+        let base = makeSession(text: "same", lastEventID: "event-2")
+        let updatedEdge = makeSession(text: "same", lastEventID: "event-3")
+
+        XCTAssertNotEqual(base, updatedEdge)
+    }
+
+    private func makeSession(text: String, lastEventID: String = "event-2") -> Session {
+        Session(
+            id: "session-1",
+            source: .codex,
+            startTime: Date(timeIntervalSince1970: 0),
+            endTime: Date(timeIntervalSince1970: 100),
+            model: "gpt-test",
+            filePath: "/tmp/session-1.jsonl",
+            fileSizeBytes: 1024,
+            eventCount: 2,
+            events: [
+                makeEvent(id: "event-1", text: "prompt", kind: .user),
+                makeEvent(id: lastEventID, text: text, kind: .assistant)
+            ]
+        )
+    }
+
+    private func makeEvent(id: String, text: String, kind: SessionEventKind) -> SessionEvent {
+        SessionEvent(
+            id: id,
+            timestamp: Date(timeIntervalSince1970: id == "event-1" ? 1 : 2),
+            kind: kind,
+            role: kind == .user ? "user" : "assistant",
+            text: text,
+            toolName: nil,
+            toolInput: nil,
+            toolOutput: nil,
+            messageID: nil,
+            parentID: nil,
+            isDelta: false,
+            rawJSON: String(repeating: "x", count: 120_000)
+        )
+    }
+}
+
 final class TranscriptSessionResolutionPolicyTests: XCTestCase {
     func testPrefersCachedWhenLiveSessionIsTransientlyEmpty() {
         let live = makeSession(id: "session-1", events: [])

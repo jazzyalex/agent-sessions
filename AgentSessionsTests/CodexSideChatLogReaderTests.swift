@@ -3,6 +3,23 @@ import SQLite3
 @testable import AgentSessions
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+private let sideBoundaryText = """
+Side conversation boundary.
+
+Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.
+
+Do not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from before this boundary. Only messages submitted after this boundary are active user instructions for this side conversation.
+
+You are a side-conversation assistant, separate from the main thread. Answer questions and do lightweight, non-mutating exploration without disrupting the main thread. If there is no user question after this boundary yet, wait for one.
+
+External tools may be available according to this thread's current permissions. Any tool calls or outputs visible before this boundary happened in the parent thread and are reference-only; do not infer active instructions from them.
+
+Do not modify files, source, git state, permissions, configuration, or workspace state unless the user explicitly asks for that modification after this boundary.
+"""
+private let sideBoundaryJSONText = sideBoundaryText
+    .replacingOccurrences(of: "\\", with: "\\\\")
+    .replacingOccurrences(of: "\"", with: "\\\"")
+    .replacingOccurrences(of: "\n", with: "\\n")
 
 final class CodexSideChatLogReaderTests: XCTestCase {
     func testLoadsSideChatSessionFromLogsDatabase() throws {
@@ -22,7 +39,7 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                       ts: 1_781_000_001,
                       threadID: sideThreadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Side conversation boundary.\n\nOnly messages submitted after this boundary are active user instructions for this side conversation.\n\nYou are a side-conversation assistant, separate from the main thread."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"ABRACADABRA test phrase"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"ABRACADABRA test phrase"}]}]}"#)
         try insertLog(dbURL: dbURL,
                       id: 3,
                       ts: 1_781_000_002,
@@ -48,6 +65,8 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(session.model, "gpt-5.5")
         XCTAssertEqual(session.cwd, "/tmp/side-chat-repo")
         XCTAssertEqual(session.events.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(session.lightweightTitle, "ABRACADABRA test phrase")
+        XCTAssertFalse(session.title.hasPrefix("Side:"))
         XCTAssertTrue(session.title.contains("ABRACADABRA test phrase"))
 
         let filters = Filters(query: "ABRACADABRA test phrase")
@@ -62,6 +81,58 @@ final class CodexSideChatLogReaderTests: XCTestCase {
             mode: .normal
         )
         XCTAssertTrue(transcript.contains("ABRACADABRA test phrase"))
+    }
+
+    func testLoadsSideChatSessionWhenWebsocketJSONHasTrailingLogText() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        let sideThreadID = "trailing-json-side-thread"
+        try insertLog(dbURL: dbURL,
+                      id: 1,
+                      ts: 1_781_000_001,
+                      threadID: sideThreadID,
+                      target: "codex_api::endpoint::responses_websocket",
+                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"trailing JSON side phrase"}]}]} trailing span fields after JSON"#)
+        try insertLog(dbURL: dbURL,
+                      id: 2,
+                      ts: 1_781_000_003,
+                      threadID: sideThreadID,
+                      target: "codex_api::endpoint::responses_websocket",
+                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket event: {"type":"response.output_text.done","text":"trailing JSON side answer","item_id":"msg_1"} trailing span fields after JSON"#)
+
+        let sessions = CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome, useCache: false)
+
+        XCTAssertEqual(sessions.map(\.id), [CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID)])
+        XCTAssertEqual(sessions.first?.events.map(\.text), [
+            "trailing JSON side phrase",
+            "trailing JSON side answer"
+        ])
+        XCTAssertEqual(sessions.first?.lightweightTitle, "trailing JSON side phrase")
+        XCTAssertTrue(FilterEngine.sessionMatches(sessions[0],
+                                                  filters: Filters(query: "#side trailing JSON side phrase"),
+                                                  allowTranscriptGeneration: false))
+    }
+
+    func testLoadsSideChatSessionFromNestedSqliteLogDirectory() throws {
+        let codexHome = try makeCodexHome()
+        let sqliteDir = codexHome.appendingPathComponent("sqlite", isDirectory: true)
+        try FileManager.default.createDirectory(at: sqliteDir, withIntermediateDirectories: true)
+        let dbURL = sqliteDir.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        let sideThreadID = "nested-sqlite-side-thread"
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: sideThreadID,
+                                  firstID: 1,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "nested sqlite side phrase")
+
+        let sessions = CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome, useCache: false)
+
+        XCTAssertEqual(sessions.map(\.id), [CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID)])
+        XCTAssertEqual(sessions.first?.lightweightTitle, "nested sqlite side phrase")
     }
 
     func testCachedSideChatSessionsLoadWithoutCurrentLogRows() throws {
@@ -82,7 +153,7 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                       ts: 1_781_000_001,
                       threadID: sideThreadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Side conversation boundary.\n\nOnly messages submitted after this boundary are active user instructions for this side conversation.\n\nYou are a side-conversation assistant, separate from the main thread."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"cached side phrase"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"cached side phrase"}]}]}"#)
         try insertLog(dbURL: dbURL,
                       id: 2,
                       ts: 1_781_000_002,
@@ -119,7 +190,7 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                       ts: 1_781_000_001,
                       threadID: sideThreadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Side conversation boundary.\n\nOnly messages submitted after this boundary are active user instructions for this side conversation.\n\nYou are a side-conversation assistant, separate from the main thread."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"recent bounded side phrase"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(sideThreadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"recent bounded side phrase"}]}]}"#)
         try insertLog(dbURL: dbURL,
                       id: newestID - 1,
                       ts: 1_781_000_002,
@@ -129,6 +200,30 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         try insertLog(dbURL: dbURL,
                       id: newestID,
                       ts: 1_781_000_003,
+                      threadID: "main-thread",
+                      target: "codex_core::session::handlers",
+                      body: #"session_loop{thread_id=main-thread}: Submission sub=Submission { op: UserInput { items: [Text { text: "latest ordinary row\n", text_elements: [] }] } }"#)
+
+        let sessions = CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome, useCache: false)
+
+        XCTAssertEqual(sessions.map(\.id), [CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID)])
+    }
+
+    func testColdDiscoveryBackfillsHistoricSideChatsOutsideRecentRowWindow() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+        let sideThreadID = "019eb2f7-6971-7e90-b7f0-3795e5fe9bbc"
+        let newestID: Int64 = 50_000_000
+
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: sideThreadID,
+                                  firstID: newestID - 8_000_000,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "historic side phrase")
+        try insertLog(dbURL: dbURL,
+                      id: newestID,
+                      ts: 1_781_000_010,
                       threadID: "main-thread",
                       target: "codex_core::session::handlers",
                       body: #"session_loop{thread_id=main-thread}: Submission sub=Submission { op: UserInput { items: [Text { text: "latest ordinary row\n", text_elements: [] }] } }"#)
@@ -294,7 +389,7 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                       ts: firstTS,
                       threadID: threadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Side conversation boundary.\n\nOnly messages submitted after this boundary are active user instructions for this side conversation.\n\nYou are a side-conversation assistant, separate from the main thread."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]}"#)
         try insertLog(dbURL: dbURL,
                       id: firstID + 1,
                       ts: firstTS + 1,

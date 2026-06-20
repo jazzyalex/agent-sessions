@@ -7,8 +7,11 @@ enum CodexSideChatLogReader {
     private static let sideConversationHeader = "Side conversation boundary."
     static let sideConversationBoundary = "You are a side-conversation assistant"
     private static let sideConversationActiveMarker = "Only messages submitted after this boundary are active user instructions for this side conversation."
+    private static let sideConversationHistoryMarker = "Everything before this boundary is inherited history from the parent thread."
+    private static let sideConversationToolsMarker = "External tools may be available according to this thread's current permissions."
     private static let maxLogDatabasesPerRefresh = 3
-    private static let coldSideChatDiscoveryRowIDWindow: Int64 = 7_500_000
+    private static let historicalBackfillRowIDWindow: Int64 = 7_500_000
+    private static let maxHistoricalBackfillChunksPerRefresh = 8
     static var cacheURLOverride: URL?
 
     static func loadSideChatSessions(sessionsRoot: URL,
@@ -86,13 +89,20 @@ enum CodexSideChatLogReader {
 
     private static func logDatabaseURLs(codexHome: URL) -> [URL] {
         let fm = FileManager.default
-        guard let urls = try? fm.contentsOfDirectory(at: codexHome,
-                                                     includingPropertiesForKeys: [.contentModificationDateKey],
-                                                     options: [.skipsHiddenFiles]) else {
-            return []
+        var urls: [URL] = []
+        for directory in [codexHome, codexHome.appendingPathComponent("sqlite", isDirectory: true)] {
+            guard let directoryURLs = try? fm.contentsOfDirectory(at: directory,
+                                                                  includingPropertiesForKeys: [.contentModificationDateKey],
+                                                                  options: [.skipsHiddenFiles]) else {
+                continue
+            }
+            urls.append(contentsOf: directoryURLs)
         }
+
+        var seenPaths: Set<String> = []
         return urls
             .filter { $0.lastPathComponent.hasPrefix("logs_") && $0.pathExtension == "sqlite" }
+            .filter { seenPaths.insert($0.standardizedFileURL.path).inserted }
             .sorted {
                 let lhsVersion = logDBVersion($0)
                 let rhsVersion = logDBVersion($1)
@@ -139,7 +149,8 @@ enum CodexSideChatLogReader {
                 sessions.append(session)
             }
         }
-        if var cache {
+        if cache != nil {
+            var cache = ThreadDiscoveryCache.load()
             let latest = latestLogPositionByRowID(db: db)
             cache.update(dbURL: dbURL,
                          fileSizeBytes: fileSizeBytes(dbURL),
@@ -162,20 +173,41 @@ enum CodexSideChatLogReader {
         let fileSize = fileSizeBytes(dbURL)
         let cached = cache?.entry(for: dbURL)
         var ids: [String] = []
+        var oldestScannedRowID: Int64?
+        var completedHistoricalBackfill = false
         if let cached,
            let highWater = cached.highWater,
            cached.fileSizeBytes <= fileSize,
            highWater.id <= newestRowID {
             ids = cached.threadIDs
+            oldestScannedRowID = cached.oldestScannedRowID
+            completedHistoricalBackfill = cached.completedHistoricalBackfill
             if highWater.id < newestRowID {
                 ids = mergeThreadIDs(readSideThreadIDs(db: db,
                                                        maxThreads: maxThreads,
-                                                       after: highWater,
-                                                       newestRowID: newestRowID),
+                                                       lowerBoundExclusive: highWater.id,
+                                                       upperBoundInclusive: nil),
                                      withCached: ids)
             }
-        } else {
-            ids = readSideThreadIDs(db: db, maxThreads: maxThreads, after: nil, newestRowID: newestRowID)
+        }
+
+        if !completedHistoricalBackfill, ids.count < maxThreads {
+            var upperBound = oldestScannedRowID ?? newestRowID
+            var chunksScanned = 0
+            while upperBound > 0,
+                  chunksScanned < maxHistoricalBackfillChunksPerRefresh,
+                  ids.count < maxThreads {
+                let lowerBound = max(0, upperBound - historicalBackfillRowIDWindow)
+                let olderIDs = readSideThreadIDs(db: db,
+                                                 maxThreads: maxThreads,
+                                                 lowerBoundExclusive: lowerBound,
+                                                 upperBoundInclusive: upperBound)
+                ids = mergeThreadIDs(ids, withCached: olderIDs)
+                upperBound = lowerBound
+                chunksScanned += 1
+            }
+            oldestScannedRowID = upperBound
+            completedHistoricalBackfill = upperBound == 0
         }
 
         let capped = Array(ids.prefix(maxThreads))
@@ -184,6 +216,8 @@ enum CodexSideChatLogReader {
                          fileSizeBytes: fileSize,
                          highWater: latest,
                          threadIDs: capped,
+                         oldestScannedRowID: oldestScannedRowID,
+                         completedHistoricalBackfill: completedHistoricalBackfill,
                          sideChatSessions: nil)
             cache.save()
         }
@@ -192,10 +226,9 @@ enum CodexSideChatLogReader {
 
     private static func readSideThreadIDs(db: OpaquePointer?,
                                           maxThreads: Int,
-                                          after position: LogPosition?,
-                                          newestRowID: Int64) -> [String] {
-        let minimumRowID = position?.id ?? max(0, newestRowID - coldSideChatDiscoveryRowIDWindow)
-        let sql = """
+                                          lowerBoundExclusive: Int64,
+                                          upperBoundInclusive: Int64?) -> [String] {
+        var sql = """
         SELECT thread_id, feedback_log_body
         FROM logs
         WHERE thread_id IS NOT NULL
@@ -203,6 +236,12 @@ enum CodexSideChatLogReader {
           AND feedback_log_body LIKE '%websocket request:%'
           AND feedback_log_body LIKE ?
           AND id > ?
+        """
+        if upperBoundInclusive != nil {
+            sql += "\n  AND id <= ?"
+        }
+        sql += """
+
         ORDER BY id DESC
         LIMIT ?;
         """
@@ -213,8 +252,12 @@ enum CodexSideChatLogReader {
         var bindIndex: Int32 = 1
         sqlite3_bind_text(stmt, bindIndex, "%\(sideConversationHeader)%", -1, SQLITE_TRANSIENT)
         bindIndex += 1
-        sqlite3_bind_int64(stmt, bindIndex, minimumRowID)
+        sqlite3_bind_int64(stmt, bindIndex, lowerBoundExclusive)
         bindIndex += 1
+        if let upperBoundInclusive {
+            sqlite3_bind_int64(stmt, bindIndex, upperBoundInclusive)
+            bindIndex += 1
+        }
         sqlite3_bind_int(stmt, bindIndex, Int32(maxThreads * 10))
 
         var ids: [String] = []
@@ -269,7 +312,10 @@ enum CodexSideChatLogReader {
                                      threadID: String,
                                      maxRows: Int) -> Session? {
         let rows = readRows(db: db, threadID: threadID, maxRows: maxRows)
-        guard !rows.isEmpty else { return nil }
+        let requestUserEvents = readSideConversationRequestUserEvents(db: db,
+                                                                      threadID: threadID,
+                                                                      maxRows: 20)
+        guard !rows.isEmpty || !requestUserEvents.isEmpty else { return nil }
 
         var events: [SessionEvent] = []
         var seenAssistantText: Set<String> = []
@@ -291,6 +337,14 @@ enum CodexSideChatLogReader {
             }
         }
 
+        if !events.contains(where: { $0.kind == .user }) {
+            events.append(contentsOf: requestUserEvents)
+        }
+        events.sort {
+            if $0.timestamp == $1.timestamp { return $0.id < $1.id }
+            return ($0.timestamp ?? .distantPast) < ($1.timestamp ?? .distantPast)
+        }
+
         guard !events.isEmpty else { return nil }
         let start = events.compactMap(\.timestamp).min()
         let end = events.compactMap(\.timestamp).max()
@@ -298,7 +352,7 @@ enum CodexSideChatLogReader {
             partial + (event.text?.utf8.count ?? 0) + (event.rawJSON.utf8.count)
         }
         let firstUserTitle = events.first(where: { $0.kind == .user })?.text.map(collapsedWhitespace)
-        let title = firstUserTitle.map { "Side: \($0)" }
+        let title = firstUserTitle
 
         return Session(
             id: sideChatSessionID(threadID: threadID),
@@ -366,7 +420,7 @@ enum CodexSideChatLogReader {
     }
 
     private struct ThreadDiscoveryCache: Codable {
-        private static let currentSchemaVersion = 2
+        private static let currentSchemaVersion = 6
 
         var schemaVersion: Int = currentSchemaVersion
         var databases: [String: CachedDatabase] = [:]
@@ -391,12 +445,16 @@ enum CodexSideChatLogReader {
                              fileSizeBytes: Int64,
                              highWater: LogPosition?,
                              threadIDs: [String],
+                             oldestScannedRowID: Int64? = nil,
+                             completedHistoricalBackfill: Bool? = nil,
                              sideChatSessions: [Session]?) {
             let key = Self.cacheKey(for: dbURL)
             let existing = databases[key]
             databases[key] = CachedDatabase(fileSizeBytes: fileSizeBytes,
                                             highWater: highWater ?? existing?.highWater,
                                             threadIDs: threadIDs,
+                                            oldestScannedRowID: oldestScannedRowID ?? existing?.oldestScannedRowID,
+                                            completedHistoricalBackfill: completedHistoricalBackfill ?? existing?.completedHistoricalBackfill ?? false,
                                             sideChatSessions: sideChatSessions ?? existing?.sideChatSessions)
         }
 
@@ -445,6 +503,8 @@ enum CodexSideChatLogReader {
         let fileSizeBytes: Int64
         let highWater: LogPosition?
         let threadIDs: [String]
+        let oldestScannedRowID: Int64?
+        let completedHistoricalBackfill: Bool
         let sideChatSessions: [Session]?
     }
 
@@ -481,11 +541,59 @@ enum CodexSideChatLogReader {
         return rows
     }
 
+    private static func readSideConversationRequestUserEvents(db: OpaquePointer?,
+                                                              threadID: String,
+                                                              maxRows: Int) -> [SessionEvent] {
+        let sql = """
+        SELECT id, ts, ts_nanos, feedback_log_body
+        FROM logs
+        WHERE thread_id = ?
+          AND target = 'codex_api::endpoint::responses_websocket'
+          AND feedback_log_body LIKE '%websocket request:%'
+          AND feedback_log_body LIKE ?
+        ORDER BY ts ASC, ts_nanos ASC, id ASC
+        LIMIT ?;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, threadID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, "%\(sideConversationHeader)%", -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(stmt, 3, Int32(maxRows))
+
+        var events: [SessionEvent] = []
+        var seenTexts: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let bodyCString = sqlite3_column_text(stmt, 3) else { continue }
+            let row = LogRow(id: sqlite3_column_int64(stmt, 0),
+                             ts: sqlite3_column_int64(stmt, 1),
+                             tsNanos: sqlite3_column_int64(stmt, 2),
+                             body: String(cString: bodyCString))
+            guard let json = extractWebsocketRequestJSON(from: row.body) else { continue }
+            let userTexts = sideConversationUserTexts(in: json)
+            for (index, text) in userTexts.enumerated() {
+                let normalized = collapsedWhitespace(text)
+                guard !normalized.isEmpty, seenTexts.insert(normalized).inserted else { continue }
+                events.append(event(row: row,
+                                    kind: .user,
+                                    role: "user",
+                                    text: text,
+                                    idSuffix: "side-request-\(index)",
+                                    rawJSON: #"{"source":"websocket_request_side_prompt"}"#))
+            }
+        }
+        return events
+    }
+
     private static func event(row: LogRow,
                               kind: SessionEventKind,
                               role: String,
-                              text: String) -> SessionEvent {
-        SessionEvent(id: "log-\(row.id)-\(kind.rawValue)",
+                              text: String,
+                              idSuffix: String? = nil,
+                              rawJSON: String? = nil) -> SessionEvent {
+        let suffix = idSuffix ?? kind.rawValue
+        return SessionEvent(id: "log-\(row.id)-\(suffix)",
                      timestamp: row.timestamp,
                      kind: kind,
                      role: role,
@@ -496,7 +604,7 @@ enum CodexSideChatLogReader {
                      messageID: nil,
                      parentID: nil,
                      isDelta: false,
-                     rawJSON: row.body)
+                     rawJSON: rawJSON ?? row.body)
     }
 
     private static func extractUserSubmissionText(from body: String) -> String? {
@@ -526,8 +634,9 @@ enum CodexSideChatLogReader {
 
     private static func extractWebsocketJSON(after marker: String, from body: String) -> [String: Any]? {
         guard let range = body.range(of: marker) else { return nil }
-        let jsonStart = range.upperBound
-        let json = String(body[jsonStart...])
+        guard let json = firstBalancedJSONObject(in: String(body[range.upperBound...])) else {
+            return nil
+        }
         guard let data = json.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -535,32 +644,73 @@ enum CodexSideChatLogReader {
         return object
     }
 
+    private static func firstBalancedJSONObject(in value: String) -> String? {
+        guard let start = value.firstIndex(of: "{") else { return nil }
+        var index = start
+        var depth = 0
+        var inString = false
+        var escaping = false
+        while index < value.endIndex {
+            let char = value[index]
+            if inString {
+                if escaping {
+                    escaping = false
+                } else if char == "\\" {
+                    escaping = true
+                } else if char == "\"" {
+                    inString = false
+                }
+            } else {
+                if char == "\"" {
+                    inString = true
+                } else if char == "{" {
+                    depth += 1
+                } else if char == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        return String(value[start...index])
+                    }
+                }
+            }
+            index = value.index(after: index)
+        }
+        return nil
+    }
+
     private static func containsSideConversationBoundaryMessage(in json: [String: Any]) -> Bool {
-        guard let input = json["input"] as? [Any] else { return false }
-        for (index, item) in input.enumerated() {
+        !sideConversationUserTexts(in: json).isEmpty
+    }
+
+    private static func sideConversationUserTexts(in json: [String: Any]) -> [String] {
+        guard let input = json["input"] as? [Any] else { return [] }
+        var foundBoundary = false
+        var userTexts: [String] = []
+        for item in input {
             guard let message = item as? [String: Any],
                   message["type"] as? String == "message",
                   message["role"] as? String == "user" else {
                 continue
             }
-            let isBoundaryMessage = messageContentTexts(message).contains { text in
-                text.hasPrefix(sideConversationHeader)
-                    && text.contains(sideConversationActiveMarker)
-                    && text.contains(sideConversationBoundary)
+            if foundBoundary {
+                userTexts.append(contentsOf: messageContentTexts(message).compactMap { text in
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                })
+                continue
             }
-            guard isBoundaryMessage else { continue }
-            return input.suffix(from: input.index(after: index)).contains { later in
-                guard let laterMessage = later as? [String: Any],
-                      laterMessage["type"] as? String == "message",
-                      laterMessage["role"] as? String == "user" else {
-                    return false
-                }
-                return messageContentTexts(laterMessage).contains { text in
-                    !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }
+            let isBoundaryMessage = messageContentTexts(message).contains { text in
+                let normalized = collapsedWhitespace(text)
+                return normalized.hasPrefix(sideConversationHeader)
+                    && normalized.contains(sideConversationHistoryMarker)
+                    && normalized.contains(sideConversationActiveMarker)
+                    && normalized.contains(sideConversationBoundary)
+                    && normalized.contains(sideConversationToolsMarker)
+            }
+            if isBoundaryMessage {
+                foundBoundary = true
             }
         }
-        return false
+        return userTexts
     }
 
     private static func messageContentTexts(_ message: [String: Any]) -> [String] {

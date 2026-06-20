@@ -3,7 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- Unified Window: Side-chat recovery now publishes the main session refresh first, then fills side-chat rows from a cache-backed background pass with bounded SQLite discovery so large Codex logs do not stall the final refresh.
+- Unified Window: Fixed a Sessions-window hang by making SwiftUI session diffing avoid full transcript payload comparisons on large Codex histories.
+- Unified Window: Fixed a Project-column hang where returning to the app could repeatedly parse raw transcript JSON for branch/repo metadata during table layout.
+- Unified Window: Fixed a foreground-return hang by caching row-derived hierarchy state during table rebuilds and deferring monitor-triggered focused transcript reloads while the app is inactive.
+- Unified Window: Added visible toolbar buttons to collapse or expand all hierarchy groups, with collapsed hierarchy state persisted across relaunches.
+- Unified Window: Side-chat recovery now publishes the main session refresh first, then fills side-chat rows from a cache-backed background pass with bounded SQLite discovery, historical backfill, and nested `~/.codex/sqlite` log discovery so large Codex logs do not stall the final refresh.
+- Unified Window: Search now treats `#side` as a side-chat filter tag, so `#side` shows only side chats without a slow transcript scan and `#side phrase` searches within side chats.
+- Unified Window: `#side` searches now ignore the archived-only Codex toggle so recovered side-chat rows stay visible even when archive filtering is enabled.
+- Unified Window: Side-chat recovery now preserves request-only side prompts as searchable titles and refreshes active `#side` search results when side-chat rows arrive later in indexing.
 - Unified Window: Codex side chats can now be recovered from Codex Desktop logs as searchable side-chat rows with readable transcripts and a distinct `side` badge, without labeling them as subagents.
 - Agent Cockpit: Added Runway EQ above the Limits Cockpit and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Limits rows; Runway now stays available during reset-first 5h windows when active session burn exists.
 - Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation, fallback reset clocks no longer produce synthetic burn rates, and the EQ avoids blanking between refreshes.

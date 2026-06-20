@@ -977,7 +977,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       kinds: kinds,
                                       repoName: self.projectFilter,
                                       pathContains: nil,
-                                      archivedCodexDesktopOnly: self.showArchivedCodexDesktopOnly)
+                                      archivedCodexDesktopOnly: self.showArchivedCodexDesktopOnly,
+                                      sideChatsOnly: false)
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
                 if self.showFavoritesOnly { results = results.filter { $0.isFavorite } }
@@ -2014,6 +2015,12 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func performFocusedSessionCheck(context: FocusedSessionContext,
                                             trigger: FocusedReloadTrigger) async {
+        let canRunFocusedReload = await MainActor.run { [weak self] in
+            guard let self else { return false }
+            return self.appIsActive || trigger != .monitor
+        }
+        guard canRunFocusedReload else { return }
+
         let signature = await MainActor.run { [weak self] () -> FileSignature? in
             guard let self else { return nil }
             return self.focusedFileSignature(for: context)
@@ -2379,7 +2386,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                               kinds: selectedKinds,
                               repoName: projectFilter,
                               pathContains: nil,
-                              archivedCodexDesktopOnly: showArchivedCodexDesktopOnly)
+                              archivedCodexDesktopOnly: showArchivedCodexDesktopOnly,
+                              sideChatsOnly: false)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
         // Optional quick filter: sessions with commands (tool calls)
@@ -2447,7 +2455,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         case .repo:
             return list.sorted { lhs, rhs in
-                let l = lhs.repoDisplay.lowercased(); let r = rhs.repoDisplay.lowercased()
+                let l = lhs.rowRepoDisplay.lowercased(); let r = rhs.rowRepoDisplay.lowercased()
                 return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         case .title:

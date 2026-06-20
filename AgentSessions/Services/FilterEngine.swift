@@ -400,6 +400,7 @@ struct Filters: Equatable {
     var repoName: String? = nil
     var pathContains: String? = nil
     var archivedCodexDesktopOnly: Bool = false
+    var sideChatsOnly: Bool = false
 }
 
 enum FilterEngine {
@@ -425,8 +426,11 @@ enum FilterEngine {
 
         if let m = filters.model, !m.isEmpty, session.model != m { return false }
 
-        // Archive filter scopes only Codex sessions; other agents pass through unaffected.
-        if filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession { return false }
+        let sideChatsOnly = filters.sideChatsOnly || parsed.sideChatsOnly
+        if sideChatsOnly, !session.isSideChat { return false }
+        // Archive filter scopes only Codex sessions; side-chat searches use recovered log rows,
+        // so an explicit #side query should not hide them behind archived-session metadata.
+        if !sideChatsOnly, filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession { return false }
 
         if let repo = effectiveRepo, !repo.isEmpty {
             guard let r = session.repoName?.lowercased() else { return false }
@@ -493,10 +497,16 @@ enum FilterEngine {
         sessions.filter { sessionMatches($0, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: allowTranscriptGeneration) }
     }
 
-    struct ParsedQuery { let freeText: String; let repo: String?; let path: String? }
+    struct ParsedQuery {
+        let freeText: String
+        let repo: String?
+        let path: String?
+        let sideChatsOnly: Bool
+    }
+
     static func parseOperators(_ q: String) -> ParsedQuery {
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return ParsedQuery(freeText: "", repo: nil, path: nil) }
+        guard !trimmed.isEmpty else { return ParsedQuery(freeText: "", repo: nil, path: nil, sideChatsOnly: false) }
 
         enum PendingKey {
             case repo
@@ -505,6 +515,7 @@ enum FilterEngine {
 
         var repo: String? = nil
         var path: String? = nil
+        var sideChatsOnly = false
         var remaining: [String] = []
         var pending: PendingKey? = nil
 
@@ -513,8 +524,9 @@ enum FilterEngine {
             let lower = token.value.lowercased()
             let isRepoToken = lower.hasPrefix("repo:")
             let isPathToken = lower.hasPrefix("path:")
+            let isSideTag = lower == "#side" && !token.startsWithQuote
 
-            if let pendingKey = pending, !isRepoToken, !isPathToken {
+            if let pendingKey = pending, !isRepoToken, !isPathToken, !isSideTag {
                 let v = token.value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !v.isEmpty {
                     switch pendingKey {
@@ -536,6 +548,11 @@ enum FilterEngine {
                 }
                 continue
             }
+            if isSideTag {
+                sideChatsOnly = true
+                pending = nil
+                continue
+            }
             if isPathToken {
                 let valueStart = token.value.index(token.value.startIndex, offsetBy: 5)
                 let v = String(token.value[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -550,6 +567,6 @@ enum FilterEngine {
             remaining.append(token.raw)
         }
 
-        return ParsedQuery(freeText: remaining.joined(separator: " "), repo: repo, path: path)
+        return ParsedQuery(freeText: remaining.joined(separator: " "), repo: repo, path: path, sideChatsOnly: sideChatsOnly)
     }
 }

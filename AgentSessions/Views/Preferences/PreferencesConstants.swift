@@ -102,6 +102,7 @@ enum PreferencesKey {
         static let showStarColumn = "UnifiedShowStarColumn"
         static let hasCommandsOnly = "UnifiedHasCommandsOnly"
         static let showArchivedCodexDesktopOnly = "UnifiedShowArchivedCodexDesktopOnly"
+        static let collapsedHierarchyParents = "UnifiedCollapsedHierarchyParents"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
         static let sessionViewAutoScrollTarget = "UnifiedSessionViewAutoScrollTarget"
         static let showCodexToolbarFilter = "UnifiedShowCodexToolbarFilter"
