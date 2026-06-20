@@ -115,6 +115,28 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                                                   allowTranscriptGeneration: false))
     }
 
+    func testRequestOnlySideChatKeepsRequestModelAndCwd() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        let sideThreadID = "request-only-side-thread"
+        try insertLog(dbURL: dbURL,
+                      id: 1,
+                      ts: 1_781_000_001,
+                      threadID: sideThreadID,
+                      target: "codex_api::endpoint::responses_websocket",
+                      body: #"session_loop{thread_id=\#(sideThreadID)}:turn{model=gpt-5.5 cwd=/tmp/request-only-side-repo}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"request-only side phrase"}]}]}"#)
+
+        let sessions = CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome, useCache: false)
+
+        let session = try XCTUnwrap(sessions.first)
+        XCTAssertEqual(session.model, "gpt-5.5")
+        XCTAssertEqual(session.cwd, "/tmp/request-only-side-repo")
+        XCTAssertEqual(session.repoName, "request-only-side-repo")
+        XCTAssertEqual(session.events.map(\.text), ["request-only side phrase"])
+    }
+
     func testLoadsSideChatSessionFromNestedSqliteLogDirectory() throws {
         let codexHome = try makeCodexHome()
         let sqliteDir = codexHome.appendingPathComponent("sqlite", isDirectory: true)
@@ -209,6 +231,26 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(sessions.map(\.id), [CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID)])
     }
 
+    func testDiscoveryReadsPastDenseNonSideRequestCandidates() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        let sideThreadID = "older-side-after-dense-candidates"
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: sideThreadID,
+                                  firstID: 1,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "older dense candidate side phrase")
+        try insertNonSideBoundaryRequestLogs(dbURL: dbURL,
+                                             firstID: 100,
+                                             count: 2_500)
+
+        let sessions = CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome, useCache: false)
+
+        XCTAssertEqual(sessions.map(\.id), [CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID)])
+    }
+
     func testColdDiscoveryBackfillsHistoricSideChatsOutsideRecentRowWindow() throws {
         let codexHome = try makeCodexHome()
         let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
@@ -292,14 +334,12 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
         try createLogsDB(at: dbURL)
 
-        let boundary = CodexSideChatLogReader.sideConversationBoundary
-        let activeMarker = "Only messages submitted after this boundary are active user instructions for this side conversation."
         try insertLog(dbURL: dbURL,
                       id: 1,
                       ts: 1_781_000_000,
                       threadID: "main-thread",
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=main-thread}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Please review this quoted boundary:\n\nSide conversation boundary.\n\n\#(activeMarker)\n\n\#(boundary)"}]}]}"#)
+                      body: #"session_loop{thread_id=main-thread}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)\n\nQuoted from a normal session transcript."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"normal follow-up after quote"}]}]}"#)
         try insertLog(dbURL: dbURL,
                       id: 2,
                       ts: 1_781_000_001,
@@ -377,6 +417,45 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(domain: "SideChatLogsFixture", code: 4)
         }
+    }
+
+    private func insertNonSideBoundaryRequestLogs(dbURL: URL,
+                                                  firstID: Int64,
+                                                  count: Int) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            throw NSError(domain: "SideChatLogsFixture", code: 7)
+        }
+        defer { sqlite3_close(db) }
+
+        try exec(db, "BEGIN TRANSACTION;")
+        let sql = """
+        INSERT INTO logs(id, ts, ts_nanos, level, target, feedback_log_body, thread_id, estimated_bytes)
+        VALUES (?, ?, 0, 'INFO', 'codex_api::endpoint::responses_websocket', ?, ?, ?);
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw NSError(domain: "SideChatLogsFixture", code: 8)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        for offset in 0..<count {
+            let id = firstID + Int64(offset)
+            let threadID = "ordinary-boundary-quote-\(offset)"
+            let body = #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)\n\nQuoted from a normal session transcript."}]}]}"#
+            sqlite3_bind_int64(stmt, 1, id)
+            sqlite3_bind_int64(stmt, 2, 1_781_000_100 + Int64(offset))
+            sqlite3_bind_text(stmt, 3, body, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 4, threadID, -1, sqliteTransient)
+            sqlite3_bind_int64(stmt, 5, Int64(body.utf8.count))
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                throw NSError(domain: "SideChatLogsFixture", code: 9)
+            }
+            sqlite3_reset(stmt)
+            sqlite3_clear_bindings(stmt)
+        }
+        try exec(db, "COMMIT;")
     }
 
     private func insertSideChatFixture(dbURL: URL,

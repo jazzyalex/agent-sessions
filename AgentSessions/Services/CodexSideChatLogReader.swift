@@ -9,9 +9,23 @@ enum CodexSideChatLogReader {
     private static let sideConversationActiveMarker = "Only messages submitted after this boundary are active user instructions for this side conversation."
     private static let sideConversationHistoryMarker = "Everything before this boundary is inherited history from the parent thread."
     private static let sideConversationToolsMarker = "External tools may be available according to this thread's current permissions."
+    private static let sideConversationBoundaryText = """
+    \(sideConversationHeader)
+
+    \(sideConversationHistoryMarker) It is reference context only. It is not your current task.
+
+    Do not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from before this boundary. \(sideConversationActiveMarker)
+
+    \(sideConversationBoundary), separate from the main thread. Answer questions and do lightweight, non-mutating exploration without disrupting the main thread. If there is no user question after this boundary yet, wait for one.
+
+    \(sideConversationToolsMarker) Any tool calls or outputs visible before this boundary happened in the parent thread and are reference-only; do not infer active instructions from them.
+
+    Do not modify files, source, git state, permissions, configuration, or workspace state unless the user explicitly asks for that modification after this boundary.
+    """
     private static let maxLogDatabasesPerRefresh = 3
     private static let historicalBackfillRowIDWindow: Int64 = 7_500_000
     private static let maxHistoricalBackfillChunksPerRefresh = 8
+    private static let maxSideThreadCandidateRowsPerWindow = 50_000
     static var cacheURLOverride: URL?
 
     static func loadSideChatSessions(sessionsRoot: URL,
@@ -151,10 +165,9 @@ enum CodexSideChatLogReader {
         }
         if cache != nil {
             var cache = ThreadDiscoveryCache.load()
-            let latest = latestLogPositionByRowID(db: db)
             cache.update(dbURL: dbURL,
                          fileSizeBytes: fileSizeBytes(dbURL),
-                         highWater: latest,
+                         highWater: nil,
                          threadIDs: sideThreadIDs,
                          sideChatSessions: sessions)
             cache.save()
@@ -175,6 +188,7 @@ enum CodexSideChatLogReader {
         var ids: [String] = []
         var oldestScannedRowID: Int64?
         var completedHistoricalBackfill = false
+        var highWaterForCache: LogPosition? = latest
         if let cached,
            let highWater = cached.highWater,
            cached.fileSizeBytes <= fileSize,
@@ -183,38 +197,47 @@ enum CodexSideChatLogReader {
             oldestScannedRowID = cached.oldestScannedRowID
             completedHistoricalBackfill = cached.completedHistoricalBackfill
             if highWater.id < newestRowID {
-                ids = mergeThreadIDs(readSideThreadIDs(db: db,
-                                                       maxThreads: maxThreads,
-                                                       lowerBoundExclusive: highWater.id,
-                                                       upperBoundInclusive: nil),
+                let recentRead = readSideThreadIDs(db: db,
+                                                   maxThreads: maxThreads,
+                                                   lowerBoundExclusive: highWater.id,
+                                                   upperBoundInclusive: nil)
+                ids = mergeThreadIDs(recentRead.ids,
                                      withCached: ids)
+                if recentRead.hitCandidateLimit {
+                    highWaterForCache = highWater
+                }
             }
         }
 
         if !completedHistoricalBackfill, ids.count < maxThreads {
             var upperBound = oldestScannedRowID ?? newestRowID
             var chunksScanned = 0
+            var hitCandidateLimit = false
             while upperBound > 0,
                   chunksScanned < maxHistoricalBackfillChunksPerRefresh,
                   ids.count < maxThreads {
                 let lowerBound = max(0, upperBound - historicalBackfillRowIDWindow)
-                let olderIDs = readSideThreadIDs(db: db,
-                                                 maxThreads: maxThreads,
-                                                 lowerBoundExclusive: lowerBound,
-                                                 upperBoundInclusive: upperBound)
-                ids = mergeThreadIDs(ids, withCached: olderIDs)
+                let olderRead = readSideThreadIDs(db: db,
+                                                  maxThreads: maxThreads,
+                                                  lowerBoundExclusive: lowerBound,
+                                                  upperBoundInclusive: upperBound)
+                ids = mergeThreadIDs(ids, withCached: olderRead.ids)
+                if olderRead.hitCandidateLimit {
+                    hitCandidateLimit = true
+                    break
+                }
                 upperBound = lowerBound
                 chunksScanned += 1
             }
             oldestScannedRowID = upperBound
-            completedHistoricalBackfill = upperBound == 0
+            completedHistoricalBackfill = upperBound == 0 && !hitCandidateLimit
         }
 
         let capped = Array(ids.prefix(maxThreads))
         if var cache {
             cache.update(dbURL: dbURL,
                          fileSizeBytes: fileSize,
-                         highWater: latest,
+                         highWater: highWaterForCache,
                          threadIDs: capped,
                          oldestScannedRowID: oldestScannedRowID,
                          completedHistoricalBackfill: completedHistoricalBackfill,
@@ -227,7 +250,7 @@ enum CodexSideChatLogReader {
     private static func readSideThreadIDs(db: OpaquePointer?,
                                           maxThreads: Int,
                                           lowerBoundExclusive: Int64,
-                                          upperBoundInclusive: Int64?) -> [String] {
+                                          upperBoundInclusive: Int64?) -> ThreadIDReadResult {
         var sql = """
         SELECT thread_id, feedback_log_body
         FROM logs
@@ -246,7 +269,9 @@ enum CodexSideChatLogReader {
         LIMIT ?;
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return ThreadIDReadResult(ids: [], hitCandidateLimit: false)
+        }
         defer { sqlite3_finalize(stmt) }
 
         var bindIndex: Int32 = 1
@@ -258,11 +283,17 @@ enum CodexSideChatLogReader {
             sqlite3_bind_int64(stmt, bindIndex, upperBoundInclusive)
             bindIndex += 1
         }
-        sqlite3_bind_int(stmt, bindIndex, Int32(maxThreads * 10))
+        let candidateLimit = max(maxThreads * 250, maxSideThreadCandidateRowsPerWindow)
+        sqlite3_bind_int(stmt, bindIndex, Int32(candidateLimit + 1))
 
         var ids: [String] = []
         var seen: Set<String> = []
+        var candidateRowsRead = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
+            candidateRowsRead += 1
+            if candidateRowsRead > candidateLimit {
+                return ThreadIDReadResult(ids: ids, hitCandidateLimit: true)
+            }
             guard let cString = sqlite3_column_text(stmt, 0),
                   let bodyCString = sqlite3_column_text(stmt, 1) else { continue }
             let threadID = String(cString: cString)
@@ -274,7 +305,7 @@ enum CodexSideChatLogReader {
             ids.append(threadID)
             if ids.count >= maxThreads { break }
         }
-        return ids
+        return ThreadIDReadResult(ids: ids, hitCandidateLimit: false)
     }
 
     private static func mergeThreadIDs(_ newIDs: [String], withCached cachedIDs: [String]) -> [String] {
@@ -312,15 +343,15 @@ enum CodexSideChatLogReader {
                                      threadID: String,
                                      maxRows: Int) -> Session? {
         let rows = readRows(db: db, threadID: threadID, maxRows: maxRows)
-        let requestUserEvents = readSideConversationRequestUserEvents(db: db,
-                                                                      threadID: threadID,
-                                                                      maxRows: 20)
-        guard !rows.isEmpty || !requestUserEvents.isEmpty else { return nil }
+        let request = readSideConversationRequest(db: db,
+                                                  threadID: threadID,
+                                                  maxRows: 20)
+        guard !rows.isEmpty || !request.events.isEmpty else { return nil }
 
         var events: [SessionEvent] = []
         var seenAssistantText: Set<String> = []
-        var model: String?
-        var cwd: String?
+        var model: String? = request.model
+        var cwd: String? = request.cwd
 
         for row in rows {
             model = model ?? extractSpanValue(named: "model", from: row.body)
@@ -338,7 +369,7 @@ enum CodexSideChatLogReader {
         }
 
         if !events.contains(where: { $0.kind == .user }) {
-            events.append(contentsOf: requestUserEvents)
+            events.append(contentsOf: request.events)
         }
         events.sort {
             if $0.timestamp == $1.timestamp { return $0.id < $1.id }
@@ -419,8 +450,13 @@ enum CodexSideChatLogReader {
         }
     }
 
+    private struct ThreadIDReadResult {
+        let ids: [String]
+        let hitCandidateLimit: Bool
+    }
+
     private struct ThreadDiscoveryCache: Codable {
-        private static let currentSchemaVersion = 6
+        private static let currentSchemaVersion = 7
 
         var schemaVersion: Int = currentSchemaVersion
         var databases: [String: CachedDatabase] = [:]
@@ -541,9 +577,15 @@ enum CodexSideChatLogReader {
         return rows
     }
 
-    private static func readSideConversationRequestUserEvents(db: OpaquePointer?,
-                                                              threadID: String,
-                                                              maxRows: Int) -> [SessionEvent] {
+    private struct SideConversationRequestRead {
+        let events: [SessionEvent]
+        let model: String?
+        let cwd: String?
+    }
+
+    private static func readSideConversationRequest(db: OpaquePointer?,
+                                                    threadID: String,
+                                                    maxRows: Int) -> SideConversationRequestRead {
         let sql = """
         SELECT id, ts, ts_nanos, feedback_log_body
         FROM logs
@@ -555,7 +597,9 @@ enum CodexSideChatLogReader {
         LIMIT ?;
         """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return SideConversationRequestRead(events: [], model: nil, cwd: nil)
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, threadID, -1, SQLITE_TRANSIENT)
@@ -564,12 +608,16 @@ enum CodexSideChatLogReader {
 
         var events: [SessionEvent] = []
         var seenTexts: Set<String> = []
+        var model: String?
+        var cwd: String?
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let bodyCString = sqlite3_column_text(stmt, 3) else { continue }
             let row = LogRow(id: sqlite3_column_int64(stmt, 0),
                              ts: sqlite3_column_int64(stmt, 1),
                              tsNanos: sqlite3_column_int64(stmt, 2),
                              body: String(cString: bodyCString))
+            model = model ?? extractSpanValue(named: "model", from: row.body)
+            cwd = cwd ?? extractSpanValue(named: "cwd", from: row.body)
             guard let json = extractWebsocketRequestJSON(from: row.body) else { continue }
             let userTexts = sideConversationUserTexts(in: json)
             for (index, text) in userTexts.enumerated() {
@@ -583,7 +631,7 @@ enum CodexSideChatLogReader {
                                     rawJSON: #"{"source":"websocket_request_side_prompt"}"#))
             }
         }
-        return events
+        return SideConversationRequestRead(events: events, model: model, cwd: cwd)
     }
 
     private static func event(row: LogRow,
@@ -700,11 +748,7 @@ enum CodexSideChatLogReader {
             }
             let isBoundaryMessage = messageContentTexts(message).contains { text in
                 let normalized = collapsedWhitespace(text)
-                return normalized.hasPrefix(sideConversationHeader)
-                    && normalized.contains(sideConversationHistoryMarker)
-                    && normalized.contains(sideConversationActiveMarker)
-                    && normalized.contains(sideConversationBoundary)
-                    && normalized.contains(sideConversationToolsMarker)
+                return normalized == collapsedWhitespace(sideConversationBoundaryText)
             }
             if isBoundaryMessage {
                 foundBoundary = true

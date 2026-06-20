@@ -365,6 +365,39 @@ final class SessionEquatablePayloadTests: XCTestCase {
     }
 }
 
+final class SessionRowProjectDisplayTests: XCTestCase {
+    func testRowProjectDisplayDoesNotReadRawJSONCwd() {
+        let session = Session(
+            id: "session-raw-cwd",
+            source: .codex,
+            startTime: Date(timeIntervalSince1970: 0),
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/session-raw-cwd.jsonl",
+            eventCount: 1,
+            events: [
+                SessionEvent(id: "event-1",
+                             timestamp: nil,
+                             kind: .meta,
+                             role: nil,
+                             text: nil,
+                             toolName: nil,
+                             toolInput: nil,
+                             toolOutput: nil,
+                             messageID: nil,
+                             parentID: nil,
+                             isDelta: false,
+                             rawJSON: #"{"cwd":"/tmp/raw-json-only-project"}"#)
+            ]
+        )
+
+        XCTAssertEqual(session.repoName, "raw-json-only-project")
+        XCTAssertNil(session.rowRepoName)
+        XCTAssertNil(session.rowProjectWorktreeDisplayName)
+        XCTAssertEqual(session.rowRepoDisplay, "—")
+    }
+}
+
 final class TranscriptSessionResolutionPolicyTests: XCTestCase {
     func testPrefersCachedWhenLiveSessionIsTransientlyEmpty() {
         let live = makeSession(id: "session-1", events: [])

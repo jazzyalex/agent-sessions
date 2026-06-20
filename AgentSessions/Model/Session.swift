@@ -687,6 +687,22 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     private func repoNameFromCwd() -> String? {
+        repoName(fromCwd: cwd)
+    }
+
+    private func repoNameFromLightweightCwd() -> String? {
+        repoName(fromCwd: lightweightCwdIfPresent)
+    }
+
+    fileprivate var lightweightCwdIfPresent: String? {
+        guard let value = lightweightCwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private func repoName(fromCwd cwd: String?) -> String? {
         guard let cwd else { return nil }
         let url = URL(fileURLWithPath: cwd)
         let dirName = url.lastPathComponent
@@ -732,7 +748,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
            !stored.isEmpty {
             return stored
         }
-        return repoNameFromCwd()
+        return repoNameFromLightweightCwd()
     }
 
     public var rowProjectWorktreeDisplayName: String? {
@@ -740,7 +756,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var rowRepoDisplay: String {
-        rowRepoName ?? (cwd != nil ? "Other" : "—")
+        rowRepoName ?? (lightweightCwdIfPresent != nil ? "Other" : "—")
     }
     public var isWorktree: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isWorktree }) ?? false }
     public var isSubmodule: Bool { (cwd.flatMap { Self.gitInfo(from: $0)?.isSubmodule }) ?? false }
@@ -1138,7 +1154,7 @@ enum ProjectPathNormalizer {
 
     private static func resolveWithoutEventMetadata(for session: Session) -> Resolution? {
         resolve(
-            cwd: session.cwd,
+            cwd: session.lightweightCwdIfPresent,
             usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession,
             storedProjectName: session.lightweightRepoName,
             gitRepositoryURL: nil,
