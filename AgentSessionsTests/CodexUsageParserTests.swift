@@ -2644,6 +2644,66 @@ final class CodexUsageParserTests: XCTestCase {
         )
     }
 
+    func testCodexRunwayRecentSessionScannerKeepsWorktreeParentWhenLogEmbedsSourceMeta() throws {
+        let codexHome = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-worktree-\(UUID().uuidString)")
+        let root = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/20", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+
+        let worktreeID = "019ee839-07ff-7370-8a66-2fedf3ee3956"
+        let sourceID = "019ee5e0-2518-7bb2-8deb-8ed972bd529c"
+        let childID = "019ee83a-2613-7103-a33e-84d796ad976e"
+        let nestedChildID = "019ee83b-bc7c-74c3-b5e1-12776943ecfa"
+        let index = codexHome.appendingPathComponent("session_index.jsonl")
+        try """
+        {"id":"\(worktreeID)","thread_name":"Investigate issue 47"}
+        {"id":"\(sourceID)","thread_name":"Investigate issue 47"}
+        """.write(to: index, atomically: true, encoding: .utf8)
+
+        let parent = dir.appendingPathComponent("rollout-2026-06-20T20-28-32-\(worktreeID).jsonl")
+        let child = dir.appendingPathComponent("rollout-2026-06-20T20-29-45-\(childID).jsonl")
+        let nestedChild = dir.appendingPathComponent("rollout-2026-06-20T20-30-16-\(nestedChildID).jsonl")
+        let parentText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"\(worktreeID)","cwd":"/Users/alexm/.codex/worktrees/0c6b/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"\(sourceID)","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"investigate issue 47"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":350000}}}}
+        """
+        let childText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"\(childID)","cwd":"/Users/alexm/.codex/worktrees/0c6b/Codex-History","source":{"subagent":{"thread_spawn":{"parent_thread_id":"\(worktreeID)","agent_role":"explorer"}}},"thread_source":"subagent","agent_nickname":"Averroes"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect issue 47 local code path"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":150000}}}}
+        """
+        let nestedChildText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"\(nestedChildID)","cwd":"/Users/alexm/.codex/worktrees/0c6b/Codex-History","source":{"subagent":{"thread_spawn":{"parent_thread_id":"\(childID)","agent_role":"reviewer"}}},"thread_source":"subagent","agent_nickname":"Socrates"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"review issue 47 nested agent findings"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":90000}}}}
+        """
+        try parentText.write(to: parent, atomically: true, encoding: .utf8)
+        try childText.write(to: child, atomically: true, encoding: .utf8)
+        try nestedChildText.write(to: nestedChild, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parent.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-1)], ofItemAtPath: child.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-2)], ofItemAtPath: nestedChild.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertFalse(identities.contains { $0.id == sourceID })
+        XCTAssertEqual(identities.first?.id, worktreeID)
+        XCTAssertEqual(identities.first?.displayName, "Investigate issue 47")
+        XCTAssertEqual(
+            identities.first?.logPaths.map { URL(fileURLWithPath: $0).lastPathComponent }.sorted(),
+            [
+                "rollout-2026-06-20T20-28-32-\(worktreeID).jsonl",
+                "rollout-2026-06-20T20-29-45-\(childID).jsonl",
+                "rollout-2026-06-20T20-30-16-\(nestedChildID).jsonl"
+            ]
+        )
+    }
+
     func testCodexRunwayRecentSessionScannerIgnoresCompletedRecentLogs() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-complete-\(UUID().uuidString)")
         let now = Date()
