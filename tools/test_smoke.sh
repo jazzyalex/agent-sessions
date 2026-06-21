@@ -82,11 +82,11 @@ else
         fail "Missing 'week_opus' field"
     fi
 
-    # Check pct_used values are present
-    if echo "$result" | grep -q '"pct_used":'; then
-        pass "Has 'pct_used' values"
+    # Check pct_left values are present
+    if echo "$result" | grep -q '"pct_left":'; then
+        pass "Has 'pct_left' values"
     else
-        fail "Missing 'pct_used' values"
+        fail "Missing 'pct_left' values"
     fi
 
     # Check resets values are present

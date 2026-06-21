@@ -78,6 +78,179 @@ remove_managed_socket_files() {
     done
 }
 
+has_v2_usage_anchors() {
+    echo "$usage_output" | grep -qiE "(What's contributing to your limits|d to day.*w to week|Last 24h|Last 7d)"
+}
+
+has_v1_usage_anchor() {
+    echo "$usage_output" | grep -q "Current session"
+}
+
+has_rate_limit_usage_error() {
+    echo "$usage_output" | grep -qiE '(rate limit|rate exceeded|too many requests|try again later)'
+}
+
+is_v2_usage_only() {
+  has_v2_usage_anchors && ! has_v1_usage_anchor
+}
+
+has_complete_v1_usage_capture() {
+  if ! has_v1_usage_anchor; then
+    return 1
+  fi
+
+  local session_pct session_resets week_anchor week_all_pct week_all_resets
+  read session_pct session_resets < <(extract_pct_and_reset "Current session")
+  week_anchor=$(echo "$usage_output" | awk 'BEGIN{IGNORECASE=1} /Current week \(all models\)|Current week \(all-models\)|Current week/ {print; exit}')
+  if [ -n "$week_anchor" ]; then
+    read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
+  else
+    week_all_pct=""
+  fi
+
+  [ -n "$session_pct" ] && [ -n "$week_all_pct" ]
+}
+
+extract_pct_and_reset() {
+  local anchor="$1"; shift
+  # Capture the anchor line + next 3 lines into a small block
+  local block
+  block=$(echo "$usage_output" | awk -v a="$anchor" '
+    BEGIN{c=0}
+    {
+      if (index($0,a)>0) { c=4 }
+      if (c>0) { print; c-- }
+    }
+  ')
+
+  # Extract percentage with unified "remaining" semantics.
+  # Claude /usage may show either:
+  #   - "83% used"
+  #   - "17% left" / "17% remaining"
+  # We always normalize to "percent left" so the app can
+  # treat Codex and Claude consistently.
+  local pct
+  pct=$(echo "$block" | awk '
+    BEGIN { pct = "" }
+    {
+      # Skip Resets line
+      if (/Resets/) next
+
+      # Pattern 1: Explicit "X% used" -> convert to remaining
+      if (tolower($0) ~ /% *used/) {
+        if (match($0, /[0-9]+/)) {
+          pct = 100 - substr($0, RSTART, RLENGTH)
+          if (pct < 0) pct = 0
+          if (pct > 100) pct = 100
+          exit
+        }
+      }
+
+      # Pattern 2: "% left" or "% remaining" (case-insensitive) - already remaining
+      if (tolower($0) ~ /% *(left|remaining)/) {
+        if (match($0, /[0-9]+/)) {
+          pct = substr($0, RSTART, RLENGTH)
+          exit
+        }
+      }
+
+      # Pattern 3: Fallback - any line with "N%" format.
+      # Assume this already represents "percent left".
+      if (pct == "" && match($0, /[0-9]+%/)) {
+        pct = substr($0, RSTART, RLENGTH-1)
+        exit
+      }
+    }
+    END { print pct }
+  ')
+
+  # Extract text after "Resets" (more flexible whitespace handling)
+  local resets
+  resets=$(echo "$block" | awk '
+    /Resets/ {
+      sub(/^.*Resets[ \t]*/, "")
+      gsub(/^[ \t]+|[ \t]+$/, "")  # trim whitespace
+      print
+      exit
+    }
+  ')
+
+  echo "$pct" "$resets"
+}
+
+emit_usage_json() {
+  # Claude Code may show "rate exceeded", "rate limit", or similar instead of
+  # normal usage data. Detect this early and return a structured error so the
+  # caller can serve stale data instead of treating it as a parse failure.
+  if has_rate_limit_usage_error; then
+    cat <<EOF
+{"ok":false,"error":"rate_limited","hint":"Claude Code CLI reported rate limiting in /usage output"}
+EOF
+    return 0
+  fi
+
+  if is_v2_usage_only; then
+    cat <<EOF
+{"ok":false,"error":"ui_format_v2","format":"v2","hint":"Claude Code 2.x no longer exposes quota percentages or reset times in /usage."}
+EOF
+    return 0
+  fi
+
+  local session_pct session_resets week_anchor week_all_pct week_all_resets week_opus_json
+  read session_pct session_resets < <(extract_pct_and_reset "Current session")
+
+  # Allow variations in label casing and punctuation for weekly all models
+  week_anchor=$(echo "$usage_output" | awk 'BEGIN{IGNORECASE=1} /Current week \(all models\)|Current week \(all-models\)|Current week/ {print; exit}')
+  if [ -n "$week_anchor" ]; then
+    read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
+  else
+    week_all_pct=""; week_all_resets=""
+  fi
+
+  # Opus weekly (optional)
+  if echo "$usage_output" | grep -q "Current week (Opus)"; then
+    local week_opus_pct week_opus_resets
+    read week_opus_pct week_opus_resets < <(extract_pct_and_reset "Current week (Opus)")
+    week_opus_json="{\"pct_left\": ${week_opus_pct:-0}, \"resets\": \"${week_opus_resets}\"}"
+  else
+    week_opus_json="null"
+  fi
+
+  if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
+    if [ "${CLAUDE_TUI_DEBUG:-0}" != "0" ]; then
+        debug_file="$(mktemp -t claude_usage_pane)"
+        echo "$usage_output" > "$debug_file"
+        echo "DEBUG: Raw captured output saved to $debug_file" >&2
+        echo "DEBUG: session_pct='$session_pct' week_all_pct='$week_all_pct'" >&2
+        echo "DEBUG: session_resets='$session_resets' week_all_resets='$week_all_resets'" >&2
+    fi
+    echo "$(error_json parsing_failed 'Failed to extract usage data from TUI. Set CLAUDE_TUI_DEBUG=1 for details.')"
+    return 16
+  fi
+
+  cat <<EOF
+{
+  "ok": true,
+  "source": "tmux-capture",
+  "session_5h": {
+    "pct_left": $session_pct,
+    "resets": "$session_resets"
+  },
+  "week_all_models": {
+    "pct_left": $week_all_pct,
+    "resets": "$week_all_resets"
+  },
+  "week_opus": $week_opus_json
+}
+EOF
+}
+
+if [[ -n "${CLAUDE_USAGE_CAPTURE_FIXTURE:-}" ]]; then
+    usage_output="$(cat "$CLAUDE_USAGE_CAPTURE_FIXTURE")"
+    emit_usage_json
+    exit $?
+fi
+
 # ============================================================================
 # Cleanup trap
 # ============================================================================
@@ -325,7 +498,7 @@ usage_output=$(capture_usage)
 ensure_usage_visible() {
   tries=0
   while [ $tries -lt 3 ]; do
-    if echo "$usage_output" | grep -q "Current session"; then
+    if has_v1_usage_anchor || has_v2_usage_anchors; then
       return 0
     fi
     # Avoid re-sending /usage (can have usage impact). Try to cycle tabs / redraw and recapture.
@@ -341,110 +514,10 @@ ensure_usage_visible() {
 
 ensure_usage_visible
 
-# ============================================================================
-# Detect rate-limited / error screens before parsing
-# ============================================================================
-# Claude Code may show "rate exceeded", "rate limit", or similar instead of
-# normal usage data. Detect this early and return a structured error so the
-# caller can serve stale data instead of treating it as a parse failure.
-if echo "$usage_output" | grep -qiE '(rate limit|rate exceeded|too many requests|try again later)'; then
-  cat <<EOF
-{"ok":false,"error":"rate_limited","hint":"Claude Code CLI reported rate limiting in /usage output"}
-EOF
-  exit 0
-fi
-
-# ============================================================================
-# Parse usage output
-# ============================================================================
-
-extract_pct_and_reset() {
-  local anchor="$1"; shift
-  # Capture the anchor line + next 3 lines into a small block
-  local block
-  block=$(echo "$usage_output" | awk -v a="$anchor" '
-    BEGIN{c=0}
-    {
-      if (index($0,a)>0) { c=4 }
-      if (c>0) { print; c-- }
-    }
-  ')
-
-  # Extract percentage with unified "remaining" semantics.
-  # Claude /usage may show either:
-  #   - "83% used"
-  #   - "17% left" / "17% remaining"
-  # We always normalize to "percent left" so the app can
-  # treat Codex and Claude consistently.
-  local pct
-  pct=$(echo "$block" | awk '
-    BEGIN { pct = "" }
-    {
-      # Skip Resets line
-      if (/Resets/) next
-
-      # Pattern 1: Explicit "X% used" → convert to remaining
-      if (tolower($0) ~ /% *used/) {
-        if (match($0, /[0-9]+/)) {
-          pct = 100 - substr($0, RSTART, RLENGTH)
-          if (pct < 0) pct = 0
-          if (pct > 100) pct = 100
-          exit
-        }
-      }
-
-      # Pattern 2: "% left" or "% remaining" (case-insensitive) - already remaining
-      if (tolower($0) ~ /% *(left|remaining)/) {
-        if (match($0, /[0-9]+/)) {
-          pct = substr($0, RSTART, RLENGTH)
-          exit
-        }
-      }
-
-      # Pattern 3: Fallback - any line with "N%" format.
-      # Assume this already represents "percent left".
-      if (pct == "" && match($0, /[0-9]+%/)) {
-        pct = substr($0, RSTART, RLENGTH-1)
-        exit
-      }
-    }
-    END { print pct }
-  ')
-
-  # Extract text after "Resets" (more flexible whitespace handling)
-  local resets
-  resets=$(echo "$block" | awk '
-    /Resets/ {
-      sub(/^.*Resets[ \t]*/, "")
-      gsub(/^[ \t]+|[ \t]+$/, "")  # trim whitespace
-      print
-      exit
-    }
-  ')
-
-  echo "$pct" "$resets"
-}
-
-read session_pct session_resets < <(extract_pct_and_reset "Current session")
-
-# Allow variations in label casing and punctuation for weekly all models
-week_anchor=$(echo "$usage_output" | awk 'BEGIN{IGNORECASE=1} /Current week \(all models\)|Current week \(all-models\)|Current week/ {print; exit}')
-if [ -n "$week_anchor" ]; then
-  read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
-else
-  week_all_pct=""; week_all_resets=""
-fi
-
-# Opus weekly (optional)
-if echo "$usage_output" | grep -q "Current week (Opus)"; then
-  read week_opus_pct week_opus_resets < <(extract_pct_and_reset "Current week (Opus)")
-  week_opus_json="{\"pct_left\": ${week_opus_pct:-0}, \"resets\": \"${week_opus_resets}\"}"
-else
-  week_opus_json="null"
-fi
-
-# Validate we got data
-if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
+# Retry old unknown screens once. Do not retry recognized v2 or rate-limited
+# screens; both are complete /usage responses that should not trigger another
+# /usage request.
+if ! has_rate_limit_usage_error && ! is_v2_usage_only && ! has_complete_v1_usage_capture; then
     # One more attempt: re-open /usage and recapture once
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Escape 2>/dev/null || true
     sleep 0.2
@@ -455,40 +528,8 @@ if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
     "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter 2>/dev/null
     sleep "$SLEEP_AFTER_USAGE"
     usage_output=$(capture_usage)
-    read session_pct session_resets < <(extract_pct_and_reset "Current session")
-    read week_all_pct week_all_resets < <(extract_pct_and_reset "Current week")
 fi
 
-if [ -z "$session_pct" ] || [ -z "$week_all_pct" ]; then
-    if [ "${CLAUDE_TUI_DEBUG:-0}" != "0" ]; then
-        debug_file="$(mktemp -t claude_usage_pane)"
-        echo "$usage_output" > "$debug_file"
-        echo "DEBUG: Raw captured output saved to $debug_file" >&2
-        echo "DEBUG: session_pct='$session_pct' week_all_pct='$week_all_pct'" >&2
-        echo "DEBUG: session_resets='$session_resets' week_all_resets='$week_all_resets'" >&2
-    fi
-    echo "$(error_json parsing_failed 'Failed to extract usage data from TUI. Set CLAUDE_TUI_DEBUG=1 for details.')"
-    exit 16
-fi
-
-# ============================================================================
-# Output JSON
-# ============================================================================
-
-cat <<EOF
-{
-  "ok": true,
-  "source": "tmux-capture",
-  "session_5h": {
-    "pct_left": $session_pct,
-    "resets": "$session_resets"
-  },
-  "week_all_models": {
-    "pct_left": $week_all_pct,
-    "resets": "$week_all_resets"
-  },
-  "week_opus": $week_opus_json
-}
-EOF
+emit_usage_json
 
 exit 0
