@@ -197,6 +197,54 @@ final class ClaudeStatusServiceTests: XCTestCase {
         )
     }
 
+    func testParseUsageJSONRejectsRateLimitedUnavailablePayload() async {
+        let service = ClaudeStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let json = #"{"ok":false,"error":"rate_limited","hint":"Claude Code CLI reported rate limiting in /usage output"}"#
+
+        let parsed = await service.parseUsageJSONForTesting(json)
+        let message = await service.probeUnavailableMessageForTesting(from: json)
+
+        XCTAssertNil(parsed)
+        XCTAssertEqual(
+            message,
+            "Claude /usage probe unavailable: rate_limited. Claude Code CLI reported rate limiting in /usage output"
+        )
+    }
+
+    func testClaudeBuiltInBinaryPathDetection() {
+        let home = "/Users/example"
+
+        XCTAssertTrue(AgentUpdateService.isClaudeBuiltinBinaryPath(
+            "/Users/example/.local/bin/claude",
+            homeDirectory: home
+        ))
+        XCTAssertTrue(AgentUpdateService.isClaudeBuiltinBinaryPath(
+            "/Users/example/.local/share/claude/versions/2.1.185",
+            homeDirectory: home
+        ))
+        XCTAssertFalse(AgentUpdateService.isClaudeBuiltinBinaryPath(
+            "/Users/example/.npm-global/bin/claude",
+            homeDirectory: home
+        ))
+    }
+
+    func testClaudeBuiltInUpdateCheckUsesBuiltInUpdaterStatus() {
+        let service = AgentUpdateService()
+        let path = NSHomeDirectory() + "/.local/bin/claude"
+
+        let result = service.checkForUpdates(
+            source: .claude,
+            resolvedBinaryPath: path,
+            customBinaryPath: nil
+        )
+
+        XCTAssertEqual(result.primaryManager.rawValue, AgentPackageManager.builtin.rawValue)
+        XCTAssertEqual(result.packageIdentifier, path)
+        guard case .builtInUpdaterAvailable = result.status else {
+            return XCTFail("Expected built-in updater status, got \(result.status)")
+        }
+    }
+
     func testParseUsageJSONAcceptsCompleteQuotaPayload() async {
         let service = ClaudeStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
         let json = """
@@ -212,6 +260,9 @@ final class ClaudeStatusServiceTests: XCTestCase {
 
         XCTAssertEqual(parsed?.sessionRemainingPercent, 82)
         XCTAssertEqual(parsed?.weekAllModelsRemainingPercent, 51)
+        guard let parsed else { return XCTFail("Expected parsed snapshot") }
+        XCTAssertNotNil(UsageResetText.resetDate(kind: "5h", source: .claude, raw: parsed.sessionResetText))
+        XCTAssertNotNil(UsageResetText.resetDate(kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText))
     }
 
     func testClaudeUsageCaptureFixtureParsesV1QuotaOutput() throws {
@@ -233,6 +284,27 @@ final class ClaudeStatusServiceTests: XCTestCase {
         XCTAssertTrue(result.stdout.contains(#""pct_left": 51"#))
     }
 
+    func testClaudeUsageCaptureFixtureParsesUsedPercentOutput() throws {
+        let fixture = """
+        Current session
+        ███████████                                        22% used
+        Resets 2:30pm (America/Los_Angeles)
+
+        Current week (all models)
+        █▌                                                 3% used
+        Resets Jun 28 at 5am (America/Los_Angeles)
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok": true"#))
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 78"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 97"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""resets": "2:30pm (America/Los_Angeles)""#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""resets": "Jun 28 at 5am (America/Los_Angeles)""#), result.stdout)
+    }
+
     func testClaudeUsageCaptureFixtureDetectsV2UnavailableQuotaOutput() throws {
         let fixture = """
         Claude Code v2.1.169
@@ -251,6 +323,22 @@ final class ClaudeStatusServiceTests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.stderr)
         XCTAssertTrue(result.stdout.contains(#""ok":false"#))
         XCTAssertTrue(result.stdout.contains(#""error":"ui_format_v2""#))
+        XCTAssertFalse(result.stdout.contains("session_5h"))
+        XCTAssertFalse(result.stdout.contains("week_all_models"))
+    }
+
+    func testClaudeUsageCaptureFixtureDetectsRateLimitedUsageOutput() throws {
+        let fixture = """
+        Current session
+
+        Error: Usage endpoint is rate limited. Please try again in a moment.
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok":false"#))
+        XCTAssertTrue(result.stdout.contains(#""error":"rate_limited""#))
         XCTAssertFalse(result.stdout.contains("session_5h"))
         XCTAssertFalse(result.stdout.contains("week_all_models"))
     }

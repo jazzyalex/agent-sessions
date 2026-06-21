@@ -220,8 +220,8 @@ final class StatusItemController: NSObject {
                 if claudeStatus.setupRequired {
                     menu.addItem(makeActionItem(title: "Copy setup command: claude", action: #selector(copyClaudeCommand)))
                 }
-                menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
-                menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                menu.addItem(makeActionItem(title: claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
             }
 
             menu.addItem(NSMenuItem.separator())
@@ -374,6 +374,7 @@ final class StatusItemController: NSObject {
         guard !claudeStatus.isUpdating else { return }
         claudeStatus.hardProbeNowDiagnostics { diag in
             if !diag.success { self.presentFailureAlert(title: "Claude Probe Failed", diagnostics: diag) }
+            else if diag.unavailableMessage != nil { self.presentFailureAlert(title: "Claude Probe Unavailable", diagnostics: diag) }
         }
     }
     @objc private func copyClaudeCommand() {
@@ -401,6 +402,14 @@ final class StatusItemController: NSObject {
         let clampedLeft = max(0, min(100, percent))
         let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
         return "\(label) \(displayPercent)% \(mode.suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
+    }
+
+    private func claudeResetLine(label: String, percent: Int, reset: String) -> String {
+        if claudeStatus.lastUpdate == nil {
+            let unavailable = claudeStatus.unavailableMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\(label) --  \((unavailable?.isEmpty == false) ? "Usage unavailable" : "Waiting for data")"
+        }
+        return resetLine(label: label, percent: percent, reset: reset)
     }
 }
 

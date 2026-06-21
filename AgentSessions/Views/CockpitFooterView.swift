@@ -52,6 +52,15 @@ struct QuotaData: Equatable {
     var fiveHourProjectedRunoutAt: Date? = nil
     var fiveHourProjectionObservedAt: Date? = nil
 
+    var hasUsageData: Bool {
+        switch provider {
+        case .codex:
+            return eventTimestamp != nil || lastUpdate != nil || !fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !weekResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .claude:
+            return lastUpdate != nil
+        }
+    }
+
     func resetDate(kind: String, raw: String) -> Date? {
         UsageResetText.resetDate(kind: kind, source: provider.usageSource, raw: raw)
     }
@@ -255,10 +264,11 @@ private struct IndexingIndicator: View {
 		        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
 		        let fiveUnavailable = isResetInfoUnavailable(raw: fiveResetRaw)
 		        let weekUnavailable = isResetInfoUnavailable(raw: weekResetRaw)
+		        let hasUsageData = data.hasUsageData
 		        let hasResetInfo = !((fiveResetRaw.isEmpty || fiveUnavailable) && (weekResetRaw.isEmpty || weekUnavailable))
 
-        let fiveLeft = clampPercent(data.fiveHourRemainingPercent)
-        let weekLeft = clampPercent(data.weekRemainingPercent)
+        let fiveLeft = hasUsageData ? clampPercent(data.fiveHourRemainingPercent) : 0
+        let weekLeft = hasUsageData ? clampPercent(data.weekRemainingPercent) : 0
         let fiveUsed = clampPercent(100 - fiveLeft)
         let weekUsed = clampPercent(100 - weekLeft)
 
@@ -274,6 +284,7 @@ private struct IndexingIndicator: View {
         }()
 
         let barFillPercent: Int = {
+            guard hasUsageData else { return 0 }
             switch mode {
             case .left: return bottleneckLeft
             case .used: return bottleneckUsed
@@ -303,6 +314,7 @@ private struct IndexingIndicator: View {
 	        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
+	            if !hasUsageData { return "Waiting" }
 	            if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
 	            if rel != "—" { return rel }
@@ -312,6 +324,7 @@ private struct IndexingIndicator: View {
 	        }()
 
 	        let weekResetDisplayText: String = {
+	            if !hasUsageData { return "Waiting" }
 	            if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
 	            let s = formatWeeklyReset(weekResetDate)
 	            if s != "—" { return s }
@@ -324,8 +337,8 @@ private struct IndexingIndicator: View {
 		            barFillPercent: barFillPercent,
 		            barFillColor: isCritical ? .red : .white,
 		            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
-		            fiveHourPercentLabelText: fiveUnavailable ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
-		            weekPercentLabelText: weekUnavailable ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
+		            fiveHourPercentLabelText: (!hasUsageData || fiveUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
+		            weekPercentLabelText: (!hasUsageData || weekUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
 		            fiveHourResetLabelText: fiveResetDisplayText,
 		            weekResetLabelText: weekResetDisplayText,
 		            fiveHourProjectionLabelText: projectedRunoutEnabled

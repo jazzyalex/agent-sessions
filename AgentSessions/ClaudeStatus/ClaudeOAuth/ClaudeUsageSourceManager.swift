@@ -127,7 +127,7 @@ actor ClaudeUsageSourceManager {
             let age = Date().timeIntervalSince(cached.fetchedAt)
             if age < Self.cacheHardExpire {
                 var serving = cached
-                serving.source = .cachedOAuth
+                serving.source = Self.cachedSource(for: cached.source)
                 serving.health = age < Self.cacheStaleThreshold ? .live : .stale
                 publish(serving)
                 lastOAuthSnapshot = cached
@@ -287,6 +287,7 @@ actor ClaudeUsageSourceManager {
                        log: log, type: .info)
             }
             await handleOAuthFailure(reason: "401 unauthorized")
+            publishCLIAuthRequired()
 
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
@@ -457,6 +458,19 @@ actor ClaudeUsageSourceManager {
         return snapshot
     }
 
+    private nonisolated static func cachedSource(for source: ClaudeUsageSource) -> ClaudeUsageSource {
+        switch source {
+        case .oauthEndpoint, .cachedOAuth:
+            return .cachedOAuth
+        case .webEndpoint, .cachedWeb:
+            return .cachedWeb
+        case .tmuxUsage:
+            return .tmuxUsage
+        case .unavailable:
+            return .unavailable
+        }
+    }
+
     private func wakeOAuthForVisibleTransition() {
         // Visibility should wake credential-gated failures, but not cancel a server-imposed 429 backoff.
         if let deadline = oauthRateLimitRetryDeadline, deadline > Date() {
@@ -588,6 +602,18 @@ actor ClaudeUsageSourceManager {
             menuVisible: ctx.menuVisible,
             stripVisible: ctx.stripVisible,
             appIsActive: ctx.appIsActive
+        )
+    }
+
+    private func publishCLIAuthRequired() {
+        availabilityHandler?(
+            ClaudeServiceAvailability(
+                cliUnavailable: false,
+                tmuxUnavailable: false,
+                loginRequired: true,
+                setupRequired: false,
+                setupHint: "Claude Code CLI credentials are stale. Open Terminal and run: claude /login"
+            )
         )
     }
 

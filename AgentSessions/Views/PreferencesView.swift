@@ -824,6 +824,14 @@ struct PreferencesView: View {
             if shouldUpdate {
                 runAgentUpdate(source: result.source, manager: result.primaryManager, packageIdentifier: result.packageIdentifier)
             }
+        case .builtInUpdaterAvailable:
+            let shouldUpdate = showUpdateConfirmationAlert(
+                title: "\(result.source.displayName): Built-in Updater",
+                message: "\(result.detailMessage)\n\nRun the built-in updater now?"
+            )
+            if shouldUpdate {
+                runAgentUpdate(source: result.source, manager: result.primaryManager, packageIdentifier: result.packageIdentifier)
+            }
         case .noPackageManagerDetected, .latestVersionUnavailable, .unsupportedForManager, .failed:
             showUpdateAlert(
                 title: "\(result.source.displayName): Update Check",

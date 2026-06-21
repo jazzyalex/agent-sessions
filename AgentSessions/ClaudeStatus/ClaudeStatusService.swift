@@ -420,10 +420,12 @@ actor ClaudeStatusService {
                 snapshot = parsed
                 hasSnapshot = true
                 updateHandler(snapshot)
-                return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
+                return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr, snapshot: parsed)
             }
-            let message = probeUnavailableMessage(from: stdout) ?? "Claude /usage output did not include quota data"
-            return ClaudeProbeDiagnostics(success: false, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr.isEmpty ? message : stderr)
+            if let message = probeUnavailableMessage(from: stdout) {
+                return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr, unavailableMessage: message)
+            }
+            return ClaudeProbeDiagnostics(success: false, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr.isEmpty ? "Claude /usage output did not include quota data" : stderr)
         } else {
             if process.terminationStatus == 13 {
                 publishAvailability(loginRequired: true, setupRequired: false, setupHint: nil)
@@ -1576,6 +1578,32 @@ struct ClaudeProbeDiagnostics {
     let timeoutSecs: String?
     let stdout: String
     let stderr: String
+    let unavailableMessage: String?
+    let snapshot: ClaudeUsageSnapshot?
+
+    init(success: Bool,
+         exitCode: Int32,
+         scriptPath: String,
+         workdir: String,
+         claudeBin: String?,
+         tmuxBin: String?,
+         timeoutSecs: String?,
+         stdout: String,
+         stderr: String,
+         unavailableMessage: String? = nil,
+         snapshot: ClaudeUsageSnapshot? = nil) {
+        self.success = success
+        self.exitCode = exitCode
+        self.scriptPath = scriptPath
+        self.workdir = workdir
+        self.claudeBin = claudeBin
+        self.tmuxBin = tmuxBin
+        self.timeoutSecs = timeoutSecs
+        self.stdout = stdout
+        self.stderr = stderr
+        self.unavailableMessage = unavailableMessage
+        self.snapshot = snapshot
+    }
 }
 
 enum ClaudeServiceError: Error {

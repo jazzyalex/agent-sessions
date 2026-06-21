@@ -234,7 +234,7 @@ extension PreferencesView {
                             .help("Query the detected Claude CLI for its version")
                         Button(agentUpdateButtonTitle(for: .claude)) { runAgentUpdateFlow(for: .claude) }
                             .buttonStyle(.bordered)
-                            .help("Check for a newer Claude CLI version and optionally update it")
+                            .help("Check package-managed Claude installs, or run Claude Code's built-in updater for ~/.local installs")
                             .disabled(isAgentUpdateBusy(.claude))
                         Button("Copy Path") {
                             if let p = claudeResolvedPath {
