@@ -769,6 +769,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                          rootPaths: [String],
                                          codexSessionRoots: [String],
                                          claudeSessionRoots: [String],
+                                         antigravitySessionRoots: [String],
                                          opencodeSessionRoots: [String],
                                          lastProcessProbeAtSnapshot: Date?,
                                          lastITermProbeAtSnapshot: Date?,
@@ -830,6 +831,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 now: now,
                 codexSessionRoots: codexSessionRoots,
                 claudeSessionRoots: claudeSessionRoots,
+                antigravitySessionRoots: antigravitySessionRoots,
                 opencodeSessionRoots: opencodeSessionRoots,
                 timeout: Self.processProbeTimeout
             )
@@ -858,6 +860,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                 itermTabTitleBySessionGuid = Self.itermTabTitleBySessionGuid(sessions)
                 itermPresences = Self.presencesFromITermSessions(sessions, source: .codex, now: now)
                 itermPresences += Self.presencesFromITermSessions(sessions, source: .claude, now: now)
+                itermPresences += Self.presencesFromITermSessions(sessions, source: .antigravity, now: now)
                 itermPresences += Self.presencesFromITermSessions(sessions, source: .opencode, now: now)
                 out.append(contentsOf: itermPresences)
             }
@@ -885,6 +888,7 @@ final class CodexActiveSessionsModel: ObservableObject {
                                           now: Date,
                                           codexSessionRoots: [String],
                                           claudeSessionRoots: [String],
+                                          antigravitySessionRoots: [String],
                                           opencodeSessionRoots: [String],
                                           timeout: TimeInterval) async -> [CodexActivePresence] {
         let user = NSUserName()
@@ -917,6 +921,16 @@ final class CodexActiveSessionsModel: ObservableObject {
                     .filter { info in
                         guard info.tty != nil else { return false }
                         return Self.commandContainsNeedle(info.command, needles: ["opencode"])
+                    }
+                    .map(\.pid)
+            )
+        ).sorted()
+        let antigravityCommandPIDs = Array(
+            Set(
+                commandInfos
+                    .filter { info in
+                        guard info.tty != nil else { return false }
+                        return Self.commandContainsNeedle(info.command, needles: ["agy", "antigravity"])
                     }
                     .map(\.pid)
             )
@@ -962,6 +976,18 @@ final class CodexActiveSessionsModel: ObservableObject {
                 timeout: timeout
             )
         }
+        let antigravityInfos: [Int: LsofPIDInfo]
+        if antigravityCommandPIDs.isEmpty {
+            antigravityInfos = [:]
+        } else {
+            antigravityInfos = await discoverLsofPIDInfos(
+                generation: generation,
+                source: .antigravity,
+                queryArguments: ["-w", "-a", "-p", antigravityCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
+                sessionsRoots: antigravitySessionRoots,
+                timeout: timeout
+            )
+        }
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return []
@@ -969,6 +995,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         let pidInfoBySource: [SessionSource: [Int: LsofPIDInfo]] = [
             .codex: codexInfos,
             .claude: claudeInfos,
+            .antigravity: antigravityInfos,
             .opencode: Self.mergePIDInfos(opencodeInfos, with: opencodeCommandInfos)
         ]
         let allPIDs = Array(pidInfoBySource.values.flatMap(\.keys)).sorted()
@@ -1160,6 +1187,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         let rootPaths = registryRoots().map(\.path)
         let codexSessionRoots = codexSessionsRoots().map(\.path)
         let claudeSessionRoots = claudeSessionsRoots().map(\.path)
+        let antigravitySessionRoots = antigravitySessionsRoots().map(\.path)
         let opencodeSessionRoots = opencodeSessionsRoots().map(\.path)
         let previousLogKeys = Set(byLogPath.keys)
         let previousSessionKeys = Set(bySessionID.keys)
@@ -1200,6 +1228,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             rootPaths: rootPaths,
             codexSessionRoots: codexSessionRoots,
             claudeSessionRoots: claudeSessionRoots,
+            antigravitySessionRoots: antigravitySessionRoots,
             opencodeSessionRoots: opencodeSessionRoots,
             lastProcessProbeAtSnapshot: lastProcessProbeAtSnapshot,
             lastITermProbeAtSnapshot: lastITermProbeAtSnapshot,
@@ -1500,6 +1529,13 @@ final class CodexActiveSessionsModel: ObservableObject {
         return dedupRoots([discovery.sessionsRoot()])
     }
 
+    private func antigravitySessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
+        let discovery = GeminiSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return dedupRoots([discovery.sessionsRoot()])
+    }
+
     private func dedupRoots(_ candidates: [URL]) -> [URL] {
         var out: [URL] = []
         var seen: Set<String> = []
@@ -1512,7 +1548,7 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     nonisolated private static func supportsLiveSessionSource(_ source: SessionSource) -> Bool {
         switch source {
-        case .codex, .claude, .opencode:
+        case .codex, .claude, .antigravity, .opencode:
             return true
         default:
             return false
@@ -2438,7 +2474,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         var out: [String] = []
         out.reserveCapacity(presences.count)
         for presence in presences {
-            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else { continue }
+            guard presence.source == .codex || presence.source == .claude || presence.source == .antigravity || presence.source == .opencode else { continue }
             guard canAttemptITerm2TailProbe(
                 itermSessionId: presence.terminal?.itermSessionId,
                 tty: presence.tty,
@@ -3282,7 +3318,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         for presence in presences {
             let key = presenceKey(for: presence)
             guard selectedPresenceKeys.contains(key), seenKeys.insert(key).inserted else { continue }
-            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else { continue }
+            guard presence.source == .codex || presence.source == .claude || presence.source == .antigravity || presence.source == .opencode else { continue }
             let guid = itermSessionGuid(from: presence.terminal?.itermSessionId) ?? ""
             let tty = (presence.tty ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !guid.isEmpty || !tty.isEmpty else { continue }
@@ -4038,7 +4074,7 @@ final class CodexActiveSessionsModel: ObservableObject {
         out.reserveCapacity(presences.count)
 
         for var presence in presences {
-            guard presence.source == .codex || presence.source == .claude || presence.source == .opencode else {
+            guard presence.source == .codex || presence.source == .claude || presence.source == .antigravity || presence.source == .opencode else {
                 out.append(presence)
                 continue
             }
@@ -4103,6 +4139,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         return false
     }
 
+    nonisolated static func isLikelyAntigravityITermSessionName(_ rawName: String) -> Bool {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return false }
+        let normalized = normalizeITermSessionNameForMatching(rawName)
+        guard !normalized.isEmpty else { return false }
+        if normalized == "agy" || normalized == "antigravity" || normalized == "antigravity cli" { return true }
+        if normalized.hasSuffix(" agy") || normalized.hasSuffix(" antigravity") || normalized.hasSuffix(" antigravity cli") { return true }
+        if trimmed.hasPrefix("agy ") || trimmed.hasPrefix("antigravity ") { return true }
+        return false
+    }
+
     nonisolated private static func normalizeITermSessionNameForMatching(_ rawName: String) -> String {
         let lowered = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !lowered.isEmpty else { return "" }
@@ -4128,6 +4175,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             return isLikelyCodexITermSessionName(rawName)
         case .claude:
             return isLikelyClaudeITermSessionName(rawName)
+        case .antigravity:
+            return isLikelyAntigravityITermSessionName(rawName)
         case .opencode:
             return isLikelyOpenCodeITermSessionName(rawName)
         default:
@@ -4255,6 +4304,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             return true
         case .opencode:
             return ext == "json" && fileName.hasPrefix("ses_")
+        case .antigravity:
+            return ext == "md"
         default:
             return false
         }
@@ -4273,6 +4324,9 @@ final class CodexActiveSessionsModel: ObservableObject {
                 return String(base.dropFirst("ses_".count))
             }
             return nil
+        case .antigravity:
+            let conversationID = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+            return conversationID.isEmpty ? nil : conversationID
         default:
             return nil
         }

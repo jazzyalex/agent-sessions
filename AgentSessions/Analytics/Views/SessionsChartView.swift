@@ -598,7 +598,7 @@ extension SessionsChartView {
 
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
-                agent: .gemini,
+                agent: .antigravity,
                 sessionCount: geminiSessions,
                 messageCount: geminiSessions * Int.random(in: 2...5)
             ))

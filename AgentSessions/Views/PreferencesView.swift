@@ -62,7 +62,7 @@ struct PreferencesView: View {
     // CLI availability (assume installed until a probe fails)
     @AppStorage(PreferencesKey.codexCLIAvailable) var codexCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.claudeCLIAvailable) var claudeCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.geminiCLIAvailable) var geminiCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.antigravityCLIAvailable) var geminiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.hermesCLIAvailable) var hermesCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
@@ -72,7 +72,7 @@ struct PreferencesView: View {
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.geminiEnabled) var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
@@ -186,13 +186,13 @@ struct PreferencesView: View {
     @State var claudePathValid: Bool = true
     @State var claudePathDebounce: DispatchWorkItem? = nil
 
-    // Gemini CLI probe state
+    // Antigravity CLI probe state
     @State var geminiProbeState: ProbeState = .idle
     @State var geminiVersionString: String? = nil
     @State var geminiResolvedPath: String? = nil
     @State var geminiProbeDebounce: DispatchWorkItem? = nil
-    // Gemini Sessions directory override
-    @AppStorage("GeminiSessionsRootOverride") var geminiSessionsPath: String = ""
+    // Antigravity artifact directory override
+    @AppStorage("AntigravitySessionsRootOverride") var geminiSessionsPath: String = ""
     @State var geminiSessionsPathValid: Bool = true
     @State var geminiSessionsPathDebounce: DispatchWorkItem? = nil
 
@@ -874,7 +874,7 @@ struct PreferencesView: View {
         switch source {
         case .codex: scheduleCodexProbe()
         case .claude: scheduleClaudeProbe()
-        case .gemini: scheduleGeminiProbe()
+        case .antigravity: scheduleGeminiProbe()
         case .opencode: scheduleOpenCodeProbe()
         case .hermes: scheduleHermesProbe()
         case .copilot: scheduleCopilotProbe()
@@ -891,7 +891,7 @@ struct PreferencesView: View {
             return resolvedCodexPath
         case .claude:
             return claudeResolvedPath
-        case .gemini:
+        case .antigravity:
             return geminiResolvedPath
         case .opencode:
             return opencodeResolvedPath
@@ -918,7 +918,7 @@ struct PreferencesView: View {
         case .claude:
             let value = claudeSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
-        case .gemini:
+        case .antigravity:
             let value = geminiSettings.binaryOverride
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .opencode:
@@ -1093,7 +1093,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
-        case .geminiCLI: return "Gemini CLI"
+        case .geminiCLI: return "Antigravity CLI"
         case .hermesCLI: return "Hermes"
         case .copilotCLI: return "GitHub Copilot CLI"
         case .droidCLI: return "Droid"
@@ -1117,7 +1117,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .codexCLI: return "terminal"
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
-        case .geminiCLI: return "g.circle"
+        case .geminiCLI: return "sparkles"
         case .hermesCLI: return "brain"
         case .copilotCLI: return "bolt.horizontal.circle"
         case .droidCLI: return "d.circle"

@@ -316,7 +316,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
 	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
@@ -405,7 +405,7 @@ struct UnifiedSessionsView: View {
                 update: { claudeIndexer.updateSession($0) },
                 parseFull: { url, forcedID in ClaudeSessionParser.parseFileFull(at: url, forcedID: forcedID) }
             ),
-            .gemini: .init(
+            .antigravity: .init(
                 transcriptCache: geminiIndexer.searchTranscriptCache,
                 update: { geminiIndexer.updateSession($0) },
                 parseFull: { url, forcedID in GeminiSessionParser.parseFileFull(at: url, forcedID: forcedID) }
@@ -879,7 +879,7 @@ struct UnifiedSessionsView: View {
 
             TableColumn("Project", value: \Session.rowRepoDisplay) { s in
                 let display: String = {
-                    if s.source == .gemini {
+                    if s.source == .antigravity {
                         if let name = s.rowRepoName, !name.isEmpty { return name }
                         return "—"
                     } else {
@@ -937,8 +937,8 @@ struct UnifiedSessionsView: View {
 			            if ids.count == 1, let id = ids.first, let s = cachedRows.first(where: { $0.id == id }) {
 			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 			                Divider()
-	                // Derive Gemini CLI session ID once to avoid repeated disk reads
-	                let geminiCLISessionID = (s.source == .gemini) ? GeminiSessionIDHelper.deriveSessionID(from: s) : nil
+	                // Derive Antigravity conversation ID once to avoid repeated disk reads
+	                let geminiCLISessionID = (s.source == .antigravity) ? GeminiSessionIDHelper.deriveSessionID(from: s) : nil
 	                if canResumeSession(s, geminiCLISessionID: geminiCLISessionID) {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
@@ -1192,7 +1192,7 @@ struct UnifiedSessionsView: View {
             return true // session.id from transcript UUID; falls back to --continue
         case .pi:
             return true // session file path or id; falls back to --continue
-        case .gemini:
+        case .antigravity:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session)) != nil
         default:
             return false
@@ -1293,13 +1293,13 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
-        case .gemini:
+        case .antigravity:
             let settings = GeminiCLISettings.shared
             guard let sid = geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session) else { return }
             let wd = settings.effectiveWorkingDirectory(for: session)
-            let binary = settings.binaryOverride.isEmpty ? "gemini" : settings.binaryOverride
+            let binary = settings.binaryOverride.isEmpty ? "agy" : settings.binaryOverride
             let builder = GeminiResumeCommandBuilder()
-            let core = "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
+            let core = "\(builder.shellQuoteIfNeeded(binary)) --conversation \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
@@ -1336,7 +1336,7 @@ struct UnifiedSessionsView: View {
                         switch s.source {
                         case .codex: return "Codex"
                         case .claude: return "Claude"
-                        case .gemini: return "Gemini"
+                        case .antigravity: return "Antigravity"
                         case .opencode: return "OpenCode"
                         case .hermes: return "Hermes"
                         case .copilot: return "Copilot"
@@ -1365,12 +1365,12 @@ struct UnifiedSessionsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
-                } else if s.source == .gemini, geminiIndexer.unreadableSessionIDs.contains(s.id) {
+                } else if s.source == .antigravity, geminiIndexer.unreadableSessionIDs.contains(s.id) {
                     VStack(spacing: 12) {
                         Label("Could not open session", systemImage: "exclamationmark.triangle.fill")
                             .font(.headline)
                             .foregroundStyle(sourceAccent(s))
-                        Text("This Gemini session could not be parsed. It may be truncated or corrupted.")
+                        Text("This Antigravity session could not be parsed. It may be truncated or corrupted.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         HStack(spacing: 12) {
@@ -1451,8 +1451,8 @@ struct UnifiedSessionsView: View {
                 }
 
                 if geminiAgentEnabled {
-                    AgentTabToggle(title: "Gemini", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeGemini)
-                        .help("Show or hide Gemini sessions in the list (⌘3)")
+                    AgentTabToggle(title: "Antigravity", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeGemini)
+                        .help("Show or hide Antigravity sessions in the list (⌘3)")
                         .keyboardShortcut("3", modifiers: .command)
                 }
 
@@ -1848,7 +1848,7 @@ struct UnifiedSessionsView: View {
         } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             claudeIndexer.reloadSession(id: id)
             requestedSelectionReload = true
-        } else if s.source == .gemini, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+        } else if s.source == .antigravity, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             geminiIndexer.reloadSession(id: id)
             requestedSelectionReload = true
         } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
@@ -2024,7 +2024,7 @@ struct UnifiedSessionsView: View {
             if !unified.includeCodex { unified.includeCodex = true }
         case .claude:
             if !unified.includeClaude { unified.includeClaude = true }
-        case .gemini:
+        case .antigravity:
             if !unified.includeGemini { unified.includeGemini = true }
         case .opencode:
             if !unified.includeOpenCode { unified.includeOpenCode = true }
@@ -2292,7 +2292,7 @@ struct UnifiedSessionsView: View {
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
-        case .gemini: label = "Gemini"
+        case .antigravity: label = "Antigravity"
         case .opencode: label = "OpenCode"
         case .hermes: label = "Hermes"
         case .copilot: label = "Copilot"
@@ -2513,7 +2513,7 @@ struct UnifiedSessionsView: View {
 
     private var canResumeSelectedSession: Bool {
         guard let selectedSession else { return false }
-        let geminiCLISessionID = selectedSession.source == .gemini
+        let geminiCLISessionID = selectedSession.source == .antigravity
             ? GeminiSessionIDHelper.deriveSessionID(from: selectedSession)
             : nil
         return canResumeSession(selectedSession, geminiCLISessionID: geminiCLISessionID)
@@ -2538,7 +2538,7 @@ struct UnifiedSessionsView: View {
             return CursorSettings.shared.effectiveWorkingDirectory(for: session)
         case .pi:
             return PiSettings.shared.effectiveWorkingDirectory(for: session)
-        case .gemini:
+        case .antigravity:
             return GeminiCLISettings.shared.effectiveWorkingDirectory(for: session)
         default:
             guard let path = session.cwd, !path.isEmpty else { return nil }
@@ -2574,7 +2574,7 @@ struct UnifiedSessionsView: View {
         case .copilot: return "Copilot CLI"
         case .cursor: return "Cursor CLI"
         case .pi: return "Pi CLI"
-        case .gemini: return "Gemini CLI"
+        case .antigravity: return "Antigravity CLI"
         default: return "CLI"
         }
     }
@@ -2585,7 +2585,7 @@ struct UnifiedSessionsView: View {
             return canResumeCodexInCLI(s)
         case .claude, .opencode, .hermes, .copilot, .cursor, .pi:
             return true
-        case .gemini:
+        case .antigravity:
             return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
         default:
             return false
@@ -2693,7 +2693,7 @@ struct UnifiedSessionsView: View {
                 let coord = PiResumeCoordinator(env: PiCLIEnvironment(), builder: PiResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
-        case .gemini:
+        case .antigravity:
             let settings = GeminiCLISettings.shared
             let sid = GeminiSessionIDHelper.deriveSessionID(from: s)
             let wd = settings.effectiveWorkingDirectory(for: s)
@@ -2824,7 +2824,7 @@ struct UnifiedSessionsView: View {
         switch s.source {
         case .codex: return Color.agentCodex
         case .claude: return Color.agentClaude
-        case .gemini: return Color.teal
+        case .antigravity: return Color.teal
         case .opencode: return Color.purple
         case .hermes: return TranscriptColorSystem.agentBrandAccent(source: .hermes)
         case .copilot: return Color.agentCopilot
@@ -3321,7 +3321,7 @@ private struct TranscriptHostView: View {
             ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
                 .opacity(kind == .claude ? 1 : 0)
             GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
-                .opacity(kind == .gemini ? 1 : 0)
+                .opacity(kind == .antigravity ? 1 : 0)
             OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
                 .opacity(kind == .opencode ? 1 : 0)
             HermesTranscriptView(indexer: hermesIndexer, sessionID: selection)
@@ -3348,7 +3348,7 @@ private struct TranscriptHostView: View {
     }
 	}
 
-		// Session title cell with inline Gemini refresh affordance (hover-only)
+		// Session title cell with inline Antigravity refresh affordance (hover-only)
 		private struct SessionTitleCell: View {
 		    let session: Session
 		    @ObservedObject var geminiIndexer: GeminiSessionIndexer
@@ -3446,7 +3446,7 @@ private struct TranscriptHostView: View {
                         .background(Color.clear)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if session.source == .gemini, geminiIndexer.isPreviewStale(id: session.id) {
+                    if session.source == .antigravity, geminiIndexer.isPreviewStale(id: session.id) {
                         Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
                             Text("Refresh")
                                 .font(.system(size: 11, weight: .medium, design: .monospaced))

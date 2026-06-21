@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// Wrapper for transcript view using UnifiedTranscriptView with Gemini indexer
+// Wrapper for transcript view using UnifiedTranscriptView with the Antigravity indexer
 struct GeminiTranscriptView: View {
     @ObservedObject var indexer: GeminiSessionIndexer
     let sessionID: String?
@@ -11,7 +11,7 @@ struct GeminiTranscriptView: View {
             indexer: indexer,
             sessionID: sessionID,
             sessionIDExtractor: geminiSessionID,
-            sessionIDLabel: "Gemini",
+            sessionIDLabel: "Antigravity",
             enableCaching: false
         )
     }
@@ -23,4 +23,3 @@ struct GeminiTranscriptView: View {
         return nil
     }
 }
-

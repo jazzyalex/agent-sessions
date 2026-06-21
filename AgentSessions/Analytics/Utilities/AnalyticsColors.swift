@@ -10,8 +10,8 @@ extension Color {
     /// Claude Code brand color (warm brown)
     static let agentClaude: Color = TranscriptColorSystem.agentBrandAccent(source: .claude)
 
-    /// Gemini brand color
-    static let agentGemini: Color = TranscriptColorSystem.agentBrandAccent(source: .gemini)
+    /// Antigravity brand color
+    static let agentGemini: Color = TranscriptColorSystem.agentBrandAccent(source: .antigravity)
     /// OpenCode brand color
     static let agentOpenCode: Color = TranscriptColorSystem.agentBrandAccent(source: .opencode)
     /// Hermes brand color
@@ -46,7 +46,7 @@ extension Color {
         switch source {
         case .codex: return .agentCodex
         case .claude: return .agentClaude
-        case .gemini: return .agentGemini
+        case .antigravity: return .agentGemini
         case .opencode: return .agentOpenCode
         case .hermes: return .agentHermes
         case .copilot: return .agentCopilot
@@ -63,7 +63,7 @@ extension Color {
             switch source {
             case .codex: return .agentCodexGray
             case .claude: return .agentClaudeGray
-            case .gemini: return .agentGeminiGray
+            case .antigravity: return .agentGeminiGray
             case .opencode: return .agentOpenCodeGray
             case .hermes: return .agentHermesGray
             case .copilot: return .agentCopilotGray

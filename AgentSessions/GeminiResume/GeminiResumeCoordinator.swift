@@ -21,42 +21,47 @@ final class GeminiResumeCoordinator {
             let message: String
             switch probe {
             case .failure(.notFound):
-                message = "Gemini CLI executable not found."
+                message = "Antigravity CLI executable not found."
             case .failure(.invalidResponse):
-                message = "Failed to execute gemini --version."
+                message = "Failed to execute agy --version."
             case .success:
-                message = "Gemini CLI not found." // unreachable; guard ensures failure
+                message = "Antigravity CLI not found." // unreachable; guard ensures failure
             }
             return GeminiResumeResult(launched: false, strategy: .none, error: message, command: nil)
         }
 
-        let hasID = (input.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
-        guard info.supportsResume, hasID else {
-            let reason: String
-            if !hasID {
-                reason = "No session ID available."
-            } else {
-                reason = "Installed Gemini CLI does not support --resume."
-            }
-            return GeminiResumeResult(launched: false, strategy: .none, error: reason, command: nil)
+        let trimmedID = input.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let strategy: GeminiResumeCommandBuilder.Strategy
+        let resultStrategy: GeminiStrategyUsed
+        if info.supportsResume, let id = trimmedID, !id.isEmpty {
+            strategy = .resumeByID(id: id)
+            resultStrategy = .resumeByID
+        } else if info.supportsResume {
+            strategy = .continueRecent
+            resultStrategy = .resumeByID
+        } else {
+            return GeminiResumeResult(launched: false,
+                                      strategy: .none,
+                                      error: "Installed Antigravity CLI does not support --conversation or --continue.",
+                                      command: nil)
         }
 
         let pkg: GeminiResumeCommandBuilder.CommandPackage
         do {
-            pkg = try builder.makeCommand(strategy: .resumeByID(id: input.sessionID!), binaryURL: info.binaryURL, workingDirectory: input.workingDirectory)
+            pkg = try builder.makeCommand(strategy: strategy, binaryURL: info.binaryURL, workingDirectory: input.workingDirectory)
         } catch {
-            return GeminiResumeResult(launched: false, strategy: .resumeByID, error: error.localizedDescription, command: nil)
+            return GeminiResumeResult(launched: false, strategy: resultStrategy, error: error.localizedDescription, command: nil)
         }
 
         if dryRun {
-            return GeminiResumeResult(launched: false, strategy: .resumeByID, error: nil, command: pkg.shellCommand)
+            return GeminiResumeResult(launched: false, strategy: resultStrategy, error: nil, command: pkg.shellCommand)
         }
 
         do {
             try launcher.launchInTerminal(pkg)
-            return GeminiResumeResult(launched: true, strategy: .resumeByID, error: nil, command: pkg.shellCommand)
+            return GeminiResumeResult(launched: true, strategy: resultStrategy, error: nil, command: pkg.shellCommand)
         } catch {
-            return GeminiResumeResult(launched: false, strategy: .resumeByID, error: error.localizedDescription, command: nil)
+            return GeminiResumeResult(launched: false, strategy: resultStrategy, error: error.localizedDescription, command: nil)
         }
     }
 }

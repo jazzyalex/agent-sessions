@@ -77,8 +77,6 @@ enum SessionInlineImageMapper {
                 return OpenCodeBase64ImageScanner.fileContainsBase64ImageDataURL(sessionFileURL: sessionFileURL,
                                                                                 messageIDs: messageIDs,
                                                                                 shouldCancel: shouldCancel)
-            case .gemini:
-                return GeminiInlineDataImageScanner.fileContainsInlineDataImage(at: sessionFileURL, shouldCancel: shouldCancel)
             case .copilot:
                 do {
                     return try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: 1, shouldCancel: shouldCancel).isEmpty == false
@@ -124,18 +122,6 @@ enum SessionInlineImageMapper {
                         let eventIndex = messageToUserEventIndex[mid] ?? messageToFirstEventIndex[mid] ?? 0
                         return InlineScanResult(payload: .base64(sourceURL: part.partFileURL, span: part.span), lineIndex: eventIndex)
                     }
-                case .gemini:
-                    let located = try GeminiInlineDataImageScanner.scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                    var eventIndexByID: [String: Int] = [:]
-                    eventIndexByID.reserveCapacity(min(session.events.count, 512))
-                    for (idx, ev) in session.events.enumerated() {
-                        eventIndexByID[ev.id] = idx
-                    }
-                    return located.map { item in
-                        let baseID = session.id + String(format: "-%04d", item.itemIndex)
-                        let eventIndex = eventIndexByID[baseID] ?? 0
-                        return InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: item.span), lineIndex: eventIndex)
-                    }
                 case .copilot:
                     let located = try CopilotAttachmentScanner.scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     var eventIndexByID: [String: Int] = [:]
@@ -168,7 +154,7 @@ enum SessionInlineImageMapper {
                     guard case .base64(_, let span) = item.payload else { return false }
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
                 }
-            case .claude, .opencode, .gemini, .copilot, .openclaw:
+            case .claude, .opencode, .copilot, .openclaw:
                 return located
             default:
                 return []

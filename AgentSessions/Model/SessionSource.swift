@@ -4,7 +4,7 @@ import Foundation
 public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case codex = "codex"
     case claude = "claude"
-    case gemini = "gemini"
+    case antigravity = "antigravity"
     case opencode = "opencode"
     case hermes = "hermes"
     case copilot = "copilot"
@@ -17,7 +17,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         switch self {
         case .codex: return "Codex CLI"
         case .claude: return "Claude Code"
-        case .gemini: return "Gemini"
+        case .antigravity: return "Antigravity"
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         case .copilot: return "Copilot CLI"
@@ -32,7 +32,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         switch self {
         case .codex: return "terminal"
         case .claude: return "command"
-        case .gemini: return "sparkles"
+        case .antigravity: return "sparkles"
         case .opencode: return "chevron.left.slash.chevron.right"
         case .hermes: return "brain"
         case .copilot: return "bolt.horizontal.circle"
@@ -46,7 +46,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     public var versionIntroduced: String {
         switch self {
         case .codex, .claude:   return "1.0"
-        case .gemini:           return "2.5"
+        case .antigravity:      return "3.9"
         case .opencode:         return "2.8"
         case .hermes:           return "3.7"
         case .copilot:          return "2.11"
@@ -61,7 +61,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         switch self {
         case .codex:    return "Track your Codex CLI coding sessions"
         case .claude:   return "Browse your Claude Code conversations"
-        case .gemini:   return "View your Gemini CLI interactions"
+        case .antigravity: return "Browse your Antigravity CLI conversations"
         case .opencode: return "Review your OpenCode sessions"
         case .hermes:   return "Browse your Hermes sessions and resume by ID"
         case .copilot:  return "Browse your GitHub Copilot chat history"

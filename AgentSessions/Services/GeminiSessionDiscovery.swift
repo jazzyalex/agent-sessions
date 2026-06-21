@@ -1,10 +1,9 @@
 import Foundation
 
-// MARK: - Gemini Session Discovery
+// MARK: - Antigravity Session Discovery
 
-/// Discovery for Google Gemini CLI session checkpoints (ephemeral)
-/// Expected layout: ~/.gemini/tmp/<project>/chats/session-*.json or session-*.jsonl.
-/// Also handle fallback: ~/.gemini/tmp/<project>/session-*.json[l]
+/// Discovery for Antigravity local brain artifacts.
+/// Expected layout: ~/.gemini/antigravity/brain/<conversation-id>/*.md.
 final class GeminiSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
 
@@ -16,7 +15,7 @@ final class GeminiSessionDiscovery: SessionDiscovery {
         if let custom = customRoot, !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".gemini/tmp")
+        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".gemini/antigravity/brain")
     }
 
     func discoverSessionFiles() -> [URL] {
@@ -29,29 +28,13 @@ final class GeminiSessionDiscovery: SessionDiscovery {
         }
 
         var out: [URL] = []
-        // Shallow scan: iterate per-project directories in ~/.gemini/tmp.
-        guard let projects = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+        // Shallow scan: iterate per-conversation directories in ~/.gemini/antigravity/brain.
+        guard let conversations = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
             return []
         }
-        for proj in projects {
-            guard (try? proj.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            let name = proj.lastPathComponent
-            // Skip known non-project entries.
-            if name == "bin" || name == ".DS_Store" || name.hasSuffix(".txt") { continue }
-
-            // Prefer chats/ subdir when present.
-            let chats = proj.appendingPathComponent("chats", isDirectory: true)
-            let chatFiles = sessionFiles(in: chats, fileManager: fm)
-
-            // Fallback: look directly in project dir for session-*.json
-            let rootFiles = sessionFiles(in: proj, fileManager: fm)
-
-            // Only accept directories that actually contain session files.
-            if chatFiles.isEmpty && rootFiles.isEmpty {
-                continue
-            }
-            out.append(contentsOf: chatFiles)
-            out.append(contentsOf: rootFiles)
+        for conversation in conversations {
+            guard (try? conversation.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            out.append(contentsOf: sessionFiles(in: conversation, fileManager: fm))
         }
 
         // Sort by modification time (desc)
@@ -76,20 +59,14 @@ final class GeminiSessionDiscovery: SessionDiscovery {
             return []
         }
 
-        var found: [URL] = []
-        guard let it = fm.enumerator(
-            at: dir,
-            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
-            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]
-        ) else {
+        guard let files = try? fm.contentsOfDirectory(at: dir,
+                                                       includingPropertiesForKeys: [.isRegularFileKey],
+                                                       options: [.skipsHiddenFiles]) else {
             return []
         }
-        for case let f as URL in it {
-            let ext = f.pathExtension.lowercased()
-            if (ext == "json" || ext == "jsonl") && f.lastPathComponent.hasPrefix("session-") {
-                found.append(f)
-            }
+        return files.filter { url in
+            guard url.pathExtension.lowercased() == "md" else { return false }
+            return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
         }
-        return found
     }
 }

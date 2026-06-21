@@ -2848,35 +2848,62 @@ final class SessionParserTests: XCTestCase {
         XCTAssertFalse(found.contains(canonicalPath(noiseURL)))
     }
 
-    func testGeminiDiscoveryAcceptsNamedProjectDirectories() throws {
+    func testAntigravityDiscoveryFindsBrainArtifactsOnly() throws {
         let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Gemini-Discovery-\(UUID().uuidString)", isDirectory: true)
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-Discovery-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: root) }
 
-        let namedWithChats = root.appendingPathComponent("radio4j/chats", isDirectory: true)
-        let namedWithoutChats = root.appendingPathComponent("radio-metadata-fr-scraper", isDirectory: true)
-        let noiseDir = root.appendingPathComponent("bin/chats", isDirectory: true)
-        try fm.createDirectory(at: namedWithChats, withIntermediateDirectories: true)
-        try fm.createDirectory(at: namedWithoutChats, withIntermediateDirectories: true)
-        try fm.createDirectory(at: noiseDir, withIntermediateDirectories: true)
+        let conversation = root.appendingPathComponent("conv-123", isDirectory: true)
+        let oldGeminiProject = root.appendingPathComponent("radio4j/chats", isDirectory: true)
+        try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
+        try fm.createDirectory(at: oldGeminiProject, withIntermediateDirectories: true)
 
-        let chatsSession = namedWithChats.appendingPathComponent("session-1.json")
-        let chatsJSONLSession = namedWithChats.appendingPathComponent("session-1b.jsonl")
-        let rootSession = namedWithoutChats.appendingPathComponent("session-2.json")
-        let ignoredSession = noiseDir.appendingPathComponent("session-bin.json")
+        let task = conversation.appendingPathComponent("task.md")
+        let walkthrough = conversation.appendingPathComponent("walkthrough.md")
+        let oldGeminiSession = oldGeminiProject.appendingPathComponent("session-1.json")
+        let unrelatedMarkdown = conversation.appendingPathComponent("notes.md")
 
-        try writeText("{}", to: chatsSession)
-        try writeText("{}", to: chatsJSONLSession)
-        try writeText("{}", to: rootSession)
-        try writeText("{}", to: ignoredSession)
+        try writeText("# Build plan\n", to: task)
+        try writeText("# Walkthrough\n", to: walkthrough)
+        try writeText("{}", to: oldGeminiSession)
+        try writeText("# Notes\n", to: unrelatedMarkdown)
 
         let discovery = GeminiSessionDiscovery(customRoot: root.path)
         let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
 
-        XCTAssertTrue(found.contains(canonicalPath(chatsSession)))
-        XCTAssertTrue(found.contains(canonicalPath(chatsJSONLSession)))
-        XCTAssertTrue(found.contains(canonicalPath(rootSession)))
-        XCTAssertFalse(found.contains(canonicalPath(ignoredSession)))
+        XCTAssertTrue(found.contains(canonicalPath(task)))
+        XCTAssertTrue(found.contains(canonicalPath(walkthrough)))
+        XCTAssertTrue(found.contains(canonicalPath(unrelatedMarkdown)))
+        XCTAssertFalse(found.contains(canonicalPath(oldGeminiSession)))
+    }
+
+    func testAntigravityMarkdownArtifactParsesConversationIDAndTitle() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-Parser-\(UUID().uuidString)", isDirectory: true)
+        let conversation = root.appendingPathComponent("conv-abc", isDirectory: true)
+        try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let url = conversation.appendingPathComponent("task.md")
+        try writeText("""
+        # Replace unsupported provider
+
+        Use agy for this conversation.
+        """, to: url)
+
+        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        XCTAssertEqual(preview.source, .antigravity)
+        XCTAssertEqual(preview.id, "conv-abc")
+        XCTAssertEqual(preview.title, "Replace unsupported provider")
+        XCTAssertEqual(preview.eventCount, 1)
+        XCTAssertTrue(preview.events.isEmpty)
+
+        guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(full.source, .antigravity)
+        XCTAssertEqual(full.id, "conv-abc")
+        XCTAssertEqual(full.events.count, 1)
+        XCTAssertEqual(full.events.first?.kind, .assistant)
+        XCTAssertTrue(full.events.first?.text?.contains("Use agy") == true)
     }
 
     func testOpenClawDiscoveryFindsAgentSessionFiles() throws {

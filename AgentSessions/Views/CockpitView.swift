@@ -679,7 +679,7 @@ struct CockpitView: View {
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .opencode: return "OpenCode"
-        case .gemini: return "Gemini"
+        case .antigravity: return "Antigravity"
         case .hermes: return "Hermes"
         case .copilot: return "Copilot"
         case .droid: return "Droid"

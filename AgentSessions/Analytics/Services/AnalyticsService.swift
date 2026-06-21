@@ -24,7 +24,7 @@ final class AnalyticsService: ObservableObject {
     private let repository: AnalyticsRepository?
 
     private static let analyticsSupportedSources: Set<SessionSource> = [
-        .codex, .claude, .gemini, .opencode, .hermes, .copilot, .droid
+        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 
@@ -85,7 +85,7 @@ final class AnalyticsService: ObservableObject {
         var allSessions: [Session] = []
         if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
@@ -117,7 +117,7 @@ final class AnalyticsService: ObservableObject {
         var allSessions: [Session] = []
         if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.gemini) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
@@ -377,13 +377,13 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.gemini.rawValue, SessionSource.opencode.rawValue, SessionSource.hermes.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
+            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.antigravity.rawValue, SessionSource.opencode.rawValue, SessionSource.hermes.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
             raw = [SessionSource.claude.rawValue]
         case .geminiOnly:
-            raw = [SessionSource.gemini.rawValue]
+            raw = [SessionSource.antigravity.rawValue]
         case .opencodeOnly:
             raw = [SessionSource.opencode.rawValue]
         case .hermesOnly:
@@ -755,7 +755,7 @@ final class AnalyticsService: ObservableObject {
             let phases = [
                 (SessionSource.codex, codexIndexer.launchPhase),
                 (SessionSource.claude, claudeIndexer.launchPhase),
-                (SessionSource.gemini, geminiIndexer.launchPhase),
+                (SessionSource.antigravity, geminiIndexer.launchPhase),
                 (SessionSource.opencode, opencodeIndexer.launchPhase),
                 (SessionSource.hermes, hermesIndexer.launchPhase),
                 (SessionSource.copilot, copilotIndexer.launchPhase),

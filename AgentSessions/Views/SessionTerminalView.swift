@@ -177,12 +177,12 @@ struct SessionTerminalView: View {
     @State private var preambleUserBlockIndexes: Set<Int> = []
     @State private var autoScrollSessionID: String? = nil
 
-    // Derived agent label for legend chips (Codex / Claude / Gemini)
+    // Derived agent label for legend chips.
     private var agentLegendLabel: String {
         switch session.source {
         case .codex: return "Codex"
         case .claude: return "Claude"
-        case .gemini: return "Gemini"
+        case .antigravity: return "Antigravity"
         case .opencode: return "OpenCode"
         case .hermes: return "Hermes"
         case .copilot: return "Copilot"
@@ -581,7 +581,7 @@ struct SessionTerminalView: View {
         guard session.source == .codex
                 || session.source == .claude
                 || session.source == .opencode
-                || session.source == .gemini
+                || session.source == .antigravity
                 || session.source == .copilot
                 || session.source == .openclaw else {
             hasInlineImagesInSession = false

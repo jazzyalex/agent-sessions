@@ -2,7 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 
-/// Session indexer for Gemini CLI sessions (ephemeral, read-only)
+/// Session indexer for Antigravity CLI artifacts.
 final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
@@ -78,12 +78,12 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
     func refresh(mode: IndexRefreshMode = .incremental,
                  trigger: IndexRefreshTrigger = .manual,
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
-        if !AgentEnablement.isEnabled(.gemini) { return }
+        if !AgentEnablement.isEnabled(.antigravity) { return }
         let root = discovery.sessionsRoot()
         #if DEBUG
-        print("\n🔵 GEMINI INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
+        print("\nANTIGRAVITY INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
         #endif
-        LaunchProfiler.log("Gemini.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
+        LaunchProfiler.log("Antigravity.refresh: start (mode=\(mode), trigger=\(trigger.rawValue))")
 
         let token = UUID()
         refreshToken = token
@@ -102,10 +102,10 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 		            guard let self else { return }
 
 	            let config = SessionIndexingEngine.ScanConfig(
-		                source: .gemini,
+		                source: .antigravity,
 		                discoverFiles: {
 		                    let files = self.discovery.discoverSessionFiles()
-	                    LaunchProfiler.log("Gemini.refresh: file enumeration done (files=\(files.count))")
+	                    LaunchProfiler.log("Antigravity.refresh: file enumeration done (files=\(files.count))")
 	                    return files
 	                },
 	                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
@@ -148,7 +148,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 		                guard self.refreshToken == token else { return }
 		                switch result.kind {
 	                case .hydrated:
-                    LaunchProfiler.log("Gemini.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
+                    LaunchProfiler.log("Antigravity.refresh: DB hydrate hit (sessions=\(result.sessions.count))")
                     self.allSessions = result.sessions
                     self.isIndexing = false
 	                    self.filesProcessed = result.sessions.count
@@ -157,14 +157,14 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 		                    self.launchPhase = .ready
 		                    self.previewMTimeByID = previewTimesByID
 		                    #if DEBUG
-		                    print("[Launch] Hydrated Gemini sessions from DB: count=\(result.sessions.count)")
+		                    print("[Launch] Hydrated Antigravity sessions from DB: count=\(result.sessions.count)")
 		                    #endif
 		                    return
 	                case .scanned:
 	                    break
 	                }
 
-		                LaunchProfiler.log("Gemini.refresh: sessions merged (total=\(result.sessions.count))")
+		                LaunchProfiler.log("Antigravity.refresh: sessions merged (total=\(result.sessions.count))")
 		                self.previewMTimeByID = previewTimesByID
 		                self.allSessions = result.sessions
 		                self.isIndexing = false
@@ -175,7 +175,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
                     }
                 }
                 #if DEBUG
-                print("✅ GEMINI INDEXING DONE: total=\(self.totalFiles)")
+                print("ANTIGRAVITY INDEXING DONE: total=\(self.totalFiles)")
                 #endif
 
                 // Background transcript cache generation for accurate search (bounded batch).
@@ -198,13 +198,13 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 	                    let cache = self.transcriptCache
 	                    let finishPrewarm: @Sendable @MainActor () -> Void = { [weak self, token] in
 	                        guard let self, self.refreshToken == token else { return }
-	                        LaunchProfiler.log("Gemini.refresh: transcript prewarm complete")
+	                        LaunchProfiler.log("Antigravity.refresh: transcript prewarm complete")
 	                        self.isProcessingTranscripts = false
 	                        self.progressText = "Ready"
 	                        self.launchPhase = .ready
 	                    }
 	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
-	                        LaunchProfiler.log("Gemini.refresh: transcript prewarm start (delta=\(delta.count))")
+	                        LaunchProfiler.log("Antigravity.refresh: transcript prewarm start (delta=\(delta.count))")
 	                        await cache.generateAndCache(sessions: delta)
 	                        await finishPrewarm()
 	                    }
@@ -220,7 +220,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         // Hydrate from session_meta without rollups gating.
         let db = try IndexDB()
         let repo = SessionMetaRepository(db: db)
-        let list = try await repo.fetchSessions(for: .gemini)
+        let list = try await repo.fetchSessions(for: .antigravity)
         guard !list.isEmpty else { return nil }
         return list.sorted { $0.modifiedAt > $1.modifiedAt }
     }
@@ -322,7 +322,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
             self.reloadLock.unlock()
             if preParseStat != postParseStat {
                 #if DEBUG
-                print("ℹ️ Gemini file changed during reload; next monitor tick will retry")
+            print("Antigravity file changed during reload; next monitor tick will retry")
                 #endif
             }
 
@@ -408,13 +408,13 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         let lightweightSessions = allSessions.filter { $0.events.isEmpty }
         guard !lightweightSessions.isEmpty else {
             #if DEBUG
-            print("ℹ️ No lightweight Gemini sessions to parse")
+            print("No lightweight Antigravity sessions to parse")
             #endif
             return
         }
 
         #if DEBUG
-        print("🔍 Starting full parse of \(lightweightSessions.count) lightweight Gemini sessions")
+        print("Starting full parse of \(lightweightSessions.count) lightweight Antigravity sessions")
         #endif
 
         for (index, session) in lightweightSessions.enumerated() {
@@ -451,7 +451,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         }
 
         #if DEBUG
-        print("✅ Completed parsing \(lightweightSessions.count) lightweight Gemini sessions")
+        print("Completed parsing \(lightweightSessions.count) lightweight Antigravity sessions")
         #endif
     }
 

@@ -26,29 +26,4 @@ final class AgentImageScannerTests: XCTestCase {
         XCTAssertEqual(matches[0].fileSizeBytes, 1)
     }
 
-    func testGeminiInlineDataImageScannerSpanDecodes() throws {
-        let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessionsTests-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: root) }
-
-        let decodedExpected = Data("hello".utf8)
-        let base64 = decodedExpected.base64EncodedString()
-        let json = """
-        {"history":[{"role":"user","parts":[{"text":"Describe this image:"},{"inlineData":{"mimeType":"image/png","data":"\(base64)"}}]}]}
-        """
-        let sessionURL = root.appendingPathComponent("session.json", isDirectory: false)
-        try json.write(to: sessionURL, atomically: true, encoding: .utf8)
-
-        let spans = try GeminiInlineDataImageScanner.scanFile(at: sessionURL, maxMatches: 10)
-        XCTAssertEqual(spans.count, 1)
-        let first = try XCTUnwrap(spans.first)
-        XCTAssertEqual(first.itemIndex, 1)
-        XCTAssertEqual(first.span.mediaType, "image/png")
-
-        let decoded = try CodexSessionImagePayload.decodeImageData(url: sessionURL,
-                                                                  span: first.span,
-                                                                  maxDecodedBytes: 1024 * 1024)
-        XCTAssertEqual(decoded, decodedExpected)
-    }
 }

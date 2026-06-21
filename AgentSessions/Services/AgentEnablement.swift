@@ -69,7 +69,7 @@ enum AgentEnablement {
         switch source {
         case .codex:    return PreferencesKey.Agents.codexEnabled
         case .claude:   return PreferencesKey.Agents.claudeEnabled
-        case .gemini:   return PreferencesKey.Agents.geminiEnabled
+        case .antigravity:   return PreferencesKey.Agents.antigravityEnabled
         case .opencode: return PreferencesKey.Agents.openCodeEnabled
         case .hermes:   return PreferencesKey.Agents.hermesEnabled
         case .copilot:  return PreferencesKey.Agents.copilotEnabled
@@ -162,18 +162,18 @@ enum AgentEnablement {
         let hasLegacyToolbarPrefs =
             defaults.object(forKey: PreferencesKey.Unified.showCodexToolbarFilter) != nil ||
             defaults.object(forKey: PreferencesKey.Unified.showClaudeToolbarFilter) != nil ||
-            defaults.object(forKey: PreferencesKey.Unified.showGeminiToolbarFilter) != nil ||
+            defaults.object(forKey: PreferencesKey.Unified.showAntigravityToolbarFilter) != nil ||
             defaults.object(forKey: PreferencesKey.Unified.showOpenCodeToolbarFilter) != nil
 
         if hasLegacyToolbarPrefs {
             let codex = defaults.object(forKey: PreferencesKey.Unified.showCodexToolbarFilter) as? Bool ?? true
             let claude = defaults.object(forKey: PreferencesKey.Unified.showClaudeToolbarFilter) as? Bool ?? true
-            let gemini = defaults.object(forKey: PreferencesKey.Unified.showGeminiToolbarFilter) as? Bool ?? true
+            let antigravity = defaults.object(forKey: PreferencesKey.Unified.showAntigravityToolbarFilter) as? Bool ?? true
             let opencode = defaults.object(forKey: PreferencesKey.Unified.showOpenCodeToolbarFilter) as? Bool ?? true
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
-            setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
+            setEnabledInternal(.antigravity, enabled: antigravity, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.hermes, enabled: isAvailable(.hermes, defaults: defaults), defaults: defaults)
             setEnabledInternal(.copilot, enabled: true, defaults: defaults)
@@ -186,7 +186,7 @@ enum AgentEnablement {
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
             let codex = isAvailable(.codex, defaults: defaults)
             let claude = isAvailable(.claude, defaults: defaults)
-            let gemini = isAvailable(.gemini, defaults: defaults)
+            let antigravity = isAvailable(.antigravity, defaults: defaults)
             let opencode = isAvailable(.opencode, defaults: defaults)
             let hermes = isAvailable(.hermes, defaults: defaults)
             let copilot = isAvailable(.copilot, defaults: defaults)
@@ -197,7 +197,7 @@ enum AgentEnablement {
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
-            setEnabledInternal(.gemini, enabled: gemini, defaults: defaults)
+            setEnabledInternal(.antigravity, enabled: antigravity, defaults: defaults)
             setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
             setEnabledInternal(.hermes, enabled: hermes, defaults: defaults)
             setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
@@ -232,8 +232,8 @@ enum AgentEnablement {
             let discovery = ClaudeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
             if discovery.hasDiscoverableSessionsRoot() { return true }
             root = discovery.sessionsRoot()
-        case .gemini:
-            let custom = defaults.string(forKey: "GeminiSessionsRootOverride") ?? ""
+        case .antigravity:
+            let custom = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
             root = GeminiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .opencode:
             let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
@@ -291,7 +291,7 @@ enum AgentEnablement {
         switch source {
         case .codex: return binaryDetectedCached("codex")
         case .claude: return binaryDetectedCached("claude") || binaryDetectedCached("claude-code")
-        case .gemini: return binaryDetectedCached("gemini")
+        case .antigravity: return binaryDetectedCached("agy")
         case .opencode: return binaryDetectedCached("opencode")
         case .hermes: return binaryDetectedCached("hermes")
         case .copilot: return binaryDetectedCached("copilot")
@@ -338,8 +338,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.codexCLIAvailable) as? Bool
         case .claude:
             return defaults.object(forKey: PreferencesKey.claudeCLIAvailable) as? Bool
-        case .gemini:
-            return defaults.object(forKey: PreferencesKey.geminiCLIAvailable) as? Bool
+        case .antigravity:
+            return defaults.object(forKey: PreferencesKey.antigravityCLIAvailable) as? Bool
         case .opencode:
             return defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool
         case .hermes:

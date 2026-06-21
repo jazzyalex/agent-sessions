@@ -391,8 +391,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             for url in discovery.discoverSessionFiles() {
                 map[sha256Hex(url.path)] = url
             }
-        case .gemini:
-            let custom = defaults.string(forKey: "GeminiSessionsRootOverride")
+        case .antigravity:
+            let custom = defaults.string(forKey: "AntigravitySessionsRootOverride")
             let discovery = GeminiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
                 map[sha256Hex(url.path)] = url
@@ -466,7 +466,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return CopilotSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .claude:
             return ClaudeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .gemini:
+        case .antigravity:
             return GeminiSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .opencode:
             return OpenCodeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)

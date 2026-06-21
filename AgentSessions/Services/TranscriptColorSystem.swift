@@ -57,7 +57,7 @@ enum TranscriptColorSystem {
         case .claude:
             // Warm brown
             return NSColor(calibratedRed: 0.74, green: 0.46, blue: 0.22, alpha: 1.0)
-        case .gemini:
+        case .antigravity:
             // Teal
             return NSColor.systemTeal
         case .opencode:

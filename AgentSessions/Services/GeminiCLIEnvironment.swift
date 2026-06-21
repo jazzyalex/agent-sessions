@@ -19,7 +19,6 @@ struct GeminiCLIEnvironment {
     }
 
     func probe(customPath: String?) -> Result<ProbeResult, ProbeError> {
-        // 1) Prefer a concrete binary path when we can resolve one.
         let resolved = resolveBinary(customPath: customPath)
         if let url = resolved {
             do {
@@ -27,27 +26,19 @@ struct GeminiCLIEnvironment {
                 if result.exitCode == 0 {
                     let rawStdout = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
                     let rawStderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                    // Some npm CLIs emit version to stderr; fall back if stdout is empty.
                     let version = rawStdout.isEmpty ? rawStderr : rawStdout
                     let supportsResume = probeHelpForResume(binaryPath: url.path)
+                    guard supportsResume else { return .failure(.invalidResponse) }
                     return .success(ProbeResult(versionString: version, binaryURL: url, supportsResume: supportsResume))
                 }
-                // Non‑zero exit: fall through to shell-based probe instead of failing early.
             } catch {
-                // Fall through to shell-based probe so we still respect aliases or
-                // login-shell PATH even if direct exec fails.
+                return .failure(.notFound)
             }
         }
 
-        // 2) Fallback: use the user's login shell to run the command.
-        let command: String
-        if let url = resolved {
-            command = url.path
-        } else if let custom = customPath?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
-            command = custom
-        } else {
-            command = "gemini"
-        }
+        let command = customPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? customPath!.trimmingCharacters(in: .whitespacesAndNewlines)
+            : "agy"
 
         let shell = defaultShell()
         let versionCmd = "\(escapeForShell(command)) --version"
@@ -63,7 +54,7 @@ struct GeminiCLIEnvironment {
         if let url = resolved {
             pathString = url.path
         } else {
-            let pres = runAndCapture([shell, "-lic", "command -v \(command) || which \(command) || echo \(command)"])
+            let pres = runAndCapture([shell, "-lic", "command -v \(escapeForShell(command)) || which \(escapeForShell(command)) || echo \(escapeForShell(command))"])
             pathString = (pres.out ?? "")
                 .split(whereSeparator: { $0.isNewline })
                 .first
@@ -73,6 +64,7 @@ struct GeminiCLIEnvironment {
 
         let url = URL(fileURLWithPath: pathString)
         let supportsResume = probeHelpForResume(binaryPath: pathString)
+        guard supportsResume else { return .failure(.invalidResponse) }
         return .success(ProbeResult(versionString: combined, binaryURL: url, supportsResume: supportsResume))
     }
 
@@ -81,47 +73,31 @@ struct GeminiCLIEnvironment {
         let helpCmd = "\(escapeForShell(binaryPath)) --help"
         let hres = runAndCapture([shell, "-lic", helpCmd])
         let helpOut = (hres.out ?? "") + (hres.err ?? "")
-        return helpOut.contains("--resume")
+        return helpOut.contains("--conversation") && helpOut.contains("--continue") && helpOut.contains("--print")
     }
 
-    // Resolve the Gemini binary using custom override, login shell PATH, common install locations, and local project bin.
+    // Resolve the Antigravity CLI binary. The desktop app also installs an `agy`
+    // launcher; accept only binaries whose help output exposes terminal CLI flags.
     private func resolveBinary(customPath: String?) -> URL? {
-        // 1) Explicit override
         if let customPath, !customPath.trimmingCharacters(in: .whitespaces).isEmpty {
             let expanded = (customPath as NSString).expandingTildeInPath
-            if FileManager.default.isExecutableFile(atPath: expanded) { return URL(fileURLWithPath: expanded) }
+            if FileManager.default.isExecutableFile(atPath: expanded), probeHelpForResume(binaryPath: expanded) {
+                return URL(fileURLWithPath: expanded)
+            }
         }
 
-        // 2) Login shell PATH (matches Terminal)
-        if let fromLogin = whichViaLoginShell("gemini"), FileManager.default.isExecutableFile(atPath: fromLogin) {
+        let local = (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/agy")
+        if FileManager.default.isExecutableFile(atPath: local), probeHelpForResume(binaryPath: local) {
+            return URL(fileURLWithPath: local)
+        }
+
+        if let path = which("agy"), probeHelpForResume(binaryPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+
+        if let fromLogin = whichViaLoginShell("agy"), FileManager.default.isExecutableFile(atPath: fromLogin), probeHelpForResume(binaryPath: fromLogin) {
             return URL(fileURLWithPath: fromLogin)
         }
-
-        // 3) Current process PATH
-        if let path = which("gemini") { return URL(fileURLWithPath: path) }
-
-        // 4) Common install locations (Homebrew / npm global)
-        var candidates: [String] = []
-        if let brewPrefix = runAndCapture(["/usr/bin/env", "brew", "--prefix"]).out?.trimmingCharacters(in: .whitespacesAndNewlines), !brewPrefix.isEmpty {
-            candidates.append("\(brewPrefix)/bin/gemini")
-        }
-        candidates.append(contentsOf: [
-            "/opt/homebrew/bin/gemini",
-            "/usr/local/bin/gemini"
-        ])
-        if let npmPrefix = runAndCapture(["/usr/bin/env", "npm", "prefix", "-g"]).out?.trimmingCharacters(in: .whitespacesAndNewlines), !npmPrefix.isEmpty {
-            candidates.append("\(npmPrefix)/bin/gemini")
-        }
-        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".npm-global/bin/gemini"))
-        candidates.append((NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/gemini"))
-
-        for path in Set(candidates) {
-            if FileManager.default.isExecutableFile(atPath: path) { return URL(fileURLWithPath: path) }
-        }
-
-        // 5) Project-local .bin
-        let local = (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent("node_modules/.bin/gemini")
-        if FileManager.default.isExecutableFile(atPath: local) { return URL(fileURLWithPath: local) }
 
         return nil
     }

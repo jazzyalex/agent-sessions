@@ -174,32 +174,9 @@ actor ImageBrowserIndexCache {
             saveIndex(built, forPath: session.filePath)
             return built
 
-        case .gemini:
-            let located: [GeminiInlineDataImageScanner.LocatedSpan] = {
-                do {
-                    return try GeminiInlineDataImageScanner.scanFile(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                } catch {
-                    return []
-                }
-            }()
-
-            let spans: [ImageBrowserStoredSpan] = located.compactMap { item in
-                if shouldCancel() { return nil }
-                let span = item.span
-                guard span.base64PayloadLength >= 64, span.approxBytes >= 32 else { return nil }
-                return ImageBrowserStoredSpan(
-                    startOffset: span.startOffset,
-                    endOffset: span.endOffset,
-                    mediaType: span.mediaType,
-                    base64PayloadOffset: span.base64PayloadOffset,
-                    base64PayloadLength: span.base64PayloadLength,
-                    approxBytes: span.approxBytes,
-                    lineIndex: item.itemIndex
-                )
-            }
-
+        case .antigravity:
             let built = ImageBrowserStoredIndex(signature: signature,
-                                                spans: spans,
+                                                spans: [],
                                                 openCodeImages: nil,
                                                 copilotAttachments: nil,
                                                 createdAtUnixSeconds: createdAt)

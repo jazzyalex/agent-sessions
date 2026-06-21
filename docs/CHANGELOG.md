@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Providers: Replaced Gemini CLI support with Antigravity CLI support using `agy`, hiding old Gemini session logs and discovering Antigravity markdown artifacts under `~/.gemini/antigravity/brain`.
+- Resume: Antigravity sessions now copy and launch `agy --conversation <id>`, fall back to `agy --continue` when needed, and appear in live-session tracking.
 - Unified Window: Fixed a Sessions-window hang by making SwiftUI session diffing avoid full transcript payload comparisons on large Codex histories.
 - Unified Window: Fixed a Project-column hang where returning to the app could repeatedly parse raw transcript JSON for branch/repo metadata during table layout.
 - Unified Window: Fixed a foreground-return hang by caching row-derived hierarchy state during table rebuilds and deferring monitor-triggered focused transcript reloads while the app is inactive.

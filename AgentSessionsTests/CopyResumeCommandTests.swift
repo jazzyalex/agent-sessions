@@ -158,6 +158,28 @@ final class CopyResumeCommandTests: XCTestCase {
         XCTAssertEqual(cmd, "agent --resume chat-123")
     }
 
+    // MARK: - Antigravity copy/resume command scenarios
+
+    func testAntigravity_conversationID_and_cwd() throws {
+        let package = try GeminiResumeCommandBuilder().makeCommand(
+            strategy: .resumeByID(id: "conv-abc"),
+            binaryURL: URL(fileURLWithPath: "/Users/alexm/.local/bin/agy"),
+            workingDirectory: URL(fileURLWithPath: "/Users/alexm/my repo")
+        )
+        XCTAssertEqual(package.displayCommand, "'/Users/alexm/.local/bin/agy' --conversation 'conv-abc'")
+        XCTAssertEqual(package.shellCommand, "cd '/Users/alexm/my repo' && '/Users/alexm/.local/bin/agy' --conversation 'conv-abc'")
+    }
+
+    func testAntigravity_continueRecent() throws {
+        let package = try GeminiResumeCommandBuilder().makeCommand(
+            strategy: .continueRecent,
+            binaryURL: URL(fileURLWithPath: "agy"),
+            workingDirectory: nil
+        )
+        XCTAssertEqual(package.displayCommand, "'agy' --continue")
+        XCTAssertEqual(package.shellCommand, "'agy' --continue")
+    }
+
     // MARK: - Helpers
 
     /// Replicates the command-building logic used in copyResumeCommand (Claude)

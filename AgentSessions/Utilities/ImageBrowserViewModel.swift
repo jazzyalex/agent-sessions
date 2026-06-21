@@ -430,68 +430,8 @@ private extension ImageBrowserViewModel {
             }
             return out
 
-        case .gemini:
-            // For Gemini, we store the message/item index in `lineIndex` and map it back to event IDs.
-            let url = URL(fileURLWithPath: session.filePath)
-            let signature = index.signature
-
-            var userEventIndices: [Int] = []
-            userEventIndices.reserveCapacity(64)
-            var eventIndexByBaseID: [String: Int] = [:]
-            eventIndexByBaseID.reserveCapacity(min(session.events.count, 512))
-
-            for (idx, ev) in session.events.enumerated() {
-                eventIndexByBaseID[ev.id] = idx
-                if ev.kind == .user { userEventIndices.append(idx) }
-            }
-
-            func nearestUserEventIndex(for eventIndex: Int) -> Int? {
-                guard eventIndex >= 0 else { return userEventIndices.first }
-                guard !userEventIndices.isEmpty else { return nil }
-                let prior = userEventIndices.filter { $0 <= eventIndex }
-                if let preferred = prior.last { return preferred }
-                let after = userEventIndices.filter { $0 > eventIndex }
-                return after.first
-            }
-
-            var out: [Item] = []
-            out.reserveCapacity(min(index.spans.count, 64))
-
-            for (i, stored) in index.spans.enumerated() {
-                let span = Base64ImageDataURLScanner.Span(
-                    startOffset: stored.startOffset,
-                    endOffset: stored.endOffset,
-                    mediaType: stored.mediaType,
-                    base64PayloadOffset: stored.base64PayloadOffset,
-                    base64PayloadLength: stored.base64PayloadLength,
-                    approxBytes: stored.approxBytes
-                )
-
-                let itemIndex = stored.lineIndex
-                let baseID = session.id + String(format: "-%04d", itemIndex)
-                let baseEventIndex = eventIndexByBaseID[baseID] ?? 0
-                let userEventIndex = nearestUserEventIndex(for: baseEventIndex) ?? baseEventIndex
-                let eventID = session.events.indices.contains(userEventIndex) ? session.events[userEventIndex].id : baseID
-
-                out.append(
-                    Item(
-                        sessionID: session.id,
-                        sessionTitle: session.title,
-                        sessionModifiedAt: session.modifiedAt,
-                        sessionFileURL: url,
-                        sessionSource: session.source,
-                        sessionProject: session.repoName,
-                        sessionImageIndex: i + 1,
-                        lineIndex: userEventIndex,
-                        eventID: eventID,
-                        userPromptIndex: userPromptIndex(for: session, eventIndex: userEventIndex),
-                        payload: .base64(sourceURL: url, span: span),
-                        fileSignature: signature
-                    )
-                )
-            }
-
-            return out
+        case .antigravity:
+            return []
 
         default:
             let url = URL(fileURLWithPath: session.filePath)

@@ -6,8 +6,8 @@ final class GeminiCLISettings: ObservableObject {
     static let shared = GeminiCLISettings()
 
     enum Keys {
-        static let binaryOverride = "GeminiCLIBinaryOverride"
-        static let preferITerm = "GeminiCLIPreferITerm"
+        static let binaryOverride = "AntigravityCLIBinaryOverride"
+        static let preferITerm = "AntigravityCLIPreferITerm"
     }
 
     @Published var binaryOverride: String

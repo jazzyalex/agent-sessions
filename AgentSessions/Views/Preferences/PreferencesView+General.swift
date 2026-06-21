@@ -74,7 +74,7 @@ extension PreferencesView {
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Gemini", source: .gemini, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Antigravity", source: .antigravity, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Hermes", source: .hermes, isOn: $hermesAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
@@ -397,7 +397,7 @@ extension PreferencesView {
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.hasCommandsOnly) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.hasCommandsOnly) }
                     ))
-                    .help("Exclude sessions that contain no recorded tool/command calls. Strict: Claude/Gemini are excluded unless tool calls are present in the parsed transcript.")
+                    .help("Exclude sessions that contain no recorded tool/command calls. Strict: Claude and Antigravity are excluded unless tool calls are present in the parsed transcript.")
                 }
 
                 Divider()

@@ -22,7 +22,7 @@ struct OnboardingSheetView: View {
 
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.geminiEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
@@ -625,10 +625,10 @@ struct OnboardingSheetView: View {
                 get: { claudeAgentEnabled },
                 set: { _ = AgentEnablement.setEnabled(.claude, enabled: $0) }
             )
-        case .gemini:
+        case .antigravity:
             return Binding(
                 get: { geminiAgentEnabled },
-                set: { _ = AgentEnablement.setEnabled(.gemini, enabled: $0) }
+                set: { _ = AgentEnablement.setEnabled(.antigravity, enabled: $0) }
             )
         case .opencode:
             return Binding(
@@ -734,7 +734,7 @@ struct OnboardingSheetView: View {
         switch source {
         case .codex: return codexIndexer.allSessions
         case .claude: return claudeIndexer.allSessions
-        case .gemini: return geminiIndexer.allSessions
+        case .antigravity: return geminiIndexer.allSessions
         case .opencode: return opencodeIndexer.allSessions
         case .hermes: return hermesIndexer.allSessions
         case .copilot: return copilotIndexer.allSessions
@@ -749,7 +749,7 @@ struct OnboardingSheetView: View {
         switch source {
         case .codex: return codexAgentEnabled
         case .claude: return claudeAgentEnabled
-        case .gemini: return geminiAgentEnabled
+        case .antigravity: return geminiAgentEnabled
         case .opencode: return openCodeAgentEnabled
         case .hermes: return hermesAgentEnabled
         case .copilot: return copilotAgentEnabled
@@ -844,7 +844,7 @@ struct OnboardingSheetView: View {
                 } else {
                     if (session.lightweightCommands ?? 0) <= 0 { return false }
                 }
-            case .claude, .gemini:
+            case .claude, .antigravity:
                 if session.events.isEmpty { return false }
                 if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
             }
@@ -1093,7 +1093,7 @@ private struct AgentBadge: View {
         switch source {
         case .claude: return "CC"
         case .codex: return "CX"
-        case .gemini: return "G"
+        case .antigravity: return "G"
         case .opencode: return "OC"
         case .hermes: return "HM"
         case .copilot: return "CP"
@@ -2148,7 +2148,7 @@ private struct OnboardingPalette {
             return accentOrange
         case .codex:
             return accentGreen
-        case .gemini:
+        case .antigravity:
             return accentBlue
         case .opencode:
             return Color(red: 0.62, green: 0.52, blue: 0.96)

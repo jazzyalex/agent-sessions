@@ -219,17 +219,11 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("unknown block with visible text") })
     }
 
-    func testGeminiFixturesParse() throws {
+    func testGeminiFixturesAreIgnoredAfterAntigravityMigration() throws {
         for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json", "agents/gemini/jsonl_v040.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)
-            guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil: \(name)") }
-            XCTAssertEqual(preview.source, .gemini)
-            XCTAssertTrue(preview.events.isEmpty)
-            XCTAssertGreaterThan(preview.eventCount, 0)
-
-            guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil: \(name)") }
-            XCTAssertEqual(full.source, .gemini)
-            XCTAssertFalse(full.events.isEmpty)
+            XCTAssertNil(GeminiSessionParser.parseFile(at: url), name)
+            XCTAssertNil(GeminiSessionParser.parseFileFull(at: url), name)
         }
     }
 

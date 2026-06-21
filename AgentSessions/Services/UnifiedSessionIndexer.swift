@@ -70,7 +70,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             inactiveOnAC: 25,
             inactiveOnBattery: 60
         ),
-        .gemini: defaultFocusedSessionRefreshIntervals,
+        .antigravity: defaultFocusedSessionRefreshIntervals,
         .opencode: defaultFocusedSessionRefreshIntervals,
         .hermes: defaultFocusedSessionRefreshIntervals,
         .copilot: defaultFocusedSessionRefreshIntervals,
@@ -142,7 +142,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 indexer.claude.reloadSession(id: context.sessionID, force: force, reason: reason)
             }
         ),
-        .gemini: FocusedMonitorCapability(
+        .antigravity: FocusedMonitorCapability(
             supportsFocusedMonitoring: { true },
             signatureSource: { indexer, context in
                 indexer.sourceAwareFocusedSignaturePath(for: context)
@@ -561,7 +561,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     // Global agent enablement (drives app-wide availability)
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
     @Published private(set) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
-    @Published private(set) var geminiAgentEnabled: Bool = AgentEnablement.isEnabled(.gemini)
+    @Published private(set) var geminiAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
     @Published private(set) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
     @Published private(set) var hermesAgentEnabled: Bool = AgentEnablement.isEnabled(.hermes)
     @Published private(set) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
@@ -625,7 +625,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private var analyticsBuildTask: Task<Void, Never>?
     var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
     private static let analyticsSupportedSources: Set<String> = [
-        "codex", "claude", "gemini", "opencode", "hermes", "copilot", "droid"
+        "codex", "claude", "antigravity", "opencode", "hermes", "copilot", "droid"
     ]
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
@@ -959,7 +959,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     base = base.filter { s in
                         (s.source == .codex && effectiveCodex) ||
                         (s.source == .claude && effectiveClaude) ||
-                        (s.source == .gemini && effectiveGemini) ||
+                        (s.source == .antigravity && effectiveGemini) ||
                         (s.source == .opencode && effectiveOpenCode) ||
                         (s.source == .hermes && effectiveHermes) ||
                         (s.source == .copilot && effectiveCopilot) ||
@@ -1006,20 +1006,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.recomputeNow() }
-            .store(in: &cancellables)
-
-        // Seed Gemini hash resolver with known working directories from Codex/Claude sessions
-        Publishers.CombineLatest(codex.$allSessions, claude.$allSessions)
-            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.global(qos: .utility))
-            .sink { [weak self] codexList, claudeList in
-                guard let self else { return }
-                if !self.codexAgentEnabled && !self.claudeAgentEnabled { return }
-                var base: [Session] = []
-                if self.codexAgentEnabled { base.append(contentsOf: codexList) }
-                if self.claudeAgentEnabled { base.append(contentsOf: claudeList) }
-                let paths = base.compactMap { $0.cwd }
-                GeminiHashResolver.shared.registerCandidates(paths)
-            }
             .store(in: &cancellables)
 
         Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase, opencode.$launchPhase),
@@ -1072,7 +1058,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let previousEnablementBySource: [SessionSource: Bool] = [
             .codex: codexAgentEnabled,
             .claude: claudeAgentEnabled,
-            .gemini: geminiAgentEnabled,
+            .antigravity: geminiAgentEnabled,
             .opencode: openCodeAgentEnabled,
             .hermes: hermesAgentEnabled,
             .copilot: copilotAgentEnabled,
@@ -1083,7 +1069,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         ]
         let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
         let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
-        let c3 = AgentEnablement.isEnabled(.gemini, defaults: defaults)
+        let c3 = AgentEnablement.isEnabled(.antigravity, defaults: defaults)
         let c4 = AgentEnablement.isEnabled(.opencode, defaults: defaults)
         let c5 = AgentEnablement.isEnabled(.hermes, defaults: defaults)
         let c6 = AgentEnablement.isEnabled(.copilot, defaults: defaults)
@@ -1145,7 +1131,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let sources: [SessionSource] = [
             codexAgentEnabled ? .codex : nil,
             claudeAgentEnabled ? .claude : nil,
-            geminiAgentEnabled ? .gemini : nil,
+            geminiAgentEnabled ? .antigravity : nil,
             openCodeAgentEnabled ? .opencode : nil,
             hermesAgentEnabled ? .hermes : nil,
             copilotAgentEnabled ? .copilot : nil,
@@ -1257,7 +1243,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         return [
             CoreProviderSnapshot(source: .codex, enabled: eCodex, indexing: iCodex, processed: pCodex, total: tCodex),
             CoreProviderSnapshot(source: .claude, enabled: eClaude, indexing: iClaude, processed: pClaude, total: tClaude),
-            CoreProviderSnapshot(source: .gemini, enabled: eGemini, indexing: iGemini, processed: pGemini, total: tGemini),
+            CoreProviderSnapshot(source: .antigravity, enabled: eGemini, indexing: iGemini, processed: pGemini, total: tGemini),
             CoreProviderSnapshot(source: .opencode, enabled: eOpenCode, indexing: iOpenCode, processed: pOpenCode, total: tOpenCode),
             CoreProviderSnapshot(source: .hermes, enabled: eHermes, indexing: iHermes, processed: pHermes, total: tHermes),
             CoreProviderSnapshot(source: .copilot, enabled: eCopilot, indexing: iCopilot, processed: pCopilot, total: tCopilot),
@@ -1839,7 +1825,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: return codexAgentEnabled && !codex.isIndexing
         case .claude: return claudeAgentEnabled && !claude.isIndexing
-        case .gemini: return geminiAgentEnabled && !gemini.isIndexing
+        case .antigravity: return geminiAgentEnabled && !gemini.isIndexing
         case .opencode: return openCodeAgentEnabled && !opencode.isIndexing
         case .hermes: return hermesAgentEnabled && !hermes.isIndexing
         case .copilot: return copilotAgentEnabled && !copilot.isIndexing
@@ -1946,7 +1932,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             livePath = codex.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .claude:
             livePath = claude.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .gemini:
+        case .antigravity:
             livePath = gemini.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .opencode:
             livePath = opencode.allSessions.first(where: { $0.id == context.sessionID })?.filePath
@@ -2055,7 +2041,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: codex.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .claude: claude.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .gemini: gemini.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .antigravity: gemini.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .opencode: opencode.refresh()
         case .hermes: hermes.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .copilot: copilot.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
@@ -2071,7 +2057,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: return codex.isIndexing
         case .claude: return claude.isIndexing
-        case .gemini: return gemini.isIndexing
+        case .antigravity: return gemini.isIndexing
         case .opencode: return opencode.isIndexing
         case .hermes: return hermes.isIndexing
         case .copilot: return copilot.isIndexing
@@ -2087,7 +2073,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         var enabled = Set<String>()
         if codexAgentEnabled { enabled.insert("codex") }
         if claudeAgentEnabled { enabled.insert("claude") }
-        if geminiAgentEnabled { enabled.insert("gemini") }
+        if geminiAgentEnabled { enabled.insert("antigravity") }
         if openCodeAgentEnabled { enabled.insert("opencode") }
         if hermesAgentEnabled { enabled.insert("hermes") }
         if copilotAgentEnabled { enabled.insert("copilot") }
@@ -2280,7 +2266,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         var phases: [SessionSource: LaunchPhase] = [:]
         phases[.codex] = (codexAgentEnabled && includeCodex) ? codex.launchPhase : .ready
         phases[.claude] = (claudeAgentEnabled && includeClaude) ? claude.launchPhase : .ready
-        phases[.gemini] = (geminiAgentEnabled && includeGemini) ? gemini.launchPhase : .ready
+        phases[.antigravity] = (geminiAgentEnabled && includeGemini) ? gemini.launchPhase : .ready
         phases[.opencode] = (openCodeAgentEnabled && includeOpenCode) ? opencode.launchPhase : .ready
         phases[.hermes] = (hermesAgentEnabled && includeHermes) ? hermes.launchPhase : .ready
         phases[.copilot] = (copilotAgentEnabled && includeCopilot) ? copilot.launchPhase : .ready
@@ -2362,12 +2348,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Apply current UI filters and sort preferences to a list of sessions.
     /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
-        // Filter by source (Codex/Claude/Gemini/OpenCode toggles) and global agent enablement.
+        // Filter by source (Codex/Claude/Antigravity/OpenCode toggles) and global agent enablement.
         let base = sessions.filter { s in
             switch s.source {
             case .codex:    return codexAgentEnabled && includeCodex
             case .claude:   return claudeAgentEnabled && includeClaude
-            case .gemini:   return geminiAgentEnabled && includeGemini
+            case .antigravity:   return geminiAgentEnabled && includeGemini
             case .opencode: return openCodeAgentEnabled && includeOpenCode
             case .hermes:   return hermesAgentEnabled && includeHermes
             case .copilot:  return copilotAgentEnabled && includeCopilot
@@ -2401,8 +2387,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                         return (s.lightweightCommands ?? 0) > 0
                     }
                 }
-                // For Claude and Gemini, treat sessions as command-bearing only when we see tool_call events.
-                if s.source == .claude || s.source == .gemini {
+                // For Claude and Antigravity, treat sessions as command-bearing only when we see tool_call events.
+                if s.source == .claude || s.source == .antigravity {
                     if s.events.isEmpty { return false }
                     return s.events.contains { $0.kind == .tool_call }
                 }
@@ -2527,7 +2513,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let hasDisplayedSessions: Bool
 
         static let idle = LaunchState(
-            sourcePhases: [.codex: .idle, .claude: .idle, .gemini: .idle, .opencode: .idle, .copilot: .idle, .droid: .idle, .openclaw: .idle, .cursor: .idle],
+            sourcePhases: [.codex: .idle, .claude: .idle, .antigravity: .idle, .opencode: .idle, .copilot: .idle, .droid: .idle, .openclaw: .idle, .cursor: .idle],
             overallPhase: .idle,
             blockingSources: SessionSource.allCases,
             hasDisplayedSessions: false

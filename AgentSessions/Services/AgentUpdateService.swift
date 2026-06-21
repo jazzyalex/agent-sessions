@@ -337,14 +337,11 @@ private extension AgentUpdateService {
                     .init(manager: .npm, identifier: "@anthropic/claude-cli")
                 ]
             )
-        case .gemini:
+        case .antigravity:
             return AgentUpdateProfile(
                 source: source,
-                binaryNames: ["gemini"],
-                mappings: [
-                    .init(manager: .brew, identifier: "gemini-cli"),
-                    .init(manager: .npm, identifier: "@google/gemini-cli")
-                ]
+                binaryNames: ["agy"],
+                mappings: []
             )
         case .opencode:
             return AgentUpdateProfile(

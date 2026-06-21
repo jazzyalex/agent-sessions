@@ -463,6 +463,31 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
+    func testParseLsofMachineOutput_extractsAntigravityConversationIDFromMarkdownArtifact() {
+        let root = "/Users/alexm/.gemini/antigravity/brain"
+        let text = """
+        p889
+        fcwd
+        tDIR
+        n/Users/alexm/Repository/Codex-History
+        f0
+        tCHR
+        n/dev/ttys032
+        f27r
+        tREG
+        n/Users/alexm/.gemini/antigravity/brain/conv-abc/task.md
+        """
+
+        let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root], source: .antigravity)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[889]?.tty, "/dev/ttys032")
+        XCTAssertEqual(out[889]?.sessionID, "conv-abc")
+        XCTAssertEqual(
+            out[889]?.sessionLogPath,
+            "/Users/alexm/.gemini/antigravity/brain/conv-abc/task.md"
+        )
+    }
+
     func testClaudeSessionDiscoveredViaPIDBasedLsofQuery() {
         // Simulates the output from `lsof -p {PID}` (the ps fallback path),
         // NOT from `lsof -c claude` (which returns nothing because Claude Code
@@ -1077,14 +1102,15 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         claude.terminal = terminal
 
         var gemini = CodexActivePresence()
-        gemini.source = .gemini
+        gemini.source = .antigravity
         gemini.sessionId = "sid-gemini"
         gemini.tty = "/dev/ttys003"
 
         let keys = Set(CodexActiveSessionsModel.itermProbeCandidateKeys(for: [codex, claude, gemini]))
-        XCTAssertEqual(keys.count, 2)
+        XCTAssertEqual(keys.count, 3)
         XCTAssertTrue(keys.contains("codex|sid:sid-codex"))
         XCTAssertTrue(keys.contains("claude|sid:sid-claude"))
+        XCTAssertTrue(keys.contains("antigravity|sid:sid-gemini"))
     }
 
     func testShouldSuppressTransientEmptyPublish_requiresVisibleCockpitAndFullConfirmation() {
@@ -1221,20 +1247,24 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyCodexITermSessionName("Codex-History"))
     }
 
-    func testIsLikelyITermSessionName_matchesClaudeAndOpenCodeNames() {
+    func testIsLikelyITermSessionName_matchesClaudeAntigravityAndOpenCodeNames() {
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("Claude", source: .claude))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("claude --model sonnet", source: .claude))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("agy --conversation conv-abc", source: .antigravity))
+        XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("Antigravity CLI", source: .antigravity))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode", source: .opencode))
         XCTAssertTrue(CodexActiveSessionsModel.isLikelyITermSessionName("opencode --continue", source: .opencode))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("zsh", source: .claude))
+        XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("workspace shell", source: .antigravity))
         XCTAssertFalse(CodexActiveSessionsModel.isLikelyITermSessionName("workspace shell", source: .opencode))
     }
 
     @MainActor
-    func testSupportsLiveSessions_includesCodexClaudeAndOpenCode() {
+    func testSupportsLiveSessions_includesCodexClaudeAntigravityAndOpenCode() {
         let model = CodexActiveSessionsModel()
         XCTAssertTrue(model.supportsLiveSessions(for: .codex))
         XCTAssertTrue(model.supportsLiveSessions(for: .claude))
+        XCTAssertTrue(model.supportsLiveSessions(for: .antigravity))
         XCTAssertTrue(model.supportsLiveSessions(for: .opencode))
     }
 
@@ -3541,7 +3571,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let now = Date()
         let codex = makeFallbackSession(id: "codex-a", source: .codex, cwd: nil, modifiedAt: now)
         let claude = makeFallbackSession(id: "claude-z", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(5))
-        let hiddenGemini = makeFallbackSession(id: "gemini-hidden", source: .gemini, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
+        let hiddenGemini = makeFallbackSession(id: "gemini-hidden", source: .antigravity, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
         let favoriteKey = StarredSessionKey(source: .claude, id: claude.id)
         let work = UnifiedSessionIndexer.SessionAggregationWork(
             codexList: [codex],

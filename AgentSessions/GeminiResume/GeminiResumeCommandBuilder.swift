@@ -13,6 +13,7 @@ struct GeminiResumeCommandBuilder {
 
     enum Strategy {
         case resumeByID(id: String)
+        case continueRecent
     }
 
     func makeCommand(strategy: Strategy,
@@ -26,14 +27,16 @@ struct GeminiResumeCommandBuilder {
         } else {
             binaryPath = binaryURL.lastPathComponent
         }
-        let geminiPath = shellQuote(binaryPath)
+        let binary = shellQuote(binaryPath)
         let command: String
 
         switch strategy {
         case .resumeByID(let id):
             guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw BuildError.missingSessionID }
             let quotedID = shellQuote(id)
-            command = "\(geminiPath) --resume \(quotedID)"
+            command = "\(binary) --conversation \(quotedID)"
+        case .continueRecent:
+            command = "\(binary) --continue"
         }
 
         let shell: String
