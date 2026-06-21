@@ -960,8 +960,14 @@ struct UnifiedSessionsView: View {
 	                Button("Reveal Session Log") { revealSessionFile(s) }
 	                    .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
-                Button("Copy Session ID") { copySessionID(id) }
-                    .help("Copy the session ID to the clipboard")
+                if let copyID = copyableSessionID(for: s) {
+                    Button("Copy Session ID") { copySessionID(copyID) }
+                        .help(s.isSideChat ? "Copy the parent session ID to the clipboard" : "Copy the session ID to the clipboard")
+                } else {
+                    Button("Copy Session ID") {}
+                        .disabled(true)
+                        .help("No parent session ID is available for this side chat")
+                }
                 Button("Copy Resume Command") { copyResumeCommand(s, geminiCLISessionID: geminiCLISessionID) }
                     .disabled(!canCopyResumeCommand(s, geminiCLISessionID: geminiCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
@@ -1173,6 +1179,20 @@ struct UnifiedSessionsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(id, forType: .string)
+    }
+
+    private func copyableSessionID(for session: Session) -> String? {
+        if session.isSideChat {
+            return nonEmptySessionID(session.parentSessionID)
+        }
+        return nonEmptySessionID(session.id)
+    }
+
+    private func nonEmptySessionID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     private func canCopyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) -> Bool {

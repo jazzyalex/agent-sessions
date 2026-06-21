@@ -436,10 +436,23 @@ struct TranscriptPlainView: View {
     }
 
     private func codexSessionID(for session: Session) -> String? {
+        if session.isSideChat {
+            return nonEmptySessionID(session.parentSessionID)
+        }
+        if let internalID = nonEmptySessionID(session.codexInternalSessionID) {
+            return internalID
+        }
         // Extract full Codex session ID (base64 or UUID from filepath)
         let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
         if base.count >= 8 { return base }
         return nil
+    }
+
+    private func nonEmptySessionID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 }
 

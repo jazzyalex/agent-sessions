@@ -188,6 +188,26 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(session.events.map(\.text), ["request-only side phrase"])
     }
 
+    func testSideChatPreservesParentThreadIDFromClientMetadata() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: "child-side-thread",
+                                  firstID: 1,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "parent linked side phrase",
+                                  parentThreadID: "parent-main-thread")
+
+        let session = try XCTUnwrap(CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome,
+                                                                                useCache: false).first)
+
+        XCTAssertTrue(session.isSideChat)
+        XCTAssertEqual(session.codexInternalSessionIDHint, "child-side-thread")
+        XCTAssertEqual(session.parentSessionID, "parent-main-thread")
+    }
+
     func testLoadsSideChatSessionFromNestedSqliteLogDirectory() throws {
         let codexHome = try makeCodexHome()
         let sqliteDir = codexHome.appendingPathComponent("sqlite", isDirectory: true)
@@ -573,13 +593,17 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                                        threadID: String,
                                        firstID: Int64,
                                        firstTS: Int64,
-                                       phrase: String) throws {
+                                       phrase: String,
+                                       parentThreadID: String? = nil) throws {
+        let clientMetadata = parentThreadID.map {
+            #","client_metadata":{"x-codex-turn-metadata":"{\"forked_from_thread_id\":\"\#($0)\"}"}"#
+        } ?? ""
         try insertLog(dbURL: dbURL,
                       id: firstID,
                       ts: firstTS,
                       threadID: threadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]\#(clientMetadata)}"#)
         try insertLog(dbURL: dbURL,
                       id: firstID + 1,
                       ts: firstTS + 1,

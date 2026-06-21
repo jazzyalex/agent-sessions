@@ -1073,10 +1073,12 @@ final class SessionIndexer: ObservableObject {
             sideChatRefreshTask = nil
         }
 
+        let existingSideChats = allSessions.filter { $0.isSideChat }
+        let sideChatsToPublish = Self.mergingCodexSideChats(sideChats, withExisting: existingSideChats)
         let base = allSessions.filter { !$0.isSideChat }
-        let merged = Self.sortedByModifiedDescending(Self.appendingCodexSideChats(sideChats, to: base))
+        let merged = Self.sortedByModifiedDescending(Self.appendingCodexSideChats(sideChatsToPublish, to: base))
         allSessions = merged
-        LaunchProfiler.log("Codex.sideChats: \(source) publish (sideChats=\(sideChats.count), total=\(merged.count))")
+        LaunchProfiler.log("Codex.sideChats: \(source) publish (sideChats=\(sideChatsToPublish.count), incoming=\(sideChats.count), total=\(merged.count))")
     }
 
     private func seedKnownFileStatsIfNeeded() async {
@@ -1583,6 +1585,17 @@ final class SessionIndexer: ObservableObject {
             merged.append(sideChat)
         }
         return merged
+    }
+
+    private static func mergingCodexSideChats(_ incoming: [Session], withExisting existing: [Session]) -> [Session] {
+        guard !existing.isEmpty else { return incoming }
+        guard !incoming.isEmpty else { return existing }
+
+        var byID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        for session in incoming {
+            byID[session.id] = session
+        }
+        return Array(byID.values)
     }
 
     private static func sortedByModifiedDescending(_ sessions: [Session]) -> [Session] {

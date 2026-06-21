@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Unified Window: Side-chat rows now expose Copy Session ID when Codex metadata provides the parent thread id, and the action copies the main session id instead of the synthetic side-chat id.
+- Unified Window: Side-chat discovery now preserves already found side chats across partial SQLite refreshes and cache writes, preventing recovered rows from collapsing back to a single root-log result while large Codex logs are still being scanned.
 - Unified Window: Fixed a Sessions-window hang by making SwiftUI session diffing avoid full transcript payload comparisons on large Codex histories.
 - Unified Window: Fixed a Project-column hang where returning to the app could repeatedly parse raw transcript JSON for branch/repo metadata during table layout.
 - Unified Window: Fixed a foreground-return hang by caching row-derived hierarchy state during table rebuilds and deferring monitor-triggered focused transcript reloads while the app is inactive.
