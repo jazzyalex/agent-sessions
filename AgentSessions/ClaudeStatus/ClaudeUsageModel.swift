@@ -402,8 +402,10 @@ final class ClaudeUsageModel: ObservableObject {
         )
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.fiveHourRemainingPercent,
+            fiveHourRemainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },
             fiveHourResetText: s.fiveHourResetText,
             weeklyRemainingPercent: s.weeklyRemainingPercent,
+            weeklyRemainingPercentExact: s.weeklyUsedRatio.map { 100 - ($0 * 100) },
             weeklyResetText: s.weeklyResetText,
             freshness: freshness,
             observedAt: s.fetchedAt,
@@ -462,8 +464,10 @@ final class ClaudeUsageModel: ObservableObject {
         )
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.sessionRemainingPercent,
+            fiveHourRemainingPercentExact: nil,
             fiveHourResetText: s.sessionResetText,
             weeklyRemainingPercent: s.weekAllModelsRemainingPercent,
+            weeklyRemainingPercentExact: nil,
             weeklyResetText: s.weekAllModelsResetText,
             freshness: .fresh,
             observedAt: lastUpdate,
@@ -507,8 +511,10 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func usageLimitSnapshot(fiveHourRemainingPercent: Int,
+                                    fiveHourRemainingPercentExact: Double?,
                                     fiveHourResetText: String,
                                     weeklyRemainingPercent: Int,
+                                    weeklyRemainingPercentExact: Double?,
                                     weeklyResetText: String,
                                     freshness: UsageLimitAlertFreshness,
                                     observedAt: Date?,
@@ -518,9 +524,11 @@ final class ClaudeUsageModel: ObservableObject {
         return UsageLimitSnapshot(
             provider: .claude,
             fiveHourRemainingPercent: fiveHourRemainingPercent,
+            fiveHourRemainingPercentExact: fiveHourRemainingPercentExact,
             fiveHourResetText: fiveHourResetText,
             hasFiveHourRateLimit: hasFiveHour,
             weeklyRemainingPercent: weeklyRemainingPercent,
+            weeklyRemainingPercentExact: weeklyRemainingPercentExact,
             weeklyResetText: weeklyResetText,
             hasWeeklyRateLimit: hasWeekly,
             freshness: freshness,
