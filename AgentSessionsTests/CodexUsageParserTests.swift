@@ -1426,6 +1426,48 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 44 * 60, accuracy: 0.001)
     }
 
+    func testUsageLimitAlertEvaluatorUsesExactClaudePercentForProjectedExhaustion() {
+        let defaults = makeAlertDefaults()
+        let evaluator = UsageLimitAlertEvaluator(defaults: defaults)
+        let firstObservedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondObservedAt = firstObservedAt.addingTimeInterval(2 * 60)
+        let reset = firstObservedAt.addingTimeInterval(4.5 * 60 * 60)
+        let weeklyReset = firstObservedAt.addingTimeInterval(2 * 24 * 60 * 60)
+        let first = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 15,
+            fiveHourRemainingPercentExact: 15.8,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: firstObservedAt,
+            sourceDescription: "OAuth"
+        )
+        let second = UsageLimitSnapshot(
+            provider: .claude,
+            fiveHourRemainingPercent: 15,
+            fiveHourRemainingPercentExact: 15.2,
+            fiveHourResetText: formatResetISO8601(reset),
+            hasFiveHourRateLimit: true,
+            weeklyRemainingPercent: 90,
+            weeklyResetText: formatResetISO8601(weeklyReset),
+            hasWeeklyRateLimit: true,
+            observedAt: secondObservedAt,
+            sourceDescription: "OAuth"
+        )
+
+        _ = evaluator.evaluate(snapshot: first, now: firstObservedAt)
+        let events = evaluator.evaluate(snapshot: second, now: secondObservedAt)
+
+        XCTAssertEqual(events.first?.provider, .claude)
+        XCTAssertEqual(events.first?.kind, .projectedExhaustion)
+        XCTAssertEqual(events.first?.window, .fiveHour)
+        XCTAssertEqual(events.first?.remainingPercent, 15)
+        XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 50 * 60 + 40, accuracy: 0.001)
+    }
+
     func testUsageLimitProjectionLabelExpiresWhenObservationIsStale() {
         let observedAt = Date(timeIntervalSince1970: 1_800_000_000)
         let runoutAt = observedAt.addingTimeInterval(44 * 60)
