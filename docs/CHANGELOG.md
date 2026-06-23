@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Usage Probes: Claude OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota data.
 - Limit Alerts: Claude projected-exhaustion alerts now use fractional OAuth/Web usage when available, so small real burns can trigger burn-rate projections before the rounded percent changes.
 - Usage Probes: Claude hard refresh now finds Homebrew `tmux` from GUI launches, reports Claude Code 2.x `/usage` quota removal and rate-limit responses as unavailable data, avoids replacing stale Claude quota values with false 0% readings, and points stale Claude Code CLI credentials to `claude /login`.
 - Preferences: Claude Code installs that use the built-in `~/.local` updater are now recognized by the per-agent update action, which can run `claude update` after confirmation.

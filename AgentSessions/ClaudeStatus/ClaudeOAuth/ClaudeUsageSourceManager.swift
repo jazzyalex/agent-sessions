@@ -235,11 +235,12 @@ actor ClaudeUsageSourceManager {
         do {
             let (raw, bodyHash, rawBody, fromCache, fetchedAt) = try await usageClient.fetch(token: resolved.token)
             lastRawOAuthPayload = rawBody
-            guard let snapshot = Self.normalizedOAuthSnapshot(raw, bodyHash: bodyHash, fromCache: fromCache, fetchedAt: fetchedAt) else {
+            guard var snapshot = Self.normalizedOAuthSnapshot(raw, bodyHash: bodyHash, fromCache: fromCache, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: normalizer returned nil (empty payload)", log: log, type: .error)
                 await handleOAuthFailure(reason: "empty payload")
                 return
             }
+            snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
 
             // Success — reset all failure state
             oauthFailureCount = 0
@@ -540,6 +541,7 @@ actor ClaudeUsageSourceManager {
                 return
             }
             if fromCache { snapshot.source = .cachedWeb }
+            snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
 
             webFailureCount = 0
             publish(snapshot)
@@ -589,12 +591,11 @@ actor ClaudeUsageSourceManager {
         let handler = self.snapshotHandler
         let availHandler = self.availabilityHandler
         let ctx = visibilityContext
-        let store = self.store
 
         await adapter.start(
             handler: { snap in
                 handler?(snap)
-                Task { await store.save(snap) }
+                Task { await self.recordExternalSnapshot(snap) }
             },
             availabilityHandler: { a in availHandler?(a) }
         )
@@ -667,7 +668,7 @@ actor ClaudeUsageSourceManager {
 
     /// Persist a snapshot produced outside the normal OAuth/tmux loop (e.g., hard probe).
     func saveSnapshot(_ snapshot: ClaudeLimitSnapshot) async {
-        await store.save(snapshot)
+        await recordExternalSnapshot(snapshot)
     }
 
 #if DEBUG
@@ -681,7 +682,49 @@ actor ClaudeUsageSourceManager {
 
     // MARK: - Private
 
+    private func mergeMissingFiveHourWindowIfNeeded(_ snapshot: ClaudeLimitSnapshot) async -> ClaudeLimitSnapshot {
+        if let merged = Self.mergeMissingFiveHourWindow(incoming: snapshot, previous: lastOAuthSnapshot, now: Date()) {
+            return merged
+        }
+        guard let persisted = await store.load() else { return snapshot }
+        return Self.mergeMissingFiveHourWindow(incoming: snapshot, previous: persisted, now: Date()) ?? snapshot
+    }
+
+    private func recordExternalSnapshot(_ snapshot: ClaudeLimitSnapshot) async {
+        lastOAuthSnapshot = snapshot
+        await store.save(snapshot)
+    }
+
     private func publish(_ snapshot: ClaudeLimitSnapshot) {
         snapshotHandler?(snapshot)
+    }
+}
+
+extension ClaudeUsageSourceManager {
+    nonisolated static func mergeMissingFiveHourWindow(incoming: ClaudeLimitSnapshot,
+                                                       previous: ClaudeLimitSnapshot?,
+                                                       now: Date = Date()) -> ClaudeLimitSnapshot? {
+        guard incoming.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        guard let previous,
+              previous.fiveHourUsedRatio != nil,
+              !previous.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              previous.health != .failed,
+              now.timeIntervalSince(previous.fetchedAt) < 30 * 60,
+              let previousReset = UsageResetText.resetDate(
+                kind: "5h",
+                source: .claude,
+                raw: previous.fiveHourResetText,
+                now: previous.fetchedAt
+              ),
+              previousReset > now else {
+            return nil
+        }
+
+        var merged = incoming
+        merged.fiveHourUsedRatio = previous.fiveHourUsedRatio
+        merged.fiveHourResetText = previous.fiveHourResetText
+        return merged
     }
 }
