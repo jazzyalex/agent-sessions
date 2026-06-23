@@ -399,7 +399,7 @@ enum CodexSideChatLogReader {
             startTime: start,
             endTime: end,
             model: model,
-            filePath: dbURL.path,
+            filePath: sideChatSessionPath(threadID: threadID),
             fileSizeBytes: max(bytes, 1),
             eventCount: events.count,
             events: events,
@@ -420,6 +420,10 @@ enum CodexSideChatLogReader {
 
     static func sideChatSessionID(threadID: String) -> String {
         "codex-side-chat-\(threadID)"
+    }
+
+    static func sideChatSessionPath(threadID: String) -> String {
+        "codex-side-chat://\(threadID)"
     }
 
     private static func projectName(from cwd: String?) -> String? {
@@ -465,7 +469,7 @@ enum CodexSideChatLogReader {
     }
 
     private struct ThreadDiscoveryCache: Codable {
-        private static let currentSchemaVersion = 12
+        private static let currentSchemaVersion = 13
         private static let cacheIOLock = NSLock()
 
         var schemaVersion: Int = currentSchemaVersion

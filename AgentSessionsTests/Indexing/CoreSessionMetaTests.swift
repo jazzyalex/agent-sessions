@@ -98,6 +98,47 @@ final class CoreSessionMetaTests: XCTestCase {
         XCTAssertEqual(sessions.first?.subagentType, "review")
     }
 
+    func testStaleSideChatSessionMetaHydratesAsSideChatWithVirtualPath() async throws {
+        let threadID = "019eeb13-9ffc-7671-9481-2f2246e09b8a"
+        let row = SessionMetaRow(
+            sessionID: CodexSideChatLogReader.sideChatSessionID(threadID: threadID),
+            source: "codex",
+            path: "/tmp/logs_2.sqlite",
+            mtime: 100,
+            size: 1_323_048_960,
+            startTS: 10,
+            endTS: 20,
+            model: "gpt-5.5",
+            cwd: "/repo",
+            repo: "repo",
+            title: "Side question",
+            codexInternalSessionID: threadID,
+            isHousekeeping: false,
+            messages: 3,
+            commands: 0,
+            parentSessionID: "019ee839-07ff-7370-8a66-2fedf3ee3956",
+            subagentType: nil,
+            customTitle: nil,
+            codexOriginator: "Codex Desktop",
+            codexSource: "side_chat",
+            codexSurface: CodexSessionSurface.desktop.rawValue,
+            originSource: "side_chat",
+            surface: CodexSessionSurface.desktop.rawValue
+        )
+
+        try await db.upsertSessionMeta(row)
+
+        let repo = SessionMetaRepository(db: db)
+        let sessions = try await repo.fetchSessions(for: .codex)
+        let session = try XCTUnwrap(sessions.first)
+
+        XCTAssertTrue(session.isSideChat)
+        XCTAssertFalse(session.isSubagent)
+        XCTAssertEqual(session.filePath, CodexSideChatLogReader.sideChatSessionPath(threadID: threadID))
+        XCTAssertEqual(session.fileSizeBytes, 0)
+        XCTAssertEqual(session.parentSessionID, "019ee839-07ff-7370-8a66-2fedf3ee3956")
+    }
+
     func testCoreUpsertPreservesReasoningEffortWhenNil() async throws {
         let indexedRow = SessionMetaRow(
             sessionID: "codex-subagent",

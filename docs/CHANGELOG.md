@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Unified Window: Side-chat rows now use synthetic side-chat paths and labels, so they show parent context and keep their own small size/date instead of looking like ordinary Codex sessions backed by the full SQLite log database.
 - Usage Probes: Claude OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota data.
 - Limit Alerts: Claude projected-exhaustion alerts now use fractional OAuth/Web usage when available, so small real burns can trigger burn-rate projections before the rounded percent changes.
 - Usage Probes: Claude hard refresh now finds Homebrew `tmux` from GUI launches, reports Claude Code 2.x `/usage` quota removal and rate-limit responses as unavailable data, avoids replacing stale Claude quota values with false 0% readings, and points stale Claude Code CLI credentials to `claude /login`.
