@@ -64,8 +64,8 @@ except Exception:
 
 if payload.get("ok") is True:
     print("usage_ok")
-elif payload.get("ok") is False and payload.get("error") == "rate_limited":
-    print("rate_limited")
+elif payload.get("ok") is False and payload.get("error") in ("rate_limited", "ui_format_v2"):
+    print("handled_unavailable")
 else:
     print("unexpected")
 ')
@@ -110,13 +110,13 @@ else:
         else
             fail "Missing 'resets' values"
         fi
-    elif [ "$result_kind" = "rate_limited" ]; then
-        pass "Reports handled rate_limited state"
+    elif [ "$result_kind" = "handled_unavailable" ]; then
+        pass "Reports handled unavailable state"
 
         if echo "$result" | grep -q '"hint":'; then
-            pass "Rate-limit response includes hint"
+            pass "Unavailable response includes hint"
         else
-            fail "Rate-limit response missing hint"
+            fail "Unavailable response missing hint"
         fi
     else
         fail "Unexpected probe result shape"
