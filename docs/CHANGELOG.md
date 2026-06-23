@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Transcript: The transcript pane now shows a compact session identity strip with `side`/`sub` labels and side-chat parent context, so the displayed transcript stays identifiable even when the session list loses focus.
 - Unified Window: Side-chat rows now use synthetic side-chat paths and labels, so they show parent context and keep their own small size/date instead of looking like ordinary Codex sessions backed by the full SQLite log database.
 - Usage Probes: Claude OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota data.
 - Limit Alerts: Claude projected-exhaustion alerts now use fractional OAuth/Web usage when available, so small real burns can trigger burn-rate projections before the rounded percent changes.

@@ -676,6 +676,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         floatingTranscriptControls(session: session)
                     }
                 }
+                Divider()
+                transcriptSessionIdentityStrip(session: session)
+                    .frame(height: 24)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(NSColor.controlBackgroundColor))
             }
             .onAppear {
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -955,23 +960,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             // === LEADING GROUP: View mode + JSON status + ID ===
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Picker("View Style", selection: $viewModeRaw) {
-                        Text("Session")
-                            .tag(SessionViewMode.terminal.rawValue)
-                            .help("Session view — terminal-inspired output with colorized commands and tool output. Cmd+Shift+T toggles between Text and Session.")
-                        Text("Text")
-                            .tag(SessionViewMode.transcript.rawValue)
-                            .help("Text view — merged chat and tools. Cmd+Shift+T toggles between Text and Session.")
-                        Text("JSON")
-                            .tag(SessionViewMode.json.rawValue)
-                            .help("JSON view — formatted session JSON for readability. Encrypted blobs and large text blocks are summarized; use the session file on disk for raw JSON.")
-                    }
-                    .pickerStyle(.segmented)
-                    .font(TranscriptToolbarStyle.baseFont)
-                    .labelsHidden()
-                    .controlSize(.regular)
-                    .frame(width: 200)
-                    .accessibilityLabel("View Style")
+                    viewModeMenu
 
                     if isJSONMode && isBuildingJSON {
                         HStack(spacing: 6) {
@@ -1019,7 +1008,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             if placeUnifiedPillInline && isUnifiedNavigationVisible {
                 unifiedNavigationPillBody
                     .frame(minWidth: 240, maxWidth: 520)
-                    .layoutPriority(1)
+                    .layoutPriority(2)
             }
 
             Spacer(minLength: 12)
@@ -1096,6 +1085,128 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .padding(.trailing, 12)
         }
+    }
+
+    private func transcriptSessionIdentityStrip(session: Session) -> some View {
+        HStack(spacing: 6) {
+            if let label = transcriptSessionRelationshipLabel(session) {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.secondary.opacity(0.10))
+                    )
+            }
+
+            Text(session.listTitle)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if let parentTitle = transcriptSideChatParentTitle(for: session) {
+                Text("of \(parentTitle)")
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .fixedSize(horizontal: false, vertical: true)
+        .help(transcriptSessionIdentityHelp(for: session))
+    }
+
+    private var viewModeMenu: some View {
+        Menu {
+            viewModeMenuButton(.terminal,
+                               title: "Session",
+                               help: "Terminal-inspired output with colorized commands and tool output.")
+            viewModeMenuButton(.transcript,
+                               title: "Text",
+                               help: "Merged chat and tools.")
+            viewModeMenuButton(.json,
+                               title: "JSON",
+                               help: "Formatted session JSON for readability.")
+        } label: {
+            Text(viewModeMenuTitle)
+                .font(TranscriptToolbarStyle.baseFont)
+                .frame(minWidth: 76, alignment: .leading)
+        }
+        .menuStyle(.button)
+        .controlSize(.regular)
+        .help("Choose transcript view")
+        .accessibilityLabel("View Style")
+    }
+
+    private func viewModeMenuButton(_ mode: SessionViewMode,
+                                    title: String,
+                                    help: String) -> some View {
+        Button {
+            setViewMode(mode)
+        } label: {
+            if viewMode == mode {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
+        .help(help)
+    }
+
+    private var viewModeMenuTitle: String {
+        switch viewMode {
+        case .terminal: return "Session"
+        case .transcript: return "Text"
+        case .json: return "JSON"
+        }
+    }
+
+    private func setViewMode(_ mode: SessionViewMode) {
+        viewModeRaw = mode.rawValue
+        renderModeRaw = mode.transcriptRenderMode.rawValue
+    }
+
+    private func transcriptSessionRelationshipLabel(_ session: Session) -> String? {
+        if session.isSideChat { return "side" }
+        if session.isSubagent { return "sub" }
+        return nil
+    }
+
+    private func transcriptSideChatParentTitle(for session: Session) -> String? {
+        guard session.isSideChat,
+              let parentID = session.parentSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !parentID.isEmpty else {
+            return nil
+        }
+
+        if let parent = indexer.allSessions.first(where: { candidate in
+            guard !candidate.isSideChat else { return false }
+            if candidate.id == parentID { return true }
+            return candidate.codexInternalSessionIDHint == parentID
+        }) {
+            return parent.listTitle
+        }
+
+        return shortenedSessionID(parentID)
+    }
+
+    private func transcriptSessionIdentityHelp(for session: Session) -> String {
+        var parts: [String] = [session.listTitle]
+        if session.isSideChat, let parent = transcriptSideChatParentTitle(for: session) {
+            parts.append("Parent: \(parent)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private func shortenedSessionID(_ id: String) -> String {
+        guard id.count > 12 else { return id }
+        return "\(id.prefix(8))..."
     }
 
     @ViewBuilder
