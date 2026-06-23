@@ -676,6 +676,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         floatingTranscriptControls(session: session)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 transcriptSessionIdentityStrip(session: session)
                     .frame(height: 24)
@@ -1136,10 +1137,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         } label: {
             Text(viewModeMenuTitle)
                 .font(TranscriptToolbarStyle.baseFont)
-                .frame(minWidth: 76, alignment: .leading)
         }
         .menuStyle(.button)
         .controlSize(.regular)
+        .fixedSize(horizontal: true, vertical: false)
         .help("Choose transcript view")
         .accessibilityLabel("View Style")
     }
