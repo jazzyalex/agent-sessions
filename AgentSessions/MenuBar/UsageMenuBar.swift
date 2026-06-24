@@ -338,7 +338,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
+                            Text(claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: displayReset(claudeStatus.sessionResetText, kind: "5h", source: .claude, lastUpdate: claudeStatus.lastUpdate), lastUpdate: claudeStatus.lastUpdate, loginRequired: claudeStatus.loginRequired, unavailableMessage: claudeStatus.unavailableMessage))
                             Spacer()
                         }
                     }
@@ -346,7 +346,7 @@ struct UsageMenuBarMenuContent: View {
 
                     Button(action: { openPreferencesUsage() }) {
                         HStack(spacing: 6) {
-                            Text(resetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", source: .claude, lastUpdate: claudeStatus.lastUpdate)))
+                            Text(claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: displayReset(claudeStatus.weekAllModelsResetText, kind: "Wk", source: .claude, lastUpdate: claudeStatus.lastUpdate), lastUpdate: claudeStatus.lastUpdate, loginRequired: claudeStatus.loginRequired, unavailableMessage: claudeStatus.unavailableMessage))
                             Spacer()
                         }
                     }
@@ -355,6 +355,16 @@ struct UsageMenuBarMenuContent: View {
                     // Last updated time
                     if let lastUpdate = claudeStatus.lastUpdate {
                         Text("Updated \(timeAgo(lastUpdate))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                    } else if claudeStatus.loginRequired {
+                        Text(claudeStatus.setupHint ?? "Open Terminal and run: claude /login")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                    } else if claudeStatus.unavailableMessage != nil {
+                        Text("Claude usage unavailable")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 4)
@@ -509,4 +519,26 @@ private func resetLine(label: String, percent: Int, reset: String) -> Attributed
     line.append(resetAttr)
 
     return line
+}
+
+private func claudeResetLine(label: String,
+                             percent: Int,
+                             reset: String,
+                             lastUpdate: Date?,
+                             loginRequired: Bool,
+                             unavailableMessage: String?) -> AttributedString {
+    guard lastUpdate != nil else {
+        var line = AttributedString("")
+        var labelAttr = AttributedString(label + " ")
+        labelAttr.font = .system(size: 13, weight: .semibold)
+        line.append(labelAttr)
+
+        let status = loginRequired ? "Login required" :
+            (unavailableMessage == nil ? "Waiting for data" : "Usage unavailable")
+        var statusAttr = AttributedString("--  \(status)")
+        statusAttr.font = .system(size: 13)
+        line.append(statusAttr)
+        return line
+    }
+    return resetLine(label: label, percent: percent, reset: reset)
 }

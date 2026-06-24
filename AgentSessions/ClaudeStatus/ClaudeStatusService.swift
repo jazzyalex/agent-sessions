@@ -348,7 +348,8 @@ actor ClaudeStatusService {
 
     // Hard-probe entry point: force a single /usage probe and return diagnostics.
     func forceProbeNow() async -> ClaudeProbeDiagnostics {
-        tmuxAvailable = tmuxAvailable || checkTmuxAvailable()
+        let refreshedTmuxPath = resolveTmuxPathCached(forceRefresh: true)
+        tmuxAvailable = refreshedTmuxPath != nil || checkTmuxAvailable()
         guard tmuxAvailable else {
             return ClaudeProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: ClaudeProbeConfig.probeWorkingDirectory(), claudeBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "tmux not found")
         }
@@ -385,7 +386,7 @@ actor ClaudeStatusService {
         let claudeOverride = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
         let claudeBin = claudeEnv.resolveBinary(customPath: claudeOverride)?.path
         if let claudeBin { env["CLAUDE_BIN"] = claudeBin }
-        let tmuxBin = resolveTmuxPathCached()
+        let tmuxBin = refreshedTmuxPath ?? resolveTmuxPathCached()
         if let tmuxBin { env["TMUX_BIN"] = tmuxBin }
         let probeLabel = makeProbeLabel()
         env["TMUX_LABEL"] = probeLabel
@@ -413,15 +414,19 @@ actor ClaudeStatusService {
             do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return } // 2s grace for shell trap
             await self?.cleanupOrphanedTmuxLabels()
         }
-	        if process.terminationStatus == 0 {
-	            if let parsed = parseUsageJSON(stdout) {
-	                snapshot = parsed
-	                hasSnapshot = true
-	                updateHandler(snapshot)
-	            }
-	            publishAvailability(loginRequired: false, setupRequired: false, setupHint: nil)
-	            return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr)
-	        } else {
+        if process.terminationStatus == 0 {
+            publishAvailability(loginRequired: false, setupRequired: false, setupHint: nil)
+            if let parsed = parseUsageJSON(stdout) {
+                snapshot = parsed
+                hasSnapshot = true
+                updateHandler(snapshot)
+                return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr, snapshot: parsed)
+            }
+            if let message = probeUnavailableMessage(from: stdout) {
+                return ClaudeProbeDiagnostics(success: true, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr, unavailableMessage: message)
+            }
+            return ClaudeProbeDiagnostics(success: false, exitCode: 0, scriptPath: scriptURL.path, workdir: workDir, claudeBin: claudeBin, tmuxBin: tmuxBin, timeoutSecs: env["TIMEOUT_SECS"], stdout: stdout, stderr: stderr.isEmpty ? "Claude /usage output did not include quota data" : stderr)
+        } else {
             if process.terminationStatus == 13 {
                 publishAvailability(loginRequired: true, setupRequired: false, setupHint: nil)
             } else if let hint = detectSetupRequiredHint(stdout: stdout, stderr: stderr) {
@@ -1176,15 +1181,17 @@ actor ClaudeStatusService {
             // Parse successful response
             var snapshot = ClaudeUsageSnapshot()
 
-            if let session = obj["session_5h"] as? [String: Any] {
-                snapshot.sessionRemainingPercent = session["pct_left"] as? Int ?? 0
-                snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
+            guard let session = obj["session_5h"] as? [String: Any],
+                  let sessionPercent = session["pct_left"] as? Int,
+                  let weekAll = obj["week_all_models"] as? [String: Any],
+                  let weekPercent = weekAll["pct_left"] as? Int else {
+                return nil
             }
 
-            if let weekAll = obj["week_all_models"] as? [String: Any] {
-                snapshot.weekAllModelsRemainingPercent = weekAll["pct_left"] as? Int ?? 0
-                snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
-            }
+            snapshot.sessionRemainingPercent = sessionPercent
+            snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
+            snapshot.weekAllModelsRemainingPercent = weekPercent
+            snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
                 snapshot.weekOpusRemainingPercent = weekOpus["pct_left"] as? Int
@@ -1195,6 +1202,21 @@ actor ClaudeStatusService {
         } catch {
             return nil
         }
+    }
+
+    private func probeUnavailableMessage(from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = obj["ok"] as? Bool,
+              !ok else {
+            return nil
+        }
+        let error = (obj["error"] as? String) ?? "unavailable"
+        let hint = (obj["hint"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if hint.isEmpty {
+            return "Claude /usage probe unavailable: \(error)"
+        }
+        return "Claude /usage probe unavailable: \(error). \(hint)"
     }
 
     private func formatResetTime(_ text: String, isWeekly: Bool) -> String {
@@ -1240,6 +1262,14 @@ actor ClaudeStatusService {
 #if DEBUG
     nonisolated static func visiblePollingIntervalSecondsForTesting(storedInterval: Int?) -> UInt64 {
         visiblePollingIntervalSeconds(storedInterval: storedInterval)
+    }
+
+    func parseUsageJSONForTesting(_ json: String) -> ClaudeUsageSnapshot? {
+        parseUsageJSON(json)
+    }
+
+    func probeUnavailableMessageForTesting(from json: String) -> String? {
+        probeUnavailableMessage(from: json)
     }
 #endif
 
@@ -1307,26 +1337,7 @@ actor ClaudeStatusService {
     // MARK: - Dependency checks
 
     private func checkTmuxAvailable() -> Bool {
-        // Check via login shell to get user's full PATH (mirrors Terminal)
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-lic", "command -v tmux || true"]
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitForExit()
-            var output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            // Strip OSC escapes injected by terminal shell integrations.
-            output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
-            return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        } catch {
-            return false
-        }
+        resolveTmuxPathCached() != nil
     }
 
     private func checkClaudeAvailable() -> Bool {
@@ -1364,10 +1375,34 @@ actor ClaudeStatusService {
             // Strip OSC escapes injected by terminal shell integrations.
             output = output.replacingOccurrences(of: "\u{1b}\\][^\u{07}]*\u{07}", with: "", options: .regularExpression)
             let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            return path.isEmpty ? nil : path
+            return Self.resolvedTmuxPath(loginShellPath: path) { candidate in
+                FileManager.default.isExecutableFile(atPath: candidate)
+            }
         } catch {
-            return nil
+            return Self.resolvedTmuxPath(loginShellPath: nil) { candidate in
+                FileManager.default.isExecutableFile(atPath: candidate)
+            }
         }
+    }
+
+    nonisolated static func resolvedTmuxPath(loginShellPath: String?,
+                                             isExecutable: (String) -> Bool) -> String? {
+        let trimmed = loginShellPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+
+        for path in commonTmuxPaths where isExecutable(path) {
+            return path
+        }
+        return nil
+    }
+
+    private nonisolated static var commonTmuxPaths: [String] {
+        [
+            "/opt/homebrew/bin/tmux",
+            "/usr/local/bin/tmux"
+        ]
     }
 
     private func resolveTerminalPATHCached(forceRefresh: Bool = false) -> String? {
@@ -1543,6 +1578,32 @@ struct ClaudeProbeDiagnostics {
     let timeoutSecs: String?
     let stdout: String
     let stderr: String
+    let unavailableMessage: String?
+    let snapshot: ClaudeUsageSnapshot?
+
+    init(success: Bool,
+         exitCode: Int32,
+         scriptPath: String,
+         workdir: String,
+         claudeBin: String?,
+         tmuxBin: String?,
+         timeoutSecs: String?,
+         stdout: String,
+         stderr: String,
+         unavailableMessage: String? = nil,
+         snapshot: ClaudeUsageSnapshot? = nil) {
+        self.success = success
+        self.exitCode = exitCode
+        self.scriptPath = scriptPath
+        self.workdir = workdir
+        self.claudeBin = claudeBin
+        self.tmuxBin = tmuxBin
+        self.timeoutSecs = timeoutSecs
+        self.stdout = stdout
+        self.stderr = stderr
+        self.unavailableMessage = unavailableMessage
+        self.snapshot = snapshot
+    }
 }
 
 enum ClaudeServiceError: Error {

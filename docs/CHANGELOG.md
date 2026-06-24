@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 - Providers: Replaced Gemini CLI support with Antigravity CLI support using `agy`, hiding old Gemini session logs and discovering Antigravity markdown artifacts under `~/.gemini/antigravity/brain`.
 - Resume: Antigravity sessions now copy and launch `agy --conversation <id>`, fall back to `agy --continue` when needed, and appear in live-session tracking.
+- Transcript: The transcript pane now shows a compact session identity strip with `side`/`sub` labels and side-chat parent context, so the displayed transcript stays identifiable even when the session list loses focus.
+- Unified Window: Side-chat rows now use synthetic side-chat paths and labels, so they show parent context and keep their own small size/date instead of looking like ordinary Codex sessions backed by the full SQLite log database.
+- Usage Probes: Claude OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota data.
+- Limit Alerts: Claude projected-exhaustion alerts now use fractional OAuth/Web usage when available, so small real burns can trigger burn-rate projections before the rounded percent changes.
+- Usage Probes: Claude hard refresh now finds Homebrew `tmux` from GUI launches, reports Claude Code 2.x `/usage` quota removal and rate-limit responses as unavailable data, avoids replacing stale Claude quota values with false 0% readings, and points stale Claude Code CLI credentials to `claude /login`.
+- Preferences: Claude Code installs that use the built-in `~/.local` updater are now recognized by the per-agent update action, which can run `claude update` after confirmation.
+- Unified Window: Side-chat rows now expose Copy Session ID when Codex metadata provides the parent thread id, and the action copies the main session id instead of the synthetic side-chat id.
+- Unified Window: Side-chat discovery now preserves already found side chats across partial SQLite refreshes and cache writes, preventing recovered rows from collapsing back to a single root-log result while large Codex logs are still being scanned.
 - Unified Window: Fixed a Sessions-window hang by making SwiftUI session diffing avoid full transcript payload comparisons on large Codex histories.
 - Unified Window: Fixed a Project-column hang where returning to the app could repeatedly parse raw transcript JSON for branch/repo metadata during table layout.
 - Unified Window: Fixed a foreground-return hang by caching row-derived hierarchy state during table rebuilds and deferring monitor-triggered focused transcript reloads while the app is inactive.
@@ -17,6 +25,7 @@ All notable changes to this project will be documented in this file.
 - Agent Cockpit: Added Runway EQ above the Limits Cockpit and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Limits rows; Runway now stays available during reset-first 5h windows when active session burn exists.
 - Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation, fallback reset clocks no longer produce synthetic burn rates, and the EQ avoids blanking between refreshes.
 - Agent Cockpit: Runway session labels now prefer Codex app/indexed titles and CLI `/rename` names before falling back to the first prompt, tab title, or project directory, and recent Codex subagent logs now roll up under their parent session instead of appearing as duplicate Runway consumers.
+- Agent Cockpit: Runway now keeps the current worktree session identity when Codex logs embed source-session metadata, and nested subagent burn rolls into the worktree parent instead of creating duplicate rows.
 
 ## [3.9.3] - 2026-06-12
 - Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.

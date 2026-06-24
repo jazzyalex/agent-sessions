@@ -515,9 +515,11 @@ enum UsageLimitAlertProvider: String {
 struct UsageLimitSnapshot: Equatable {
     let provider: UsageLimitAlertProvider
     let fiveHourRemainingPercent: Int
+    let fiveHourRemainingPercentExact: Double?
     let fiveHourResetText: String
     let hasFiveHourRateLimit: Bool
     let weeklyRemainingPercent: Int
+    let weeklyRemainingPercentExact: Double?
     let weeklyResetText: String
     let hasWeeklyRateLimit: Bool
     let fiveHourFreshness: UsageLimitAlertFreshness
@@ -529,9 +531,11 @@ struct UsageLimitSnapshot: Equatable {
 
     init(provider: UsageLimitAlertProvider,
          fiveHourRemainingPercent: Int,
+         fiveHourRemainingPercentExact: Double? = nil,
          fiveHourResetText: String,
          hasFiveHourRateLimit: Bool,
          weeklyRemainingPercent: Int,
+         weeklyRemainingPercentExact: Double? = nil,
          weeklyResetText: String,
          hasWeeklyRateLimit: Bool,
          freshness: UsageLimitAlertFreshness = .fresh,
@@ -543,9 +547,11 @@ struct UsageLimitSnapshot: Equatable {
          weeklySourceDescription: String? = nil) {
         self.provider = provider
         self.fiveHourRemainingPercent = fiveHourRemainingPercent
+        self.fiveHourRemainingPercentExact = fiveHourRemainingPercentExact
         self.fiveHourResetText = fiveHourResetText
         self.hasFiveHourRateLimit = hasFiveHourRateLimit
         self.weeklyRemainingPercent = weeklyRemainingPercent
+        self.weeklyRemainingPercentExact = weeklyRemainingPercentExact
         self.weeklyResetText = weeklyResetText
         self.hasWeeklyRateLimit = hasWeeklyRateLimit
         self.fiveHourFreshness = fiveHourFreshness ?? freshness
@@ -976,7 +982,9 @@ final class UsageLimitAlertEvaluator {
                 window: .fiveHour,
                 provider: snapshot.provider,
                 previousRemainingPercent: previous.fiveHourRemainingPercent,
+                previousRemainingPercentExact: previous.fiveHourRemainingPercentExact,
                 currentRemainingPercent: snapshot.fiveHourRemainingPercent,
+                currentRemainingPercentExact: snapshot.fiveHourRemainingPercentExact,
                 resetText: snapshot.fiveHourResetText,
                 hasRateLimit: snapshot.hasFiveHourRateLimit,
                 currentFreshness: snapshot.fiveHourFreshness,
@@ -989,7 +997,9 @@ final class UsageLimitAlertEvaluator {
                 window: .weekly,
                 provider: snapshot.provider,
                 previousRemainingPercent: previous.weeklyRemainingPercent,
+                previousRemainingPercentExact: previous.weeklyRemainingPercentExact,
                 currentRemainingPercent: snapshot.weeklyRemainingPercent,
+                currentRemainingPercentExact: snapshot.weeklyRemainingPercentExact,
                 resetText: snapshot.weeklyResetText,
                 hasRateLimit: snapshot.hasWeeklyRateLimit,
                 currentFreshness: snapshot.weeklyFreshness,
@@ -1004,7 +1014,9 @@ final class UsageLimitAlertEvaluator {
     private func projectedExhaustionEvent(window: UsageLimitAlertWindow,
                                           provider: UsageLimitAlertProvider,
                                           previousRemainingPercent: Int,
+                                          previousRemainingPercentExact: Double?,
                                           currentRemainingPercent: Int,
+                                          currentRemainingPercentExact: Double?,
                                           resetText: String,
                                           hasRateLimit: Bool,
                                           currentFreshness: UsageLimitAlertFreshness,
@@ -1017,15 +1029,15 @@ final class UsageLimitAlertEvaluator {
         let elapsed = currentTime.timeIntervalSince(previousTime)
         guard elapsed >= 60 else { return nil }
 
-        let previousRemaining = clampPercent(previousRemainingPercent)
-        let currentRemaining = clampPercent(currentRemainingPercent)
-        guard currentRemaining > thresholdPercent,
+        let previousRemaining = Self.remainingPercent(exact: previousRemainingPercentExact, fallback: previousRemainingPercent)
+        let currentRemaining = Self.remainingPercent(exact: currentRemainingPercentExact, fallback: currentRemainingPercent)
+        guard currentRemaining > Double(thresholdPercent),
               previousRemaining > currentRemaining else {
             return nil
         }
 
-        let percentBurned = Double(previousRemaining - currentRemaining)
-        let secondsUntilEmpty = Double(currentRemaining) / (percentBurned / elapsed)
+        let percentBurned = previousRemaining - currentRemaining
+        let secondsUntilEmpty = currentRemaining / (percentBurned / elapsed)
         guard secondsUntilEmpty > 0,
               secondsUntilEmpty <= predictionHorizonSeconds else {
             return nil
@@ -1055,11 +1067,16 @@ final class UsageLimitAlertEvaluator {
             provider: provider,
             kind: .projectedExhaustion,
             window: window,
-            remainingPercent: currentRemaining,
+            remainingPercent: clampPercent(currentRemainingPercent),
             resetDate: resetDate,
             identifier: dedupeKey,
             projectedSecondsUntilEmpty: secondsUntilEmpty
         )
+    }
+
+    private static func remainingPercent(exact: Double?, fallback: Int) -> Double {
+        guard let exact, exact.isFinite else { return Double(clampPercent(fallback)) }
+        return max(0, min(100, exact))
     }
 
     private func projectionUrgencyBucket(secondsUntilEmpty: TimeInterval) -> String {

@@ -2173,6 +2173,45 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(identities.first?.logPaths.sorted(), ["/tmp/child.jsonl", "/tmp/parent.jsonl"])
     }
 
+    func testRunwayIdentitiesGroupsNestedSubagentsUnderRootParentSession() {
+        let nestedChild = makeHUDRow(
+            id: "nested-child-row",
+            project: "Alpha",
+            name: "Nested review subagent",
+            state: .active,
+            resolvedSessionID: "nested-child-session",
+            parentSessionID: "child-session",
+            logPath: "/tmp/nested-child.jsonl"
+        )
+        let child = makeHUDRow(
+            id: "child-row",
+            project: "Alpha",
+            name: "Review subagent",
+            state: .active,
+            resolvedSessionID: "child-session",
+            parentSessionID: "parent-session",
+            logPath: "/tmp/child.jsonl"
+        )
+        let parent = makeHUDRow(
+            id: "parent-row",
+            project: "Alpha",
+            name: "Parent Work",
+            state: .active,
+            resolvedSessionID: "parent-session",
+            logPath: "/tmp/parent.jsonl"
+        )
+
+        let identities = HUDRunwayIdentityReducer.identities(from: [nestedChild, child, parent])
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "parent-session")
+        XCTAssertEqual(identities.first?.displayName, "Parent Work")
+        XCTAssertEqual(
+            identities.first?.logPaths.sorted(),
+            ["/tmp/child.jsonl", "/tmp/nested-child.jsonl", "/tmp/parent.jsonl"]
+        )
+    }
+
     func testRunwayIdentitiesPreferIndexedTitleOverTabTitle() {
         let row = makeHUDRow(
             id: "active-row",

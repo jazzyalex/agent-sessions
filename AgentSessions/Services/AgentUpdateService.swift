@@ -5,6 +5,7 @@ enum AgentPackageManager: String, CaseIterable, Sendable {
     case npm
     case pipx
     case pip
+    case builtin
     case unknown
 
     var displayName: String {
@@ -13,6 +14,7 @@ enum AgentPackageManager: String, CaseIterable, Sendable {
         case .npm: return "npm"
         case .pipx: return "pipx"
         case .pip: return "pip"
+        case .builtin: return "Built-in updater"
         case .unknown: return "Unknown"
         }
     }
@@ -21,6 +23,7 @@ enum AgentPackageManager: String, CaseIterable, Sendable {
 enum AgentUpdateStatus: Sendable {
     case upToDate
     case updateAvailable
+    case builtInUpdaterAvailable
     case noPackageManagerDetected
     case latestVersionUnavailable
     case unsupportedForManager
@@ -50,7 +53,7 @@ struct AgentUpdateExecutionResult: Sendable {
 }
 
 struct AgentUpdateService {
-    private static let managerPreference: [AgentPackageManager] = [.brew, .npm, .pipx, .pip, .unknown]
+    private static let managerPreference: [AgentPackageManager] = [.brew, .npm, .pipx, .pip, .builtin, .unknown]
     private static let fallbackBinarySearchPaths: [String] = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
@@ -83,7 +86,7 @@ struct AgentUpdateService {
         let binaryPath = resolveBinaryPath(profile: profile,
                                            resolvedBinaryPath: resolvedBinaryPath,
                                            customBinaryPath: customBinaryPath)
-        let ownershipManagers = managersFromBinaryOwnership(binaryPath)
+        let ownershipManagers = managersFromBinaryOwnership(binaryPath, source: source)
         let installedManagers = installedManagers(for: profile)
 
         var detectedManagers = orderedUnique(ownershipManagers + installedManagers)
@@ -98,7 +101,7 @@ struct AgentUpdateService {
             let sourceHint: String
             switch source {
             case .claude:
-                sourceHint = " If this Claude installation uses the built-in installer, run `claude update` in Terminal."
+                sourceHint = " If this Claude installation uses the built-in installer, Agent Sessions can update it when the binary resolves under ~/.local/bin or ~/.local/share/claude/versions."
             default:
                 sourceHint = ""
             }
@@ -110,7 +113,22 @@ struct AgentUpdateService {
                 primaryManager: .unknown,
                 detectedManagers: detectedManagers,
                 status: .noPackageManagerDetected,
-                detailMessage: "Could not determine which supported package manager (Homebrew, npm, pipx, pip) owns the \(source.displayName) binary.\(binaryNote)\(sourceHint)"
+                detailMessage: "Could not determine which supported package manager or updater (Homebrew, npm, pipx, pip, built-in updater) owns the \(source.displayName) binary.\(binaryNote)\(sourceHint)"
+            )
+        }
+
+        if primaryManager == .builtin {
+            let executable = binaryPath ?? managerExecutablePath(for: .builtin)
+            let installedVersion = executable.flatMap { builtinInstalledVersion(binaryPath: $0) }
+            return AgentUpdateCheckResult(
+                source: source,
+                installedVersion: installedVersion,
+                latestVersion: nil,
+                packageIdentifier: executable,
+                primaryManager: .builtin,
+                detectedManagers: detectedManagers,
+                status: .builtInUpdaterAvailable,
+                detailMessage: "Installed: \(installedVersion ?? "unknown") via Claude Code's built-in updater. Agent Sessions can run `claude update` using \(executable ?? "the resolved Claude binary")."
             )
         }
 
@@ -222,7 +240,14 @@ struct AgentUpdateService {
             )
         }
 
-        guard let managerExecutable = managerExecutablePath(for: manager) else {
+        let updateIdentifier = packageIdentifier ?? mapping.identifier
+        let managerExecutable: String
+        if manager == .builtin,
+           FileManager.default.isExecutableFile(atPath: (updateIdentifier as NSString).expandingTildeInPath) {
+            managerExecutable = (updateIdentifier as NSString).expandingTildeInPath
+        } else if let resolved = managerExecutablePath(for: manager) {
+            managerExecutable = resolved
+        } else {
             return AgentUpdateExecutionResult(
                 source: source,
                 manager: manager,
@@ -235,7 +260,6 @@ struct AgentUpdateService {
             )
         }
 
-        let updateIdentifier = packageIdentifier ?? mapping.identifier
         let command: [String]
         switch manager {
         case .brew:
@@ -251,6 +275,8 @@ struct AgentUpdateService {
             command = [managerExecutable, "upgrade", updateIdentifier]
         case .pip:
             command = [managerExecutable, "-m", "pip", "install", "-U", updateIdentifier]
+        case .builtin:
+            command = [managerExecutable, "update"]
         case .unknown:
             return AgentUpdateExecutionResult(
                 source: source,
@@ -290,6 +316,33 @@ struct AgentUpdateService {
             stderr: result.stderr,
             detailMessage: detail
         )
+    }
+}
+
+extension AgentUpdateService {
+    static func isClaudeBuiltinBinaryPath(_ binaryPath: String?,
+                                          homeDirectory: String = NSHomeDirectory()) -> Bool {
+        guard let binaryPath,
+              !binaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+
+        let expandedHome = (homeDirectory as NSString).expandingTildeInPath
+        let home = URL(fileURLWithPath: expandedHome)
+            .standardizedFileURL
+            .path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+        guard !home.isEmpty else { return false }
+
+        let rawExpanded = (binaryPath as NSString).expandingTildeInPath
+        let rawPath = URL(fileURLWithPath: rawExpanded).standardizedFileURL.path.lowercased()
+        let resolvedPath = URL(fileURLWithPath: rawExpanded).resolvingSymlinksInPath().standardizedFileURL.path.lowercased()
+        let binPath = "/" + home + "/.local/bin/claude"
+        let versionsPrefix = "/" + home + "/.local/share/claude/versions/"
+
+        return rawPath == binPath
+            || rawPath.hasPrefix(versionsPrefix)
+            || resolvedPath == binPath
+            || resolvedPath.hasPrefix(versionsPrefix)
     }
 }
 
@@ -334,7 +387,8 @@ private extension AgentUpdateService {
                 binaryNames: ["claude"],
                 mappings: [
                     .init(manager: .brew, identifier: "claude-code"),
-                    .init(manager: .npm, identifier: "@anthropic/claude-cli")
+                    .init(manager: .npm, identifier: "@anthropic/claude-cli"),
+                    .init(manager: .builtin, identifier: "claude")
                 ]
             )
         case .antigravity:
@@ -449,7 +503,8 @@ private extension AgentUpdateService {
         return nil
     }
 
-    func managersFromBinaryOwnership(_ binaryPath: String?) -> [AgentPackageManager] {
+    func managersFromBinaryOwnership(_ binaryPath: String?,
+                                     source: SessionSource) -> [AgentPackageManager] {
         guard let binaryPath,
               !binaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
 
@@ -480,6 +535,11 @@ private extension AgentUpdateService {
             bump(.pip, score: 80)
         }
 
+        if source == .claude,
+           Self.isClaudeBuiltinBinaryPath(binaryPath, homeDirectory: resolvedUserHomeDirectory()) {
+            bump(.builtin, score: 90)
+        }
+
         if let shebang = readShebang(from: resolvedPath)?.lowercased() {
             if shebang.contains("node") {
                 bump(.npm, score: 85)
@@ -501,6 +561,7 @@ private extension AgentUpdateService {
     func installedManagers(for profile: AgentUpdateProfile) -> [AgentPackageManager] {
         var managers: [AgentPackageManager] = []
         for manager in orderedUnique(profile.mappings.map(\.manager)) {
+            if manager == .builtin { continue }
             guard let executable = managerExecutablePath(for: manager) else { continue }
             let managerMappings = profile.mappings(for: manager)
             if managerMappings.contains(where: { isPackageInstalled(mapping: $0, managerExecutablePath: executable) }) {
@@ -520,6 +581,8 @@ private extension AgentUpdateService {
             return commandPath("pipx")
         case .pip:
             return commandPath("python3") ?? commandPath("python")
+        case .builtin:
+            return commandPath("claude")
         case .unknown:
             return nil
         }
@@ -569,6 +632,9 @@ private extension AgentUpdateService {
         case .pip:
             let result = runProcess([managerExecutablePath, "-m", "pip", "show", mapping.identifier], timeout: 30)
             return result.status == 0
+        case .builtin:
+            return mapping.identifier == "claude"
+                && FileManager.default.isExecutableFile(atPath: managerExecutablePath)
         case .unknown:
             return false
         }
@@ -591,6 +657,8 @@ private extension AgentUpdateService {
             let installed = pipInstalledVersion(package: mapping.identifier, pythonPath: managerExecutablePath)
             let latest = pipLatestVersion(package: mapping.identifier)
             return (installed, latest)
+        case .builtin:
+            return (builtinInstalledVersion(binaryPath: managerExecutablePath), nil)
         case .unknown:
             return (nil, nil)
         }
@@ -630,6 +698,8 @@ private extension AgentUpdateService {
             return regexMatch(in: resolvedPath.lowercased(), pattern: "/cellar/([^/]+)/")
         case .pipx:
             return regexMatch(in: resolvedPath, pattern: "/pipx/venvs/([^/]+)/")
+        case .builtin:
+            return binaryPath
         case .pip, .unknown:
             return nil
         }
@@ -723,6 +793,14 @@ private extension AgentUpdateService {
             }
         }
         return nil
+    }
+
+    func builtinInstalledVersion(binaryPath: String) -> String? {
+        let expanded = (binaryPath as NSString).expandingTildeInPath
+        guard FileManager.default.isExecutableFile(atPath: expanded) else { return nil }
+        let result = runProcess([expanded, "--version"], timeout: 20)
+        guard result.status == 0 else { return nil }
+        return normalizeVersion(result.stdout.isEmpty ? result.stderr : result.stdout)
     }
 
     func pipLatestVersion(package: String) -> String? {

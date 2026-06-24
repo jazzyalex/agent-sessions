@@ -22,7 +22,29 @@ extension PreferencesView {
                         isClaudeHardProbeRunning = true
                         ClaudeUsageModel.shared.hardProbeNowDiagnostics { diag in
                             isClaudeHardProbeRunning = false
-                            if diag.success {
+                            if let unavailable = diag.unavailableMessage {
+                                var lines: [String] = []
+                                lines.append("Result: UNAVAILABLE")
+                                lines.append(unavailable)
+                                lines.append("")
+                                lines.append("Exit code: \(diag.exitCode)")
+                                lines.append("Script: \(diag.scriptPath)")
+                                lines.append("WORKDIR: \(diag.workdir)")
+                                lines.append("CLAUDE_BIN: \(diag.claudeBin ?? "<unset>")")
+                                lines.append("TMUX_BIN: \(diag.tmuxBin ?? "<unset>")")
+                                if let t = diag.timeoutSecs { lines.append("TIMEOUT_SECS: \(t)") }
+                                lines.append("")
+                                lines.append("Last known limits were preserved.")
+                                lines.append("")
+                                lines.append("— stdout —")
+                                lines.append(diag.stdout.isEmpty ? "<empty>" : diag.stdout)
+                                if !diag.stderr.isEmpty {
+                                    lines.append("")
+                                    lines.append("— stderr —")
+                                    lines.append(diag.stderr)
+                                }
+                                claudeProbeMessage = lines.joined(separator: "\n")
+                            } else if diag.success {
                                 let m = ClaudeUsageModel.shared
                                 var lines: [String] = []
                                 lines.append("Result: SUCCESS")

@@ -66,6 +66,8 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(sessions.count, 1)
         let session = try XCTUnwrap(sessions.first)
         XCTAssertEqual(session.id, CodexSideChatLogReader.sideChatSessionID(threadID: sideThreadID))
+        XCTAssertEqual(session.filePath, CodexSideChatLogReader.sideChatSessionPath(threadID: sideThreadID))
+        XCTAssertFalse(session.filePath.hasSuffix("logs_2.sqlite"))
         XCTAssertTrue(session.isSideChat)
         XCTAssertFalse(session.isSubagent)
         XCTAssertNil(session.parentSessionID)
@@ -73,6 +75,8 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(session.model, "gpt-5.5")
         XCTAssertEqual(session.cwd, "/tmp/side-chat-repo")
         XCTAssertEqual(session.events.map(\.kind), [.user, .assistant])
+        XCTAssertEqual(session.modifiedAt, session.endTime)
+        XCTAssertLessThan(session.fileSizeBytes ?? Int.max, 10_000)
         XCTAssertEqual(session.lightweightTitle, "ABRACADABRA test phrase")
         XCTAssertFalse(session.title.hasPrefix("Side:"))
         XCTAssertTrue(session.title.contains("ABRACADABRA test phrase"))
@@ -188,6 +192,26 @@ final class CodexSideChatLogReaderTests: XCTestCase {
         XCTAssertEqual(session.events.map(\.text), ["request-only side phrase"])
     }
 
+    func testSideChatPreservesParentThreadIDFromClientMetadata() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: "child-side-thread",
+                                  firstID: 1,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "parent linked side phrase",
+                                  parentThreadID: "parent-main-thread")
+
+        let session = try XCTUnwrap(CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome,
+                                                                                useCache: false).first)
+
+        XCTAssertTrue(session.isSideChat)
+        XCTAssertEqual(session.codexInternalSessionIDHint, "child-side-thread")
+        XCTAssertEqual(session.parentSessionID, "parent-main-thread")
+    }
+
     func testLoadsSideChatSessionFromNestedSqliteLogDirectory() throws {
         let codexHome = try makeCodexHome()
         let sqliteDir = codexHome.appendingPathComponent("sqlite", isDirectory: true)
@@ -291,7 +315,37 @@ final class CodexSideChatLogReaderTests: XCTestCase {
 
         let cached = CodexSideChatLogReader.loadCachedSideChatSessions(codexHome: codexHome)
         XCTAssertEqual(cached.map(\.id), firstScan.map(\.id))
+        XCTAssertEqual(cached.first?.filePath, CodexSideChatLogReader.sideChatSessionPath(threadID: sideThreadID))
+        XCTAssertEqual(cached.first?.fileSizeBytes, firstScan.first?.fileSizeBytes)
         XCTAssertEqual(cached.first?.events.map(\.text), firstScan.first?.events.map(\.text))
+    }
+
+    func testSideChatSessionDoesNotExposeBackingSQLiteFileStats() throws {
+        let codexHome = try makeCodexHome()
+        let dbURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        try createLogsDB(at: dbURL)
+
+        let sideThreadID = "synthetic-stats-side-thread"
+        try insertSideChatFixture(dbURL: dbURL,
+                                  threadID: sideThreadID,
+                                  firstID: 1,
+                                  firstTS: 1_781_000_001,
+                                  phrase: "small synthetic side phrase")
+        let padding = String(repeating: "x", count: 256 * 1024)
+        try insertLog(dbURL: dbURL,
+                      id: 10,
+                      ts: 1_781_999_999,
+                      threadID: "ordinary-thread",
+                      target: "codex_otel.log_only",
+                      body: padding)
+
+        let session = try XCTUnwrap(CodexSideChatLogReader.loadSideChatSessions(codexHome: codexHome,
+                                                                                useCache: false).first)
+        let backingSize = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: dbURL.path)[.size] as? NSNumber).intValue
+
+        XCTAssertEqual(session.filePath, CodexSideChatLogReader.sideChatSessionPath(threadID: sideThreadID))
+        XCTAssertLessThan(session.fileSizeBytes ?? Int.max, backingSize)
+        XCTAssertEqual(session.modifiedAt, session.endTime)
     }
 
     func testColdDiscoveryFindsRecentSideChatNearNewestRowID() throws {
@@ -573,13 +627,17 @@ final class CodexSideChatLogReaderTests: XCTestCase {
                                        threadID: String,
                                        firstID: Int64,
                                        firstTS: Int64,
-                                       phrase: String) throws {
+                                       phrase: String,
+                                       parentThreadID: String? = nil) throws {
+        let clientMetadata = parentThreadID.map {
+            #","client_metadata":{"x-codex-turn-metadata":"{\"forked_from_thread_id\":\"\#($0)\"}"}"#
+        } ?? ""
         try insertLog(dbURL: dbURL,
                       id: firstID,
                       ts: firstTS,
                       threadID: threadID,
                       target: "codex_api::endpoint::responses_websocket",
-                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]}"#)
+                      body: #"session_loop{thread_id=\#(threadID)}: websocket request: {"instructions":"You are Codex.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(sideBoundaryJSONText)"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(phrase)"}]}]\#(clientMetadata)}"#)
         try insertLog(dbURL: dbURL,
                       id: firstID + 1,
                       ts: firstTS + 1,

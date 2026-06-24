@@ -33,7 +33,10 @@ struct ClaudeUsageStripView: View {
 
             // Status text (right-aligned): only show problems/warnings
             if status.loginRequired {
-                Text("Login required").font(.caption).foregroundStyle(.red)
+                Text("Login required")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .help(status.setupHint ?? "Claude Code CLI credentials are stale. Open Terminal and run: claude /login")
             } else if status.setupRequired {
                 Text("Setup required")
                     .font(.caption)
@@ -43,6 +46,8 @@ struct ClaudeUsageStripView: View {
                 Text("CLI not found").font(.caption).foregroundStyle(.red)
             } else if status.tmuxUnavailable {
                 Text("tmux not found").font(.caption).foregroundStyle(.red)
+            } else if status.lastUpdate == nil, status.unavailableMessage != nil {
+                Text("Usage unavailable").font(.caption).foregroundStyle(.orange)
             } else if let update = status.lastUpdate {
                 // Show immediately when stale/degraded; otherwise only after 30 minutes
                 if status.dataIsStale || Date().timeIntervalSince(update) > 30 * 60 {
@@ -106,6 +111,9 @@ struct ClaudeUsageStripView: View {
         if status.setupRequired {
             parts.append(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
         }
+        if let unavailable = status.unavailableMessage {
+            parts.append(unavailable)
+        }
         parts.append("Double-click to refresh now")
 
         return parts.joined(separator: "\n")
@@ -123,14 +131,15 @@ private struct UsageMeter: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
 
     var body: some View {
-        let includeReset = showResetTime && !reset.isEmpty
+        let hasData = lastUpdate != nil
+        let includeReset = showResetTime && hasData && !reset.isEmpty
         // Unified freshness: allow TTL after manual hard probe
         let effectiveEvent = effectiveEventTimestamp(source: .claude, eventTimestamp: nil, lastUpdate: lastUpdate)
         let stale = isResetInfoStale(kind: title, source: .claude, lastUpdate: effectiveEvent)
         let displayText = stale ? UsageStaleThresholds.outdatedCopy : UsageResetText.displayTextWithPrefix(kind: title, source: .claude, raw: reset)
 
         let mode = UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left
-        let leftPercent = max(0, min(100, percent))
+        let leftPercent = hasData ? max(0, min(100, percent)) : 0
         let barUsedPercent = mode.barUsedPercent(fromLeft: leftPercent)
         let labelPercent = mode.numericPercent(fromLeft: leftPercent)
 
@@ -143,7 +152,7 @@ private struct UsageMeter: View {
                 .tint(stripMonochrome ? .secondary : tintColor)
                 .frame(width: UsageMeterLayout.progressWidth)
             // Label switches between "left" and "used" depending on mode
-            Text("\(labelPercent)% \(mode.suffix)")
+            Text(hasData ? "\(labelPercent)% \(mode.suffix)" : "--")
                 .font(.footnote)
                 .monospacedDigit()
                 .frame(width: UsageMeterLayout.percentWidth, alignment: .trailing)
@@ -156,7 +165,7 @@ private struct UsageMeter: View {
             }
         }
         .frame(width: UsageMeterLayout.totalWidth(includeReset: includeReset), alignment: .leading)
-        .help(reset.isEmpty ? "" : UsageResetText.displayTextWithPrefix(kind: title, source: .claude, raw: reset))
+        .help(hasData && !reset.isEmpty ? UsageResetText.displayTextWithPrefix(kind: title, source: .claude, raw: reset) : "Waiting for Claude usage data")
     }
 }
 

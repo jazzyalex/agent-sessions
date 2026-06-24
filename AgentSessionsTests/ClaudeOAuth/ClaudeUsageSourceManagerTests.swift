@@ -262,4 +262,115 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertEqual(restored?.fetchedAt.timeIntervalSince1970 ?? 0, seed.fetchedAt.timeIntervalSince1970, accuracy: 0.001)
         XCTAssertEqual(restored?.fiveHourUsedRatio ?? 0, 0.4, accuracy: 0.001)
     }
+
+    func testColdStart_preservesPersistedTmuxSource() async throws {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_claude_usage_\(UUID().uuidString).json")
+        addTeardownBlock { try? FileManager.default.removeItem(at: tempURL) }
+
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
+        let seed = ClaudeLimitSnapshot(
+            fetchedAt: Date().addingTimeInterval(-30),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: 0.22,
+            fiveHourResetText: "resets in 3h",
+            weeklyUsedRatio: 0.03,
+            weeklyResetText: "resets in 2d",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: nil
+        )
+        await store.save(seed)
+
+        var delivered: [ClaudeLimitSnapshot] = []
+        let mgr = ClaudeUsageSourceManager(store: store)
+        await mgr.start(
+            mode: .auto,
+            handler: { snap in delivered.append(snap) },
+            availabilityHandler: { _ in }
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        await mgr.stop()
+
+        let restored = delivered.first
+        XCTAssertEqual(restored?.source, .tmuxUsage)
+        XCTAssertEqual(restored?.health, .live)
+        XCTAssertEqual(restored?.fiveHourUsedRatio ?? 0, 0.22, accuracy: 0.001)
+    }
+
+    func testMergeMissingFiveHourWindowPreservesRecentTmuxSessionLimit() {
+        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
+        let incoming = ClaudeLimitSnapshot(
+            fetchedAt: now,
+            source: .oauthEndpoint,
+            health: .live,
+            fiveHourUsedRatio: 0.0,
+            fiveHourResetText: "",
+            weeklyUsedRatio: 0.03,
+            weeklyResetText: "2027-01-19T09:00:00Z",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: "oauth-weekly-only"
+        )
+        let previous = ClaudeLimitSnapshot(
+            fetchedAt: now.addingTimeInterval(-60),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: 0.24,
+            fiveHourResetText: "11:20pm (America/Los_Angeles)",
+            weeklyUsedRatio: 0.05,
+            weeklyResetText: "Jun 28 at 5am (America/Los_Angeles)",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: nil
+        )
+
+        let merged = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
+            incoming: incoming,
+            previous: previous,
+            now: now
+        )
+
+        XCTAssertEqual(merged?.fiveHourUsedRatio ?? 0, 0.24, accuracy: 0.001)
+        XCTAssertEqual(merged?.fiveHourResetText, "11:20pm (America/Los_Angeles)")
+        XCTAssertEqual(merged?.weeklyUsedRatio ?? 0, incoming.weeklyUsedRatio ?? -1, accuracy: 0.001)
+        XCTAssertEqual(merged?.weeklyResetText, incoming.weeklyResetText)
+    }
+
+    func testMergeMissingFiveHourWindowRejectsExpiredTmuxSessionLimit() {
+        let now = ISO8601DateFormatter().date(from: "2026-06-23T01:31:00Z")!
+        let incoming = ClaudeLimitSnapshot(
+            fetchedAt: now,
+            source: .oauthEndpoint,
+            health: .live,
+            fiveHourUsedRatio: 0.0,
+            fiveHourResetText: "",
+            weeklyUsedRatio: 0.03,
+            weeklyResetText: "2027-01-19T09:00:00Z",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: "oauth-weekly-only"
+        )
+        let previous = ClaudeLimitSnapshot(
+            fetchedAt: now.addingTimeInterval(-(31 * 60)),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: 0.24,
+            fiveHourResetText: "11:20pm (America/Los_Angeles)",
+            weeklyUsedRatio: 0.05,
+            weeklyResetText: "Jun 28 at 5am (America/Los_Angeles)",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            rawPayloadHash: nil
+        )
+
+        let merged = ClaudeUsageSourceManager.mergeMissingFiveHourWindow(
+            incoming: incoming,
+            previous: previous,
+            now: now
+        )
+
+        XCTAssertNil(merged)
+    }
 }

@@ -39,6 +39,9 @@ enum UsageResetText {
         // 0) ISO 8601 (OAuth endpoint: "2026-03-14T09:00:00.397911+00:00")
         if let d = parseISO8601(trimmed) { return d }
 
+        // 0.5) Claude tmux /usage relative reset text: "in 3h", "in 2d", "in 1h 30m".
+        if let d = parseRelativeReset(trimmed, now: now) { return d }
+
         // Extract a timezone suffix like "(America/Los_Angeles)" when present, so Codex legacy
         // strings can be interpreted in the correct timezone.
         let split = splitTimezoneIdentifier(trimmed)
@@ -93,6 +96,44 @@ enum UsageResetText {
         }
 
         return nil
+    }
+
+    private static func parseRelativeReset(_ text: String, now: Date) -> Date? {
+        let lower = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: ",", with: " ")
+        guard lower.hasPrefix("in ") else { return nil }
+
+        let remainder = lower.dropFirst(3)
+        let pattern = #"(\d+(?:\.\d+)?)\s*(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(remainder.startIndex..<remainder.endIndex, in: remainder)
+        let matches = regex.matches(in: String(remainder), range: NSRange(location: 0, length: range.length))
+        guard !matches.isEmpty else { return nil }
+
+        var seconds: TimeInterval = 0
+        let source = String(remainder)
+        for match in matches {
+            guard match.numberOfRanges >= 3,
+                  let valueRange = Range(match.range(at: 1), in: source),
+                  let unitRange = Range(match.range(at: 2), in: source),
+                  let value = Double(source[valueRange])
+            else { continue }
+            switch source[unitRange] {
+            case "d", "day", "days":
+                seconds += value * 24 * 60 * 60
+            case "h", "hr", "hrs", "hour", "hours":
+                seconds += value * 60 * 60
+            case "m", "min", "mins", "minute", "minutes":
+                seconds += value * 60
+            default:
+                continue
+            }
+        }
+
+        guard seconds > 0 else { return nil }
+        return now.addingTimeInterval(seconds)
     }
 
     private static func parseCodexLegacy(_ text: String, now: Date, tz: TimeZone) -> Date? {

@@ -298,7 +298,8 @@ struct UnifiedSessionsView: View {
         @State private var cachedLatestModifiedAt: Date? = nil
 	    @State private var collapsedParents: Set<String> = []
 	    @State private var hasLoadedPersistedCollapsedParents: Bool = false
-	    @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
+        @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
+        @State private var sideChatParentContextByID: [String: String] = [:]
         @State private var cachedExpandableParentIDs: Set<String> = []
 	@State private var columnLayoutID: UUID = UUID()
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
@@ -837,13 +838,14 @@ struct UnifiedSessionsView: View {
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
 
-	            TableColumn("Session", value: \Session.listTitle) { s in
-	                SessionTitleCell(
-                        session: s,
-                        geminiIndexer: geminiIndexer,
-                        rowMeta: hierarchyRowMeta[s.id],
-                        isExpanded: !collapsedParents.contains(s.id),
-                        onToggleExpand: { id in
+            TableColumn("Session", value: \Session.listTitle) { s in
+                SessionTitleCell(
+                    session: s,
+                    geminiIndexer: geminiIndexer,
+                    rowMeta: hierarchyRowMeta[s.id],
+                    sideChatParentContext: sideChatParentContextByID[s.id],
+                    isExpanded: !collapsedParents.contains(s.id),
+                    onToggleExpand: { id in
                             if collapsedParents.contains(id) {
                                 collapsedParents.remove(id)
                             } else {
@@ -960,8 +962,14 @@ struct UnifiedSessionsView: View {
 	                Button("Reveal Session Log") { revealSessionFile(s) }
 	                    .keyboardShortcut("l", modifiers: [.command, .option])
                     .help("Show session log file in Finder (⌥⌘L)")
-                Button("Copy Session ID") { copySessionID(id) }
-                    .help("Copy the session ID to the clipboard")
+                if let copyID = copyableSessionID(for: s) {
+                    Button("Copy Session ID") { copySessionID(copyID) }
+                        .help(s.isSideChat ? "Copy the parent session ID to the clipboard" : "Copy the session ID to the clipboard")
+                } else {
+                    Button("Copy Session ID") {}
+                        .disabled(true)
+                        .help("No parent session ID is available for this side chat")
+                }
                 Button("Copy Resume Command") { copyResumeCommand(s, geminiCLISessionID: geminiCLISessionID) }
                     .disabled(!canCopyResumeCommand(s, geminiCLISessionID: geminiCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
@@ -1175,6 +1183,20 @@ struct UnifiedSessionsView: View {
         pasteboard.setString(id, forType: .string)
     }
 
+    private func copyableSessionID(for session: Session) -> String? {
+        if session.isSideChat {
+            return nonEmptySessionID(session.parentSessionID)
+        }
+        return nonEmptySessionID(session.id)
+    }
+
+    private func nonEmptySessionID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
     private func canCopyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) -> Bool {
         switch session.source {
         case .claude:
@@ -1331,7 +1353,7 @@ struct UnifiedSessionsView: View {
             if shouldShowLaunchOverlay {
                 launchBlockingTranscriptOverlay()
             } else if let s = selectedSession {
-                if !FileManager.default.fileExists(atPath: s.filePath) {
+                if !s.isSideChat && !FileManager.default.fileExists(atPath: s.filePath) {
                     let providerName: String = {
                         switch s.source {
                         case .codex: return "Codex"
@@ -1624,7 +1646,38 @@ struct UnifiedSessionsView: View {
         }
     }
 
-		    private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
+            private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
+
+            private static func sideChatParentContexts(for rows: [Session],
+                                                       allSessions: [Session]) -> [String: String] {
+                let candidates = rows + allSessions
+                var titleByParentKey: [String: String] = [:]
+                titleByParentKey.reserveCapacity(candidates.count * 2)
+                for session in candidates where !session.isSideChat {
+                    let title = session.listTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !title.isEmpty else { continue }
+                    titleByParentKey[session.id] = title
+                    if let internalID = session.codexInternalSessionIDHint?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !internalID.isEmpty {
+                        titleByParentKey[internalID] = title
+                    }
+                }
+
+                var contexts: [String: String] = [:]
+                for session in rows where session.isSideChat {
+                    guard let parentID = session.parentSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !parentID.isEmpty else {
+                        continue
+                    }
+                    contexts[session.id] = titleByParentKey[parentID] ?? shortenedParentID(parentID)
+                }
+                return contexts
+            }
+
+            private static func shortenedParentID(_ id: String) -> String {
+                guard id.count > 12 else { return id }
+                return "\(id.prefix(8))…"
+            }
 
             private var currentExpandableParentIDs: Set<String> {
                 guard isHierarchyBrowsing else { return [] }
@@ -2128,10 +2181,14 @@ struct UnifiedSessionsView: View {
                     collapsedParents: collapsedParents,
                     hierarchyEnabled: showSubagentHierarchy && !searchActive
                 )
-		            cachedRows = hierarchyResult.sessions
+                cachedRows = hierarchyResult.sessions
                 hierarchyRowMeta = hierarchyResult.rowMeta
+                sideChatParentContextByID = Self.sideChatParentContexts(
+                    for: hierarchyResult.sessions,
+                    allSessions: unified.allSessions
+                )
                 refreshCachedRowDerivedState()
-		        }
+            }
 	        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
 
 	        if let selectedID = selection,
@@ -3346,128 +3403,138 @@ private struct TranscriptHostView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
     }
-	}
+}
 
-		// Session title cell with inline Antigravity refresh affordance (hover-only)
-		private struct SessionTitleCell: View {
-		    let session: Session
-		    @ObservedObject var geminiIndexer: GeminiSessionIndexer
-            let rowMeta: SubagentRowMeta?
-            let isExpanded: Bool
-            let onToggleExpand: ((String) -> Void)?
-		    @State private var hover: Bool = false
+// Session title cell with inline Antigravity refresh affordance (hover-only)
+private struct SessionTitleCell: View {
+    let session: Session
+    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    let rowMeta: SubagentRowMeta?
+    let sideChatParentContext: String?
+    let isExpanded: Bool
+    let onToggleExpand: ((String) -> Void)?
+    @State private var hover: Bool = false
 
-            var body: some View {
-                let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
-                let showFlatSubagentMarker = session.isSubagent && !isNestedSubagent
-                HStack(spacing: 4) {
-                    // Disclosure chevron for parents with children
-                    if let meta = rowMeta, meta.hasChildren {
-                        Button(action: { onToggleExpand?(session.id) }) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .medium))
-                                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                                .animation(.easeInOut(duration: 0.15), value: isExpanded)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: 16)
+    var body: some View {
+        let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
+        let showFlatSubagentMarker = session.isSubagent && !isNestedSubagent
+        HStack(spacing: 4) {
+            // Disclosure chevron for parents with children
+            if let meta = rowMeta, meta.hasChildren {
+                Button(action: { onToggleExpand?(session.id) }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 16)
+                .foregroundStyle(.secondary)
+                Text("(\(meta.childCount))")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } else if isNestedSubagent {
+                // Indent for subagent children
+                Spacer().frame(width: 20)
+            }
+
+            if showFlatSubagentMarker {
+                Text("sub")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .foregroundStyle(.secondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .accessibilityLabel("Subagent")
+                    .help(subagentPillHelp)
+            }
+
+            if session.isSideChat {
+                Text("side")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.green.opacity(0.18))
+                    .foregroundStyle(.green)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .accessibilityLabel("Side chat")
+                    .help("Codex side chat")
+            }
+
+            // Subagent type badge (only when hierarchy nesting is active)
+            if isNestedSubagent {
+                if let agentType = session.subagentType, !agentType.isEmpty {
+                    Text(agentType)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.15))
+                        .foregroundStyle(.purple)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .help(subagentPillHelp)
+                }
+                // Model badge
+                if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
+                    Text(abbreviated)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundStyle(.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+            }
+
+            if session.isDeleted {
+                Text("deleted")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.red.opacity(0.12))
+                    .foregroundStyle(.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .accessibilityLabel("Deleted session")
+            }
+
+            HStack(spacing: 6) {
+                Text(session.listTitle)
+                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if session.isSideChat, let sideChatParentContext {
+                    Text("of \(sideChatParentContext)")
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
                         .foregroundStyle(.secondary)
-                        Text("(\(meta.childCount))")
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    } else if isNestedSubagent {
-                        // Indent for subagent children
-                        Spacer().frame(width: 20)
-                    }
-
-                    if showFlatSubagentMarker {
-                        Text("sub")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.12))
-                            .foregroundStyle(.secondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .accessibilityLabel("Subagent")
-                            .help(subagentPillHelp)
-                    }
-
-                    if session.isSideChat {
-                        Text("side")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.green.opacity(0.18))
-                            .foregroundStyle(.green)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .accessibilityLabel("Side chat")
-                            .help("Codex side chat")
-                    }
-
-                    // Subagent type badge (only when hierarchy nesting is active)
-                    if isNestedSubagent {
-                        if let agentType = session.subagentType, !agentType.isEmpty {
-                            Text(agentType)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.purple.opacity(0.15))
-                                .foregroundStyle(.purple)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                                .help(subagentPillHelp)
-                        }
-                        // Model badge
-                        if let abbreviated = ModelNameAbbreviator.abbreviate(session.model) {
-                            Text(abbreviated)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Color.blue.opacity(0.12))
-                                .foregroundStyle(.blue)
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                        }
-                    }
-
-                    if session.isDeleted {
-                        Text("deleted")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.red.opacity(0.12))
-                            .foregroundStyle(.red)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .accessibilityLabel("Deleted session")
-                    }
-
-                    Text(session.listTitle)
-                        .font(.system(size: 13, weight: .regular, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .background(Color.clear)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if session.source == .antigravity, geminiIndexer.isPreviewStale(id: session.id) {
-                        Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
-                            Text("Refresh")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.teal)
-                        .opacity(hover ? 1 : 0)
-                        .help("Update this session's preview to reflect the latest file contents")
-                    }
                 }
-                .onHover { hover = $0 }
             }
+            .background(Color.clear)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            private var subagentPillHelp: String {
-                guard let effort = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !effort.isEmpty else {
-                    return "Subagent"
+            if session.source == .antigravity, geminiIndexer.isPreviewStale(id: session.id) {
+                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
+                    Text("Refresh")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
-                return "Subagent\nReasoning effort: \(effort)"
+                .buttonStyle(.bordered)
+                .tint(.teal)
+                .opacity(hover ? 1 : 0)
+                .help("Update this session's preview to reflect the latest file contents")
             }
         }
+        .onHover { hover = $0 }
+    }
+
+    private var subagentPillHelp: String {
+        guard let effort = session.reasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !effort.isEmpty else {
+            return "Subagent"
+        }
+        return "Subagent\nReasoning effort: \(effort)"
+    }
+}
 
 // Stable cell to prevent Table reuse glitches in Project column
 private struct ProjectCellView: View {

@@ -148,12 +148,15 @@ enum CodexRunwaySnapshotLoader {
         }
     }
 
+#if DEBUG
+    static func uniqueIdentitiesForTesting(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
+        uniqueIdentities(identities)
+    }
+#endif
+
     private static func uniqueIdentities(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
         var byID: [String: RunwaySessionIdentity] = [:]
         var order: [String] = []
-        var pathOwner: [String: String] = [:]
-        var output: [RunwaySessionIdentity] = []
-        output.reserveCapacity(identities.count)
 
         for identity in identities {
             if var existing = byID[identity.id] {
@@ -170,26 +173,68 @@ enum CodexRunwaySnapshotLoader {
             }
         }
 
-        for id in order {
-            guard let identity = byID[id] else { continue }
-            let unclaimedPaths = identity.logPaths.filter { path in
-                guard let owner = pathOwner[path] else {
-                    pathOwner[path] = id
-                    return true
-                }
-                return owner == id
-            }
-            guard !unclaimedPaths.isEmpty else { continue }
-            output.append(
-                RunwaySessionIdentity(
-                    id: identity.id,
-                    displayName: identity.displayName,
-                    isGoal: identity.isGoal,
-                    logPaths: unclaimedPaths
-                )
+        var groups = order.compactMap { id -> IdentityMergeGroup? in
+            guard let identity = byID[id] else { return nil }
+            return IdentityMergeGroup(
+                id: identity.id,
+                displayName: identity.displayName,
+                isGoal: identity.isGoal,
+                logPaths: Set(identity.logPaths),
+                order: order.firstIndex(of: id) ?? 0
             )
         }
-        return output
+
+        var index = 0
+        while index < groups.count {
+            var scanIndex = index + 1
+            while scanIndex < groups.count {
+                if groups[index].logPaths.isDisjoint(with: groups[scanIndex].logPaths) {
+                    scanIndex += 1
+                    continue
+                }
+
+                let merged = IdentityMergeGroup.merged(groups[index], groups[scanIndex])
+                groups[index] = merged
+                groups.remove(at: scanIndex)
+                scanIndex = index + 1
+            }
+            index += 1
+        }
+
+        return groups
+            .sorted { $0.order < $1.order }
+            .map {
+                RunwaySessionIdentity(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    isGoal: $0.isGoal,
+                    logPaths: Array($0.logPaths).sorted()
+                )
+            }
+    }
+
+    private struct IdentityMergeGroup {
+        let id: String
+        let displayName: String
+        let isGoal: Bool
+        let logPaths: Set<String>
+        let order: Int
+
+        static func merged(_ lhs: IdentityMergeGroup, _ rhs: IdentityMergeGroup) -> IdentityMergeGroup {
+            let winner: IdentityMergeGroup
+            if lhs.logPaths.count != rhs.logPaths.count {
+                winner = lhs.logPaths.count > rhs.logPaths.count ? lhs : rhs
+            } else {
+                winner = lhs.order > rhs.order ? lhs : rhs
+            }
+            return IdentityMergeGroup(
+                id: winner.id,
+                displayName: winner.displayName,
+                isGoal: lhs.isGoal || rhs.isGoal,
+                logPaths: lhs.logPaths.union(rhs.logPaths),
+                order: min(lhs.order, rhs.order)
+            )
+        }
     }
 
     private static func mergeBurns(directBurns: [RunwaySessionBurn],
@@ -534,6 +579,7 @@ enum CodexRunwayRecentSessionScanner {
     static let maximumActiveSampleAge: TimeInterval = 75
     static let maximumGoalCompletionGrace: TimeInterval = 75
     static let maximumFiles = 12
+    static let maximumMetadataFiles = 80
 
     static func identities(root: URL? = nil,
                            now: Date = Date(),
@@ -565,54 +611,102 @@ enum CodexRunwayRecentSessionScanner {
 
         let threadNames = SessionIndexer.loadCodexThreadNames(sessionsRoot: rootURL)
 
-        let identities = candidates
+        let recentCandidates = candidates
             .sorted { $0.modifiedAt > $1.modifiedAt }
-            .prefix(maximumFiles)
-            .compactMap { identity(for: $0.url, now: now, threadNames: threadNames) }
-        return mergeParentIdentities(identities)
+            .prefix(maximumMetadataFiles)
+            .compactMap { candidate(for: $0.url, now: now, threadNames: threadNames) }
+        return Array(mergeParentCandidates(recentCandidates).prefix(maximumFiles))
     }
 
-    private static func identity(for url: URL, now: Date, threadNames: [String: String]) -> RunwaySessionIdentity? {
+    private static func candidate(for url: URL, now: Date, threadNames: [String: String]) -> RecentSessionCandidate? {
         let metadata = metadata(from: url)
-        guard hasActiveTail(url: url, now: now, isGoal: metadata.isGoal) else { return nil }
         if let cwd = metadata.cwd,
            CodexProbeConfig.isProbeWorkingDirectory(cwd) {
             return nil
         }
+        let isActive = hasActiveTail(url: url, now: now, isGoal: metadata.isGoal)
         let fallbackID = url.deletingPathExtension().lastPathComponent
-        let id = metadata.parentSessionID ?? metadata.sessionID ?? fallbackID
+        let id = metadata.sessionID ?? fallbackID
         let customTitle = [metadata.parentSessionID, metadata.sessionID]
             .compactMap { $0 }
             .compactMap { threadNames[$0] }
             .first
-        return RunwaySessionIdentity(
-            id: id,
+        return RecentSessionCandidate(
+            sessionID: id,
+            parentSessionID: metadata.parentSessionID,
             displayName: displayName(metadata: metadata, customTitle: customTitle, fallbackID: fallbackID),
             isGoal: metadata.isGoal,
-            logPaths: [url.path]
+            logPath: url.path,
+            isActive: isActive
         )
     }
 
-    private static func mergeParentIdentities(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
-        var byID: [String: RunwaySessionIdentity] = [:]
+    private static func mergeParentCandidates(_ candidates: [RecentSessionCandidate]) -> [RunwaySessionIdentity] {
+        let candidateBySessionID = Dictionary(
+            candidates.map { ($0.sessionID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let parentBySessionID = Dictionary(
+            candidates.compactMap { candidate -> (String, String)? in
+                guard let parentSessionID = candidate.parentSessionID,
+                      parentSessionID != candidate.sessionID else {
+                    return nil
+                }
+                return (candidate.sessionID, parentSessionID)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var byID: [String: (displayName: String, isGoal: Bool, logPaths: Set<String>, hasRootRow: Bool)] = [:]
         var order: [String] = []
 
-        for identity in identities {
-            if var existing = byID[identity.id] {
-                existing = RunwaySessionIdentity(
-                    id: existing.id,
-                    displayName: existing.displayName,
-                    isGoal: existing.isGoal || identity.isGoal,
-                    logPaths: Array(Set(existing.logPaths).union(identity.logPaths)).sorted()
-                )
-                byID[identity.id] = existing
+        for candidate in candidates {
+            guard candidate.isActive else { continue }
+            let rootID = rootSessionID(for: candidate, parentBySessionID: parentBySessionID)
+            let isRootRow = candidate.sessionID == rootID
+            let displayName = candidateBySessionID[rootID]?.displayName ?? candidate.displayName
+            let hasRootRow = candidateBySessionID[rootID] != nil
+            if var existing = byID[rootID] {
+                existing.isGoal = existing.isGoal || candidate.isGoal
+                existing.logPaths.insert(candidate.logPath)
+                if isRootRow && !existing.hasRootRow {
+                    existing.displayName = displayName
+                    existing.hasRootRow = true
+                }
+                byID[rootID] = existing
             } else {
-                order.append(identity.id)
-                byID[identity.id] = identity
+                order.append(rootID)
+                byID[rootID] = (
+                    displayName: displayName,
+                    isGoal: candidate.isGoal,
+                    logPaths: [candidate.logPath],
+                    hasRootRow: hasRootRow
+                )
             }
         }
 
-        return order.compactMap { byID[$0] }
+        return order.compactMap { id in
+            guard let group = byID[id] else { return nil }
+            return RunwaySessionIdentity(
+                id: id,
+                displayName: group.displayName,
+                isGoal: group.isGoal,
+                logPaths: Array(group.logPaths).sorted()
+            )
+        }
+    }
+
+    private static func rootSessionID(for candidate: RecentSessionCandidate,
+                                      parentBySessionID: [String: String]) -> String {
+        var current = candidate.parentSessionID ?? candidate.sessionID
+        var seen: Set<String> = [candidate.sessionID]
+        while let parent = parentBySessionID[current],
+              parent != current,
+              !seen.contains(parent) {
+            seen.insert(current)
+            current = parent
+        }
+        return current
     }
 
     private static func hasActiveTail(url: URL, now: Date, isGoal: Bool) -> Bool {
@@ -662,6 +756,7 @@ enum CodexRunwayRecentSessionScanner {
         }
 
         var metadata = SessionMetadata()
+        var capturedIdentityMetadata = false
         for line in text.split(separator: "\n", omittingEmptySubsequences: true).prefix(80) {
             guard let data = String(line).data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -669,11 +764,14 @@ enum CodexRunwayRecentSessionScanner {
                 continue
             }
             if obj["type"] as? String == "session_meta" {
-                metadata.sessionID = string(payload["id"]) ?? metadata.sessionID
-                metadata.cwd = string(payload["cwd"]) ?? metadata.cwd
-                metadata.nickname = string(payload["agent_nickname"]) ?? metadata.nickname
-                metadata.parentSessionID = parentSessionID(from: payload) ?? metadata.parentSessionID
                 metadata.isGoal = metadata.isGoal || isGoalPayload(payload)
+                if !capturedIdentityMetadata {
+                    metadata.sessionID = string(payload["id"]) ?? metadata.sessionID
+                    metadata.cwd = string(payload["cwd"]) ?? metadata.cwd
+                    metadata.nickname = string(payload["agent_nickname"]) ?? metadata.nickname
+                    metadata.parentSessionID = parentSessionID(from: payload) ?? metadata.parentSessionID
+                    capturedIdentityMetadata = true
+                }
             }
             if metadata.firstUserText == nil,
                string(payload["type"]) == "message",
@@ -779,6 +877,15 @@ enum CodexRunwayRecentSessionScanner {
         var nickname: String?
         var firstUserText: String?
         var isGoal = false
+    }
+
+    private struct RecentSessionCandidate {
+        let sessionID: String
+        let parentSessionID: String?
+        let displayName: String
+        let isGoal: Bool
+        let logPath: String
+        let isActive: Bool
     }
 }
 

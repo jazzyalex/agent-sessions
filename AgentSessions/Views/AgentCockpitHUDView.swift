@@ -3197,39 +3197,62 @@ private struct LimitsRunwayHeightRowsKey: PreferenceKey {
 /// polling updates don't cause the entire AgentCockpitHUDView to re-render.
 enum HUDRunwayIdentityReducer {
     static func identities(from rows: [HUDRow]) -> [RunwaySessionIdentity] {
-        var grouped: [String: (displayName: String, paths: Set<String>, hasParentRow: Bool)] = [:]
-        var order: [String] = []
-
-        for row in rows {
-            guard row.source == .codex, row.liveState == .active else { continue }
+        let candidates = rows.compactMap { row -> RunwayHUDCandidate? in
+            guard row.source == .codex, row.liveState == .active else { return nil }
             guard let logPath = row.logPath?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !logPath.isEmpty else {
-                continue
+                return nil
             }
 
             let parentID = row.parentSessionID?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let nonEmptyParentID = parentID.flatMap { $0.isEmpty ? nil : $0 }
-            let key = nonEmptyParentID
-                ?? row.resolvedSessionID
+            let sessionID = row.resolvedSessionID
                 ?? row.runtimeSessionID
                 ?? row.id
-            let display = compactName(for: row)
-            let isParentRow = nonEmptyParentID == nil || nonEmptyParentID == row.resolvedSessionID
+            return RunwayHUDCandidate(
+                sessionID: sessionID,
+                parentSessionID: nonEmptyParentID,
+                displayName: compactName(for: row),
+                logPath: logPath
+            )
+        }
+
+        let candidateBySessionID = Dictionary(
+            candidates.map { ($0.sessionID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let parentBySessionID = Dictionary(
+            candidates.compactMap { candidate -> (String, String)? in
+                guard let parentSessionID = candidate.parentSessionID,
+                      parentSessionID != candidate.sessionID else {
+                    return nil
+                }
+                return (candidate.sessionID, parentSessionID)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var grouped: [String: (displayName: String, paths: Set<String>, hasRootRow: Bool)] = [:]
+        var order: [String] = []
+
+        for candidate in candidates {
+            let key = rootSessionID(for: candidate, parentBySessionID: parentBySessionID)
+            let display = candidateBySessionID[key]?.displayName ?? candidate.displayName
+            let isParentRow = candidate.sessionID == key
 
             if var existing = grouped[key] {
-                existing.paths.insert(logPath)
-                if isParentRow && !existing.hasParentRow {
+                existing.paths.insert(candidate.logPath)
+                if isParentRow && !existing.hasRootRow {
                     existing.displayName = display
-                    existing.hasParentRow = true
+                    existing.hasRootRow = true
                 }
                 grouped[key] = existing
             } else {
                 order.append(key)
                 grouped[key] = (
                     displayName: display,
-                    paths: [logPath],
-                    hasParentRow: isParentRow
+                    paths: [candidate.logPath],
+                    hasRootRow: candidateBySessionID[key] != nil
                 )
             }
         }
@@ -3243,6 +3266,19 @@ enum HUDRunwayIdentityReducer {
                 logPaths: Array(group.paths).sorted()
             )
         }
+    }
+
+    private static func rootSessionID(for candidate: RunwayHUDCandidate,
+                                      parentBySessionID: [String: String]) -> String {
+        var current = candidate.parentSessionID ?? candidate.sessionID
+        var seen: Set<String> = [candidate.sessionID]
+        while let parent = parentBySessionID[current],
+              parent != current,
+              !seen.contains(parent) {
+            seen.insert(current)
+            current = parent
+        }
+        return current
     }
 
     private static func compactName(for row: HUDRow) -> String {
@@ -3261,6 +3297,13 @@ enum HUDRunwayIdentityReducer {
 
     private static func isPlaceholderTitle(_ title: String) -> Bool {
         title == "Active Codex session" || title.hasPrefix("Session ")
+    }
+
+    private struct RunwayHUDCandidate {
+        let sessionID: String
+        let parentSessionID: String?
+        let displayName: String
+        let logPath: String
     }
 }
 

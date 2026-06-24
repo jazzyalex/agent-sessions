@@ -65,6 +65,18 @@ final class UsageResetTextTests: XCTestCase {
         XCTAssertNotNil(date)
     }
 
+    func testClaudeRelativeResetDateParsesHoursMinutesAndDays() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let fiveHour = UsageResetText.resetDate(kind: "5h", source: .claude, raw: "resets in 1h 30m", now: now)
+        let weekly = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: "in 2d", now: now)
+
+        XCTAssertNotNil(fiveHour)
+        XCTAssertNotNil(weekly)
+        XCTAssertEqual(fiveHour!.timeIntervalSince(now), 90 * 60, accuracy: 0.001)
+        XCTAssertEqual(weekly!.timeIntervalSince(now), 2 * 24 * 60 * 60, accuracy: 0.001)
+    }
+
     // MARK: - Existing formats still work (regression)
 
     func testDisplayText_codexLegacy_unaffected() {

@@ -107,33 +107,30 @@ enum CodexSideChatLogReader {
     private static func logDatabaseURLs(codexHome: URL) -> [URL] {
         let fm = FileManager.default
         var urls: [URL] = []
-        for directory in [codexHome, codexHome.appendingPathComponent("sqlite", isDirectory: true)] {
+        for directory in [codexHome.appendingPathComponent("sqlite", isDirectory: true), codexHome] {
             guard let directoryURLs = try? fm.contentsOfDirectory(at: directory,
                                                                   includingPropertiesForKeys: [.contentModificationDateKey],
                                                                   options: [.skipsHiddenFiles]) else {
                 continue
             }
-            urls.append(contentsOf: directoryURLs)
+            urls.append(contentsOf: directoryURLs
+                .filter { $0.lastPathComponent.hasPrefix("logs_") && $0.pathExtension == "sqlite" }
+                .sorted {
+                    let lhsVersion = logDBVersion($0)
+                    let rhsVersion = logDBVersion($1)
+                    if lhsVersion != rhsVersion { return lhsVersion > rhsVersion }
+                    let lhsSize = fileSizeBytes($0)
+                    let rhsSize = fileSizeBytes($1)
+                    if lhsSize != rhsSize { return lhsSize < rhsSize }
+                    let lhsMtime = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let rhsMtime = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    return lhsMtime > rhsMtime
+                })
         }
 
         var seenPaths: Set<String> = []
         return urls
-            .filter { $0.lastPathComponent.hasPrefix("logs_") && $0.pathExtension == "sqlite" }
             .filter { seenPaths.insert($0.standardizedFileURL.path).inserted }
-            .sorted {
-                let lhsVersion = logDBVersion($0)
-                let rhsVersion = logDBVersion($1)
-                if lhsVersion != rhsVersion { return lhsVersion > rhsVersion }
-                let lhsDirectoryPriority = logDBDirectoryPriority($0)
-                let rhsDirectoryPriority = logDBDirectoryPriority($1)
-                if lhsDirectoryPriority != rhsDirectoryPriority { return lhsDirectoryPriority < rhsDirectoryPriority }
-                let lhsSize = fileSizeBytes($0)
-                let rhsSize = fileSizeBytes($1)
-                if lhsSize != rhsSize { return lhsSize < rhsSize }
-                let lhsMtime = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let rhsMtime = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return lhsMtime > rhsMtime
-            }
             .prefix(maxLogDatabasesPerRefresh)
             .map { $0 }
     }
@@ -142,10 +139,6 @@ enum CodexSideChatLogReader {
         let name = url.deletingPathExtension().lastPathComponent
         guard let suffix = name.split(separator: "_").last, let version = Int(suffix) else { return 0 }
         return version
-    }
-
-    private static func logDBDirectoryPriority(_ url: URL) -> Int {
-        url.deletingLastPathComponent().lastPathComponent == "sqlite" ? 0 : 1
     }
 
     private static func loadSideChatSessions(from dbURL: URL,
@@ -158,6 +151,7 @@ enum CodexSideChatLogReader {
             if let db { sqlite3_close(db) }
             return []
         }
+        sqlite3_busy_timeout(db, 2_000)
         defer { sqlite3_close(db) }
 
         let sideThreadIDs = discoverSideThreadIDs(db: db,
@@ -247,15 +241,16 @@ enum CodexSideChatLogReader {
         }
 
         let capped = Array(ids.prefix(maxThreads))
-        if var cache {
-            cache.update(dbURL: dbURL,
-                         fileSizeBytes: fileSize,
-                         highWater: highWaterForCache,
-                         threadIDs: capped,
-                         oldestScannedRowID: oldestScannedRowID,
-                         completedHistoricalBackfill: completedHistoricalBackfill,
-                         sideChatSessions: nil)
-            cache.save()
+        if cache != nil {
+            var currentCache = ThreadDiscoveryCache.load()
+            currentCache.update(dbURL: dbURL,
+                                fileSizeBytes: fileSize,
+                                highWater: highWaterForCache,
+                                threadIDs: capped,
+                                oldestScannedRowID: oldestScannedRowID,
+                                completedHistoricalBackfill: completedHistoricalBackfill,
+                                sideChatSessions: nil)
+            currentCache.save()
         }
         return capped
     }
@@ -404,7 +399,7 @@ enum CodexSideChatLogReader {
             startTime: start,
             endTime: end,
             model: model,
-            filePath: dbURL.path,
+            filePath: sideChatSessionPath(threadID: threadID),
             fileSizeBytes: max(bytes, 1),
             eventCount: events.count,
             events: events,
@@ -412,6 +407,7 @@ enum CodexSideChatLogReader {
             repoName: projectName(from: cwd),
             lightweightTitle: title,
             codexInternalSessionIDHint: threadID,
+            parentSessionID: request.parentThreadID,
             relationshipKind: .sideChat,
             codexOriginator: "Codex Desktop",
             codexSource: "side_chat",
@@ -424,6 +420,10 @@ enum CodexSideChatLogReader {
 
     static func sideChatSessionID(threadID: String) -> String {
         "codex-side-chat-\(threadID)"
+    }
+
+    static func sideChatSessionPath(threadID: String) -> String {
+        "codex-side-chat://\(threadID)"
     }
 
     private static func projectName(from cwd: String?) -> String? {
@@ -469,7 +469,8 @@ enum CodexSideChatLogReader {
     }
 
     private struct ThreadDiscoveryCache: Codable {
-        private static let currentSchemaVersion = 10
+        private static let currentSchemaVersion = 13
+        private static let cacheIOLock = NSLock()
 
         var schemaVersion: Int = currentSchemaVersion
         var databases: [String: CachedDatabase] = [:]
@@ -509,10 +510,21 @@ enum CodexSideChatLogReader {
 
         func save() {
             guard let url = Self.cacheURL() else { return }
+            Self.cacheIOLock.lock()
+            defer { Self.cacheIOLock.unlock() }
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                         withIntermediateDirectories: true)
-                let data = try JSONEncoder().encode(self)
+                var cacheToWrite = self
+                if let existingData = try? Data(contentsOf: url),
+                   var existing = try? JSONDecoder().decode(ThreadDiscoveryCache.self, from: existingData),
+                   existing.schemaVersion == Self.currentSchemaVersion {
+                    for (key, value) in cacheToWrite.databases {
+                        existing.databases[key] = value
+                    }
+                    cacheToWrite = existing
+                }
+                let data = try JSONEncoder().encode(cacheToWrite)
                 try data.write(to: url, options: [.atomic])
             } catch {
                 return
@@ -594,6 +606,7 @@ enum CodexSideChatLogReader {
         let events: [SessionEvent]
         let model: String?
         let cwd: String?
+        let parentThreadID: String?
     }
 
     private static func readSideConversationRequest(db: OpaquePointer?,
@@ -611,7 +624,7 @@ enum CodexSideChatLogReader {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return SideConversationRequestRead(events: [], model: nil, cwd: nil)
+            return SideConversationRequestRead(events: [], model: nil, cwd: nil, parentThreadID: nil)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -623,6 +636,7 @@ enum CodexSideChatLogReader {
         var seenTexts: Set<String> = []
         var model: String?
         var cwd: String?
+        var parentThreadID: String?
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let bodyCString = sqlite3_column_text(stmt, 3) else { continue }
             let row = LogRow(id: sqlite3_column_int64(stmt, 0),
@@ -632,6 +646,7 @@ enum CodexSideChatLogReader {
             model = model ?? extractSpanValue(named: "model", from: row.body)
             cwd = cwd ?? extractSpanValue(named: "cwd", from: row.body)
             guard let json = extractWebsocketRequestJSON(from: row.body) else { continue }
+            parentThreadID = parentThreadID ?? extractForkedFromThreadID(in: json)
             let userTexts = sideConversationUserTexts(in: json)
             for (index, text) in userTexts.enumerated() {
                 let normalized = collapsedWhitespace(text)
@@ -644,7 +659,7 @@ enum CodexSideChatLogReader {
                                     rawJSON: #"{"source":"websocket_request_side_prompt"}"#))
             }
         }
-        return SideConversationRequestRead(events: events, model: model, cwd: cwd)
+        return SideConversationRequestRead(events: events, model: model, cwd: cwd, parentThreadID: parentThreadID)
     }
 
     private static func event(row: LogRow,
@@ -740,6 +755,25 @@ enum CodexSideChatLogReader {
 
     private static func containsSideConversationBoundaryMessage(in json: [String: Any]) -> Bool {
         !sideConversationUserTexts(in: json).isEmpty
+    }
+
+    private static func extractForkedFromThreadID(in json: [String: Any]) -> String? {
+        guard let clientMetadata = json["client_metadata"] as? [String: Any] else { return nil }
+        if let id = nonEmptyString(clientMetadata["forked_from_thread_id"]) {
+            return id
+        }
+        guard let metadataJSON = nonEmptyString(clientMetadata["x-codex-turn-metadata"]),
+              let data = metadataJSON.data(using: .utf8),
+              let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return nonEmptyString(metadata["forked_from_thread_id"])
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func sideConversationUserTexts(in json: [String: Any]) -> [String] {

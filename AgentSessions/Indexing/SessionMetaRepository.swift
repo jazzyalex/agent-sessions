@@ -40,14 +40,17 @@ actor SessionMetaRepository {
         for r in rows {
             let startDate = r.startTS == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(r.startTS))
             let endDate = r.endTS == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(r.endTS))
+            let relationshipKind = Self.relationshipKind(for: r)
+            let filePath = Self.filePath(for: r, relationshipKind: relationshipKind)
+            let fileSizeBytes = Self.fileSizeBytes(for: r, relationshipKind: relationshipKind)
             let session = Session(
                 id: r.sessionID,
                 source: source,
                 startTime: startDate,
                 endTime: endDate,
                 model: r.model,
-                filePath: r.path,
-                fileSizeBytes: Int(r.size),
+                filePath: filePath,
+                fileSizeBytes: fileSizeBytes,
                 eventCount: r.messages,
                 events: [],
                 cwd: r.cwd,
@@ -57,6 +60,7 @@ actor SessionMetaRepository {
                 codexInternalSessionIDHint: r.codexInternalSessionID,
                 parentSessionID: r.parentSessionID,
                 subagentType: r.subagentType,
+                relationshipKind: relationshipKind,
                 customTitle: r.customTitle,
                 codexOriginator: r.codexOriginator,
                 codexSource: r.codexSource,
@@ -84,6 +88,7 @@ actor SessionMetaRepository {
                                codexInternalSessionIDHint: session.codexInternalSessionIDHint,
                                parentSessionID: session.parentSessionID,
                                subagentType: session.subagentType,
+                               relationshipKind: session.relationshipKind,
                                customTitle: session.customTitle,
                                codexOriginator: session.codexOriginator,
                                codexSource: session.codexSource,
@@ -110,6 +115,7 @@ actor SessionMetaRepository {
                                codexInternalSessionIDHint: enriched.codexInternalSessionIDHint,
                                parentSessionID: enriched.parentSessionID,
                                subagentType: enriched.subagentType,
+                               relationshipKind: enriched.relationshipKind,
                                customTitle: enriched.customTitle,
                                codexOriginator: enriched.codexOriginator,
                                codexSource: enriched.codexSource,
@@ -121,6 +127,45 @@ actor SessionMetaRepository {
                                deletedAt: deletedAt(fromPath: r.path)))
         }
         return out
+    }
+
+    private static func relationshipKind(for row: SessionMetaRow) -> SessionRelationshipKind? {
+        if row.codexSource == "side_chat"
+            || row.originSource == "side_chat"
+            || row.sessionID.hasPrefix("codex-side-chat-") {
+            return .sideChat
+        }
+        return nil
+    }
+
+    private static func filePath(for row: SessionMetaRow,
+                                 relationshipKind: SessionRelationshipKind?) -> String {
+        guard relationshipKind == .sideChat,
+              let threadID = sideChatThreadID(for: row) else {
+            return row.path
+        }
+        return CodexSideChatLogReader.sideChatSessionPath(threadID: threadID)
+    }
+
+    private static func fileSizeBytes(for row: SessionMetaRow,
+                                      relationshipKind: SessionRelationshipKind?) -> Int {
+        guard relationshipKind == .sideChat,
+              row.path.hasSuffix(".sqlite") else {
+            return Int(row.size)
+        }
+        return 0
+    }
+
+    private static func sideChatThreadID(for row: SessionMetaRow) -> String? {
+        if let id = row.codexInternalSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !id.isEmpty {
+            return id
+        }
+        let prefix = "codex-side-chat-"
+        if row.sessionID.hasPrefix(prefix) {
+            return String(row.sessionID.dropFirst(prefix.count))
+        }
+        return nil
     }
 }
 

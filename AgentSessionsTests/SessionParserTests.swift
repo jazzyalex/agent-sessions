@@ -1687,6 +1687,34 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(result.rowMeta["side-chat"]?.hasChildren, false)
     }
 
+    func testSubagentHierarchyNestsSideChatWhenParentExists() {
+        let parentRuntimeID = "019ee839-07ff-7370-8a66-2fedf3ee3956"
+        let parent = makeCodexHierarchySession(
+            id: "parent",
+            runtimeID: parentRuntimeID,
+            timestamp: "2026-06-21T03-28-32",
+            cwd: "/tmp/repo"
+        )
+        let sideChat = makeCodexHierarchySession(
+            id: "side-chat",
+            runtimeID: "019eeb13-9ffc-7671-9481-2f2246e09b8a",
+            timestamp: "2026-06-21T09-46-32",
+            cwd: "/tmp/repo",
+            parentSessionID: parentRuntimeID,
+            relationshipKind: .sideChat
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [sideChat, parent],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["parent", "side-chat"])
+        XCTAssertEqual(result.rowMeta["parent"]?.hasChildren, true)
+        XCTAssertEqual(result.rowMeta["parent"]?.childCount, 1)
+        XCTAssertEqual(result.rowMeta["side-chat"]?.depth, 1)
+    }
+
     func testSubagentHierarchyInfersRoleOnlyParentAfterLongGap() {
         let parent = makeCodexHierarchySession(
             id: "parent",
