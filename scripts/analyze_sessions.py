@@ -123,49 +123,45 @@ def analyze_claude_sessions():
 
     return stats, examples
 
-def analyze_gemini_sessions():
-    """Analyze Gemini CLI sessions."""
-    gemini_root = Path.home() / '.gemini' / 'tmp'
+def analyze_antigravity_sessions():
+    """Analyze Antigravity CLI markdown brain artifacts."""
+    antigravity_root = Path.home() / '.gemini' / 'antigravity' / 'brain'
     stats = defaultdict(int)
     examples = {'zero': [], 'low': [], 'normal': []}
 
-    if not gemini_root.exists():
+    if not antigravity_root.exists():
         return stats, examples
 
-    for session_file in gemini_root.rglob('session-*.json'):
+    for session_file in antigravity_root.glob('*/*.md'):
         try:
-            with open(session_file, 'r') as f:
-                data = json.load(f)
-                messages = data.get('messages', [])
-                message_count = len(messages)
+            text = session_file.read_text(encoding='utf-8', errors='replace')
+            content_lines = [line.strip() for line in text.splitlines() if line.strip()]
+            message_count = len(content_lines)
 
-                session_info = {
-                    'file': session_file.name,
-                    'count': message_count,
-                    'messages': []
-                }
+            session_info = {
+                'file': f"{session_file.parent.name}/{session_file.name}",
+                'count': message_count,
+                'messages': [
+                    {'role': 'markdown', 'preview': line[:100]}
+                    for line in content_lines[:3]
+                ]
+            }
 
-                for msg in messages[:3]:  # Preview first 3 messages
-                    session_info['messages'].append({
-                        'role': msg.get('role', 'unknown'),
-                        'preview': msg.get('content', '')[:100]
-                    })
+            # Categorize
+            if message_count == 0:
+                stats['zero'] += 1
+                if len(examples['zero']) < 2:
+                    examples['zero'].append(session_info)
+            elif 1 <= message_count <= 2:
+                stats['low'] += 1
+                if len(examples['low']) < 2:
+                    examples['low'].append(session_info)
+            else:
+                stats['normal'] += 1
+                if len(examples['normal']) < 1:
+                    examples['normal'].append(session_info)
 
-                # Categorize
-                if message_count == 0:
-                    stats['zero'] += 1
-                    if len(examples['zero']) < 2:
-                        examples['zero'].append(session_info)
-                elif 1 <= message_count <= 2:
-                    stats['low'] += 1
-                    if len(examples['low']) < 2:
-                        examples['low'].append(session_info)
-                else:
-                    stats['normal'] += 1
-                    if len(examples['normal']) < 1:
-                        examples['normal'].append(session_info)
-
-                stats['total'] += 1
+            stats['total'] += 1
 
         except Exception as e:
             print(f"Error reading {session_file}: {e}")
@@ -219,18 +215,18 @@ def main():
     claude_stats, claude_examples = analyze_claude_sessions()
     print_report("CLAUDE CODE", claude_stats, claude_examples)
 
-    gemini_stats, gemini_examples = analyze_gemini_sessions()
-    print_report("GEMINI CLI", gemini_stats, gemini_examples)
+    antigravity_stats, antigravity_examples = analyze_antigravity_sessions()
+    print_report("ANTIGRAVITY CLI", antigravity_stats, antigravity_examples)
 
     # Combined summary
     print(f"\n{'='*60}")
     print("COMBINED SUMMARY")
     print(f"{'='*60}")
 
-    total_all = codex_stats['total'] + claude_stats['total'] + gemini_stats['total']
+    total_all = codex_stats['total'] + claude_stats['total'] + antigravity_stats['total']
     noise_all = (codex_stats['zero'] + codex_stats['low'] +
                  claude_stats['zero'] + claude_stats['low'] +
-                 gemini_stats['zero'] + gemini_stats['low'])
+                 antigravity_stats['zero'] + antigravity_stats['low'])
 
     if total_all > 0:
         print(f"Total sessions across all agents: {total_all}")
@@ -238,7 +234,7 @@ def main():
         print(f"\nWith proper filtering (>2 messages), Analytics should show:")
         print(f"  - Codex:  {codex_stats['normal']} sessions")
         print(f"  - Claude: {claude_stats['normal']} sessions")
-        print(f"  - Gemini: {gemini_stats['normal']} sessions")
+        print(f"  - Antigravity: {antigravity_stats['normal']} sessions")
 
 if __name__ == '__main__':
     main()

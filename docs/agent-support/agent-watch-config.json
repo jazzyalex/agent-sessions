@@ -220,51 +220,50 @@
         }
       }
     },
-    "gemini": {
+    "antigravity": {
       "cadence": { "daily": false, "weekly": true },
-      "installed_version_cmd": ["gemini", "--version"],
-      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.gemini_cli.max_verified_version",
-      "upstream": [
-        { "kind": "npm_latest", "package": "@google/gemini-cli" }
-      ],
+      "installed_version_cmd": ["agy", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.antigravity.max_verified_version",
+      "upstream": [],
       "risk_keywords": {
-        "schema": ["session", "transcript", "json", "format"],
+        "schema": ["session", "transcript", "markdown", "format"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
         "local_schema": {
-          "kind": "gemini_session_json_newest",
-          "roots": ["~/.gemini/tmp"],
-          "glob": "**/session-*.*",
-          "max_messages": 2500
+          "kind": "antigravity_markdown_newest",
+          "roots": ["~/.gemini/antigravity/brain"],
+          "glob": "*/*.md",
+          "max_lines": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
-          "description": "Gemini sessions should be under ~/.gemini/tmp/<project>/(chats/)?session-*.json or session-*.jsonl.",
-          "patterns": ["/\\.gemini/tmp/[^/]+/(chats/)?session-[^/]+\\.(json|jsonl)$"]
+          "description": "Antigravity brain artifacts should be under ~/.gemini/antigravity/brain/<conversation-id>/*.md.",
+          "patterns": ["/\\.gemini/antigravity/brain/[^/]+/[^/]+\\.md$"]
         },
         "probes": [
           {
             "kind": "script",
-            "label": "gemini_capture",
-            "argv": ["./scripts/capture_latest_agent_sessions.py", "--agent", "gemini"],
+            "label": "antigravity_capture",
+            "argv": ["./scripts/capture_latest_agent_sessions.py", "--agent", "antigravity"],
             "timeout_seconds": 60,
             "parse": "capture_latest_sessions"
           }
         ]
       },
       "prebump": {
-        "driver": "gemini_prompt",
-        "sandbox": {"mode": "home_override", "subdir": "gemini_sandbox"},
-        "prompt": "Say hello and list files.",
+        "driver": "antigravity_print",
+        "sandbox": {"mode": "home_override", "subdir": "antigravity_sandbox"},
+        "prompt": "Say hello in one sentence.",
         "timeout_seconds": 180,
-        "env_vars": ["GEMINI_API_KEY"],
-        "credential_files": ["~/.gemini/oauth_creds.json"],
-        "support_files": ["~/.gemini/settings.json", "~/.gemini/google_accounts.json"],
+        "real_home_session": true,
+        "env_vars": [],
+        "credential_files": [],
+        "support_files": [],
         "discover_session": {
-          "kind": "gemini_session_json_newest",
-          "roots": [".gemini/tmp"],
-          "globs": ["**/session-*.json", "**/session-*.jsonl"],
+          "kind": "antigravity_markdown_newest",
+          "roots": [".gemini/antigravity/brain"],
+          "globs": ["*/*.md"],
           "required_types": []
         }
       }
@@ -300,6 +299,7 @@
         "driver": "copilot_prompt",
         "sandbox": {"mode": "home_override", "subdir": "copilot_sandbox"},
         "prompt": "Run ls.",
+        "model": "auto",
         "real_home_session": true,
         "timeout_seconds": 180,
         "env_vars": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],

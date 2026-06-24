@@ -6,7 +6,7 @@
     { "id": "cursor", "public_name": "Cursor" },
     { "id": "copilot", "public_name": "GitHub Copilot CLI" },
     { "id": "pi", "public_name": "Pi" },
-    { "id": "gemini", "public_name": "Gemini CLI" },
+    { "id": "antigravity", "public_name": "Antigravity CLI" },
     { "id": "hermes", "public_name": "Hermes" },
     { "id": "openclaw", "public_name": "OpenClaw" }
   ]

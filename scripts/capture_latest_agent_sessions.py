@@ -3,7 +3,7 @@
 Capture the most recently modified local agent session artifacts into a repo-local folder.
 
 This is intended for "auto mode" evidence collection when upstream session formats drift:
-- Gemini: copy the newest `session-*.json` or `session-*.jsonl` from `~/.gemini/tmp/**/(chats/)?`.
+- Antigravity: copy the newest markdown artifact from `~/.gemini/antigravity/brain/<conversation-id>/*.md`.
 - OpenCode: copy the newest `ses_*.json` plus the referenced message/part trees from
   `~/.local/share/opencode/storage/**`.
 - OpenClaw: copy the newest `*.jsonl` under OpenClaw/clawdbot session roots:
@@ -66,25 +66,27 @@ def _try_version(cmd: list[str]) -> str | None:
     return out if out else None
 
 
-def capture_gemini(dest_root: Path) -> list[CaptureResult]:
-    gemini_root = Path.home() / ".gemini" / "tmp"
-    if not gemini_root.exists():
+def capture_antigravity(dest_root: Path) -> list[CaptureResult]:
+    brain_root = Path.home() / ".gemini" / "antigravity" / "brain"
+    if not brain_root.exists():
         return []
 
-    candidates = list(gemini_root.rglob("session-*.json")) + list(gemini_root.rglob("session-*.jsonl"))
+    candidates = [p for p in brain_root.glob("*/*.md") if p.is_file()]
     if not candidates:
         return []
 
-    # Prefer modern `.../<hash>/chats/session-*.json` when present.
-    chats = [p for p in candidates if "chats" in p.parts]
-    src = _newest(chats) or _newest(candidates)
+    src = _newest(candidates)
     if src is None:
         return []
 
-    out_dir = dest_root / "gemini"
-    dst = out_dir / src.name
+    out_dir = dest_root / "antigravity"
+    try:
+        rel = src.relative_to(brain_root)
+    except ValueError:
+        rel = Path(src.name)
+    dst = out_dir / rel
     _safe_copy(src, dst)
-    return [CaptureResult(agent="gemini", source=src, destination=dst)]
+    return [CaptureResult(agent="antigravity", source=src, destination=dst)]
 
 
 def capture_opencode(dest_root: Path) -> list[CaptureResult]:
@@ -293,7 +295,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--agent",
         action="append",
-        choices=["gemini", "opencode", "openclaw"],
+        choices=["antigravity", "opencode", "openclaw"],
         help="Agent(s) to capture (default: all supported local agents).",
     )
     parser.add_argument(
@@ -303,21 +305,21 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    agents = args.agent or ["gemini", "opencode", "openclaw"]
+    agents = args.agent or ["antigravity", "opencode", "openclaw"]
     out = Path(args.out) if args.out else Path("scripts") / "agent_captures" / _now_utc_slug()
     out.mkdir(parents=True, exist_ok=True)
 
     # Record local CLI versions (best-effort; these do not necessarily appear in session JSON).
     versions = {
-        "gemini": _try_version(["gemini", "--version"]) or _try_version(["gemini", "-v"]),
+        "antigravity": _try_version(["agy", "--version"]),
         "opencode": _try_version(["opencode", "--version"]) or _try_version(["opencode", "-v"]),
         "openclaw": _try_version(["openclaw", "--version"]) or _try_version(["openclaw", "-v"]),
     }
     (out / "versions.json").write_text(json.dumps(versions, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     captured: list[CaptureResult] = []
-    if "gemini" in agents:
-        captured.extend(capture_gemini(out))
+    if "antigravity" in agents:
+        captured.extend(capture_antigravity(out))
     if "opencode" in agents:
         captured.extend(capture_opencode(out))
     if "openclaw" in agents:

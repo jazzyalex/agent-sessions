@@ -19,7 +19,7 @@ Do not declare a format change unless two independent signals agree, for example
 ## Agent-Specific Paths
 - Codex CLI: `~/.codex/sessions/**/rollout-*.jsonl`
 - Claude Code: `~/.claude/projects/**/<uuid>.jsonl`, `~/.claude/history.jsonl`
-- Gemini CLI: `~/.gemini/tmp/<hash>/chats/session-*.json`, fallback `session-*.json`
+- Antigravity CLI: `~/.gemini/antigravity/brain/<conversation-id>/*.md`
 - Copilot CLI: `~/.copilot/session-state/*.jsonl`
 - OpenCode: `~/.local/share/opencode/storage/{session,message,part}/`
 - Droid: `~/.factory/sessions/**/<id>.jsonl`, `~/.factory/projects/**/*.jsonl`

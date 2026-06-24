@@ -433,20 +433,23 @@ class ClaudePrintDriver:
 DRIVERS["claude_print"] = ClaudePrintDriver()
 
 
-class GeminiPromptDriver:
-    name = "gemini_prompt"
+class AntigravityPrintDriver:
+    name = "antigravity_print"
 
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
-        gemini_home = sandbox / ".gemini"
-        gemini_home.mkdir(parents=True, exist_ok=True)
+        session_home = Path(env.get("AGENT_WATCH_SESSION_HOME") or env.get("HOME") or str(sandbox))
+        brain_root = session_home / ".gemini" / "antigravity" / "brain"
+        brain_root.mkdir(parents=True, exist_ok=True)
         # F2: env comes from prepare_auth.
         env = dict(env)
-        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
-        stdout_file = sandbox / "gemini.stdout.txt"
-        stderr_file = sandbox / "gemini.stderr.txt"
+        stdout_file = sandbox / "antigravity.stdout.txt"
+        stderr_file = sandbox / "antigravity.stderr.txt"
+        marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
+        probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
+        run_started = time.time()
         try:
             proc = subprocess.run(
-                ["gemini", "-p", prompt, "--output-format", "json", "--yolo"],
+                ["agy", "-p", probe_prompt],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -462,29 +465,19 @@ class GeminiPromptDriver:
             stderr_file.write_text(f"timeout after {timeout}s: {exc}")
             return DriverResult(False, None, stdout_file, stderr_file, 124, f"timeout:{timeout}")
         except FileNotFoundError as exc:
-            stderr_file.write_text(f"gemini not found: {exc}")
-            return DriverResult(False, None, stdout_file, stderr_file, 127, "gemini_not_found")
+            stderr_file.write_text(f"agy not found: {exc}")
+            return DriverResult(False, None, stdout_file, stderr_file, 127, "agy_not_found")
 
-        tmp_root = gemini_home / "tmp"
-        newest: Path | None = None
-        newest_m = -1.0
-        if tmp_root.exists():
-            for pattern in ("session-*.json", "session-*.jsonl"):
-                for p in tmp_root.rglob(pattern):
-                    try:
-                        m = p.stat().st_mtime
-                    except OSError:
-                        continue
-                    if m > newest_m:
-                        newest = p
-                        newest_m = m
+        newest = _newest_matching_after_with_text(brain_root, ("*.md",), run_started, marker)
 
         if rc != 0 or newest is None:
-            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"gemini_prompt_failed rc={rc}")
+            if rc == 0 and marker in (proc.stdout or ""):
+                return DriverResult(False, newest, stdout_file, stderr_file, rc, "antigravity_no_brain_artifact")
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"antigravity_print_failed rc={rc}")
         return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
 
 
-DRIVERS["gemini_prompt"] = GeminiPromptDriver()
+DRIVERS["antigravity_print"] = AntigravityPrintDriver()
 
 
 class DroidExecDriver:
@@ -589,6 +582,9 @@ class CopilotPromptDriver:
         marker = f"AGENT_WATCH_PREBUMP_{_uuid.uuid4().hex}"
         probe_prompt = f"{prompt}\n\nInclude this exact marker in your final answer: {marker}"
         cmd = ["copilot", "-p", probe_prompt, "--allow-all-tools"]
+        model = env.get("AGENT_WATCH_MODEL")
+        if model:
+            cmd.extend(["--model", model])
         if not using_real_session_home:
             cmd.extend(["--config-dir", str(copilot_home)])
         run_started = time.time()

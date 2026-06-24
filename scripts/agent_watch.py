@@ -744,6 +744,50 @@ def _gemini_session_json_schema_fingerprint(path: Path, max_messages: int) -> di
     }
 
 
+def _antigravity_markdown_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    """Coarse fingerprint for Antigravity brain markdown artifacts."""
+    type_keys: dict[str, set[str]] = {"markdown": {"content"}}
+    type_counts: dict[str, int] = {"markdown": 1}
+    parsed_lines = 0
+    parse_errors = 0
+    in_fence = False
+
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for idx, line in enumerate(handle):
+                if idx >= max(0, int(max_lines)):
+                    break
+                parsed_lines += 1
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                keys = type_keys["markdown"]
+                if stripped.startswith("#"):
+                    keys.add("heading")
+                if stripped.startswith("```"):
+                    keys.add("fenced_code")
+                    in_fence = not in_fence
+                if "](" in stripped:
+                    keys.add("markdown_link")
+                if "file://" in stripped or "(/" in stripped:
+                    keys.add("local_path_reference")
+                if in_fence:
+                    keys.add("fenced_code_content")
+    except OSError:
+        parse_errors += 1
+
+    if parsed_lines == 0 and parse_errors == 0:
+        parse_errors = 1
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_lines": parsed_lines,
+        "parse_errors": parse_errors,
+    }
+
+
 def _hermes_session_json_schema_fingerprint(path: Path, max_messages: int) -> dict[str, Any]:
     """
     Schema fingerprint for Hermes canonical session JSON files.
@@ -1280,13 +1324,13 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
-    elif agent_name == "gemini":
+    elif agent_name == "antigravity":
         for p in filtered:
-            if not (p.endswith(".json") or p.endswith(".jsonl")):
+            if not p.endswith(".md"):
                 continue
             bp = Path(p)
             if bp.exists():
-                fps.append(_gemini_session_json_schema_fingerprint(bp, max_messages=5000))
+                fps.append(_antigravity_markdown_schema_fingerprint(bp, max_lines=5000))
     elif agent_name == "hermes":
         for p in filtered:
             if not p.endswith(".json"):
@@ -2379,13 +2423,13 @@ def _run_prebump(
         if result.ok and result.session_path and result.session_path.exists():
             matrix_key = {
                 "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
-                "gemini": "gemini_cli", "opencode": "opencode", "hermes": "hermes",
+                "antigravity": "antigravity", "opencode": "opencode", "hermes": "hermes",
                 "openclaw": "openclaw", "cursor": "cursor", "pi": "pi",
             }.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
-            if agent_name == "gemini":
-                fp = _gemini_session_json_schema_fingerprint(result.session_path, max_messages=5000)
+            if agent_name == "antigravity":
+                fp = _antigravity_markdown_schema_fingerprint(result.session_path, max_lines=5000)
             elif agent_name == "hermes":
                 if result.session_path.name == "state.db":
                     fp = _hermes_state_db_latest_session_schema_fingerprint(result.session_path, max_messages=5000)
@@ -2507,7 +2551,7 @@ def main(argv: list[str]) -> int:
         "claude": matrix_versions.get("claude_code"),
         "opencode": matrix_versions.get("opencode"),
         "hermes": matrix_versions.get("hermes"),
-        "gemini": matrix_versions.get("gemini_cli"),
+        "antigravity": matrix_versions.get("antigravity"),
         "copilot": matrix_versions.get("copilot_cli"),
         "openclaw": matrix_versions.get("openclaw"),
         "cursor": matrix_versions.get("cursor"),
@@ -2654,7 +2698,7 @@ def main(argv: list[str]) -> int:
                     "codex": "codex_cli",
                     "claude": "claude_code",
                     "copilot": "copilot_cli",
-                    "gemini": "gemini_cli",
+                    "antigravity": "antigravity",
                     "opencode": "opencode",
                     "hermes": "hermes",
                     "openclaw": "openclaw",
@@ -2680,11 +2724,11 @@ def main(argv: list[str]) -> int:
                         newest = _newest_file(roots, glob, exclude_globs=exclude_globs)
                     if newest:
                         local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
-                elif kind == "gemini_session_json_newest":
-                    max_messages = int(local_schema_cfg.get("max_messages") or 2500)
+                elif kind == "antigravity_markdown_newest":
+                    max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)
                     if newest:
-                        local_fp = _gemini_session_json_schema_fingerprint(newest, max_messages=max_messages)
+                        local_fp = _antigravity_markdown_schema_fingerprint(newest, max_lines=max_lines)
                 elif kind == "hermes_session_json_newest":
                     max_messages = int(local_schema_cfg.get("max_messages") or 2500)
                     newest = _newest_file(roots, glob)

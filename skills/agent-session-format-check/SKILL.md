@@ -108,7 +108,7 @@ Flags:
 - `--allow-real-home` — copilot/real-HOME opt-in after a sandbox-breach
   diagnostic; never persistent.
 
-Configured real-session drivers today are `codex`, `claude`, `gemini`,
+Configured real-session drivers today are `codex`, `claude`, `antigravity`,
 `copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, and `pi`. Droid is
 legacy-only and excluded from active checks.
 
@@ -118,7 +118,7 @@ env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
 and real HOME is never read. Otherwise the driver copies the declared
 credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
-`codex_exec`, `claude_print`, `gemini_prompt`, `copilot_prompt`,
+`codex_exec`, `claude_print`, `antigravity_print`, `copilot_prompt`,
 `opencode_run`, `hermes_oneshot`, `openclaw_local_agent`,
 `cursor_agent_print`, and `pi_prompt`. Some OAuth/keychain-backed CLIs use
 `real_home_session: true`; run them with `--allow-real-home` so the session
@@ -249,7 +249,7 @@ Key contracts (simplified from regexes in `agent-watch-config.json`):
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/storage/session/*/ses_*.json` |
 | Hermes   | `~/.hermes/sessions/session_*.json` |
-| Gemini   | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
+| Antigravity | `~/.gemini/antigravity/brain/<conversation-id>/*.md` |
 | Copilot  | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
 | Cursor   | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |

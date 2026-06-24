@@ -9,6 +9,57 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "3.9.3"
+    as_of_date_utc: "2026-06-24"
+    as_of_commit: "8cb5c6ca"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.142.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260624-182521Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.190"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "/Users/alexm/.claude/projects/-Users-alexm-Repository-Codex-History/4997a524-5d8a-4f85-8035-17b7a1f87137.jsonl", "scripts/probe_scan_output/agent_watch/20260624-182521Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json"]
+      antigravity:
+        sessions:
+          max_verified_version: "1.0.9"
+          evidence: ["Resources/Fixtures/stage0/agents/antigravity/small.md", "scripts/probe_scan_output/agent_watch/20260624-181714Z/report.json", "/tmp/as-antigravity-capture-test/antigravity/bce9651e-f3be-43c4-a2f5-79d13980af1d/task.md", "scripts/tests/test_prebump_driver_antigravity.py"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.64"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "/Users/alexm/.copilot/session-state/65fe3c49-c851-4d34-90c4-1dddfa3f4b93/events.jsonl", "scripts/probe_scan_output/agent_watch/20260624-182958Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.17.9"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_small/001.json", "scripts/probe_scan_output/agent_watch/20260624-182521Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json"]
+      hermes:
+        sessions:
+          max_verified_version: "0.17.0"
+          evidence: ["Resources/Fixtures/stage0/agents/hermes/small.json", "Resources/Fixtures/stage0/agents/hermes/large.json", "Resources/Fixtures/stage0/agents/hermes/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260624-184512Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.6.10"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "/Users/alexm/.openclaw/agents/main/sessions/b458e129-16d4-477f-a069-f8a0d3c9978b.jsonl", "scripts/probe_scan_output/agent_watch/20260624-184431Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json"]
+      pi:
+        sessions:
+          max_verified_version: "0.80.1"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring; supports installed 0.80.1 only because upstream is 0.80.2"
+          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "AgentSessionsTests/PiSessionParserTests.swift", "AgentSessionsTests/PiResumeCommandBuilderTests.swift", "AgentSessionsTests/PiCLIEnvironmentTests.swift", "scripts/probe_scan_output/agent_watch/20260624-182521Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json"]
+    notes:
+      - "Maintenance 2026-06-24: active session-format monitoring moved from removed Gemini CLI support to Antigravity CLI (`agy`) markdown brain artifacts under ~/.gemini/antigravity/brain/<conversation-id>/*.md."
+      - "Verified local Antigravity CLI with `agy --version` -> 1.0.9 and `agy --help` exposing --print, --conversation, and --continue."
+      - "Weekly monitor report scripts/probe_scan_output/agent_watch/20260624-181714Z/report.json validated the Antigravity discovery contract and capture probe; the newest existing local artifact is stale relative to the installed CLI because no real-home prebump conversation was created during this maintenance run."
+      - "Full format check 2026-06-24: final weekly report scripts/probe_scan_output/agent_watch/20260624-183312Z/report.json reports supports_latest for Codex 0.142.0, Claude 2.1.190, OpenCode 1.17.9, and Copilot 1.0.64."
+      - "Claude 2.1.190 added system.stop_hook_summary hookAdditionalContext; Resources/Fixtures/stage0/agents/claude/small.jsonl was updated because ClaudeSessionParser already preserves the event as metadata."
+      - "Copilot 1.0.64 can emit session.error; Resources/Fixtures/stage0/agents/copilot/small.jsonl was updated and the prebump driver now uses --model auto to avoid inherited unsupported-model failures."
+      - "Pi 0.80.1 fresh prebump evidence matched baseline, but latest available is 0.80.2, so the matrix records installed-version support only."
+      - "Targeted follow-up 2026-06-24: OpenClaw config was repaired with openclaw doctor --fix, OpenClaw was updated to 2026.6.10, and fresh prebump evidence matched baseline in scripts/probe_scan_output/agent_watch/20260624-184431Z-prebump/report.json."
+      - "Targeted follow-up 2026-06-24: Hermes was updated to 0.17.0 and fresh state.db prebump evidence matched baseline in scripts/probe_scan_output/agent_watch/20260624-184512Z-prebump/report.json."
+      - "Antigravity remains blocked for max-version bump: agy -p now returns the marker, but print mode does not create a monitored ~/.gemini/antigravity/brain markdown artifact; scripts/probe_scan_output/agent_watch/20260624-184505Z-prebump/report.json records antigravity_no_brain_artifact."
+      - "Cursor remains verified at installed 2026.6.2: cursor-agent update returns unauthenticated and cursor-agent --print requires CURSOR_API_KEY or equivalent headless auth; scripts/probe_scan_output/agent_watch/20260624-184527Z-prebump/report.json records the blocked prebump."
+      - "Final weekly report scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json reports supports_latest for Hermes 0.17.0 and OpenClaw 2026.6.10, blocked_stale_sample for Antigravity 1.0.11, and supports_installed_only for Cursor 2026.6.2."
+
   - agent_sessions_version: "3.8"
     as_of_date_utc: "2026-05-28"
     as_of_commit: "9502aea2"

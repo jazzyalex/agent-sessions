@@ -1,6 +1,6 @@
-agent_sessions_version: 3.8
-as_of_commit: 9502aea2
-as_of_date: 2026-05-28
+agent_sessions_version: 3.9.3
+as_of_commit: 8cb5c6ca
+as_of_date: 2026-06-24
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -25,31 +25,31 @@ notes:
   - "2026-06-02 format check: bumped Codex 0.135.0->0.136.0, Claude 2.1.156->2.1.160, Copilot 1.0.55->1.0.58, OpenCode 1.15.12->1.15.13, Hermes 0.15.0->0.15.1, OpenClaw 2026.5.27->2026.5.28, Cursor 3.5.38->2026.6.2, and Pi 0.76.0->0.78.0. Fresh real-session prebump evidence matched baseline for every configured active agent after adding real-session drivers for OpenCode, OpenClaw, Cursor, and Hermes."
   - "2026-06-03 Cursor follow-up: Cursor CLI latest-source monitoring now uses the official cursor.com/install installer script and Homebrew cursor-cli cask fallback; both identify latest build 2026.06.02-8c11d9f, normalized to 2026.6.2. Cursor Desktop agent-window store.db metadata is monitored by cursor_sqlite_probe with agentId, createdAt, mode, model, and meta-key schema evidence."
   - "2026-06-03 format follow-up: bumped Claude 2.1.160->2.1.161, Gemini 0.44.1->0.45.0, and Copilot 1.0.58->1.0.59. Fresh real-session prebump evidence matched baseline after adding Claude user.promptSource fixture coverage."
+  - "2026-06-24 maintenance: active format monitoring moved from removed Gemini CLI support to Antigravity CLI (`agy`) markdown brain artifacts under ~/.gemini/antigravity/brain."
+  - "2026-06-24 full format check: bumped Codex 0.136.0->0.142.0, Claude 2.1.161->2.1.190, OpenCode 1.15.13->1.17.9, Copilot 1.0.59->1.0.64, and Pi 0.78.0->0.80.1 from fresh real-session evidence. Pi remains supports_installed_only because upstream is 0.80.2. Antigravity 1.0.11 and OpenClaw 2026.6.9 initially remained blocked by stale/failed prebump evidence; Cursor 2026.6.24 and Hermes 0.17.0 remained upstream candidates pending latest-build validation."
+  - "2026-06-24 targeted follow-up: updated OpenClaw 2026.6.9->2026.6.10 after openclaw doctor --fix and a fresh local-agent prebump matched baseline; updated Hermes 0.15.1->0.17.0 after hermes update and a fresh state.db prebump matched baseline. Final weekly report scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json reports supports_latest for OpenClaw and Hermes. Antigravity 1.0.11 is current but remains blocked because agy -p answers without creating a monitored brain markdown artifact. Cursor remains verified at installed 2026.6.2 because cursor-agent update and cursor-agent --print are blocked by headless authentication."
 agents:
   codex_cli:
-    max_verified_version: "0.136.0"
+    max_verified_version: "0.142.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.161"
+    max_verified_version: "2.1.190"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
-  gemini_cli:
-    max_verified_version: "0.45.0"
+  antigravity:
+    max_verified_version: "1.0.9"
     version_field: "not_logged"
     evidence_fixtures:
-      - "Resources/Fixtures/stage0/agents/gemini/small.json"
-      - "Resources/Fixtures/stage0/agents/gemini/large.json"
-      - "Resources/Fixtures/stage0/agents/gemini/jsonl_v040.jsonl"
-      - "Resources/Fixtures/stage0/agents/gemini/schema_drift.json"
+      - "Resources/Fixtures/stage0/agents/antigravity/small.md"
   copilot_cli:
-    max_verified_version: "1.0.59"
+    max_verified_version: "1.0.64"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -57,7 +57,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.15.13"
+    max_verified_version: "1.17.9"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -76,14 +76,14 @@ agents:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/006.json"
       - "Resources/Fixtures/stage0/agents/opencode/storage_legacy/session/proj_test/ses_s_stage0_drift.json"
   hermes:
-    max_verified_version: "0.15.1"
+    max_verified_version: "0.17.0"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/hermes/small.json"
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
       - "Resources/Fixtures/stage0/agents/hermes/schema_drift.json"
   openclaw:
-    max_verified_version: "2026.5.28"
+    max_verified_version: "2026.6.10"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
@@ -99,7 +99,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.78.0"
+    max_verified_version: "0.80.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
     unsupported_surfaces:

@@ -702,56 +702,6 @@ def opencode_tool_blocks(obj: Dict[str, Any], raw_event: str) -> List[Tuple[str,
     return blocks
 
 
-def gemini_extract_tool_output(tc: Dict[str, Any]) -> Optional[Any]:
-    if tc.get("output") is not None:
-        return tc.get("output")
-    if tc.get("resultDisplay") is not None:
-        return tc.get("resultDisplay")
-    result = tc.get("result")
-    if isinstance(result, list):
-        for item in result:
-            if isinstance(item, dict):
-                if "functionResponse" in item and isinstance(item["functionResponse"], dict):
-                    resp = item["functionResponse"].get("response")
-                    if isinstance(resp, dict):
-                        for key in ["output", "stdout", "text", "content"]:
-                            if key in resp:
-                                return resp[key]
-                if "output" in item:
-                    return item["output"]
-                if "stdout" in item:
-                    return item["stdout"]
-    return None
-
-
-def gemini_tool_blocks(obj: Dict[str, Any], raw_event: str) -> List[Tuple[str, str, Any, str, List[str], Optional[str]]]:
-    blocks: List[Tuple[str, str, Any, str, List[str], Optional[str]]] = []
-    t = (obj.get("type") or obj.get("role") or "").lower()
-    if t in {"tool_use", "tool_call"}:
-        tool_name = obj.get("name") or obj.get("tool")
-        tool_input = obj.get("input")
-        shape = "json:type=tool_call"
-        blocks.append(("input", tool_name, tool_input, shape, list(obj.keys()), "type"))
-    if t in {"tool_result", "tool"}:
-        tool_output = obj.get("output")
-        shape = "json:type=tool_result"
-        blocks.append(("output", None, tool_output, shape, list(obj.keys()), "type"))
-
-    tool_calls = obj.get("toolCalls") or obj.get("tool_calls")
-    if isinstance(tool_calls, list):
-        for tc in tool_calls:
-            if not isinstance(tc, dict):
-                continue
-            tool_name = tc.get("displayName") or tc.get("name") or tc.get("tool")
-            tool_input = tc.get("args") or tc.get("input")
-            shape = "json:toolCalls[]" if "toolCalls" in obj else "json:tool_calls[]"
-            blocks.append(("input", tool_name, tool_input, shape, list(tc.keys()), "toolCalls[]"))
-            output = gemini_extract_tool_output(tc)
-            if output is not None:
-                blocks.append(("output", tool_name, output, shape, list(tc.keys()), "toolCalls[]"))
-    return blocks
-
-
 def discover_codex_sessions() -> List[Path]:
     if os.getenv("CODEX_HOME"):
         root = Path(os.getenv("CODEX_HOME", "")).expanduser() / "sessions"
@@ -781,22 +731,11 @@ def discover_copilot_sessions() -> List[Path]:
     return [p for p in root.glob("*.jsonl")]
 
 
-def discover_gemini_sessions() -> List[Path]:
-    root = Path.home() / ".gemini" / "tmp"
+def discover_antigravity_sessions() -> List[Path]:
+    root = Path.home() / ".gemini" / "antigravity" / "brain"
     if not root.exists():
         return []
-    out: List[Path] = []
-    for project in root.iterdir():
-        if not project.is_dir():
-            continue
-        name = project.name
-        if not (32 <= len(name) <= 64 and all(c in "0123456789abcdef" for c in name.lower())):
-            continue
-        chats = project / "chats"
-        if chats.exists():
-            out.extend([p for p in chats.glob("session-*.json")])
-        out.extend([p for p in project.glob("session-*.json")])
-    return out
+    return [p for p in root.glob("*/*.md") if p.is_file()]
 
 
 def discover_opencode_sessions() -> List[Path]:
@@ -893,7 +832,7 @@ def discover_fixture_sessions(fixtures_root: Path) -> Dict[str, List[Path]]:
     if not fixtures_root.exists():
         return out
     for path in fixtures_root.rglob("*"):
-        if path.suffix.lower() not in {".jsonl", ".ndjson", ".json"}:
+        if path.suffix.lower() not in {".jsonl", ".ndjson", ".json", ".md"}:
             continue
         parts = list(path.parts)
         agent = "codex"
@@ -903,6 +842,8 @@ def discover_fixture_sessions(fixtures_root: Path) -> Dict[str, List[Path]]:
                 agent = parts[idx + 1]
             except Exception:
                 agent = "codex"
+        if agent == "gemini":
+            continue
         elif "claude" in path.name:
             agent = "claude"
         elif "copilot" in path.name:
@@ -991,56 +932,6 @@ def scan_json_file(
     max_examples_per_group: int,
     max_examples_per_shape: int,
 ) -> None:
-    if agent == "gemini":
-        for idx, obj, raw in iter_json_items_with_raw(path):
-            blocks = gemini_tool_blocks(obj, raw)
-            for direction, tool_name, payload, shape, fields, field_path in blocks:
-                raw_payload, parsed_payload, parse_error, payload_fields = parse_payload(payload)
-                use_fields = fields or payload_fields
-                add_tool_block(
-                    groups=groups,
-                    shapes=shapes,
-                    agent=agent,
-                    tool_name=tool_name,
-                    direction=direction,
-                    shape_signature=shape,
-                    raw_event=raw,
-                    raw_payload=raw_payload,
-                    parsed_payload=parsed_payload,
-                    parse_error=parse_error,
-                    field_path=field_path,
-                    fields=use_fields,
-                    source_file=str(path),
-                    event_index=idx,
-                    max_examples_per_group=max_examples_per_group,
-                    max_examples_per_shape=max_examples_per_shape,
-                )
-            for field_path, text in text_candidates(obj):
-                if len(text) > MAX_TEXT_EVENT_LEN:
-                    continue
-                for tool_name, raw_json, shape in extract_text_tool_blocks(text, field_path):
-                    raw_payload, parsed_payload, parse_error, payload_fields = parse_payload(raw_json)
-                    direction = infer_direction_from_payload(parsed_payload)
-                    add_tool_block(
-                        groups=groups,
-                        shapes=shapes,
-                        agent=agent,
-                        tool_name=tool_name,
-                        direction=direction,
-                        shape_signature=shape,
-                        raw_event=text,
-                        raw_payload=raw_payload,
-                        parsed_payload=parsed_payload,
-                        parse_error=parse_error,
-                        field_path=field_path,
-                        fields=payload_fields,
-                        source_file=str(path),
-                        event_index=idx,
-                        max_examples_per_group=max_examples_per_group,
-                        max_examples_per_shape=max_examples_per_shape,
-                    )
-        return
-
     # OpenCode part files contain single JSON objects.
     if agent == "opencode_part":
         try:
@@ -1075,6 +966,43 @@ def scan_json_file(
                 max_examples_per_group=max_examples_per_group,
                 max_examples_per_shape=max_examples_per_shape,
             )
+
+
+def scan_markdown_file(
+    agent: str,
+    path: Path,
+    groups: Dict[Tuple[str, str, str, str], GroupStats],
+    shapes: Dict[str, ShapeStats],
+    max_examples_per_group: int,
+    max_examples_per_shape: int,
+) -> None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if len(text) > MAX_TEXT_EVENT_LEN:
+        text = text[:MAX_TEXT_EVENT_LEN]
+    for tool_name, raw_json, shape in extract_text_tool_blocks(text, "markdown"):
+        raw_payload, parsed_payload, parse_error, payload_fields = parse_payload(raw_json)
+        direction = infer_direction_from_payload(parsed_payload)
+        add_tool_block(
+            groups=groups,
+            shapes=shapes,
+            agent=agent,
+            tool_name=tool_name,
+            direction=direction,
+            shape_signature=shape,
+            raw_event=text,
+            raw_payload=raw_payload,
+            parsed_payload=parsed_payload,
+            parse_error=parse_error,
+            field_path="markdown",
+            fields=payload_fields,
+            source_file=str(path),
+            event_index=None,
+            max_examples_per_group=max_examples_per_group,
+            max_examples_per_shape=max_examples_per_shape,
+        )
 
 
 def discover_opencode_part_files(session_paths: List[Path]) -> List[Path]:
@@ -1263,7 +1191,7 @@ def render_report(
         render_json(
             {
                 "id": "string",
-                "agent_family": "codex|claude|copilot|droid|opencode|gemini|openclaw|other",
+                "agent_family": "codex|claude|copilot|droid|opencode|antigravity|openclaw|other",
                 "session_id": "string",
                 "timestamp": "string|number|null",
                 "direction": "input|output|unknown",
@@ -1333,7 +1261,7 @@ def main() -> int:
         sources["claude"] = discover_claude_sessions()
         sources["copilot"] = discover_copilot_sessions()
         sources["droid"] = discover_droid_sessions()
-        sources["gemini"] = discover_gemini_sessions()
+        sources["antigravity"] = discover_antigravity_sessions()
         sources["opencode"] = discover_opencode_sessions()
         sources["openclaw"] = discover_openclaw_sessions()
 
@@ -1362,6 +1290,16 @@ def main() -> int:
             elif path.suffix.lower() == ".json":
                 files_scanned[agent] += 1
                 scan_json_file(
+                    agent,
+                    path,
+                    groups,
+                    shapes,
+                    max_examples_per_group=args.max_examples_per_group,
+                    max_examples_per_shape=args.max_examples_per_shape,
+                )
+            elif path.suffix.lower() == ".md":
+                files_scanned[agent] += 1
+                scan_markdown_file(
                     agent,
                     path,
                     groups,

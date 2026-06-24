@@ -23,7 +23,7 @@ paths, and how we detect upstream session format changes that could break JSON o
    - Use `docs/agent-support/update-checklist.md` to gate the work.
 3. Run monitoring (preferred).
    - Daily: release watch for `codex`, `claude`, `opencode`, `openclaw`.
-   - Weekly: release watch + probes for the nine active providers (`codex`, `claude`, `gemini`, `copilot`, `cursor`, `opencode`, `openclaw`, `hermes`, `pi`).
+   - Weekly: release watch + probes for the nine active providers (`codex`, `claude`, `antigravity`, `copilot`, `cursor`, `opencode`, `openclaw`, `hermes`, `pi`).
    - See `docs/agent-support/monitoring.md`.
 4. Collect upstream agent versions (manual fallback).
    - Record the latest available versions in a scratch note; do not update the matrix yet.
@@ -41,7 +41,7 @@ paths, and how we detect upstream session format changes that could break JSON o
    - Add or update fixtures and ensure parser tests pass.
    - Run discovery-contract tests so storage-path/layout drift is caught (not just parser drift):
      - `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/SessionParserTests`
-   - Auto capture helper (Gemini/OpenCode): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
+   - Auto capture helper (Antigravity/OpenCode/OpenClaw): `./scripts/capture_latest_agent_sessions.py` writes the newest local session artifacts to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Auto capture helper (OpenClaw): `./scripts/capture_latest_agent_sessions.py --agent openclaw` writes the latest local OpenClaw JSONL session to `scripts/agent_captures/` for quick diffing and fixture updates.
    - Legacy helper (Droid): `./scripts/droid_stream_schema_probe.py` remains available for archival session analysis, but Droid is excluded from the active monitoring cadence.
 9. Update documentation.

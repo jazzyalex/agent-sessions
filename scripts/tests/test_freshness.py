@@ -206,9 +206,9 @@ def test_latest_successful_prebump_evidence_requires_fresh_matching_report(tmp_p
     report_path.write_text(_json.dumps({
         "mode": "prebump",
         "results": {
-            "gemini": {
+            "antigravity": {
                 "ok": True,
-                "session_path": "/tmp/session.jsonl",
+                "session_path": "/tmp/session.md",
                 "evidence": {
                     "schema_matches_baseline": True,
                     "fresh_session_matches_baseline": True,
@@ -226,18 +226,18 @@ def test_latest_successful_prebump_evidence_requires_fresh_matching_report(tmp_p
     os.utime(report_path, (2_000.0, 2_000.0))
 
     evidence = agent_watch._latest_successful_prebump_evidence(
-        agent_name="gemini",
+        agent_name="antigravity",
         reports_root=reports_root,
         cli_binary_mtime=1_500.0,
     )
 
     assert evidence is not None
     assert evidence["source"] == "latest_prebump_report"
-    assert evidence["session_path"] == "/tmp/session.jsonl"
+    assert evidence["session_path"] == "/tmp/session.md"
     assert evidence["sample_freshness"]["is_stale"] is False
 
     stale_to_cli = agent_watch._latest_successful_prebump_evidence(
-        agent_name="gemini",
+        agent_name="antigravity",
         reports_root=reports_root,
         cli_binary_mtime=2_500.0,
     )
@@ -435,7 +435,7 @@ def test_config_freshness_windows_per_agent():
         (repo / "docs" / "agent-support" / "agent-watch-config.json").read_text()
     )
     hot = {"codex", "claude", "copilot"}
-    cold = {"gemini", "opencode", "openclaw"}
+    cold = {"antigravity", "opencode", "openclaw"}
     for name in hot:
         w = cfg["agents"][name]["weekly"].get("freshness_window_days")
         assert w == 14, f"{name}: want 14, got {w}"
