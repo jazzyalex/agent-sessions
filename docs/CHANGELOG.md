@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Website: Replaced the GitHub Pages landing page with the redesigned product page from the preview, including updated Antigravity positioning, Quota Meter copy, and production download metadata.
 - Providers: Antigravity markdown artifacts in the same conversation now keep distinct session rows while resume/copy actions still use the parent conversation ID, stay visible when low-message filtering is enabled, infer projects from local file links, and local screenshots linked from Antigravity markdown now appear in transcript image handling and the image browser.
 - Providers: Replaced Gemini CLI support with Antigravity CLI support using `agy`, hiding old Gemini session logs and discovering Antigravity markdown artifacts under `~/.gemini/antigravity/brain`.
 - Resume: Antigravity sessions now copy and launch `agy --conversation <id>`, fall back to `agy --continue` when needed, and appear in live-session tracking.
