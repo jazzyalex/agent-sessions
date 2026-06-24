@@ -85,6 +85,8 @@ enum SessionInlineImageMapper {
                 }
             case .openclaw:
                 return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: shouldCancel)
+            case .antigravity:
+                return AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionFileURL, shouldCancel: shouldCancel)
             default:
                 return false
             }
@@ -139,6 +141,11 @@ enum SessionInlineImageMapper {
                     return try OpenClawBase64ImageScanner
                         .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                         .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
+                case .antigravity:
+                    return try AntigravityMarkdownImageScanner
+                        .scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                        .map { InlineScanResult(payload: .file(fileURL: $0.fileURL, mediaType: $0.mediaType, fileSizeBytes: $0.fileSizeBytes),
+                                                lineIndex: $0.lineIndex) }
                 default:
                     return []
                 }
@@ -154,7 +161,7 @@ enum SessionInlineImageMapper {
                     guard case .base64(_, let span) = item.payload else { return false }
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
                 }
-            case .claude, .opencode, .copilot, .openclaw:
+            case .claude, .opencode, .copilot, .openclaw, .antigravity:
                 return located
             default:
                 return []
@@ -191,6 +198,9 @@ enum SessionInlineImageMapper {
         }
 
         func nearestUserEventIndex(for lineIndex: Int) -> Int? {
+            if session.source == .antigravity, userEventIndices.isEmpty {
+                return session.events.indices.first
+            }
             guard !userEventIndices.isEmpty else { return nil }
 
             let prior = userEventIndices.filter { $0 <= lineIndex }
@@ -232,6 +242,18 @@ enum SessionInlineImageMapper {
 
             let openClawEventID = openClawUserEventID(forFileLineIndex: item.lineIndex)
             let resolved: (String, Int?, Int)? = {
+                if session.source == .antigravity, userEventIndices.isEmpty {
+                    guard let firstEventIndex = session.events.indices.first else { return nil }
+                    let targetEventID = session.events[firstEventIndex].id
+                    if let blockIndex = userEventIDToBlockIndex[targetEventID] {
+                        return (targetEventID, nil, blockIndex)
+                    }
+                    if let firstBlockIndex = blocks.indices.first {
+                        return (targetEventID, nil, firstBlockIndex)
+                    }
+                    return nil
+                }
+
                 if let openClawEventID, let blockIndex = userEventIDToBlockIndex[openClawEventID] {
                     let eventIndex = session.events.firstIndex(where: { $0.id == openClawEventID })
                     return (openClawEventID,

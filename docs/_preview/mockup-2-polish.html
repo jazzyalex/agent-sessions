@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Sessions — Mockup 2 (Polish & Modernize)</title>
+  <link rel="icon" href="../assets/app-icon-32.png" />
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --surface: #ffffff;
+      --surface-2: #fafafa;
+      --ink: #1d1d1f;
+      --ink-2: #515154;
+      --ink-3: #86868b;
+      --hair: #e3e3e6;
+      --hair-2: #d0d0d3;
+      --blue: #0071e3;
+      --blue-press: #0077ed;
+      --radius: 14px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+      --shadow-md: 0 4px 18px rgba(0,0,0,.06);
+      --shadow-shot: 0 18px 50px rgba(0,0,0,.10), 0 3px 10px rgba(0,0,0,.05);
+      --maxw: 940px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --surface-2: #161618;
+        --ink: #f5f5f7;
+        --ink-2: #aeaeb2;
+        --ink-3: #8e8e93;
+        --hair: #2c2c2e;
+        --hair-2: #3a3a3c;
+        --blue: #2997ff;
+        --blue-press: #47a6ff;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+        --shadow-md: 0 4px 18px rgba(0,0,0,.5);
+        --shadow-shot: 0 24px 60px rgba(0,0,0,.6), 0 4px 12px rgba(0,0,0,.5);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.6;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Header */
+    header.site {
+      position: sticky; top: 0; z-index: 40;
+      backdrop-filter: saturate(180%) blur(18px);
+      -webkit-backdrop-filter: saturate(180%) blur(18px);
+      background: color-mix(in srgb, var(--bg) 75%, transparent);
+      border-bottom: 1px solid var(--hair);
+    }
+    .header-inner {
+      max-width: var(--maxw); margin: 0 auto;
+      padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); font-weight: 600; font-size: 18px; }
+    .brand:hover { text-decoration: none; }
+    .brand img { width: 30px; height: 30px; border-radius: 7px; }
+    .header-right { font-size: 13px; color: var(--ink-3); display: flex; align-items: center; gap: 14px; }
+    .header-right .star { font-variant-numeric: tabular-nums; }
+
+    .container { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero { padding: 64px 0 8px; }
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(34px, 5.2vw, 50px);
+      line-height: 1.08;
+      letter-spacing: -0.022em;
+      font-weight: 700;
+      max-width: 18ch;
+    }
+    .hero .lede {
+      margin: 20px 0 0;
+      font-size: 19px;
+      line-height: 1.55;
+      color: var(--ink-2);
+      max-width: 62ch;
+    }
+    .hero .lede strong { color: var(--ink); font-weight: 600; }
+    .tagline {
+      margin: 18px 0 0;
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: .01em;
+      color: var(--ink-3);
+      text-transform: lowercase;
+    }
+
+    .button-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 30px 0 0; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 44px; padding: 0 22px; border-radius: 12px;
+      font-size: 15px; font-weight: 500;
+      transition: transform .15s ease, background .2s ease, border-color .2s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn.primary { background: var(--blue); color: #fff; box-shadow: 0 4px 14px color-mix(in srgb, var(--blue) 38%, transparent); }
+    .btn.primary:hover { background: var(--blue-press); }
+    .btn.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--hair-2); }
+    .btn.secondary:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* Whats new */
+    .whats-new {
+      margin-top: 44px;
+      background: var(--surface);
+      border: 1px solid var(--hair);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .whats-new .tag {
+      display: inline-block; font-size: 12px; font-weight: 600;
+      color: var(--blue); letter-spacing: .03em; text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .whats-new h3 { margin: 0 0 12px; font-size: 19px; letter-spacing: -0.01em; }
+    .whats-new ul { margin: 0; padding-left: 20px; color: var(--ink-2); line-height: 1.7; font-size: 15px; }
+    .whats-new li { margin-bottom: 3px; }
+    .whats-new li strong { color: var(--ink); font-weight: 600; }
+
+    /* Brew */
+    .brew-block { margin-top: 36px; }
+    .brew-block .label { font-size: 14px; font-weight: 600; color: var(--ink-2); margin-bottom: 10px; }
+    pre.brew {
+      margin: 0; background: var(--surface); border: 1px solid var(--hair);
+      border-radius: var(--radius); padding: 16px 18px; overflow: auto;
+      box-shadow: var(--shadow-sm);
+    }
+    pre.brew code { font-family: var(--mono); font-size: 13px; color: var(--ink); display: block; }
+    pre.brew code .c { color: var(--blue); user-select: none; }
+
+    /* Section headings */
+    .section-title { font-size: 27px; letter-spacing: -0.018em; margin: 64px 0 0; }
+    .section-sub { color: var(--ink-2); margin: 8px 0 0; font-size: 16px; }
+
+    /* Caption + shots */
+    .cap { text-align: center; color: var(--ink-3); font-size: 14px; margin: 18px 0 12px; font-style: italic; }
+    .shot { width: 100%; border-radius: var(--radius); box-shadow: var(--shadow-shot); display: block; margin: 0 auto; }
+    .shot.narrow { max-width: 640px; }
+
+    /* Feature cards */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px; margin-top: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--hair);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow-sm);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .card h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -0.01em; }
+    .card p { margin: 0 0 8px; color: var(--ink-2); font-size: 14.5px; line-height: 1.55; }
+    .card p:last-child { margin-bottom: 0; }
+    .card ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 14.5px; line-height: 1.7; }
+    .card.full-width { grid-column: 1 / -1; }
+
+    .agent-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 12px 0 0; }
+    .agent-cols ul { margin: 0; padding-left: 18px; line-height: 1.85; }
+    .agent-cols li strong { font-size: .95em; }
+    .muted { color: var(--ink-3); font-size: 13.5px; }
+
+    .cockpit-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 14px; }
+    .cockpit-grid img { width: 48%; border-radius: 10px; box-shadow: var(--shadow-sm); }
+
+    /* Guides */
+    .guide-card a { color: var(--ink); }
+    .guide-card h3 a:hover { color: var(--blue); }
+
+    /* Footer */
+    footer {
+      margin-top: 72px;
+      border-top: 1px solid var(--hair);
+      background: var(--surface-2);
+    }
+    .foot-inner { max-width: var(--maxw); margin: 0 auto; padding: 36px 24px; }
+    .foot-inner h2 { font-size: 15px; color: var(--ink-2); margin: 0 0 10px; }
+    .foot-inner p { margin: 0 0 8px; font-size: 13.5px; color: var(--ink-3); line-height: 1.6; max-width: 72ch; }
+    .foot-bottom { margin-top: 22px; font-size: 13px; color: var(--ink-3); }
+
+    @media (max-width: 560px) {
+      .agent-cols { grid-template-columns: 1fr; }
+      .button-row .btn { flex: 1 1 100%; }
+      .cockpit-grid img { width: 100%; }
+    }
+
+    .mock-flag {
+      position: fixed; bottom: 16px; right: 16px; z-index: 99;
+      background: var(--ink); color: var(--bg);
+      font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 980px;
+      box-shadow: var(--shadow-md); opacity: .85;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="site">
+    <div class="header-inner">
+      <a class="brand" href="#"><img src="../assets/app-icon-512.png" alt="Agent Sessions icon">Agent Sessions</a>
+      <div class="header-right">
+        <span>macOS · Open Source</span>
+        <span class="star">★ 128</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+    <section class="hero">
+      <h1>Session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi and Gemini</h1>
+      <p class="lede"><strong>Agent Sessions</strong> is a local-first Mac app for session history across CLI tools, desktop apps, and app-bundled agent commands. Search local Codex, Claude, OpenCode, Cursor, Copilot, Pi, Gemini, Hermes, and OpenClaw histories, inspect transcripts and images, then resume supported CLI sessions in Terminal.app, iTerm2, or Warp.</p>
+      <p class="tagline">local histories · desktop transcripts · resume-ready workflows</p>
+
+      <div class="button-row">
+        <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.3/AgentSessions-3.9.3.dmg">Download Agent Sessions 3.9.3</a>
+        <a class="btn secondary" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+        <a class="btn secondary" href="https://x.com/jazzyalex">Follow on X</a>
+      </div>
+    </section>
+
+    <div class="whats-new">
+      <span class="tag">What's new in 3.9</span>
+      <h3>The Limits Widget keeps usage visible without the menu bar</h3>
+      <ul>
+        <li><strong>Limits Widget</strong> — tiny always-on window for Codex &amp; Claude 5h/weekly limits.</li>
+        <li><strong>Run-out predictions</strong> — freshness-aware ETAs and earlier Cockpit markers.</li>
+        <li><strong>Limit Alerts pane</strong> — separate controls for predicted exhaustion vs. low-threshold warnings.</li>
+        <li><strong>Quality fixes</strong> — Unified Window collapse/expand, persistent Transcript toggle, scroll-position fixes during live refresh, and refreshed format support across all agents.</li>
+      </ul>
+    </div>
+
+    <div class="brew-block">
+      <div class="label">Install with Homebrew</div>
+      <pre class="brew"><code><span class="c">$ </span>brew tap jazzyalex/agent-sessions
+<span class="c">$ </span>brew install --cask agent-sessions</code></pre>
+    </div>
+
+    <p class="cap">Sessions search with transcript preview</p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/session-all-agents-dark.png">
+      <img class="shot" src="../assets/session-history-light.png" alt="Main Sessions window with local agent history and transcript preview">
+    </picture>
+
+    <div class="features" style="margin-top:40px;">
+      <div class="card">
+        <h3>Session history across agents</h3>
+        <p>Browse local sessions from CLI tools, desktop apps, and app-bundled coding agents in one unified window.</p>
+        <div class="agent-cols">
+          <ul>
+            <li><strong>Codex CLI</strong></li>
+            <li><strong>Claude CLI</strong></li>
+            <li><strong>Hermes Agent</strong></li>
+            <li><strong>Pi CLI</strong></li>
+            <li><strong>Cursor Agent</strong></li>
+          </ul>
+          <ul>
+            <li><strong>Gemini CLI</strong></li>
+            <li><strong>GitHub Copilot CLI</strong></li>
+            <li><strong>OpenCode</strong></li>
+            <li><strong>OpenClaw</strong></li>
+          </ul>
+        </div>
+        <p class="muted" style="margin-top:12px;">Codex Desktop, Claude Desktop, and Cursor Agent sessions are surfaced beside terminal histories with source-specific labels.</p>
+      </div>
+
+      <div class="card">
+        <h3>Unified search &amp; images</h3>
+        <p>Apple Notes-style search across all agents and within a single session.</p>
+        <p>Inline image support and Image Browser for visual output from Codex, Claude, and OpenCode CLI sessions.</p>
+      </div>
+
+      <div class="card">
+        <h3>Local &amp; private</h3>
+        <ul>
+          <li>All processing on Mac</li>
+          <li>Reads local session storage</li>
+          <li>No cloud uploads or telemetry</li>
+          <li>Read-only by design</li>
+        </ul>
+      </div>
+
+      <div class="card full-width">
+        <h3>Limits Widget and Agent Cockpit</h3>
+        <p>The Limits Widget is a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limits visible without spending menu-bar space. Freshness-aware predictions show projected run-out ETAs before the final alert window, while Agent Cockpit provides grouped active and waiting visibility, quick focus jumps, and compact/full modes.</p>
+        <p class="cap">Limits Widget with 5h burn predictions</p>
+        <img class="shot" src="../assets/limits-widget-light.png" alt="Limits Widget showing Codex and Claude 5h burn predictions" style="max-width:760px;">
+        <div class="cockpit-grid">
+          <img src="../assets/screenshot-cockpit-light.png" alt="Compact cockpit, light mode">
+          <img src="../assets/screenshot-cockpit-dark.png" alt="Compact cockpit, dark mode">
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Resume any session</h3>
+        <p>Right-click a supported CLI session to copy the exact resume command or open it directly in Terminal.app, iTerm2, or Warp.</p>
+      </div>
+      <div class="card">
+        <h3>Saved sessions</h3>
+        <p>Saved Sessions window for managing archived sessions. Delete, reveal, and diagnose with archive status tooltips.</p>
+      </div>
+      <div class="card">
+        <h3>Usage tracking</h3>
+        <p>Track Codex and Claude CLI usage in-app, in the menu bar, or in the Limits Widget. Shared notifications warn when limits are approaching, exhausted, or projected to run out.</p>
+      </div>
+      <div class="card">
+        <h3>Analytics</h3>
+        <p>Interactive flip cards with sparklines: session trends, agent breakdowns, and time-of-day heatmaps.</p>
+      </div>
+    </div>
+
+    <h2 class="section-title">Local history guides</h2>
+    <p class="section-sub">Where each agent keeps its sessions and what Agent Sessions reads.</p>
+    <div class="features" style="margin-top:24px;">
+      <div class="card guide-card"><h3><a href="../guides/codex-local-history.html">Codex local history</a></h3><p>How Agent Sessions searches Codex CLI, Desktop, and VS Code rollout history from <code>~/.codex/sessions</code>.</p></div>
+      <div class="card guide-card"><h3><a href="../guides/opencode-sqlite-history.html">OpenCode SQLite history</a></h3><p>Where OpenCode stores local session data and how to browse old runs.</p></div>
+      <div class="card guide-card"><h3><a href="../guides/claude-code-jsonl-history.html">Claude Code JSONL history</a></h3><p>What Claude Code writes to local transcripts and where the boundary is.</p></div>
+      <div class="card guide-card"><h3><a href="../guides/cursor-agent-local-history.html">Cursor Agent local history</a></h3><p>How Agent Sessions reads Cursor Agent transcripts from local storage.</p></div>
+      <div class="card guide-card"><h3><a href="../guides/hermes-agent-state-db-history.html">Hermes state.db history</a></h3><p>How Hermes sessions in <code>~/.hermes/state.db</code> become searchable history.</p></div>
+      <div class="card guide-card"><h3><a href="../guides/openclaw-local-agent-history.html">OpenClaw local history</a></h3><p>How OpenClaw JSONL sessions are discovered, searched, and kept separate.</p></div>
+    </div>
+
+    <p class="cap" style="margin-top:48px;">Saved Sessions with restore actions</p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/saved-sessions-dark.png">
+      <img class="shot" src="../assets/screenshot-V.png" alt="Saved Sessions window">
+    </picture>
+
+    <p class="cap">Image Browser for visual session outputs</p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/image-browser-dark.png">
+      <img class="shot" src="../assets/image-browser-light.png" alt="Image Browser window">
+    </picture>
+
+    <p class="cap">Menu bar status strip</p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/menu-bar-status-dark.png">
+      <img class="shot narrow" src="../assets/menu-bar-status-light.png" alt="Menu bar status label">
+    </picture>
+
+    <p class="cap">Analytics dashboard filtered to one project</p>
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/analytics-dark.png">
+      <img class="shot" src="../assets/analytics-light.png" alt="Analytics dashboard">
+    </picture>
+  </div>
+
+  <footer>
+    <div class="foot-inner">
+      <h2>Disclaimer</h2>
+      <p><strong>Agent Sessions</strong> is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI, Anthropic, or any of their products or services (including ChatGPT, Claude, or Codex CLI).</p>
+      <p>All trademarks and brand names belong to their respective owners. References to "OpenAI," "Anthropic," or "Codex CLI" are made solely for descriptive purposes.</p>
+      <div class="foot-bottom">© 2026 Agent Sessions</div>
+    </div>
+  </footer>
+
+  <div class="mock-flag">Mockup 2 · Polish</div>
+</body>
+
+</html>

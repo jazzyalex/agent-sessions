@@ -22,9 +22,30 @@ struct GeminiResumeResult {
 /// Antigravity brain artifacts live under
 /// `~/.gemini/antigravity/brain/<conversation-id>/*.md`.
 enum GeminiSessionIDHelper {
+    static func artifactID(fromArtifactURL url: URL) -> String? {
+        guard let conversationID = conversationID(fromArtifactURL: url) else { return nil }
+        let artifact = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !artifact.isEmpty else { return conversationID }
+        return "\(conversationID)#\(artifact)"
+    }
+
+    static func conversationID(fromArtifactURL url: URL) -> String? {
+        let id = url.deletingLastPathComponent().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
+    }
+
     static func deriveSessionID(from session: Session) -> String? {
         let url = URL(fileURLWithPath: session.filePath)
-        let id = url.deletingLastPathComponent().lastPathComponent
-        return id.isEmpty ? nil : id
+        if let id = conversationID(fromArtifactURL: url) {
+            return id
+        }
+
+        let trimmed = session.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let separator = trimmed.firstIndex(of: "#") {
+            let prefix = String(trimmed[..<separator])
+            return prefix.isEmpty ? nil : prefix
+        }
+        return trimmed
     }
 }

@@ -431,7 +431,35 @@ private extension ImageBrowserViewModel {
             return out
 
         case .antigravity:
-            return []
+            let images = index.antigravityImages ?? []
+            var out: [Item] = []
+            out.reserveCapacity(min(images.count, 64))
+
+            for (i, image) in images.enumerated() {
+                let url = URL(fileURLWithPath: image.filePath)
+                let sig = fileSignature(forPath: image.filePath)
+                    ?? ImageBrowserFileSignature(filePath: image.filePath, fileSizeBytes: image.fileSizeBytes, modifiedAtUnixSeconds: 0)
+                let eventIndex = session.events.indices.contains(0) ? 0 : -1
+                let eventID = session.events.first?.id ?? "\(session.id)-0001"
+
+                out.append(
+                    Item(
+                        sessionID: session.id,
+                        sessionTitle: session.title,
+                        sessionModifiedAt: session.modifiedAt,
+                        sessionFileURL: url,
+                        sessionSource: session.source,
+                        sessionProject: session.repoName,
+                        sessionImageIndex: i + 1,
+                        lineIndex: max(0, image.lineIndex),
+                        eventID: eventID,
+                        userPromptIndex: eventIndex >= 0 ? userPromptIndex(for: session, eventIndex: eventIndex) : nil,
+                        payload: .file(fileURL: url, mediaType: image.mediaType, fileSizeBytes: image.fileSizeBytes),
+                        fileSignature: sig
+                    )
+                )
+            }
+            return out
 
         default:
             let url = URL(fileURLWithPath: session.filePath)

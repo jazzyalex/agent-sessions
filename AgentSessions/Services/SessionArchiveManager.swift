@@ -395,7 +395,13 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             let custom = defaults.string(forKey: "AntigravitySessionsRootOverride")
             let discovery = GeminiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
-                map[sha256Hex(url.path)] = url
+                if let session = GeminiSessionParser.parseFile(at: url), !session.id.isEmpty {
+                    map[session.id] = url
+                }
+                if let conversationID = GeminiSessionIDHelper.conversationID(fromArtifactURL: url),
+                   map[conversationID] == nil {
+                    map[conversationID] = url
+                }
             }
         case .opencode:
             let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride")

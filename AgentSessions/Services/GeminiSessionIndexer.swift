@@ -62,7 +62,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
                 let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
                 let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
                 if hideZero { results = results.filter { $0.messageCount > 0 } }
-                if hideLow { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
+                if hideLow { results = results.filter { $0.source == .antigravity || $0.messageCount == 0 || $0.messageCount > 2 } }
                 return results
             }
             .receive(on: DispatchQueue.main)
@@ -236,7 +236,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
 	        let hideLow = UserDefaults.standard.object(forKey: "HideLowMessageSessions") as? Bool ?? true
 	        if hideZero { results = results.filter { $0.messageCount > 0 } }
-	        if hideLow { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
+	        if hideLow { results = results.filter { $0.source == .antigravity || $0.messageCount == 0 || $0.messageCount > 2 } }
 	        Task { @MainActor [weak self] in
 	            self?.sessions = results
 	        }

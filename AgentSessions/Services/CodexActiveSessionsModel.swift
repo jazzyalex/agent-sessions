@@ -4325,8 +4325,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             }
             return nil
         case .antigravity:
-            let conversationID = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
-            return conversationID.isEmpty ? nil : conversationID
+            return GeminiSessionIDHelper.artifactID(fromArtifactURL: URL(fileURLWithPath: path))
         default:
             return nil
         }

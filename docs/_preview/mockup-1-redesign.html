@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Sessions — Mockup 1 (Full Redesign)</title>
+  <link rel="icon" href="../assets/app-icon-32.png" />
+  <style>
+    :root {
+      --bg: #fbfbfd;
+      --bg-elev: #ffffff;
+      --bg-sunken: #f5f5f7;
+      --ink: #1d1d1f;
+      --ink-2: #6e6e73;
+      --ink-3: #86868b;
+      --hair: rgba(0, 0, 0, 0.08);
+      --hair-strong: rgba(0, 0, 0, 0.12);
+      --blue: #0071e3;
+      --blue-press: #0077ed;
+      --radius: 18px;
+      --radius-lg: 28px;
+      --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.06);
+      --shadow-hero: 0 30px 80px rgba(0, 0, 0, 0.18), 0 6px 18px rgba(0, 0, 0, 0.08);
+      --maxw: 1024px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --bg-elev: #1c1c1e;
+        --bg-sunken: #0e0e10;
+        --ink: #f5f5f7;
+        --ink-2: #aeaeb2;
+        --ink-3: #8e8e93;
+        --hair: rgba(255, 255, 255, 0.10);
+        --hair-strong: rgba(255, 255, 255, 0.16);
+        --blue: #2997ff;
+        --blue-press: #47a6ff;
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.5);
+        --shadow-hero: 0 40px 100px rgba(0, 0, 0, 0.7), 0 8px 24px rgba(0, 0, 0, 0.5);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      line-height: 1.5;
+    }
+
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ---------- Nav ---------- */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      background: color-mix(in srgb, var(--bg) 72%, transparent);
+      border-bottom: 1px solid var(--hair);
+    }
+
+    .nav-inner {
+      max-width: var(--maxw);
+      margin: 0 auto;
+      height: 52px;
+      padding: 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    } 
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 17px;
+      color: var(--ink);
+    }
+    .nav-brand:hover { text-decoration: none; }
+    .nav-brand img { width: 26px; height: 26px; border-radius: 7px; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      font-size: 13px;
+      color: var(--ink-2);
+    }
+    .nav-links a { color: var(--ink-2); }
+    .nav-links a:hover { color: var(--ink); text-decoration: none; }
+    .nav-star { font-variant-numeric: tabular-nums; }
+
+    @media (max-width: 720px) { .nav-links a.hide-sm { display: none; } }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      max-width: var(--maxw);
+      margin: 0 auto;
+      padding: 92px 22px 40px;
+      text-align: center;
+    }
+
+    .eyebrow {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--blue);
+      margin: 0 0 18px;
+    }
+
+    .hero h1 {
+      margin: 0 auto;
+      max-width: 14ch;
+      font-size: clamp(40px, 7vw, 76px);
+      line-height: 1.04;
+      letter-spacing: -0.025em;
+      font-weight: 700;
+    }
+
+    .hero .sub {
+      margin: 22px auto 0;
+      max-width: 40ch;
+      font-size: clamp(18px, 2.4vw, 23px);
+      line-height: 1.4;
+      color: var(--ink-2);
+      font-weight: 400;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      justify-content: center;
+      margin-top: 34px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 46px;
+      padding: 0 24px;
+      border-radius: 980px;
+      font-size: 16px;
+      font-weight: 500;
+      transition: transform .15s ease, background .2s ease, box-shadow .2s ease;
+    }
+    .btn:hover { text-decoration: none; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+
+    .btn.primary { background: var(--blue); color: #fff; box-shadow: 0 6px 20px color-mix(in srgb, var(--blue) 40%, transparent); }
+    .btn.primary:hover { background: var(--blue-press); }
+    .btn.ghost { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+    .btn.ghost:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+
+    .meta-line {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--ink-3);
+    }
+    .dot { padding: 0 7px; opacity: .5; }
+
+    .brew {
+      margin: 26px auto 0;
+      max-width: 460px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border: 1px solid var(--hair);
+      border-radius: 14px;
+      background: var(--bg-elev);
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--ink-2);
+      text-align: left;
+      box-shadow: var(--shadow-card);
+    }
+    .brew .prompt { color: var(--blue); user-select: none; }
+    .brew code { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---------- Hero shot ---------- */
+    .hero-shot {
+      max-width: 1120px;
+      margin: 56px auto 0;
+      padding: 0 22px;
+    }
+    .hero-shot img {
+      width: 100%;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-hero);
+      display: block;
+    }
+
+    /* ---------- Generic section ---------- */
+    section.band {
+      max-width: var(--maxw);
+      margin: 0 auto;
+      padding: 96px 22px;
+    }
+
+    .band-head { text-align: center; margin-bottom: 14px; }
+    .band-head h2 {
+      font-size: clamp(30px, 4.5vw, 46px);
+      letter-spacing: -0.02em;
+      line-height: 1.08;
+      margin: 0;
+      font-weight: 700;
+    }
+    .band-head p {
+      max-width: 46ch;
+      margin: 16px auto 0;
+      font-size: 19px;
+      color: var(--ink-2);
+    }
+
+    /* ---------- Agents marquee ---------- */
+    .agents {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-top: 40px;
+    }
+    .agents-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+    }
+    .agents-row.leads { flex-wrap: nowrap; }
+    .chip {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1px;
+      padding: 9px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--hair-strong);
+      background: var(--bg-elev);
+      color: var(--ink);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .chip:hover { transform: translateY(-2px); border-color: var(--blue); }
+    .chip b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .chip span {
+      font-size: 10.5px; font-weight: 600;
+      color: var(--ink-3);
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .chip.lead b { color: var(--blue); }
+    .chip.plain { padding: 9px 16px 8px; }
+    .chip.plain b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+
+    /* ---------- Feature grid ---------- */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 18px;
+      margin-top: 48px;
+    }
+    .feat {
+      grid-column: span 2;
+      background: var(--bg-elev);
+      border: 1px solid var(--hair);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow-card);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .feat:hover { transform: translateY(-3px); box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 22px 50px rgba(0,0,0,.10); }
+    .feat.span3 { grid-column: span 3; }
+    .feat.span6 { grid-column: span 6; }
+
+    .feat .ic {
+      width: 44px; height: 44px;
+      border-radius: 12px;
+      display: grid; place-items: center;
+      background: color-mix(in srgb, var(--blue) 13%, transparent);
+      color: var(--blue);
+      margin-bottom: 16px;
+    }
+    .feat .ic svg { width: 23px; height: 23px; display: block; }
+    .feat h3 { margin: 0 0 8px; font-size: 20px; letter-spacing: -0.01em; }
+    .feat p { margin: 0; color: var(--ink-2); font-size: 15px; line-height: 1.55; }
+    .feat ul { margin: 10px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 15px; line-height: 1.7; }
+
+    .feat .kicker {
+      display: inline-block; font-size: 12px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--blue); margin-bottom: 12px;
+    }
+    .feat .blist { list-style: none; margin: 18px 0 0; padding: 0; }
+    .feat .blist li {
+      position: relative; padding-left: 22px; margin-bottom: 12px;
+      font-size: 15px; color: var(--ink-2); line-height: 1.5;
+    }
+    .feat .blist li::before {
+      content: ""; position: absolute; left: 0; top: 7px;
+      width: 7px; height: 7px; border-radius: 50%; background: var(--blue);
+    }
+    .feat .blist b { color: var(--ink); font-weight: 600; }
+    .feat.showcase { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; }
+    .feat.showcase .copy { padding: 4px 0; }
+    .feat.showcase .shots { display: flex; flex-direction: column; gap: 12px; }
+    .feat.showcase .shots img { width: 100%; border-radius: 12px; box-shadow: var(--shadow-card); }
+    .feat.showcase .pair { display: flex; gap: 12px; }
+    .feat.showcase .pair img { width: 50%; }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .feat, .feat.span3 { grid-column: span 1; }
+      .feat.span6 { grid-column: span 2; }
+      .feat.showcase { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .grid { grid-template-columns: 1fr; }
+      .feat.span6 { grid-column: span 1; }
+    }
+
+    /* ---------- Showcase strip ---------- */
+    .strip { background: var(--bg-sunken); }
+    .shot-block { max-width: 1080px; margin: 0 auto; padding: 0 22px; }
+    .shot-block + .shot-block { margin-top: 64px; }
+    .cap { text-align: center; color: var(--ink-3); font-size: 14px; margin: 0 0 14px; }
+    .shot-block img { width: 100%; border-radius: var(--radius); box-shadow: var(--shadow-card); display: block; }
+    .shot-block.narrow img { max-width: 680px; margin: 0 auto; }
+
+    /* ---------- Guides ---------- */
+    .guides {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 44px;
+    }
+    .guide {
+      display: block;
+      padding: 22px;
+      border-radius: 16px;
+      border: 1px solid var(--hair);
+      background: var(--bg-elev);
+      color: var(--ink);
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .guide:hover { text-decoration: none; transform: translateY(-2px); border-color: var(--blue); }
+    .guide h4 { margin: 0 0 6px; font-size: 16px; display: flex; align-items: center; gap: 6px; }
+    .guide .arrow { color: var(--blue); transition: transform .2s ease; }
+    .guide:hover .arrow { transform: translateX(3px); }
+    .guide p { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+    @media (max-width: 860px) { .guides { grid-template-columns: 1fr; } }
+
+    /* ---------- Footer ---------- */
+    footer {
+      background: var(--bg-sunken);
+      border-top: 1px solid var(--hair);
+      color: var(--ink-3);
+      font-size: 13px;
+    }
+    .foot-inner { max-width: var(--maxw); margin: 0 auto; padding: 40px 22px; }
+    .foot-inner h2 { font-size: 15px; color: var(--ink-2); margin: 0 0 8px; }
+    .foot-inner p { margin: 0 0 8px; line-height: 1.6; max-width: 70ch; }
+    .foot-bottom { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--hair); }
+
+    /* mockup banner */
+    .mock-flag {
+      position: fixed; bottom: 16px; right: 16px; z-index: 99;
+      background: var(--ink); color: var(--bg);
+      font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 980px;
+      box-shadow: var(--shadow-card); opacity: .85;
+    }
+  </style>
+</head>
+
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="#top">
+        <img src="../assets/app-icon-512.png" alt="Agent Sessions icon">
+        Agent Sessions
+      </a>
+      <div class="nav-links">
+        <a class="hide-sm" href="#features">Features</a>
+        <a class="hide-sm" href="#cockpit">Runway</a>
+        <a class="hide-sm" href="#guides">Guides</a>
+        <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="gh-stars"></span></a>
+      </div>
+    </div>
+  </nav>
+
+  <a id="top"></a>
+  <header class="hero">
+    <p class="eyebrow">macOS · Open Source · Local-first</p>
+    <h1>Every coding agent. One history.</h1>
+    <p class="sub">Browse, search, inspect, and resume local AI agent sessions — across Codex, Claude, Cursor, Antigravity, Copilot, OpenCode, Pi and more.<br>Desktop apps and CLI, together.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.3/AgentSessions-3.9.3.dmg">Download for macOS</a>
+      <a class="btn ghost" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+    </div>
+    <p class="meta-line">Version 3.9.3<span class="dot">·</span>Free &amp; open source<span class="dot">·</span>No telemetry</p>
+    <div class="brew">
+      <span class="prompt">$</span>
+      <code>brew install --cask jazzyalex/agent-sessions/agent-sessions</code>
+    </div>
+  </header>
+
+  <div class="hero-shot">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/session-all-agents-dark.png">
+      <img src="../assets/session-history-light.png" alt="Main Sessions window with unified agent history and transcript preview">
+    </picture>
+  </div>
+
+  <section class="band" id="features">
+    <div class="band-head">
+      <h2>One window for every agent's memory.</h2>
+      <p>Desktop apps and CLI tools side by side — surfaced with source-specific labels and clear project context.</p>
+    </div>
+    <div class="agents">
+      <div class="agents-row leads">
+        <span class="chip lead"><b>Codex</b><span>Desktop · CLI · VS Code</span></span>
+        <span class="chip lead"><b>Claude</b><span>Desktop · CLI</span></span>
+        <span class="chip lead"><b>Cursor</b><span>Desktop ADE · CLI</span></span>
+      </div>
+      <div class="agents-row">
+        <span class="chip"><b>Antigravity</b><span>CLI</span></span>
+        <span class="chip"><b>GitHub Copilot</b><span>CLI</span></span>
+        <span class="chip"><b>OpenCode</b><span>CLI</span></span>
+        <span class="chip"><b>Pi</b><span>CLI</span></span>
+      </div>
+      <div class="agents-row">
+        <span class="chip plain"><b>Hermes</b></span>
+        <span class="chip plain"><b>OpenClaw</b></span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="feat span3">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+        <h3>Unified search &amp; images</h3>
+        <p>Apple Notes-style search across all agents and within a single session. Inline image support and an Image Browser for visual output from Codex, Claude, and OpenCode.</p>
+      </div>
+      <div class="feat span3">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M21 13a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg></div>
+        <h3>Resume any session</h3>
+        <p>Right-click a supported CLI session to copy the exact resume command, or open it directly in Terminal.app, iTerm2, or Warp.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+        <h3>Local &amp; private</h3>
+        <ul>
+          <li>All processing on Mac</li>
+          <li>No cloud, no telemetry</li>
+          <li>Read-only by design</li>
+        </ul>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v3H4z"/><path d="M5 10v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/><path d="M10 14h4"/></svg></div>
+        <h3>Saved sessions</h3>
+        <p>Manage archived sessions — delete, reveal, and diagnose with archive status tooltips.</p>
+      </div>
+      <div class="feat">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="12" width="3" height="5" rx="1"/><rect x="13" y="8" width="3" height="9" rx="1"/></svg></div>
+        <h3>Analytics</h3>
+        <p>Flip cards with sparklines: session trends, agent breakdowns, time-of-day heatmaps.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="cockpit" style="padding-top:0;">
+    <div class="grid">
+      <div class="feat span6 showcase">
+        <div class="copy">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M4 16h16"/><path d="m12 16 4-4.5"/><circle cx="12" cy="16" r="1.3" fill="currentColor" stroke="none"/></svg></div>
+          <h3 style="font-size:28px;">Quota Meter</h3>
+          <p>How fast each session burns <em>your</em> plan — and how much you have left before you run out. Quota Meter reads your Codex and Claude 5-hour and weekly limits as a live burn rate against your own plan, so one glance tells you which sessions eat your quota and how long until reset. Three ways to keep it in view:</p>
+          <ul class="blist">
+            <li><b>Always-on widget</b> — a tiny window that keeps your Codex &amp; Claude 5h / weekly runway on screen.</li>
+            <li><b>Run-out predictions</b> — freshness-aware ETAs showing the runway left before you hit the wall.</li>
+            <li><b>Quota Meter alerts</b> — separate controls for predicted exhaustion vs. low-threshold warnings.</li>
+          </ul>
+          <p style="margin-top:18px;">The same markers carry into <b style="color:var(--ink)">Agent Cockpit</b>, where active and waiting sessions show their runway alongside quick focus jumps.</p>
+        </div>
+        <div class="shots">
+          <img src="../assets/limits-widget-light.png" alt="Runway widget with Codex and Claude 5h burn predictions">
+          <div class="pair">
+            <img src="../assets/screenshot-cockpit-light.png" alt="Compact cockpit, light mode">
+            <img src="../assets/screenshot-cockpit-dark.png" alt="Compact cockpit, dark mode">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="strip" style="padding:90px 0;">
+    <div class="shot-block">
+      <p class="cap">Saved Sessions with restore actions</p>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../assets/saved-sessions-dark.png">
+        <img src="../assets/screenshot-V.png" alt="Saved Sessions window">
+      </picture>
+    </div>
+    <div class="shot-block">
+      <p class="cap">Image Browser for visual session outputs</p>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../assets/image-browser-dark.png">
+        <img src="../assets/image-browser-light.png" alt="Image Browser window">
+      </picture>
+    </div>
+    <div class="shot-block narrow">
+      <p class="cap">Menu bar status strip</p>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../assets/menu-bar-status-dark.png">
+        <img src="../assets/menu-bar-status-light.png" alt="Menu bar status label">
+      </picture>
+    </div>
+    <div class="shot-block">
+      <p class="cap">Analytics dashboard filtered to one project</p>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../assets/analytics-dark.png">
+        <img src="../assets/analytics-light.png" alt="Analytics dashboard">
+      </picture>
+    </div>
+  </section>
+
+  <section class="band" id="guides">
+    <div class="band-head">
+      <h2>Local history guides</h2>
+      <p>Where each agent keeps its sessions, what Agent Sessions reads, and where the boundaries are.</p>
+    </div>
+    <div class="guides">
+      <a class="guide" href="../guides/codex-local-history.html"><h4>Codex local history <span class="arrow">→</span></h4><p>How CLI, Desktop, and VS Code rollout history is read from <code>~/.codex/sessions</code>.</p></a>
+      <a class="guide" href="../guides/opencode-sqlite-history.html"><h4>OpenCode SQLite <span class="arrow">→</span></h4><p>Where OpenCode stores session data and how to browse old runs locally.</p></a>
+      <a class="guide" href="../guides/claude-code-jsonl-history.html"><h4>Claude Code JSONL <span class="arrow">→</span></h4><p>What Claude Code writes to local transcripts and where the boundary is.</p></a>
+      <a class="guide" href="../guides/cursor-agent-local-history.html"><h4>Cursor Agent <span class="arrow">→</span></h4><p>How Cursor Agent transcripts are read from Cursor's local storage.</p></a>
+      <a class="guide" href="../guides/hermes-agent-state-db-history.html"><h4>Hermes state.db <span class="arrow">→</span></h4><p>How Hermes sessions in <code>~/.hermes/state.db</code> become searchable history.</p></a>
+      <a class="guide" href="../guides/openclaw-local-agent-history.html"><h4>OpenClaw history <span class="arrow">→</span></h4><p>How OpenClaw JSONL sessions are discovered, searched, and kept separate.</p></a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="foot-inner">
+      <h2>Disclaimer</h2>
+      <p><strong style="color:var(--ink-2)">Agent Sessions</strong> is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by OpenAI, Anthropic, or any of their products or services (including ChatGPT, Claude, or Codex CLI).</p>
+      <p>All trademarks and brand names belong to their respective owners. References to "OpenAI," "Anthropic," or "Codex CLI" are made solely for descriptive purposes.</p>
+      <div class="foot-bottom">© 2026 Agent Sessions · macOS · Open Source</div>
+    </div>
+  </footer>
+
+  <div class="mock-flag">Mockup 1 · Full redesign</div>
+
+  <script>
+    (async function () {
+      const el = document.getElementById('gh-stars');
+      if (!el) return;
+      try {
+        const res = await fetch('https://api.github.com/repos/jazzyalex/agent-sessions', {
+          headers: { 'Accept': 'application/vnd.github+json' }
+        });
+        if (!res.ok) return;
+        const repo = await res.json();
+        el.textContent = ' ★ ' + (repo.stargazers_count ?? 0);
+      } catch (e) { /* offline: leave blank */ }
+    })();
+  </script>
+</body>
+
+</html>

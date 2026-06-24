@@ -17,9 +17,6 @@ struct GeminiTranscriptView: View {
     }
 
     private func geminiSessionID(for session: Session) -> String? {
-        // Fallback to filename base sans extension
-        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
-        if base.count >= 8 { return base }
-        return nil
+        GeminiSessionIDHelper.deriveSessionID(from: session)
     }
 }

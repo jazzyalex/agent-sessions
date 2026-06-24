@@ -1187,6 +1187,9 @@ struct UnifiedSessionsView: View {
         if session.isSideChat {
             return nonEmptySessionID(session.parentSessionID)
         }
+        if session.source == .antigravity {
+            return GeminiSessionIDHelper.deriveSessionID(from: session)
+        }
         return nonEmptySessionID(session.id)
     }
 

@@ -99,7 +99,12 @@ enum TranscriptMarkdownExporter {
                     parts.append(userPart)
                 }
             case .assistant:
-                parts.append(renderAssistant(block, showTimestamps: showTimestamps))
+                let assistantPart = renderAssistant(block, showTimestamps: showTimestamps)
+                if !images.isEmpty {
+                    parts.append(assistantPart + "\n\n" + renderImages(images, imageReferenceBuilder: imageReferenceBuilder))
+                } else {
+                    parts.append(assistantPart)
+                }
             case .toolCall:
                 parts.append(renderToolCall(block, showTimestamps: showTimestamps))
             case .toolOut:

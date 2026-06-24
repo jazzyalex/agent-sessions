@@ -2921,17 +2921,90 @@ final class SessionParserTests: XCTestCase {
 
         guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
         XCTAssertEqual(preview.source, .antigravity)
-        XCTAssertEqual(preview.id, "conv-abc")
+        XCTAssertEqual(preview.id, "conv-abc#task")
+        XCTAssertEqual(GeminiSessionIDHelper.deriveSessionID(from: preview), "conv-abc")
         XCTAssertEqual(preview.title, "Replace unsupported provider")
         XCTAssertEqual(preview.eventCount, 1)
         XCTAssertTrue(preview.events.isEmpty)
 
         guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
         XCTAssertEqual(full.source, .antigravity)
-        XCTAssertEqual(full.id, "conv-abc")
+        XCTAssertEqual(full.id, "conv-abc#task")
+        XCTAssertEqual(GeminiSessionIDHelper.deriveSessionID(from: full), "conv-abc")
         XCTAssertEqual(full.events.count, 1)
         XCTAssertEqual(full.events.first?.kind, .assistant)
         XCTAssertTrue(full.events.first?.text?.contains("Use agy") == true)
+    }
+
+    func testAntigravityMarkdownArtifactInfersProjectFromLocalFileLink() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-Project-\(UUID().uuidString)", isDirectory: true)
+        let brain = root.appendingPathComponent("brain/conv-project", isDirectory: true)
+        let repo = root.appendingPathComponent("ExampleProject", isDirectory: true)
+        let sourceDir = repo.appendingPathComponent("Sources", isDirectory: true)
+        try fm.createDirectory(at: brain, withIntermediateDirectories: true)
+        try fm.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: repo.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let sourceFile = sourceDir.appendingPathComponent("Feature.swift")
+        try writeText("struct Feature {}\n", to: sourceFile)
+
+        let task = brain.appendingPathComponent("task.md")
+        try writeText("""
+        # Update feature
+
+        See [Feature.swift](file://\(sourceFile.path)).
+        """, to: task)
+
+        guard let session = GeminiSessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.cwd, repo.path)
+        XCTAssertEqual(session.rowRepoName, "ExampleProject")
+    }
+
+    func testAntigravityMarkdownArtifactInfersProjectFromSiblingLocalFileLink() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-SiblingProject-\(UUID().uuidString)", isDirectory: true)
+        let brain = root.appendingPathComponent("brain/conv-project", isDirectory: true)
+        let repo = root.appendingPathComponent("SiblingProject", isDirectory: true)
+        let docsDir = repo.appendingPathComponent("docs", isDirectory: true)
+        try fm.createDirectory(at: brain, withIntermediateDirectories: true)
+        try fm.createDirectory(at: docsDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: repo.appendingPathComponent(".git", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let doc = docsDir.appendingPathComponent("index.html")
+        try writeText("<h1>Docs</h1>\n", to: doc)
+
+        let task = brain.appendingPathComponent("task.md")
+        let walkthrough = brain.appendingPathComponent("walkthrough.md")
+        try writeText("# Task without links\n", to: task)
+        try writeText("""
+        # Walkthrough
+
+        Open `file://\(doc.path)` in the browser.
+        """, to: walkthrough)
+
+        guard let session = GeminiSessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
+        XCTAssertEqual(session.cwd, repo.path)
+        XCTAssertEqual(session.rowRepoName, "SiblingProject")
+    }
+
+    func testAntigravityArtifactsInSameConversationHaveUniqueSessionIDs() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Antigravity-IDs-\(UUID().uuidString)", isDirectory: true)
+        let conversation = root.appendingPathComponent("conv-shared", isDirectory: true)
+        try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let task = conversation.appendingPathComponent("task.md")
+        let walkthrough = conversation.appendingPathComponent("walkthrough.md")
+        try writeText("# Task\n", to: task)
+        try writeText("# Walkthrough\n", to: walkthrough)
+
+        let sessions = [task, walkthrough].compactMap { GeminiSessionParser.parseFile(at: $0) }
+        XCTAssertEqual(Set(sessions.map(\.id)), ["conv-shared#task", "conv-shared#walkthrough"])
+        XCTAssertEqual(Set(sessions.compactMap { GeminiSessionIDHelper.deriveSessionID(from: $0) }), ["conv-shared"])
     }
 
     func testOpenClawDiscoveryFindsAgentSessionFiles() throws {

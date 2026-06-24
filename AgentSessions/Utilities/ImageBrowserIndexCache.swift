@@ -29,11 +29,19 @@ struct ImageBrowserStoredCopilotAttachment: Codable, Hashable, Sendable {
     let fileSizeBytes: Int64
 }
 
+struct ImageBrowserStoredAntigravityImage: Codable, Hashable, Sendable {
+    let lineIndex: Int
+    let filePath: String
+    let mediaType: String
+    let fileSizeBytes: Int64
+}
+
 struct ImageBrowserStoredIndex: Codable, Sendable {
     let signature: ImageBrowserFileSignature
     let spans: [ImageBrowserStoredSpan]
     let openCodeImages: [ImageBrowserStoredOpenCodeImage]?
     let copilotAttachments: [ImageBrowserStoredCopilotAttachment]?
+    let antigravityImages: [ImageBrowserStoredAntigravityImage]?
     let createdAtUnixSeconds: Int64
 }
 
@@ -63,6 +71,13 @@ actor ImageBrowserIndexCache {
             if session.source == .openclaw, decoded.spans.isEmpty {
                 let sessionURL = URL(fileURLWithPath: session.filePath)
                 if OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionURL) {
+                    invalidateIndex(for: session)
+                    return nil
+                }
+            }
+            if session.source == .antigravity, (decoded.antigravityImages ?? []).isEmpty {
+                let sessionURL = URL(fileURLWithPath: session.filePath)
+                if AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionURL) {
                     invalidateIndex(for: session)
                     return nil
                 }
@@ -135,6 +150,7 @@ actor ImageBrowserIndexCache {
                                                 spans: spans,
                                                 openCodeImages: nil,
                                                 copilotAttachments: nil,
+                                                antigravityImages: nil,
                                                 createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
@@ -170,15 +186,32 @@ actor ImageBrowserIndexCache {
                                                 spans: [],
                                                 openCodeImages: images,
                                                 copilotAttachments: nil,
+                                                antigravityImages: nil,
                                                 createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
 
         case .antigravity:
+            let located: [AntigravityMarkdownImageScanner.Attachment] = {
+                do {
+                    return try AntigravityMarkdownImageScanner.scanFile(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
+                } catch {
+                    return []
+                }
+            }()
+
+            let images: [ImageBrowserStoredAntigravityImage] = located.map { att in
+                ImageBrowserStoredAntigravityImage(lineIndex: att.lineIndex,
+                                                   filePath: att.fileURL.path,
+                                                   mediaType: att.mediaType,
+                                                   fileSizeBytes: att.fileSizeBytes)
+            }
+
             let built = ImageBrowserStoredIndex(signature: signature,
                                                 spans: [],
                                                 openCodeImages: nil,
                                                 copilotAttachments: nil,
+                                                antigravityImages: images,
                                                 createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
@@ -205,6 +238,7 @@ actor ImageBrowserIndexCache {
                                                 spans: [],
                                                 openCodeImages: nil,
                                                 copilotAttachments: attachments,
+                                                antigravityImages: nil,
                                                 createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
@@ -214,6 +248,7 @@ actor ImageBrowserIndexCache {
                                                 spans: [],
                                                 openCodeImages: nil,
                                                 copilotAttachments: nil,
+                                                antigravityImages: nil,
                                                 createdAtUnixSeconds: createdAt)
             saveIndex(built, forPath: session.filePath)
             return built
@@ -245,6 +280,7 @@ private extension ImageBrowserIndexCache {
                                       spans: [],
                                       openCodeImages: nil,
                                       copilotAttachments: nil,
+                                      antigravityImages: nil,
                                       createdAtUnixSeconds: Int64(Date().timeIntervalSince1970))
     }
 

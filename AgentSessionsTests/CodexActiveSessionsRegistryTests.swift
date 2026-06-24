@@ -463,7 +463,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
     }
 
-    func testParseLsofMachineOutput_extractsAntigravityConversationIDFromMarkdownArtifact() {
+    func testParseLsofMachineOutput_extractsAntigravityArtifactIDFromMarkdownArtifact() {
         let root = "/Users/alexm/.gemini/antigravity/brain"
         let text = """
         p889
@@ -481,7 +481,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let out = CodexActiveSessionsModel.parseLsofMachineOutput(text, sessionsRoots: [root], source: .antigravity)
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[889]?.tty, "/dev/ttys032")
-        XCTAssertEqual(out[889]?.sessionID, "conv-abc")
+        XCTAssertEqual(out[889]?.sessionID, "conv-abc#task")
         XCTAssertEqual(
             out[889]?.sessionLogPath,
             "/Users/alexm/.gemini/antigravity/brain/conv-abc/task.md"
@@ -3683,6 +3683,26 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertTrue(
             UnifiedSessionIndexer.shouldPublishAggregationResult(result, currentFavoritesVersion: 3)
         )
+    }
+
+    func testUnifiedLowMessageFilterKeepsAntigravityMarkdownArtifacts() {
+        let now = Date()
+        let session = Session(
+            id: "conversation-1#task",
+            source: .antigravity,
+            startTime: now.addingTimeInterval(-10),
+            endTime: now,
+            model: nil,
+            filePath: "/tmp/brain/conversation-1/task.md",
+            eventCount: 1,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: "Task"
+        )
+
+        XCTAssertEqual(session.messageCount, 1)
+        XCTAssertTrue(UnifiedSessionIndexer.passesLowMessageVisibilityFilter(session))
     }
 
     @MainActor

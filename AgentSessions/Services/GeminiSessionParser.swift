@@ -24,7 +24,7 @@ final class GeminiSessionParser {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
         let ctime = (attrs[.creationDate] as? Date) ?? mtime
-        let sid = forcedID ?? antigravityConversationID(from: url) ?? sha256(path: url.path)
+        let sid = forcedID ?? GeminiSessionIDHelper.artifactID(fromArtifactURL: url) ?? sha256(path: url.path)
         let title = firstMarkdownHeading(in: trimmed)
             ?? url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").capitalized
 
@@ -50,6 +50,8 @@ final class GeminiSessionParser {
             events = []
         }
 
+        let cwd = inferredWorkingDirectory(for: url, markdownText: trimmed)
+
         return Session(id: sid,
                        source: .antigravity,
                        startTime: ctime,
@@ -59,15 +61,9 @@ final class GeminiSessionParser {
                        fileSizeBytes: size >= 0 ? size : nil,
                        eventCount: 1,
                        events: events,
-                       cwd: nil,
+                       cwd: cwd,
                        repoName: nil,
                        lightweightTitle: title)
-    }
-
-    private static func antigravityConversationID(from url: URL) -> String? {
-        let parent = url.deletingLastPathComponent().lastPathComponent
-        guard !parent.isEmpty else { return nil }
-        return parent
     }
 
     private static func firstMarkdownHeading(in text: String) -> String? {
@@ -76,6 +72,90 @@ final class GeminiSessionParser {
             guard trimmed.hasPrefix("#") else { continue }
             let title = trimmed.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespacesAndNewlines)
             if !title.isEmpty { return title }
+        }
+        return nil
+    }
+
+    private static func inferredWorkingDirectory(for artifactURL: URL, markdownText: String) -> String? {
+        if let cwd = inferredWorkingDirectory(fromMarkdown: markdownText) {
+            return cwd
+        }
+
+        let directory = artifactURL.deletingLastPathComponent()
+        guard let siblings = try? FileManager.default.contentsOfDirectory(at: directory,
+                                                                          includingPropertiesForKeys: [.isRegularFileKey],
+                                                                          options: [.skipsHiddenFiles]) else {
+            return nil
+        }
+
+        for sibling in siblings.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            guard sibling != artifactURL,
+                  sibling.pathExtension.lowercased() == "md",
+                  (try? sibling.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  let text = try? String(contentsOf: sibling, encoding: .utf8),
+                  let cwd = inferredWorkingDirectory(fromMarkdown: text) else {
+                continue
+            }
+            return cwd
+        }
+
+        return nil
+    }
+
+    private static func inferredWorkingDirectory(fromMarkdown text: String) -> String? {
+        for path in localPaths(in: text) {
+            if let root = nearestGitRoot(forLocalPath: path) {
+                return root
+            }
+        }
+        return nil
+    }
+
+    private static func localPaths(in text: String) -> [String] {
+        var out: [String] = []
+        out.append(contentsOf: localFileURLPaths(in: text))
+        out.append(contentsOf: absoluteMarkdownLinkPaths(in: text))
+        return out
+    }
+
+    private static func localFileURLPaths(in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"file://[^\s\)\]>"]+"#) else { return [] }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return regex.matches(in: text, range: range).compactMap { match in
+            let raw = ns.substring(with: match.range)
+            return URL(string: raw)?.path
+        }
+    }
+
+    private static func absoluteMarkdownLinkPaths(in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"\]\((/[^)\n]+)\)"#) else { return [] }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard match.numberOfRanges > 1 else { return nil }
+            return ns.substring(with: match.range(at: 1))
+        }
+    }
+
+    private static func nearestGitRoot(forLocalPath path: String, maxLevels: Int = 10) -> String? {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        var url = URL(fileURLWithPath: path).standardizedFileURL
+        if fm.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue {
+            url = url.deletingLastPathComponent()
+        } else if !fm.fileExists(atPath: url.path) {
+            url = url.deletingLastPathComponent()
+        }
+
+        for _ in 0..<maxLevels {
+            let dotGit = url.appendingPathComponent(".git")
+            if fm.fileExists(atPath: dotGit.path) {
+                return url.path
+            }
+            let parent = url.deletingLastPathComponent()
+            if parent.path == url.path { break }
+            url = parent
         }
         return nil
     }
