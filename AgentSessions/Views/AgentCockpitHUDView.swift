@@ -192,7 +192,7 @@ enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
         switch self {
         case .full: return "Full"
         case .compact: return "Compact"
-        case .limits: return "Limits"
+        case .limits: return "Quota Meter"
         }
     }
 
@@ -1177,7 +1177,7 @@ struct AgentCockpitHUDView: View {
         .pickerStyle(.segmented)
         .controlSize(.small)
         .frame(width: 86)
-        .help("Switch Agent Cockpit mode: Full, Compact, or Limits.")
+        .help("Switch Agent Cockpit mode: Full, Compact, or Quota Meter.")
     }
 
     private var cockpitSettingsButton: some View {

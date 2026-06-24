@@ -9,7 +9,7 @@ Scope: Design a compact session-consumption tracker for indie users on fixed 20/
 
 This is not token analytics. It is a **plan-relative runway tracker** for an indie developer who wants to protect real 5h and weekly subscription limits.
 
-The existing **Limits Cockpit works because it is clock-first, not interpretive**:
+The existing **Quota Meter works because it is clock-first, not interpretive**:
 
 ```text
 Codex 5h: 91%  >1h35m  ↻3h33m
@@ -40,13 +40,13 @@ release notes              no change                      -
 +7 bursts                  >1h44m                         +9m
 ```
 
-This mirrors Limits Cockpit instead of inventing a second language. The numbers carry the interpretation.
+This mirrors Quota Meter instead of inventing a second language. The numbers carry the interpretation.
 
 ## Final Product Shape
 
-### Keep Limits Cockpit Compact
+### Keep Quota Meter Compact
 
-Limits Cockpit remains the always-visible provider status surface:
+Quota Meter remains the always-visible provider status surface:
 
 - Provider.
 - 5h usage.
@@ -54,11 +54,11 @@ Limits Cockpit remains the always-visible provider status surface:
 - Reset ETA.
 - Weekly status/projection where it already fits.
 
-Do not put the top session list into the collapsed Limits Cockpit.
+Do not put the top session list into the collapsed Quota Meter.
 
 ### Add Runway As Pause-Impact Surface
 
-Runway is the compact session-consumption surface adjacent to, or expanded from, Limits Cockpit:
+Runway is the compact session-consumption surface adjacent to, or expanded from, Quota Meter:
 
 - Show current provider 5h clock as the baseline.
 - Show the top sessions by pause impact.
@@ -376,11 +376,11 @@ Only promote an individual burst into the top list when it is:
 
 ## Weekly Limits
 
-The compact grammar is centered on the 5h deadline because that is the immediate clock shown in Limits Cockpit.
+The compact grammar is centered on the 5h deadline because that is the immediate clock shown in Quota Meter.
 
 Weekly should be included when it changes the answer:
 
-- Provider-level weekly prediction can remain in Limits Cockpit if it already fits.
+- Provider-level weekly prediction can remain in Quota Meter if it already fits.
 - Runway detail can show weekly impact for the same pause action.
 - Compact Runway can add a secondary weekly line only if weekly is the actual constrained window.
 
@@ -412,7 +412,7 @@ Recent sample: last 10m
 
 MVP:
 
-- Provider-level baseline: existing 5h burn-out ETA and reset ETA from Limits Cockpit data.
+- Provider-level baseline: existing 5h burn-out ETA and reset ETA from Quota Meter data.
 - Per-session attribution: Codex first.
 - Use local Codex JSONL `rate_limits`.
 - Tokens are diagnostics only.
@@ -433,7 +433,7 @@ Existing code paths that make this feasible:
 - [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:71): `HUDRow` already carries display name, source, resolved/runtime session IDs, log path, working directory, last activity, and active subagent count.
 - [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:2011): `makeRowsSnapshot` joins active presences to indexed sessions and builds the active HUD rows Runway can reuse.
 - [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:3162): `HUDLimitsProviderEntry` already carries 5h/weekly percentages, reset text, and 5h projected run-out timestamps.
-- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:3419): `HUDLimitsDetailPanel` is the existing expanded Limits surface where Runway can be added without changing collapsed rows.
+- [AgentCockpitHUDView.swift](/Users/alexm/Repository/Codex-History/AgentSessions/Views/AgentCockpitHUDView.swift:3419): `HUDLimitsDetailPanel` is the existing expanded Quota Meter surface where Runway can be added without changing collapsed rows.
 - [UsageDisplayFormatter.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/UsageDisplayFormatter.swift:66): `UsageLimitProjectionTracker` already computes provider-level 5h run-out from consecutive usage samples.
 - [CodexStatusService.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/CodexStatusService.swift:2954): Codex JSONL tail parsing already extracts `rate_limits`; Runway should extract shared parsing rather than duplicate it.
 - [CodexStatusService.swift](/Users/alexm/Repository/Codex-History/AgentSessions/CodexStatus/CodexStatusService.swift:3139): `makeRateLimitSummary` and `decodeWindow` already normalize primary/weekly window fields, reset times, and remaining percentages.
@@ -442,7 +442,7 @@ Existing code paths that make this feasible:
 
 Recommended:
 
-- Keep compact Limits Cockpit unchanged.
+- Keep compact Quota Meter unchanged.
 - Add Runway as an expanded detail panel, drawer, or compact sidebar.
 - Show top 3 rows by pause impact by default.
 - Show top 5 only when space allows.
@@ -451,7 +451,7 @@ Recommended:
 Do not:
 
 - Add a new full dashboard.
-- Put a top-3 session list in the collapsed Limits Cockpit.
+- Put a top-3 session list in the collapsed Quota Meter.
 - Add heavy controls to the compact UI.
 - Force the user to understand sampling windows.
 - Use compact verdict labels when time clocks are enough.
@@ -467,12 +467,12 @@ Do not:
 7. Compact UI does not expose raw tokens, percent of active burn, or sampling windows.
 8. Hover/detail can explain attribution, sample window, 5h movement, and weekly impact.
 9. Unsupported providers do not imply zero consumption.
-10. Limits Cockpit remains compact and provider-focused.
+10. Quota Meter remains compact and provider-focused.
 11. No provider calls, network operations, new probes, or shell commands are introduced for measurement.
 
 ## Handoff Decision
 
-Build this as a **pause-impact Runway surface adjacent to Limits Cockpit**.
+Build this as a **pause-impact Runway surface adjacent to Quota Meter**.
 
 Default compact content:
 

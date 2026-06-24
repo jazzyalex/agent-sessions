@@ -175,7 +175,7 @@ extension PreferencesView {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 280)
-                    .help("Choose whether Agent Cockpit opens as a full session list, compact session HUD, or limits-only cockpit.")
+                    .help("Choose whether Agent Cockpit opens as a full session list, compact session HUD, or Quota Meter.")
                 }
 
                 Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
@@ -200,8 +200,8 @@ extension PreferencesView {
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Show tab subtitle under agent name", isOn: $cockpitShowTabSubtitleInFullMode)
                     .help("Displays iTerm tab title as a muted subtitle under the agent label in full Agent Cockpit rows. Long titles are truncated with hover tooltips.")
-                Toggle("Show usage limits footer", isOn: $cockpitShowLimitsFooter)
-                    .help("Shows a compact limits footer at the bottom of the Cockpit window with 5-hour and weekly usage percentages for enabled providers.")
+                Toggle("Show Quota Meter footer", isOn: $cockpitShowLimitsFooter)
+                    .help("Shows a compact Quota Meter footer at the bottom of the Cockpit window with 5-hour and weekly usage percentages for enabled providers.")
             }
         }
     }

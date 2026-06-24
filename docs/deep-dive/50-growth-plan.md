@@ -137,7 +137,7 @@ You need repeated, small “distribution moments” instead of one big launch.
 
 1) “The problem: terminal agent history is fragmented”
 2) “Context Pack: stop re-explaining your project”
-3) “Limits radar: never get cut off mid-session again”
+3) “Quota Meter: never get cut off mid-session again”
 4) “Git context at session time: what the agent actually saw”
 5) “How I search 2,000 sessions in seconds (performance story)”
 6) “How Agent Sessions complements Crystal / Claude Squad”

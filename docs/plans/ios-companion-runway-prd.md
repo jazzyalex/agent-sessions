@@ -96,7 +96,7 @@ Design rules:
 - The upper-right freshness label is mandatory.
 - If freshness is older than the warning threshold, replace `fresh 3m` with `stale 28m` and dim burn interpretation.
 - Show one pause action only. Widgets should not become mini dashboards.
-- Use the same clock-first grammar as the Mac Limits Cockpit: used percent, burn-out ETA, reset ETA.
+- Use the same clock-first grammar as the Mac Quota Meter: used percent, burn-out ETA, reset ETA.
 
 ### Home Screen Small Widget
 
@@ -277,7 +277,7 @@ Recommended defaults:
 
 | Parameter | Default | Notes |
 | --- | ---: | --- |
-| Mac active collector cadence | 30s | Use when Agent Cockpit/Limits is visible, pinned, or active pressure is detected. |
+| Mac active collector cadence | 30s | Use when Agent Cockpit or Quota Meter is visible, pinned, or active pressure is detected. |
 | Mac normal collector cadence | 60s | Matches the existing Codex usage tracking posture for visible usage surfaces. |
 | Mac background ceiling | 180s | Preserve battery and avoid unnecessary probes while still keeping snapshots usable. |
 | Snapshot write debounce | 10s | Avoid rewriting for every tiny row/view update. |

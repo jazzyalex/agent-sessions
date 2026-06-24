@@ -13,12 +13,12 @@
 <li>Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.</li>
 <li>Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.</li>
 <li>Dock: Hide Dock icon can now rely on a pinned Agent Cockpit as the app&#x27;s reopen path, so hiding the Dock no longer forces the menu bar item on when Cockpit is pinned.</li>
-<li>Limits Widget: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.</li>
+<li>Quota Meter: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.</li>
 <li>Settings: Standardized visible app copy on Settings instead of mixing Settings and Preferences labels.</li>
 </ul>
 <h3>Reminder: What You Got in 3.9</h3>
 <ul>
-<li>Limits Widget: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.</li>
+<li>Quota Meter: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.</li>
 <li>Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.</li>
 <li>Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.</li>
 <li>Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.</li>

@@ -62,7 +62,7 @@ If you want 10/10 “vibe coding workflow” impact without turning into a full 
 Agent Sessions becomes the local-first memory layer for terminal AI:
 - Unified timeline across Codex CLI, Claude Code, Gemini CLI, Copilot CLI, OpenCode, Droid
 - “Context Pack” export that rehydrates a new agent session in seconds
-- Limits radar (Codex + Claude usage) so you do not get cut off mid-work
+- Quota Meter (Codex + Claude usage) so you do not get cut off mid-work
 - Quality signals (what was compiled/tested, what changed, what decisions were made)
 - Optional integrations with multi-session/worktree managers (Crystal, Claude Squad) instead of competing head-on
 
@@ -101,4 +101,3 @@ Examples (tracked in git as of this checkout):
 - `AgentSessions.xcodeproj/project.pbxproj.*` backup variants (merge/conflict and contributor friction)
 
 Even if you do nothing else, cleaning these up is a high-leverage “trust repair” move.
-

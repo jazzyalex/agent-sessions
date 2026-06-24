@@ -145,7 +145,7 @@ extension OnboardingContent {
             ),
             Screen(
                 symbolName: "gauge",
-                title: "Limits Cockpit",
+                title: "Quota Meter",
                 body: "Keep Codex and Claude limits visible, including 5h run-out predictions when fresh usage velocity is available."
             ),
             primaryPowerTipsScreen(),
@@ -192,7 +192,7 @@ extension OnboardingContent {
             randomPowerTipsScreen(),
             Screen(
                 symbolName: "gauge",
-                title: "Limits Cockpit",
+                title: "Quota Meter",
                 body: "See 5h and weekly usage at a glance, with prediction markers and alert settings for fresh limit data."
             ),
             Screen(

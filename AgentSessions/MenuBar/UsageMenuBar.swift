@@ -408,7 +408,7 @@ struct UsageMenuBarMenuContent: View {
                 AppWindowRouter.showAgentSessionsWindow()
             }
             // Dynamic label: warn when Claude probes will consume tokens
-            let refreshLabel: some View = AnyView(Text("Refresh Limits"))
+            let refreshLabel: some View = AnyView(Text("Refresh Quota Meter"))
             Button(action: {
                 switch source {
                 case .codex:

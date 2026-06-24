@@ -73,9 +73,9 @@ struct OnboardingSheetView: View {
 
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .limitsCockpit, .powerTips(0), .analyticsUsage, .feedbackSupport]
+            return [.sessionsFound, .connectAgents, .quotaMeter, .powerTips(0), .analyticsUsage, .feedbackSupport]
         case .updateTour:
-            return [.powerTips(0), .limitsCockpit, .feedbackSupport]
+            return [.powerTips(0), .quotaMeter, .feedbackSupport]
         case .powerTips:
             return powerTipScreens.indices.map { .powerTips($0) }
         }
@@ -163,8 +163,8 @@ struct OnboardingSheetView: View {
                 sessionsFoundSlide
             case .connectAgents:
                 connectAgentsSlide
-            case .limitsCockpit:
-                limitsCockpitSlide
+            case .quotaMeter:
+                quotaMeterSlide
             case .powerTips(let index):
                 powerTipsSlide(index: index)
             case .workWithSessions:
@@ -317,7 +317,7 @@ struct OnboardingSheetView: View {
         }
     }
 
-    private var limitsCockpitSlide: some View {
+    private var quotaMeterSlide: some View {
         let isUpdateTour = content.kind == .updateTour
 
         return VStack(spacing: 18) {
@@ -325,7 +325,7 @@ struct OnboardingSheetView: View {
                 palette: palette,
                 icon: .symbol("gauge"),
                 iconGradient: palette.iconGradientBlue,
-                title: "Limits Cockpit",
+                title: "Quota Meter",
                 subtitle: isUpdateTour
                     ? "See Codex and Claude limits, predictions, and alerts without opening Settings."
                     : "Keep Codex and Claude limits visible while Agent Sessions watches for fresh prediction data."
@@ -333,7 +333,7 @@ struct OnboardingSheetView: View {
 
             CockpitScreenshotCard(
                 palette: palette,
-                imageName: "OnboardingLimitsCockpitPredictionMarkers",
+                imageName: "OnboardingQuotaMeterPredictionMarkers",
                 preferredHeight: 132
             )
             .frame(maxWidth: 560)
@@ -371,7 +371,7 @@ struct OnboardingSheetView: View {
             }
 
             TipBox(
-                text: "Open View → Agent Cockpit, then choose Limits mode. Tune alerts in Settings → Limit Alerts.",
+                text: "Open View → Agent Cockpit, then choose Quota Meter mode. Tune alerts in Settings → Limit Alerts.",
                 palette: palette
             )
         }
@@ -896,7 +896,7 @@ private final class OnboardingAgentAvailabilityModel: ObservableObject {
 private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
-    case limitsCockpit
+    case quotaMeter
     case powerTips(Int)
     case workWithSessions
     case analyticsUsage

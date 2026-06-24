@@ -169,7 +169,7 @@ extension PreferencesView {
             // Display style (shared across Codex & Claude)
             sectionHeader("Display Style")
             VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Limits display") {
+                labeledRow("Quota Meter display") {
                     Picker("", selection: Binding(
                         get: { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left },
                         set: { usageDisplayModeRaw = $0.rawValue }
@@ -181,7 +181,7 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .help("Choose whether usage meters show remaining (left) or used percentages.")
                 }
-                Text("Applies to Codex and Claude usage strips, menu bar reset meters, and Cockpit limits.")
+                Text("Applies to Codex and Claude usage strips, menu bar reset meters, and the Quota Meter.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

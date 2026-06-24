@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Agent Cockpit: Renamed the always-on limits surface to Quota Meter across onboarding, Settings, marketing copy, docs, and assets.
 - Website: Replaced the GitHub Pages landing page with the redesigned product page from the preview, including updated Antigravity positioning, Quota Meter copy, and production download metadata.
 - Providers: Antigravity markdown artifacts in the same conversation now keep distinct session rows while resume/copy actions still use the parent conversation ID, stay visible when low-message filtering is enabled, infer projects from local file links, and local screenshots linked from Antigravity markdown now appear in transcript image handling and the image browser.
 - Providers: Replaced Gemini CLI support with Antigravity CLI support using `agy`, hiding old Gemini session logs and discovering Antigravity markdown artifacts under `~/.gemini/antigravity/brain`.
@@ -24,7 +25,7 @@ All notable changes to this project will be documented in this file.
 - Unified Window: `#side` searches now ignore the archived-only Codex toggle so recovered side-chat rows stay visible even when archive filtering is enabled.
 - Unified Window: Side-chat recovery now preserves request-only side prompts as searchable titles and refreshes active `#side` search results when side-chat rows arrive later in indexing.
 - Unified Window: Codex side chats can now be recovered from Codex Desktop logs as searchable side-chat rows with readable transcripts and a distinct `side` badge, without labeling them as subagents.
-- Agent Cockpit: Added Runway EQ above the Limits Cockpit and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Limits rows; Runway now stays available during reset-first 5h windows when active session burn exists.
+- Agent Cockpit: Added Runway EQ above the Quota Meter and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Quota Meter rows; Runway now stays available during reset-first 5h windows when active session burn exists.
 - Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation, fallback reset clocks no longer produce synthetic burn rates, and the EQ avoids blanking between refreshes.
 - Agent Cockpit: Runway session labels now prefer Codex app/indexed titles and CLI `/rename` names before falling back to the first prompt, tab title, or project directory, and recent Codex subagent logs now roll up under their parent session instead of appearing as duplicate Runway consumers.
 - Agent Cockpit: Runway now keeps the current worktree session identity when Codex logs embed source-session metadata, and nested subagent burn rolls into the worktree parent instead of creating duplicate rows.
@@ -34,16 +35,16 @@ All notable changes to this project will be documented in this file.
 - Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.
 - Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.
 - Dock: Hide Dock icon can now rely on a pinned Agent Cockpit as the app's reopen path, so hiding the Dock no longer forces the menu bar item on when Cockpit is pinned.
-- Limits Widget: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.
+- Quota Meter: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.
 - Settings: Standardized visible app copy on Settings instead of mixing Settings and Preferences labels.
 - Limit Alerts: Low-limit and projected-runout notifications now share one clearer message with percent remaining, fresh burn ETA when available, and reset timing, while Settings shows a plain readiness verdict before detailed diagnostics.
 
 ## [3.9.2] - 2026-06-10
 ### Improvements
 - Limit Alerts and Predictions: Added freshness-aware Codex and Claude run-out predictions, earlier Cockpit ETA markers, and separate notification controls for predicted exhaustion versus low-threshold warnings.
-- Onboarding: Replaced the Agent Cockpit slide in fresh-install and update tours with a Limits Cockpit slide covering prediction markers and Limit Alerts.
-- Limits Widget: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.
-- Limits Widget: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.
+- Onboarding: Replaced the Agent Cockpit slide in fresh-install and update tours with a Quota Meter slide covering prediction markers and Limit Alerts.
+- Quota Meter: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.
+- Quota Meter: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.
 - Limit Alerts: Added a dedicated Preferences pane with source/freshness diagnostics, split predicted run-out alerts from low-threshold alerts, and gates prediction on fresh usage data while ignoring stale snapshots.
 - Dock: Added a Hide Dock Icon command to the Dock tile right-click menu.
 - Menu bar: Turning off the menu bar item now stays off across relaunches by clearing Hide Dock icon instead of letting the safety path re-enable the menu bar.
@@ -55,13 +56,13 @@ All notable changes to this project will be documented in this file.
 
 ## [3.9] - 2026-06-04
 ### Features
-- Limits Widget: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.
+- Quota Meter: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.
 - Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
 - Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.
 - Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.
 
 ### Improvements
-- Limits Widget: Shows Codex and Claude on separate rows, adapts reset times to the available width, and keeps controls out of the way until hover.
+- Quota Meter: Shows Codex and Claude on separate rows, adapts reset times to the available width, and keeps controls out of the way until hover.
 - Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
 - Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.
 - Agent formats: Preserved empty Hermes session metadata records during parsing and added explicit compatibility verdicts to agent-support monitoring reports.
@@ -250,7 +251,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
 - Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.
-- Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
+- Agent Cockpit: Quota Meter now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
 - Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
 - Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
 - OpenCode: Stored session titles, including names set with `/rename`, now populate custom session titles for SQLite and JSON-backed sessions.

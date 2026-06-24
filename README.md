@@ -69,12 +69,12 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 3.9
 
-**TL;DR** - Limits Widget now adds freshness-aware run-out predictions and Limit Alerts.
+**TL;DR** - Quota Meter now adds freshness-aware run-out predictions and Limit Alerts.
 
 **Highlights:** MacBook users can pin a tiny always-on limits window instead of opening the full Agent Cockpit or relying on a crowded menu bar item. It shows Codex and Claude 5h/weekly usage, keeps visible usage sources fresh, surfaces projected 5h run-out ETAs before the final warning window, and adds a dedicated Limit Alerts pane with separate controls for predicted exhaustion and threshold warnings.
 
 Also new in 3.9:
-- Update tours now introduce Limits Cockpit prediction markers and Limit Alerts.
+- Update tours now introduce Quota Meter prediction markers and Limit Alerts.
 - The Dock tile right-click menu now includes Hide Dock Icon.
 - Turning off the menu bar item now persists across relaunches by restoring the Dock path instead of re-enabling the menu bar item.
 - Unified Window controls to collapse or expand visible session hierarchy groups.
@@ -96,7 +96,7 @@ Also new in 3.9:
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
-- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with a compact Limits Widget for always-on Codex and Claude usage visibility, freshness diagnostics, and projected run-out alerts.
+- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with a compact Quota Meter for always-on Codex and Claude usage visibility, freshness diagnostics, and projected run-out alerts.
 - Local-only indexing designed for large histories.
 
 ## Agent Cockpit (Beta)
@@ -104,8 +104,8 @@ Also new in 3.9:
 Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Limits Widget with 5h burn predictions</em></p>
-  <img src="docs/assets/limits-widget-light.png" alt="Small Limits Widget showing Codex and Claude 5h burn predictions, reset timing, and weekly pressure" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
+  <p style="margin:0 0 0px 0;"><em>Quota Meter with 5h burn predictions</em></p>
+  <img src="docs/assets/quota-meter-light.png" alt="Small Quota Meter showing Codex and Claude 5h burn predictions, reset timing, and weekly pressure" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
 
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
