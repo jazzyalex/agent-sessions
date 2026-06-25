@@ -3897,6 +3897,17 @@ private struct HUDLimitsRowsPanel: View {
         return out
     }
 
+    private var shouldReserveFiveHourProjectionSlot: Bool {
+        guard projectedRunoutEnabled else { return false }
+        return entries.contains { entry in
+            formatUsageProjectionLabel(
+                runoutAt: entry.fiveHourProjectedRunoutAt,
+                observedAt: entry.fiveHourProjectionObservedAt,
+                now: clockNow
+            ) != nil
+        }
+    }
+
     var body: some View {
         Group {
             if entries.isEmpty {
@@ -3940,7 +3951,16 @@ private struct HUDLimitsRowsPanel: View {
 
     private func row(entry: HUDLimitsProviderEntry) -> some View {
         HStack(spacing: 0) {
-            HUDLimitsProviderText(entry: entry, mode: mode, showResets: true, onlyBottleneck: false, now: clockNow)
+            HUDLimitsProviderText(
+                entry: entry,
+                mode: mode,
+                showResets: true,
+                onlyBottleneck: false,
+                showProjection: true,
+                alignColumns: entries.count > 1,
+                reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
+                now: clockNow
+            )
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
                 .allowsTightening(true)
@@ -4206,6 +4226,13 @@ private struct HUDLimitsDetailPanel: View {
     private func detailRow(entry: HUDLimitsProviderEntry, reserveProjectionSlot: Bool) -> some View {
         let fiveUnavail = isResetInfoUnavailable(raw: entry.fiveHourResetText)
         let weekUnavail = isResetInfoUnavailable(raw: entry.weekResetText)
+        let projection = projectedRunoutEnabled
+            ? formatUsageProjectionLabel(
+                runoutAt: entry.fiveHourProjectedRunoutAt,
+                observedAt: entry.fiveHourProjectionObservedAt,
+                now: now
+            )
+            : nil
         GridRow {
             Group {
                 if entry.source == .claude {
@@ -4226,35 +4253,27 @@ private struct HUDLimitsDetailPanel: View {
                 Text("5h: ")
                 Text(fiveUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
-                if projectedRunoutEnabled,
-                   let projection = formatUsageProjectionLabel(
-                        runoutAt: entry.fiveHourProjectedRunoutAt,
-                        observedAt: entry.fiveHourProjectionObservedAt,
-                        now: now
-                   ) {
-                    Text(" \(projection)")
-                        .fontWeight(.bold)
-                        .foregroundStyle(hudProjectionColor(colorScheme))
-                } else if reserveProjectionSlot {
-                    Text(" ▸18m")
-                        .fontWeight(.bold)
-                        .foregroundStyle(hudProjectionColor(colorScheme))
-                        .opacity(0)
-                        .layoutPriority(-1)
-                        .accessibilityHidden(true)
-                }
+            }
+            .frame(width: HUDLimitsColumnLayout.detailFiveHourPercentWidth, alignment: .leading)
+            if projection != nil || reserveProjectionSlot {
+                HUDLimitsProjectionToken(projection: projection, reserve: reserveProjectionSlot)
+                    .frame(width: HUDLimitsColumnLayout.detailFiveHourProjectionWidth, alignment: .leading)
             }
             Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
                 .foregroundStyle(.secondary)
+                .frame(width: HUDLimitsColumnLayout.detailFiveHourResetWidth, alignment: .leading)
             Text("|")
                 .foregroundStyle(Color.primary.opacity(0.25))
+                .frame(width: HUDLimitsColumnLayout.detailSeparatorWidth, alignment: .center)
             HStack(spacing: 0) {
                 Text("Wk: ")
                 Text(weekUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.weekLeft))%")
                     .foregroundStyle(hudPctColor(entry.weekLeft))
             }
+            .frame(width: HUDLimitsColumnLayout.detailWeekPercentWidth, alignment: .leading)
             Text("↻ \(weekResetText(entry: entry, unavailable: weekUnavail))")
                 .foregroundStyle(.secondary)
+                .frame(width: HUDLimitsColumnLayout.detailWeekResetWidth, alignment: .leading)
         }
         .font(.system(size: 12, weight: .medium, design: .monospaced))
         .foregroundStyle(Color.primary)
@@ -4558,6 +4577,45 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
         : Color(red: 0.82, green: 0.30, blue: 0.00)
 }
 
+private enum HUDLimitsColumnLayout {
+    static let compactSpacing: CGFloat = 3
+    static let compactFiveHourPercentWidth: CGFloat = 52
+    static let compactFiveHourProjectionWidth: CGFloat = 44
+    static let compactFiveHourResetWidth: CGFloat = 54
+    static let compactSeparatorWidth: CGFloat = 5
+    static let compactWeekPercentWidth: CGFloat = 48
+    static let compactWeekResetWidth: CGFloat = 92
+
+    static let detailFiveHourPercentWidth: CGFloat = 58
+    static let detailFiveHourProjectionWidth: CGFloat = 58
+    static let detailFiveHourResetWidth: CGFloat = 60
+    static let detailSeparatorWidth: CGFloat = 7
+    static let detailWeekPercentWidth: CGFloat = 58
+    static let detailWeekResetWidth: CGFloat = 106
+}
+
+private struct HUDLimitsProjectionToken: View {
+    let projection: String?
+    let reserve: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Group {
+            if let projection {
+                Text(" \(projection)")
+                    .fontWeight(.bold)
+                    .foregroundStyle(hudProjectionColor(colorScheme))
+            } else if reserve {
+                Text(" ▸4h 59m")
+                    .fontWeight(.bold)
+                    .foregroundStyle(hudProjectionColor(colorScheme))
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
 private struct HUDLimitsBarContent: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
@@ -4614,6 +4672,8 @@ private struct HUDLimitsProviderText: View {
     var showResets: Bool = true
     var onlyBottleneck: Bool = false
     var showProjection: Bool = true
+    var alignColumns: Bool = false
+    var reserveProjectionSlot: Bool = false
     var now: Date = Date()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
@@ -4665,6 +4725,44 @@ private struct HUDLimitsProviderText: View {
         formatUsageWeeklyResetLabel(date, now: now)
     }
 
+    @ViewBuilder
+    private var alignedContent: some View {
+        HStack(spacing: HUDLimitsColumnLayout.compactSpacing) {
+            HStack(spacing: 0) {
+                Text("5h: ")
+                Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
+                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+            }
+            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth, alignment: .leading)
+
+            if reserveProjectionSlot || fiveHourProjectionLabel != nil {
+                HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, reserve: reserveProjectionSlot)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth, alignment: .leading)
+            }
+
+            if showResets, let r = fiveHourResetLabel() {
+                Text("↻ \(r)")
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth, alignment: .leading)
+            }
+
+            Text("|")
+                .foregroundStyle(Color.primary.opacity(0.25))
+                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth, alignment: .center)
+
+            HStack(spacing: 0) {
+                Text("Wk: ")
+                Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
+                    .foregroundStyle(hudPctColor(entry.weekLeft))
+            }
+            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth, alignment: .leading)
+
+            if showResets, let r = weekResetLabel() {
+                Text("↻ \(r)")
+                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth, alignment: .leading)
+            }
+        }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             // Provider icon — matches CockpitFooterView ProviderIcon exactly
@@ -4687,43 +4785,50 @@ private struct HUDLimitsProviderText: View {
                 HUDLimitsLoadingSpinner()
                     .transition(.opacity)
             } else {
-                HStack(spacing: 6) {
-                    if !onlyBottleneck || bottleneckIs5h {
-                        HStack(spacing: 4) {
-                            HStack(spacing: 0) {
-                                Text("5h: ")
-                                Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
-                                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
-                                if let projection = fiveHourProjectionLabel {
-                                    Text(" \(projection)")
-                                        .fontWeight(.bold)
-                                        .foregroundStyle(hudProjectionColor(colorScheme))
+                if alignColumns && !onlyBottleneck {
+                    alignedContent
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.primary)
+                        .transition(.opacity)
+                } else {
+                    HStack(spacing: 6) {
+                        if !onlyBottleneck || bottleneckIs5h {
+                            HStack(spacing: 4) {
+                                HStack(spacing: 0) {
+                                    Text("5h: ")
+                                    Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
+                                        .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                                    if let projection = fiveHourProjectionLabel {
+                                        Text(" \(projection)")
+                                            .fontWeight(.bold)
+                                            .foregroundStyle(hudProjectionColor(colorScheme))
+                                    }
+                                }
+                                if showResets, let r = fiveHourResetLabel() {
+                                    Text("↻ \(r)")
                                 }
                             }
-                            if showResets, let r = fiveHourResetLabel() {
-                                Text("↻ \(r)")
+                        }
+                        if !onlyBottleneck {
+                            Text("|").foregroundStyle(Color.primary.opacity(0.25))
+                        }
+                        if !onlyBottleneck || !bottleneckIs5h {
+                            HStack(spacing: 4) {
+                                HStack(spacing: 0) {
+                                    Text("Wk: ")
+                                    Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
+                                        .foregroundStyle(hudPctColor(entry.weekLeft))
+                                }
+                                if showResets, let r = weekResetLabel() {
+                                    Text("↻ \(r)")
+                                }
                             }
                         }
                     }
-                    if !onlyBottleneck {
-                        Text("|").foregroundStyle(Color.primary.opacity(0.25))
-                    }
-                    if !onlyBottleneck || !bottleneckIs5h {
-                        HStack(spacing: 4) {
-                            HStack(spacing: 0) {
-                                Text("Wk: ")
-                                Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
-                                    .foregroundStyle(hudPctColor(entry.weekLeft))
-                            }
-                            if showResets, let r = weekResetLabel() {
-                                Text("↻ \(r)")
-                            }
-                        }
-                    }
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.primary)
+                    .transition(.opacity)
                 }
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.primary)
-                .transition(.opacity)
             }
         }
         .animation(.easeIn(duration: 0.2), value: entry.isInitialLoading)
