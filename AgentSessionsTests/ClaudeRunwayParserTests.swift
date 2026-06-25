@@ -131,6 +131,38 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertEqual(identities.first?.displayName, "1.0 release blockers")
     }
 
+    func testRecentSessionScannerFoldsSubagentsIntoParentSession() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-subagent-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        let subagentDir = projectDir.appendingPathComponent("sess-parent/subagents", isDirectory: true)
+        try FileManager.default.createDirectory(at: subagentDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        // Parent main transcript carries the session title.
+        let parentLog = projectDir.appendingPathComponent("sess-parent.jsonl")
+        try """
+        {"type":"ai-title","aiTitle":"ship the release","sessionId":"sess-parent"}
+        \(assistantLine(id: "p1", at: now.addingTimeInterval(-8), inputTokens: 1000, sessionID: "sess-parent", cwd: "/tmp/proj"))
+        """.write(to: parentLog, atomically: true, encoding: .utf8)
+
+        // Subagent transcript shares the parent sessionId; its first prompt is an
+        // internal task that must NOT become the row name.
+        let subagentLog = subagentDir.appendingPathComponent("agent-abc.jsonl")
+        try """
+        \(userLine(sessionID: "sess-parent", cwd: "/tmp/proj", text: "You are a subagent: grep the repo", at: now.addingTimeInterval(-6)))
+        \(assistantLine(id: "s1", at: now.addingTimeInterval(-3), inputTokens: 2000, sessionID: "sess-parent", cwd: "/tmp/proj"))
+        """.write(to: subagentLog, atomically: true, encoding: .utf8)
+
+        let identities = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1, "parent + subagent should collapse to one session")
+        XCTAssertEqual(identities.first?.id, "sess-parent")
+        XCTAssertEqual(identities.first?.displayName, "ship the release", "parent title wins, never the subagent task")
+        XCTAssertEqual(identities.first?.logPaths.count, 2, "both transcripts contribute to cumulative burn")
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,

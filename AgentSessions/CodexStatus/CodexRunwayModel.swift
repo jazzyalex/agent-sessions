@@ -142,7 +142,7 @@ enum CodexRunwaySnapshotLoader {
                     root: request.recentSessionsRoot,
                     now: request.now
                 )
-                let identities = uniqueIdentities(request.identities + scannerIdentities)
+                let identities = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
                 let directBurns = identities.compactMap {
                     CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
                 }
@@ -154,7 +154,7 @@ enum CodexRunwaySnapshotLoader {
                     )
                     : []
                 let burns = mergeBurns(directBurns: directBurns, tokenBurns: tokenBurns)
-                let snapshot = snapshotWithPendingRows(
+                let snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: request.baseline,
                     snapshot: CodexRunwayCalculator.snapshot(
                         baseline: request.baseline,
@@ -171,23 +171,42 @@ enum CodexRunwaySnapshotLoader {
 
 #if DEBUG
     static func uniqueIdentitiesForTesting(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
-        uniqueIdentities(identities)
+        RunwaySnapshotAssembly.uniqueIdentities(identities)
     }
 #endif
 
-    private static func uniqueIdentities(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
+    private static func mergeBurns(directBurns: [RunwaySessionBurn],
+                                   tokenBurns: [RunwaySessionBurn]) -> [RunwaySessionBurn] {
+        guard !directBurns.isEmpty else { return tokenBurns }
+        guard !tokenBurns.isEmpty else { return directBurns }
+
+        let directIDs = Set(directBurns.map { $0.identity.id })
+        let directPaths = Set(directBurns.flatMap(\.identity.logPaths))
+        let indirectBurns = tokenBurns.filter { burn in
+            !directIDs.contains(burn.identity.id)
+                && directPaths.isDisjoint(with: Set(burn.identity.logPaths))
+        }
+        return directBurns + indirectBurns
+    }
+}
+
+/// Shared, provider-agnostic helpers for assembling a runway snapshot:
+/// deduping/merging session identities and filling pending ("waiting") rows for
+/// active sessions whose burn rate hasn't been measured yet. Used by both the
+/// Codex and Claude snapshot loaders.
+enum RunwaySnapshotAssembly {
+    static func uniqueIdentities(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
         var byID: [String: RunwaySessionIdentity] = [:]
         var order: [String] = []
 
         for identity in identities {
-            if var existing = byID[identity.id] {
-                existing = RunwaySessionIdentity(
+            if let existing = byID[identity.id] {
+                byID[identity.id] = RunwaySessionIdentity(
                     id: existing.id,
                     displayName: existing.displayName,
                     isGoal: existing.isGoal || identity.isGoal,
                     logPaths: Array(Set(existing.logPaths).union(identity.logPaths)).sorted()
                 )
-                byID[identity.id] = existing
             } else {
                 byID[identity.id] = identity
                 order.append(identity.id)
@@ -234,48 +253,10 @@ enum CodexRunwaySnapshotLoader {
             }
     }
 
-    private struct IdentityMergeGroup {
-        let id: String
-        let displayName: String
-        let isGoal: Bool
-        let logPaths: Set<String>
-        let order: Int
-
-        static func merged(_ lhs: IdentityMergeGroup, _ rhs: IdentityMergeGroup) -> IdentityMergeGroup {
-            let winner: IdentityMergeGroup
-            if lhs.logPaths.count != rhs.logPaths.count {
-                winner = lhs.logPaths.count > rhs.logPaths.count ? lhs : rhs
-            } else {
-                winner = lhs.order > rhs.order ? lhs : rhs
-            }
-            return IdentityMergeGroup(
-                id: winner.id,
-                displayName: winner.displayName,
-                isGoal: lhs.isGoal || rhs.isGoal,
-                logPaths: lhs.logPaths.union(rhs.logPaths),
-                order: min(lhs.order, rhs.order)
-            )
-        }
-    }
-
-    private static func mergeBurns(directBurns: [RunwaySessionBurn],
-                                   tokenBurns: [RunwaySessionBurn]) -> [RunwaySessionBurn] {
-        guard !directBurns.isEmpty else { return tokenBurns }
-        guard !tokenBurns.isEmpty else { return directBurns }
-
-        let directIDs = Set(directBurns.map { $0.identity.id })
-        let directPaths = Set(directBurns.flatMap(\.identity.logPaths))
-        let indirectBurns = tokenBurns.filter { burn in
-            !directIDs.contains(burn.identity.id)
-                && directPaths.isDisjoint(with: Set(burn.identity.logPaths))
-        }
-        return directBurns + indirectBurns
-    }
-
-    private static func snapshotWithPendingRows(baseline: RunwayProviderBaseline,
-                                                snapshot: CodexRunwaySnapshot?,
-                                                activeIdentities: [RunwaySessionIdentity],
-                                                maxRows: Int) -> CodexRunwaySnapshot? {
+    static func withPendingRows(baseline: RunwayProviderBaseline,
+                                snapshot: CodexRunwaySnapshot?,
+                                activeIdentities: [RunwaySessionIdentity],
+                                maxRows: Int) -> CodexRunwaySnapshot? {
         guard maxRows > 0 else { return snapshot }
         let existing = snapshot ?? CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
         let representedIDs = Set(existing.rows.map(\.id))
@@ -309,6 +290,30 @@ enum CodexRunwaySnapshotLoader {
             rows: existing.rows + pendingRows,
             burstSummary: existing.burstSummary ?? pendingSummary
         )
+    }
+
+    private struct IdentityMergeGroup {
+        let id: String
+        let displayName: String
+        let isGoal: Bool
+        let logPaths: Set<String>
+        let order: Int
+
+        static func merged(_ lhs: IdentityMergeGroup, _ rhs: IdentityMergeGroup) -> IdentityMergeGroup {
+            let winner: IdentityMergeGroup
+            if lhs.logPaths.count != rhs.logPaths.count {
+                winner = lhs.logPaths.count > rhs.logPaths.count ? lhs : rhs
+            } else {
+                winner = lhs.order > rhs.order ? lhs : rhs
+            }
+            return IdentityMergeGroup(
+                id: winner.id,
+                displayName: winner.displayName,
+                isGoal: lhs.isGoal || rhs.isGoal,
+                logPaths: lhs.logPaths.union(rhs.logPaths),
+                order: min(lhs.order, rhs.order)
+            )
+        }
     }
 }
 

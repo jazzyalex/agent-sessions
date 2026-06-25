@@ -34,7 +34,7 @@ enum ClaudeRunwayTokenActivityParser {
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 1024 * 1024,
                               now: Date = Date()) -> [ClaudeRunwayTokenActivitySample] {
-        guard let data = tailData(path: path, maxBytes: maxBytes),
+        guard let data = ClaudeRunwayLog.tailData(path: path, maxBytes: maxBytes),
               let text = String(data: data, encoding: .utf8) else {
             return []
         }
@@ -139,7 +139,7 @@ enum ClaudeRunwayTokenActivityParser {
             if seenMessageIDs.contains(messageID) { return nil }
             seenMessageIDs.insert(messageID)
         }
-        guard let capturedAt = flexibleDate(obj["timestamp"]),
+        guard let capturedAt = ClaudeRunwayLog.date(obj["timestamp"]),
               capturedAt <= now.addingTimeInterval(5) else {
             return nil
         }
@@ -153,40 +153,10 @@ enum ClaudeRunwayTokenActivityParser {
     }
 
     private static func weightedTokens(_ usage: [String: Any]) -> Double {
-        func value(_ key: String) -> Double { double(usage[key]) ?? 0 }
+        func value(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
         return value("input_tokens")
             + value("output_tokens")
             + value("cache_creation_input_tokens")
             + cacheReadWeight * value("cache_read_input_tokens")
-    }
-
-    // MARK: - Local IO/parse helpers (kept private so the Codex stack is untouched)
-
-    private static func tailData(path: String, maxBytes: Int) -> Data? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
-        try? handle.seek(toOffset: offset)
-        return try? handle.readToEnd()
-    }
-
-    private static func double(_ value: Any?) -> Double? {
-        guard let value else { return nil }
-        if let double = value as? Double { return double }
-        if let int = value as? Int { return Double(int) }
-        if let number = value as? NSNumber { return number.doubleValue }
-        if let string = value as? String { return Double(string) }
-        return nil
-    }
-
-    private static func flexibleDate(_ value: Any?) -> Date? {
-        guard let string = value as? String else { return nil }
-        let isoFractional = ISO8601DateFormatter()
-        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = isoFractional.date(from: string) { return date }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: string)
     }
 }

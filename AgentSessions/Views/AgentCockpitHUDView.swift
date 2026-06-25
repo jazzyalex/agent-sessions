@@ -3438,7 +3438,11 @@ enum HUDRunwayIdentityReducer {
     }
 
     private static func isPlaceholderTitle(_ title: String) -> Bool {
-        (title.hasPrefix("Active ") && title.hasSuffix(" session")) || title.hasPrefix("Session ")
+        // Match only the synthesized fallbacks ("Active <Agent> session" /
+        // "Session <id>"), not legitimate user titles that happen to start
+        // with "Active" and end with "session".
+        if title.hasPrefix("Session ") { return true }
+        return SessionSource.allCases.contains { title == "Active \($0.displayName) session" }
     }
 
     private struct RunwayHUDCandidate {
@@ -4279,8 +4283,7 @@ private struct HUDRunwayPanel: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .gridColumnAlignment(.leading)
-                            Text(RunwayTimeFormatting.quotaRate(row.quotaMinutesPerHour, confidence: row.confidence))
-                                .foregroundStyle(row.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
+                            rateCell(quota: row.quotaMinutesPerHour, confidence: row.confidence)
                                 .gridColumnAlignment(.trailing)
                             HUDRunwayLoadBar(
                                 quotaMinutesPerHour: row.quotaMinutesPerHour,
@@ -4299,8 +4302,7 @@ private struct HUDRunwayPanel: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .gridColumnAlignment(.leading)
-                            Text(RunwayTimeFormatting.quotaRate(summary.quotaMinutesPerHour, confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting))
-                                .foregroundStyle(summary.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
+                            rateCell(quota: summary.quotaMinutesPerHour, confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting)
                                 .gridColumnAlignment(.trailing)
                             HUDRunwayLoadBar(
                                 quotaMinutesPerHour: summary.quotaMinutesPerHour,
@@ -4337,6 +4339,21 @@ private struct HUDRunwayPanel: View {
         }
         .onReceive(Self.loadTimer) { _ in
             animationTick = (animationTick + 1) % 1024
+        }
+    }
+
+    /// Burn-rate cell: a small spinner while the rate is still being measured
+    /// (waiting), otherwise the quota-rate text.
+    @ViewBuilder
+    private func rateCell(quota: Double, confidence: RunwayAttributionConfidence) -> some View {
+        if confidence == .waiting {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.62)
+                .frame(width: 22, height: 12, alignment: .trailing)
+        } else {
+            Text(RunwayTimeFormatting.quotaRate(quota, confidence: confidence))
+                .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
         }
     }
 
@@ -4427,10 +4444,14 @@ private struct HUDRunwayLoadBar: View {
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.08))
-                Capsule()
-                    .fill(hudProjectionColor(colorScheme).opacity(fillOpacity))
-                    .frame(width: max(0, proxy.size.width * fillFraction))
-                    .animation(.easeInOut(duration: 0.28), value: animationTick)
+                // While waiting the spinner carries the "working" cue, so the
+                // bar stays an empty track until a real rate arrives.
+                if confidence != .waiting {
+                    Capsule()
+                        .fill(hudProjectionColor(colorScheme).opacity(fillOpacity))
+                        .frame(width: max(0, proxy.size.width * fillFraction))
+                        .animation(.easeInOut(duration: 0.28), value: animationTick)
+                }
             }
         }
         .frame(minWidth: 62, maxWidth: .infinity)

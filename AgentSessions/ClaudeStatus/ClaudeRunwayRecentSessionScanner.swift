@@ -48,47 +48,103 @@ enum ClaudeRunwayRecentSessionScanner {
             candidates.append((url, modifiedAt))
         }
 
-        return candidates
+        // Scan recent files, then group by session id so a session's subagent
+        // transcripts (which live in <sessionId>/subagents/ and carry the parent
+        // session id) fold into the parent: their burn is counted via the extra
+        // log path, but the parent's name and a single row win. maximumFiles is
+        // applied to distinct sessions, not raw files, so subagents can't crowd
+        // out other sessions.
+        let scanned = candidates
             .sorted { $0.modifiedAt > $1.modifiedAt }
             .prefix(maximumMetadataFiles)
             .compactMap { candidate(for: $0.url, now: now) }
-            .prefix(maximumFiles)
-            .map { $0 }
+
+        var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool)] = [:]
+        var order: [String] = []
+        for candidate in scanned {
+            if var existing = byID[candidate.id] {
+                existing.logPaths.append(candidate.logPath)
+                // A non-subagent (parent) transcript's name beats a subagent's
+                // internal task prompt.
+                if !candidate.isSubagent, !existing.hasPrimaryName {
+                    existing.displayName = candidate.displayName
+                    existing.hasPrimaryName = true
+                }
+                byID[candidate.id] = existing
+            } else {
+                order.append(candidate.id)
+                byID[candidate.id] = (candidate.displayName, [candidate.logPath], !candidate.isSubagent)
+            }
+        }
+
+        return order.prefix(maximumFiles).compactMap { id in
+            guard let group = byID[id] else { return nil }
+            return RunwaySessionIdentity(
+                id: id,
+                displayName: group.displayName,
+                isGoal: false,
+                logPaths: group.logPaths.sorted()
+            )
+        }
     }
 
-    private static func candidate(for url: URL, now: Date) -> RunwaySessionIdentity? {
+    private static func candidate(for url: URL, now: Date) -> ScannedCandidate? {
         let metadata = metadata(from: url)
         if ClaudeProbeConfig.isProbeWorkingDirectory(metadata.cwd) {
             return nil
         }
         guard hasActiveTail(url: url, now: now) else { return nil }
         let fallbackID = url.deletingPathExtension().lastPathComponent
-        return RunwaySessionIdentity(
+        let isSubagent = url.pathComponents.contains("subagents")
+        // Subagents fold into the parent session for cumulative burn, but never
+        // lend their internal task prompt as a name — use only the project
+        // folder so the parent's real title always wins the merge.
+        let name = isSubagent
+            ? projectFallbackName(metadata: metadata, fallbackID: fallbackID)
+            : displayName(metadata: metadata, fallbackID: fallbackID)
+        return ScannedCandidate(
             id: metadata.sessionID ?? fallbackID,
-            displayName: displayName(metadata: metadata, fallbackID: fallbackID),
-            isGoal: false,
-            logPaths: [url.path]
+            displayName: name,
+            logPath: url.path,
+            isSubagent: isSubagent
         )
     }
 
+    private static func projectFallbackName(metadata: SessionMetadata, fallbackID: String) -> String {
+        if let cwd = metadata.cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cwd.isEmpty {
+            return compact(URL(fileURLWithPath: cwd).lastPathComponent)
+        }
+        return compact(fallbackID)
+    }
+
+    private struct ScannedCandidate {
+        let id: String
+        let displayName: String
+        let logPath: String
+        let isSubagent: Bool
+    }
+
     private static func hasActiveTail(url: URL, now: Date) -> Bool {
-        guard let data = tailData(path: url.path, maxBytes: 256 * 1024),
+        guard let data = ClaudeRunwayLog.tailData(path: url.path, maxBytes: 256 * 1024),
               let text = String(data: data, encoding: .utf8) else {
             return false
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(200)
         for line in lines.reversed() {
-            guard let obj = jsonObject(String(line)),
-                  let capturedAt = flexibleDate(obj["timestamp"]) else {
+            guard let obj = ClaudeRunwayLog.jsonObject(String(line)),
+                  let capturedAt = ClaudeRunwayLog.date(obj["timestamp"]) else {
                 continue
             }
+            // Skip lines with implausible future timestamps (clock skew / bad
+            // data) rather than treating them as live activity.
+            guard capturedAt <= now.addingTimeInterval(5) else { continue }
             return now.timeIntervalSince(capturedAt) <= maximumActiveSampleAge
         }
         return false
     }
 
     private static func metadata(from url: URL) -> SessionMetadata {
-        guard let data = headData(path: url.path, maxBytes: 96 * 1024),
+        guard let data = ClaudeRunwayLog.headData(path: url.path, maxBytes: 96 * 1024),
               let text = String(data: data, encoding: .utf8) else {
             return SessionMetadata()
         }
@@ -96,7 +152,7 @@ enum ClaudeRunwayRecentSessionScanner {
         // Scan a healthy slice of the head: ai-title/custom-title records are
         // usually written a few turns in, after the first user message.
         for line in text.split(separator: "\n", omittingEmptySubsequences: true).prefix(160) {
-            guard let obj = jsonObject(String(line)) else { continue }
+            guard let obj = ClaudeRunwayLog.jsonObject(String(line)) else { continue }
             if metadata.sessionID == nil { metadata.sessionID = string(obj["sessionId"]) }
             if metadata.cwd == nil { metadata.cwd = string(obj["cwd"]) }
             switch string(obj["type"]) {
@@ -165,38 +221,8 @@ enum ClaudeRunwayRecentSessionScanner {
         return String(collapsed.prefix(27)) + "…"
     }
 
-    private static func jsonObject(_ line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-    }
-
     private static func string(_ value: Any?) -> String? {
         value as? String
-    }
-
-    private static func flexibleDate(_ value: Any?) -> Date? {
-        guard let string = value as? String else { return nil }
-        let isoFractional = ISO8601DateFormatter()
-        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = isoFractional.date(from: string) { return date }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
-        return iso.date(from: string)
-    }
-
-    private static func headData(path: String, maxBytes: Int) -> Data? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        return try? handle.read(upToCount: maxBytes)
-    }
-
-    private static func tailData(path: String, maxBytes: Int) -> Data? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
-        try? handle.seek(toOffset: offset)
-        return try? handle.readToEnd()
     }
 
     private struct SessionMetadata {
