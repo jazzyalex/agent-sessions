@@ -163,6 +163,43 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertEqual(identities.first?.logPaths.count, 2, "both transcripts contribute to cumulative burn")
     }
 
+    func testRecentSessionScannerCapsDistinctSessionsNotSubagentFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-subagent-cap-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        let subagentDir = projectDir.appendingPathComponent("sess-parent/subagents", isDirectory: true)
+        try FileManager.default.createDirectory(at: subagentDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let parentLog = projectDir.appendingPathComponent("sess-parent.jsonl")
+        try """
+        {"type":"ai-title","aiTitle":"parent work","sessionId":"sess-parent"}
+        \(assistantLine(id: "parent", at: now.addingTimeInterval(-8), inputTokens: 1000, sessionID: "sess-parent", cwd: "/tmp/proj"))
+        """.write(to: parentLog, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-100)], ofItemAtPath: parentLog.path)
+
+        for index in 0..<85 {
+            let log = subagentDir.appendingPathComponent("agent-\(index).jsonl")
+            try """
+            \(assistantLine(id: "sub-\(index)", at: now.addingTimeInterval(-4), inputTokens: 1000, sessionID: "sess-parent", cwd: "/tmp/proj"))
+            """.write(to: log, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(TimeInterval(-index))], ofItemAtPath: log.path)
+        }
+
+        let otherLog = projectDir.appendingPathComponent("sess-other.jsonl")
+        try """
+        \(userLine(sessionID: "sess-other", cwd: "/tmp/proj", text: "other active work", at: now.addingTimeInterval(-12)))
+        \(assistantLine(id: "other", at: now.addingTimeInterval(-5), inputTokens: 900, sessionID: "sess-other", cwd: "/tmp/proj"))
+        """.write(to: otherLog, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-90)], ofItemAtPath: otherLog.path)
+
+        let identities = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.map(\.id), ["sess-parent", "sess-other"])
+        XCTAssertEqual(identities.first?.logPaths.count, 86)
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,

@@ -2244,6 +2244,22 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(identities.first?.displayName, "codex - Codex-History")
     }
 
+    func testRunwayIdentitiesKeepLegitimateActiveSessionTitle() {
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active incident response session",
+            state: .active,
+            resolvedSessionID: "session",
+            logPath: "/tmp/session.jsonl",
+            cleanedTabTitle: "codex - Codex-History"
+        )
+
+        let identities = HUDRunwayIdentityReducer.identities(from: [row])
+
+        XCTAssertEqual(identities.first?.displayName.hasPrefix("Active incident response"), true)
+    }
+
     func testRunwayRequestFallsBackToResetWindowWithoutProjectedRunout() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let reset = now.addingTimeInterval(3 * 60 * 60)

@@ -3442,7 +3442,10 @@ enum HUDRunwayIdentityReducer {
         // "Session <id>"), not legitimate user titles that happen to start
         // with "Active" and end with "session".
         if title.hasPrefix("Session ") { return true }
-        return SessionSource.allCases.contains { title == "Active \($0.displayName) session" }
+        let agentNames = SessionSource.allCases.flatMap { source in
+            [source.displayName, source.rawValue.capitalized]
+        }
+        return agentNames.contains { title == "Active \($0) session" }
     }
 
     private struct RunwayHUDCandidate {

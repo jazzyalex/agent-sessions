@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Quota Meter: Session Runway now keeps real active-session titles while still falling back to tab titles for synthesized "Active Codex session" placeholders, and Claude subagent transcript volume no longer crowds other active sessions out of Runway discovery.
 - Quota Meter: Session Runway now trims the drawer to the measured session-row height and no longer paints a separate darker bottom band below the last visible session.
 - Quota Meter: Session Runway now surfaces active Codex sessions before token burn samples arrive, keeps just-finished sessions visible briefly, and preserves measured low-impact burn rows instead of hiding them as pending calculation.
 - Quota Meter: Session Runway horizontal bars now use relative, lightly animated scaling, so the highest-burn row no longer renders as a static full-width bar.

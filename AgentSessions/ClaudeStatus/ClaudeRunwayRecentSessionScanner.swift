@@ -14,8 +14,6 @@ enum ClaudeRunwayRecentSessionScanner {
     /// promptly once a session stops.
     static let maximumActiveSampleAge: TimeInterval = 15
     static let maximumFiles = 12
-    static let maximumMetadataFiles = 80
-
     static func defaultRoot() -> URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".claude/projects", isDirectory: true)
@@ -48,20 +46,16 @@ enum ClaudeRunwayRecentSessionScanner {
             candidates.append((url, modifiedAt))
         }
 
+        var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool)] = [:]
+        var order: [String] = []
         // Scan recent files, then group by session id so a session's subagent
         // transcripts (which live in <sessionId>/subagents/ and carry the parent
         // session id) fold into the parent: their burn is counted via the extra
         // log path, but the parent's name and a single row win. maximumFiles is
         // applied to distinct sessions, not raw files, so subagents can't crowd
         // out other sessions.
-        let scanned = candidates
-            .sorted { $0.modifiedAt > $1.modifiedAt }
-            .prefix(maximumMetadataFiles)
-            .compactMap { candidate(for: $0.url, now: now) }
-
-        var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool)] = [:]
-        var order: [String] = []
-        for candidate in scanned {
+        for entry in candidates.sorted(by: { $0.modifiedAt > $1.modifiedAt }) {
+            guard let candidate = candidate(for: entry.url, now: now) else { continue }
             if var existing = byID[candidate.id] {
                 existing.logPaths.append(candidate.logPath)
                 // A non-subagent (parent) transcript's name beats a subagent's
@@ -72,6 +66,7 @@ enum ClaudeRunwayRecentSessionScanner {
                 }
                 byID[candidate.id] = existing
             } else {
+                guard order.count < maximumFiles else { continue }
                 order.append(candidate.id)
                 byID[candidate.id] = (candidate.displayName, [candidate.logPath], !candidate.isSubagent)
             }
