@@ -4155,6 +4155,17 @@ private struct HUDLimitsDetailPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
 
+    private var shouldReserveFiveHourProjectionSlot: Bool {
+        guard projectedRunoutEnabled else { return false }
+        return entries.contains { entry in
+            formatUsageProjectionLabel(
+                runoutAt: entry.fiveHourProjectedRunoutAt,
+                observedAt: entry.fiveHourProjectionObservedAt,
+                now: now
+            ) != nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Rectangle()
@@ -4170,7 +4181,7 @@ private struct HUDLimitsDetailPanel: View {
                 }
                 // Grid keeps the "5h:" / "Wk:" columns aligned within a provider row.
                 Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
-                    detailRow(entry: entry)
+                    detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
                 }
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity)
@@ -4192,7 +4203,7 @@ private struct HUDLimitsDetailPanel: View {
     }
 
     @ViewBuilder
-    private func detailRow(entry: HUDLimitsProviderEntry) -> some View {
+    private func detailRow(entry: HUDLimitsProviderEntry, reserveProjectionSlot: Bool) -> some View {
         let fiveUnavail = isResetInfoUnavailable(raw: entry.fiveHourResetText)
         let weekUnavail = isResetInfoUnavailable(raw: entry.weekResetText)
         GridRow {
@@ -4217,13 +4228,20 @@ private struct HUDLimitsDetailPanel: View {
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
                 if projectedRunoutEnabled,
                    let projection = formatUsageProjectionLabel(
-                    runoutAt: entry.fiveHourProjectedRunoutAt,
-                    observedAt: entry.fiveHourProjectionObservedAt,
-                    now: now
+                        runoutAt: entry.fiveHourProjectedRunoutAt,
+                        observedAt: entry.fiveHourProjectionObservedAt,
+                        now: now
                    ) {
                     Text(" \(projection)")
                         .fontWeight(.bold)
                         .foregroundStyle(hudProjectionColor(colorScheme))
+                } else if reserveProjectionSlot {
+                    Text(" ▸18m")
+                        .fontWeight(.bold)
+                        .foregroundStyle(hudProjectionColor(colorScheme))
+                        .opacity(0)
+                        .layoutPriority(-1)
+                        .accessibilityHidden(true)
                 }
             }
             Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
@@ -4278,62 +4296,30 @@ private struct HUDRunwayPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 if snapshot.hasRunwayContent {
                     ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) { index, row in
-                        GridRow {
-                            Text(sessionLabel(row))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .gridColumnAlignment(.leading)
-                            rateCell(quota: row.quotaMinutesPerHour, confidence: row.confidence)
-                                .gridColumnAlignment(.trailing)
-                            HUDRunwayLoadBar(
-                                quotaMinutesPerHour: row.quotaMinutesPerHour,
-                                maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
-                                confidence: row.confidence,
-                                animationTick: animationTick,
-                                index: index
-                            )
-                            .gridColumnAlignment(.leading)
-                        }
+                        runwayRow(row, index: index)
                         .help(rowHelp(row))
                     }
                     if let summary = snapshot.burstSummary {
-                        GridRow {
-                            Text(summaryLabel(summary))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .gridColumnAlignment(.leading)
-                            rateCell(quota: summary.quotaMinutesPerHour, confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting)
-                                .gridColumnAlignment(.trailing)
-                            HUDRunwayLoadBar(
-                                quotaMinutesPerHour: summary.quotaMinutesPerHour,
-                                maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
-                                confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting,
-                                animationTick: animationTick,
-                                index: snapshot.rows.count
-                            )
-                            .gridColumnAlignment(.leading)
-                        }
+                        summaryRow(summary)
                         .help(summaryHelp(summary))
                     }
                 } else {
-                    GridRow {
-                        Text("No active \(agentLabel) burn")
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .foregroundStyle(.secondary)
-                            .gridCellColumns(3)
-                    }
+                    Text("No active \(agentLabel) burn")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+                        .frame(height: HUDRunwayLayout.rowHeight, alignment: .center)
                 }
             }
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
         }
         .foregroundStyle(Color.primary)
         .padding(.horizontal, 10)
-        .padding(.top, 6)
-        .padding(.bottom, 5)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
             Rectangle()
@@ -4358,6 +4344,52 @@ private struct HUDRunwayPanel: View {
             Text(RunwayTimeFormatting.quotaRate(quota, confidence: confidence))
                 .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
         }
+    }
+
+    private func runwayRow(_ row: RunwayPauseImpactRow, index: Int) -> some View {
+        GeometryReader { proxy in
+            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width)
+            HStack(spacing: HUDRunwayLayout.columnSpacing) {
+                Text(sessionLabel(row))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: titleWidth, alignment: .leading)
+                rateCell(quota: row.quotaMinutesPerHour, confidence: row.confidence)
+                    .frame(width: HUDRunwayLayout.rateWidth, alignment: .trailing)
+                HUDRunwayLoadBar(
+                    quotaMinutesPerHour: row.quotaMinutesPerHour,
+                    maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                    confidence: row.confidence,
+                    animationTick: animationTick,
+                    index: index
+                )
+            }
+        }
+        .frame(height: HUDRunwayLayout.rowHeight)
+    }
+
+    private func summaryRow(_ summary: RunwayShortBurstSummary) -> some View {
+        let confidence: RunwayAttributionConfidence = summary.quotaMinutesPerHour > 0 ? .mixed : .waiting
+        return GeometryReader { proxy in
+            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width)
+            HStack(spacing: HUDRunwayLayout.columnSpacing) {
+                Text(summaryLabel(summary))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: titleWidth, alignment: .leading)
+                rateCell(quota: summary.quotaMinutesPerHour, confidence: confidence)
+                    .frame(width: HUDRunwayLayout.rateWidth, alignment: .trailing)
+                HUDRunwayLoadBar(
+                    quotaMinutesPerHour: summary.quotaMinutesPerHour,
+                    maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                    confidence: confidence,
+                    animationTick: animationTick,
+                    index: snapshot.rows.count
+                )
+            }
+        }
+        .frame(height: HUDRunwayLayout.rowHeight)
     }
 
     private func sessionLabel(_ row: RunwayPauseImpactRow) -> String {
@@ -4391,15 +4423,15 @@ private struct HUDRunwayEmptyPanel: View {
     var body: some View {
         HStack(spacing: 0) {
             Text("No active \(agentLabel) burn")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .truncationMode(.middle)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.top, 6)
-        .padding(.bottom, 5)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
             Rectangle()
@@ -4458,8 +4490,22 @@ private struct HUDRunwayLoadBar: View {
             }
         }
         .frame(minWidth: 62, maxWidth: .infinity)
-        .frame(height: 6)
+        .frame(height: 5)
         .accessibilityLabel(RunwayTimeFormatting.quotaRate(quotaMinutesPerHour, confidence: confidence))
+    }
+}
+
+private enum HUDRunwayLayout {
+    static let titleFraction: CGFloat = 2.0 / 3.0
+    static let rateWidth: CGFloat = 42
+    static let minBarWidth: CGFloat = 62
+    static let columnSpacing: CGFloat = 8
+    static let rowHeight: CGFloat = 14
+
+    static func titleWidth(for totalWidth: CGFloat) -> CGFloat {
+        let reservedWidth = rateWidth + minBarWidth + (columnSpacing * 2)
+        let maximumTitleWidth = max(64, totalWidth - reservedWidth)
+        return min(maximumTitleWidth, max(64, totalWidth * titleFraction))
     }
 }
 
