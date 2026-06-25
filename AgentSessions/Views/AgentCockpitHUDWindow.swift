@@ -684,8 +684,24 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             frame.size.width = targetWidth
             frame.size.height = targetHeight
-            frame.origin.y += oldHeight - targetHeight
+            if shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight) {
+                frame.origin.y += oldHeight - targetHeight
+            }
             setWindowFrame(frame, display: true, animate: false)
+        }
+
+        private func shouldGrowLimitsWindowDown(window: NSWindow, targetHeight: CGFloat) -> Bool {
+            guard targetHeight > window.frame.height,
+                  let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+                return true
+            }
+            let frame = window.frame
+            let extraHeight = targetHeight - frame.height
+            let roomBelow = max(0, frame.minY - visibleFrame.minY)
+            let roomAbove = max(0, visibleFrame.maxY - frame.maxY)
+            if roomBelow >= extraHeight { return true }
+            if roomAbove >= extraHeight { return false }
+            return roomBelow >= roomAbove
         }
 
         private func setWindowFrame(_ frame: NSRect, display: Bool, animate: Bool) {

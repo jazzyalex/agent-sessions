@@ -2509,7 +2509,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 21.6, accuracy: 0.001)
     }
 
-    func testCodexRunwayCalculatorHidesSubMinuteImpactRows() {
+    func testCodexRunwayCalculatorKeepsSubMinuteBurnRowsAsNoChange() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let baseline = RunwayProviderBaseline(
             source: .codex,
@@ -2528,8 +2528,46 @@ final class CodexUsageParserTests: XCTestCase {
 
         let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: [tiny], maxRows: 3)
 
-        XCTAssertEqual(snapshot?.rows, [])
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["tiny"])
+        XCTAssertEqual(snapshot?.rows.first?.deadline, .noChange)
+        XCTAssertEqual(snapshot?.rows.first?.gainedSeconds ?? -1, 0, accuracy: 0.001)
+        XCTAssertGreaterThan(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 0)
+        XCTAssertEqual(snapshot?.rows.first?.confidence, .direct)
         XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testCodexRunwayCalculatorSummarizesHiddenSubMinuteBurnRows() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let burns = (1...5).map { index in
+            RunwaySessionBurn(
+                identity: RunwaySessionIdentity(
+                    id: "session-\(index)",
+                    displayName: "session \(index)",
+                    isGoal: false,
+                    logPaths: ["/tmp/session-\(index).jsonl"]
+                ),
+                percentPerSecond: 0.000001 * Double(index),
+                confidence: .direct,
+                sampleStart: now.addingTimeInterval(-120),
+                sampleEnd: now
+            )
+        }
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: burns, maxRows: 4)
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["session-5", "session-4", "session-3", "session-2"])
+        XCTAssertEqual(snapshot?.rows.map(\.deadline), [.noChange, .noChange, .noChange, .noChange])
+        XCTAssertEqual(snapshot?.burstSummary?.count, 1)
+        XCTAssertEqual(snapshot?.burstSummary?.deadline, .noChange)
+        XCTAssertEqual(snapshot?.burstSummary?.gainedSeconds ?? -1, 0, accuracy: 0.001)
+        XCTAssertGreaterThan(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 0)
     }
 
     func testCodexRunwayLoaderUniqueIdentitiesMergePartialHudRowIntoCorrectedParent() {
@@ -2832,7 +2870,7 @@ final class CodexUsageParserTests: XCTestCase {
         )
     }
 
-    func testCodexRunwayRecentSessionScannerIgnoresCompletedRecentLogs() throws {
+    func testCodexRunwayRecentSessionScannerKeepsCompletedRecentLogsDuringGrace() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-complete-\(UUID().uuidString)")
         let now = Date()
         let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
@@ -2851,7 +2889,30 @@ final class CodexUsageParserTests: XCTestCase {
 
         let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
 
-        XCTAssertEqual(identities, [])
+        XCTAssertEqual(identities.first?.id, "session-complete")
+        XCTAssertEqual(identities.first?.displayName, "finished runway repair")
+        XCTAssertEqual(identities.first?.isGoal, false)
+    }
+
+    func testCodexRunwayRecentSessionScannerDiscoversRecentWorkBeforeTokenSamples() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-pre-token-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/06/14", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let log = dir.appendingPathComponent("rollout-test.jsonl")
+        let text = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"session-active","cwd":"/Users/alexm/Repository/Codex-History","originator":"Codex Desktop"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"investigate runway delay"}]}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: log.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.first?.id, "session-active")
+        XCTAssertEqual(identities.first?.displayName, "investigate runway delay")
     }
 
     func testCodexRunwayRecentSessionScannerKeepsRecentCompletedGoalDuringGrace() throws {
@@ -2992,7 +3053,8 @@ final class CodexUsageParserTests: XCTestCase {
             baseline: baseline,
             identities: [identity],
             now: second.addingTimeInterval(1),
-            maxRows: 3
+            maxRows: 3,
+            recentSessionsRoot: dir.appendingPathComponent("empty-sessions", isDirectory: true)
         )
 
         let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
@@ -3030,13 +3092,55 @@ final class CodexUsageParserTests: XCTestCase {
             baseline: baseline,
             identities: [identity],
             now: second.addingTimeInterval(1),
-            maxRows: 3
+            maxRows: 3,
+            recentSessionsRoot: dir.appendingPathComponent("empty-sessions", isDirectory: true)
         )
 
         let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
 
-        XCTAssertEqual(snapshot?.rows, [])
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["session"])
+        XCTAssertEqual(snapshot?.rows.first?.confidence, .waiting)
+        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? -1, 0, accuracy: 0.001)
         XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testCodexRunwayLoaderShowsPendingActiveRowsBeforeBurnRatesArrive() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-loader-pending-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let identities = (1...5).map { index in
+            RunwaySessionIdentity(
+                id: "session-\(index)",
+                displayName: "session \(index)",
+                isGoal: false,
+                logPaths: ["/tmp/no-samples-\(index).jsonl"]
+            )
+        }
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 45,
+            resetAt: reset,
+            currentRunoutAt: now.addingTimeInterval(45 * 60),
+            observedAt: now,
+            hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: identities,
+            now: now,
+            maxRows: 4,
+            recentSessionsRoot: dir.appendingPathComponent("empty-sessions", isDirectory: true)
+        )
+
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["session-1", "session-2", "session-3", "session-4"])
+        XCTAssertEqual(snapshot?.rows.map(\.confidence), [.waiting, .waiting, .waiting, .waiting])
+        XCTAssertEqual(snapshot?.burstSummary?.count, 1)
+        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? -1, 0, accuracy: 0.001)
     }
 
     func testCodexRunwayLoaderPrefersDirectPercentBurnOverTokenAllocation() async throws {
@@ -3066,7 +3170,8 @@ final class CodexUsageParserTests: XCTestCase {
             baseline: baseline,
             identities: [identity],
             now: second.addingTimeInterval(1),
-            maxRows: 3
+            maxRows: 3,
+            recentSessionsRoot: dir.appendingPathComponent("empty-sessions", isDirectory: true)
         )
 
         let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)

@@ -184,6 +184,25 @@ extension PreferencesView {
                 Text("Applies to Codex and Claude usage strips, menu bar reset meters, and the Quota Meter.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                labeledRow("Session Runway") {
+                    Picker("", selection: Binding(
+                        get: { QuotaMeterRunwayVisibility.current(raw: quotaMeterRunwayVisibilityRaw) },
+                        set: { quotaMeterRunwayVisibilityRaw = $0.rawValue }
+                    )) {
+                        ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
+                            Text(visibility.title).tag(visibility)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose when Quota Meter shows the Codex session runway drawer.")
+                }
+
+                labeledRow("Runway EQ") {
+                    Toggle("Show compact EQ", isOn: $quotaMeterRunwayEQEnabled)
+                        .toggleStyle(.checkbox)
+                        .help("Show a tight five-bar EQ strip for active runway burn. The first four bars are top sessions; the fifth combines the rest.")
+                }
             }
 
             // Menu Bar controls moved to the Menu Bar pane

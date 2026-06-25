@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Quota Meter: Session Runway now surfaces active Codex sessions before token burn samples arrive, keeps just-finished sessions visible briefly, and preserves measured low-impact burn rows instead of hiding them as pending calculation.
+- Quota Meter: Session Runway horizontal bars now use the same relative, lightly animated EQ scaling as the top EQ strip, so the highest-burn row no longer renders as a static full-width bar.
+- Quota Meter: Added in-meter Auto, On, and Off controls for the Codex Session Runway drawer, made the optional EQ toggle appear on Quota Meter hover, tightened EQ into a labeled five-bar strip with session abbreviations and burn rates, and changed Session Runway rows to show burn rate plus an unlabeled horizontal load bar for only the top four sessions plus a cumulative others row.
 - Agent Cockpit: Renamed the always-on limits surface to Quota Meter across onboarding, Settings, marketing copy, docs, and assets.
 - Website: Replaced the GitHub Pages landing page with the redesigned product page from the preview, including updated Antigravity positioning, Quota Meter copy, and production download metadata.
 - Providers: Antigravity markdown artifacts in the same conversation now keep distinct session rows while resume/copy actions still use the parent conversation ID, stay visible when low-message filtering is enabled, infer projects from local file links, and local screenshots linked from Antigravity markdown now appear in transcript image handling and the image browser.

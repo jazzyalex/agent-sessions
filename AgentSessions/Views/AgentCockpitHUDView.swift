@@ -3185,11 +3185,95 @@ private struct HUDLimitsProviderEntry {
     let fiveHourProjectionObservedAt: Date?
 }
 
+private extension CodexRunwaySnapshot {
+    var hasRunwayContent: Bool {
+        !rows.isEmpty || burstSummary != nil
+    }
+
+    var runwayVisibleRowCount: Int {
+        rows.count + (burstSummary == nil ? 0 : 1)
+    }
+
+    var runwayPanelRows: Int {
+        if hasRunwayContent {
+            return min(5, runwayVisibleRowCount)
+        }
+        return 1
+    }
+}
+
+private func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?,
+                                             visibility: QuotaMeterRunwayVisibility) -> CodexRunwaySnapshot? {
+    guard let snapshot else { return nil }
+    switch visibility {
+    case .automatic:
+        return snapshot.hasRunwayContent ? snapshot : nil
+    case .alwaysOn:
+        return snapshot
+    case .alwaysOff:
+        return nil
+    }
+}
+
 private struct LimitsRunwayHeightRowsKey: PreferenceKey {
     static let defaultValue = 0
 
     static func reduce(value: inout Int, nextValue: () -> Int) {
         value = max(value, nextValue())
+    }
+}
+
+private enum HUDExpansionDirection {
+    case up
+    case down
+}
+
+private struct HUDWindowExpansionDirectionReader: NSViewRepresentable {
+    let onChange: (HUDExpansionDirection) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { [weak view] in
+            context.coordinator.update(from: view?.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onChange = onChange
+        DispatchQueue.main.async { [weak nsView] in
+            context.coordinator.update(from: nsView?.window)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onChange: onChange)
+    }
+
+    final class Coordinator {
+        var onChange: (HUDExpansionDirection) -> Void
+        private var lastDirection: HUDExpansionDirection?
+
+        init(onChange: @escaping (HUDExpansionDirection) -> Void) {
+            self.onChange = onChange
+        }
+
+        func update(from window: NSWindow?) {
+            guard let window,
+                  let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
+                emit(.up)
+                return
+            }
+            let frame = window.frame
+            let direction: HUDExpansionDirection = frame.midY >= visibleFrame.midY ? .down : .up
+            emit(direction)
+        }
+
+        private func emit(_ direction: HUDExpansionDirection) {
+            guard direction != lastDirection else { return }
+            lastDirection = direction
+            onChange(direction)
+        }
     }
 }
 
@@ -3371,15 +3455,35 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
+    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
     @State private var clockNow = Date()
     @State private var isHovering = false
+    @State private var isHoveringExpandedPanel = false
     @State private var activeVariant: Int = 0
     @State private var runwaySnapshot: CodexRunwaySnapshot?
+    @State private var expansionDirection: HUDExpansionDirection = .up
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
+    private var runwayVisibility: QuotaMeterRunwayVisibility {
+        QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
+    }
 
     private var autoExpandNeeded: Bool {
         activeVariant >= 3 || (activeVariant == 2 && hasActiveProjection)
+    }
+
+    private var visibleRunwaySnapshot: CodexRunwaySnapshot? {
+        quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot, visibility: runwayVisibility)
+    }
+
+    private var visibleEQSnapshot: CodexRunwaySnapshot? {
+        guard runwayEQEnabled,
+              let runwaySnapshot,
+              runwaySnapshot.hasRunwayContent else {
+            return nil
+        }
+        return runwaySnapshot
     }
 
     private var hasActiveProjection: Bool {
@@ -3396,6 +3500,8 @@ private struct HUDLimitsBar: View {
     private var contentRefreshID: String {
         var parts: [String] = [mode.rawValue]
         parts.append(projectedRunoutEnabled ? "projection-on" : "projection-off")
+        parts.append("runway-\(runwayVisibility.rawValue)")
+        parts.append(runwayEQEnabled ? "eq-on" : "eq-off")
         if codexAgentEnabled && codexUsageEnabled {
             parts.append(
                 [
@@ -3480,6 +3586,12 @@ private struct HUDLimitsBar: View {
                     .onPreferenceChange(LimitsBarVariantKey.self) { activeVariant = $0 }
             }
             .onHover { isHovering = $0 }
+            .background(
+                HUDWindowExpansionDirectionReader { direction in
+                    expansionDirection = direction
+                }
+                .allowsHitTesting(false)
+            )
             .onReceive(Self.clockTimer) { clockNow = $0 }
             .onTapGesture(count: 2) {
                 if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
@@ -3490,19 +3602,16 @@ private struct HUDLimitsBar: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if isHovering || autoExpandNeeded {
-                    HUDLimitsExpandedPanel(
-                        entries: entries,
-                        mode: mode,
-                        now: clockNow,
-                        runwaySnapshot: runwaySnapshot
-                    )
-                        .id(contentRefreshID)
-                        .frame(maxWidth: .infinity)
+                if shouldShowExpandedPanel && expansionDirection == .up {
+                    expandedPanel
                         .alignmentGuide(.bottom) { d in d[.bottom] + 22.5 }
-                        .allowsHitTesting(false)
-                        .transition(.opacity.animation(.easeIn(duration: 0.05)))
-                    }
+                }
+            }
+            .overlay(alignment: .top) {
+                if shouldShowExpandedPanel && expansionDirection == .down {
+                    expandedPanel
+                        .alignmentGuide(.top) { d in d[.top] - 22.5 }
+                }
             }
             .task(id: runwayRequestID) {
                 await refreshRunwaySnapshot()
@@ -3511,6 +3620,27 @@ private struct HUDLimitsBar: View {
     }
 
     private static let clockTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    private var shouldShowExpandedPanel: Bool {
+        isHovering || isHoveringExpandedPanel || autoExpandNeeded
+    }
+
+    private var expandedPanel: some View {
+        HUDLimitsExpandedPanel(
+            entries: entries,
+            mode: mode,
+            now: clockNow,
+            runwaySnapshot: visibleRunwaySnapshot,
+            eqSnapshot: visibleEQSnapshot,
+            showsControls: isHovering || isHoveringExpandedPanel
+        )
+        .id(contentRefreshID)
+        .frame(maxWidth: .infinity)
+        .onHover { hovering in
+            isHoveringExpandedPanel = hovering
+        }
+        .transition(.opacity.animation(.easeIn(duration: 0.05)))
+    }
 
     private var runwayRequestID: String {
         runwayRequest?.id ?? "runway-off"
@@ -3527,7 +3657,7 @@ private struct HUDLimitsBar: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             now: clockNow,
-            maxRows: 5
+            maxRows: 4
         )
     }
 
@@ -3580,23 +3710,46 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
+    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
     @State private var clockNow = Date()
     @State private var runwaySnapshot: CodexRunwaySnapshot?
+    @State private var isHovering = false
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
+    private var runwayVisibility: QuotaMeterRunwayVisibility {
+        QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
+    }
 
     private var visibleRunwaySnapshot: CodexRunwaySnapshot? {
-        guard let runwaySnapshot,
-              !runwaySnapshot.rows.isEmpty || runwaySnapshot.burstSummary != nil else {
+        quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot, visibility: runwayVisibility)
+    }
+
+    private var visibleEQSnapshot: CodexRunwaySnapshot? {
+        guard runwayEQEnabled,
+              let runwaySnapshot,
+              runwaySnapshot.hasRunwayContent else {
             return nil
         }
         return runwaySnapshot
     }
 
     private var runwayHeightRows: Int {
-        guard let snapshot = visibleRunwaySnapshot else { return 0 }
-        let visibleRows = snapshot.rows.count + (snapshot.burstSummary == nil ? 0 : 1)
-        return min(8, max(3, visibleRows + 3))
+        var rows = 0
+        if showsRunwayControls {
+            rows += 1
+        }
+        if visibleEQSnapshot != nil {
+            rows += 2
+        }
+        if let snapshot = visibleRunwaySnapshot {
+            rows += snapshot.runwayPanelRows
+        }
+        return min(8, rows)
+    }
+
+    private var showsRunwayControls: Bool {
+        codexAgentEnabled && codexUsageEnabled && isHovering
     }
 
     private var entries: [HUDLimitsProviderEntry] {
@@ -3636,7 +3789,14 @@ private struct HUDLimitsRowsPanel: View {
                 emptyRow
             } else {
                 VStack(spacing: 0) {
-                    if let snapshot = visibleRunwaySnapshot {
+                    if showsRunwayControls {
+                        HUDRunwayControlsPanel()
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.08))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 14)
+                    }
+                    if let snapshot = visibleEQSnapshot {
                         HUDRunwayEQPanel(snapshot: snapshot)
                         Rectangle()
                             .fill(Color.primary.opacity(0.08))
@@ -3664,6 +3824,7 @@ private struct HUDLimitsRowsPanel: View {
         }
         .frame(maxWidth: .infinity)
         .background(Color.primary.opacity(0.025))
+        .onHover { isHovering = $0 }
         .preference(key: LimitsRunwayHeightRowsKey.self, value: runwayHeightRows)
         .onReceive(Self.clockTimer) { clockNow = $0 }
         .onTapGesture(count: 2) {
@@ -3722,7 +3883,7 @@ private struct HUDLimitsRowsPanel: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             now: clockNow,
-            maxRows: 5
+            maxRows: 4
         )
     }
 
@@ -3742,15 +3903,72 @@ private struct HUDLimitsExpandedPanel: View {
     let mode: UsageDisplayMode
     let now: Date
     let runwaySnapshot: CodexRunwaySnapshot?
+    let eqSnapshot: CodexRunwaySnapshot?
+    let showsControls: Bool
+
+    private var showsRunwayControls: Bool {
+        showsControls && entries.contains { $0.source == .codex }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            if showsRunwayControls {
+                HUDRunwayControlsPanel()
+            }
+            if let eqSnapshot {
+                HUDRunwayEQPanel(snapshot: eqSnapshot)
+            }
             HUDLimitsDetailPanel(entries: entries, mode: mode, now: now)
-            if let runwaySnapshot,
-               !runwaySnapshot.rows.isEmpty || runwaySnapshot.burstSummary != nil {
+            if let runwaySnapshot {
                 HUDRunwayPanel(snapshot: runwaySnapshot, now: now)
             }
         }
+    }
+}
+
+private struct HUDRunwayControlsPanel: View {
+    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var runwayVisibility: Binding<QuotaMeterRunwayVisibility> {
+        Binding(
+            get: { QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw) },
+            set: { runwayVisibilityRaw = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Runway")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Picker("", selection: runwayVisibility) {
+                Text("Auto").tag(QuotaMeterRunwayVisibility.automatic)
+                Text("On").tag(QuotaMeterRunwayVisibility.alwaysOn)
+                Text("Off").tag(QuotaMeterRunwayVisibility.alwaysOff)
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.mini)
+            .labelsHidden()
+            .frame(width: 108)
+            .help("Choose when Quota Meter shows the Codex session runway drawer.")
+
+            Spacer(minLength: 0)
+
+            Toggle(isOn: $runwayEQEnabled) {
+                Text("EQ")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .help("Show the five-bar Runway EQ strip.")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.02))
     }
 }
 
@@ -3760,24 +3978,47 @@ private struct HUDRunwayEQPanel: View {
     @State private var animationTick: Int = 0
 
     private static let eqTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
-    private let barHeight: CGFloat = 34
+    private let barHeight: CGFloat = 24
+    private let channelWidth: CGFloat = 34
 
     private var channels: [RunwayEQChannel] {
-        var out = snapshot.rows.prefix(5).map {
+        var out = snapshot.rows.prefix(4).map {
             RunwayEQChannel(
                 id: $0.id,
-                label: shortEQLabel($0.displayName),
+                label: $0.displayName,
                 quotaMinutesPerHour: $0.quotaMinutesPerHour,
-                isOther: false
+                confidence: $0.confidence,
+                isOther: false,
+                isEmpty: false
             )
         }
-        if let summary = snapshot.burstSummary, out.count < 5 {
+
+        let foldedRows = snapshot.rows.dropFirst(4)
+        let foldedRate = foldedRows.reduce(0) { $0 + $1.quotaMinutesPerHour }
+            + (snapshot.burstSummary?.quotaMinutesPerHour ?? 0)
+        let foldedCount = foldedRows.count + (snapshot.burstSummary?.count ?? 0)
+        if foldedCount > 0 {
             out.append(
                 RunwayEQChannel(
-                    id: "other-\(summary.count)",
+                    id: "other-\(foldedCount)",
                     label: "other",
-                    quotaMinutesPerHour: summary.quotaMinutesPerHour,
-                    isOther: true
+                    quotaMinutesPerHour: foldedRate,
+                    confidence: foldedRate > 0 ? .mixed : .waiting,
+                    isOther: true,
+                    isEmpty: false
+                )
+            )
+        }
+
+        while out.count < 5 {
+            out.append(
+                RunwayEQChannel(
+                    id: "empty-\(out.count)",
+                    label: "empty",
+                    quotaMinutesPerHour: 0,
+                    confidence: .unsupported,
+                    isOther: false,
+                    isEmpty: true
                 )
             )
         }
@@ -3785,36 +4026,46 @@ private struct HUDRunwayEQPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Runway EQ")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        HStack(alignment: .center, spacing: 8) {
+            Text("EQ")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
-            HStack(alignment: .bottom, spacing: 10) {
+                .frame(width: 18, alignment: .leading)
+            HStack(alignment: .bottom, spacing: 6) {
                 ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
-                    VStack(spacing: 3) {
+                    VStack(spacing: 2) {
                         ZStack(alignment: .bottom) {
-                            Rectangle()
-                                .fill(Color.primary.opacity(0.07))
-                                .frame(width: 18, height: barHeight)
-                            Rectangle()
-                                .fill(channelColor.opacity(channel.isOther ? 0.55 : 0.86))
-                                .frame(width: 18, height: currentHeight(for: channel, index: index))
+                            Capsule()
+                                .fill(Color.primary.opacity(0.08))
+                                .frame(width: 8, height: barHeight)
+                            Capsule()
+                                .fill(channelColor.opacity(channelOpacity(channel)))
+                                .frame(width: 8, height: currentHeight(for: channel, index: index))
                                 .animation(.easeInOut(duration: 0.28), value: animationTick)
                         }
-                        Text(channel.label)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                        .frame(width: 12, height: barHeight)
+
+                        Text(channel.shortCode)
+                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(channel.isEmpty ? Color.secondary.opacity(0.45) : Color.primary.opacity(0.78))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.65)
-                            .frame(maxWidth: .infinity)
+                            .minimumScaleFactor(0.8)
+
+                        Text(channel.compactRate)
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(channel.isEmpty ? Color.secondary.opacity(0.35) : hudProjectionColor(colorScheme))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
                     }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel("\(channel.label), \(RunwayTimeFormatting.quotaRate(channel.quotaMinutesPerHour))")
+                    .frame(width: channelWidth)
+                    .accessibilityLabel("\(channel.label), \(channel.compactRate)")
+                    .help("\(channel.label): \(channel.compactRate)")
                 }
             }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(colorScheme == .dark ? 0.025 : 0.015))
         .onReceive(Self.eqTimer) { _ in
@@ -3831,32 +4082,61 @@ private struct HUDRunwayEQPanel: View {
     }
 
     private func currentHeight(for channel: RunwayEQChannel, index: Int) -> CGFloat {
+        guard !channel.isEmpty else { return 0 }
         let relative = channel.quotaMinutesPerHour / maxQuotaMinutesPerHour
         let absolutePressure = min(1, channel.quotaMinutesPerHour / 45)
-        let base = max(0.08, (relative * 0.55) + (absolutePressure * 0.35))
+        let base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
         let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
         return max(3, barHeight * CGFloat(min(1, base * wave)))
     }
 
-    private func shortEQLabel(_ name: String) -> String {
-        let collapsed = name
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        let first = collapsed
-            .split(whereSeparator: { $0 == "-" || $0 == "/" || $0 == ":" })
-            .first
-            .map(String.init) ?? collapsed
-        let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = trimmed.isEmpty ? collapsed : trimmed
-        guard source.count > 5 else { return source.lowercased() }
-        return String(source.prefix(5)).lowercased()
+    private func channelOpacity(_ channel: RunwayEQChannel) -> Double {
+        if channel.isEmpty { return 0 }
+        return channel.isOther ? 0.55 : 0.86
     }
 
     private struct RunwayEQChannel {
         let id: String
         let label: String
         let quotaMinutesPerHour: Double
+        let confidence: RunwayAttributionConfidence
         let isOther: Bool
+        let isEmpty: Bool
+
+        var shortCode: String {
+            if isEmpty { return "---" }
+            if isOther { return "OTH" }
+            return Self.shortCode(for: label)
+        }
+
+        var compactRate: String {
+            guard !isEmpty else { return "--" }
+            guard confidence != .waiting else { return "calc" }
+            guard quotaMinutesPerHour.isFinite, quotaMinutesPerHour >= 0.5 else { return "flat" }
+            return "\(Int(ceil(quotaMinutesPerHour)))m/h"
+        }
+
+        private static func shortCode(for label: String) -> String {
+            let cleaned = label
+                .uppercased()
+                .map { character -> Character in
+                    character.isLetter || character.isNumber ? character : " "
+                }
+            let words = String(cleaned)
+                .split(separator: " ")
+                .map(String.init)
+            guard !words.isEmpty else { return "COD" }
+            var code = ""
+            for word in words {
+                let needed = 3 - code.count
+                guard needed > 0 else { break }
+                code += String(word.prefix(needed))
+            }
+            if code.count < 3 {
+                code += String(repeating: "X", count: 3 - code.count)
+            }
+            return code
+        }
     }
 }
 
@@ -3968,28 +4248,67 @@ private struct HUDRunwayPanel: View {
     let snapshot: CodexRunwaySnapshot
     let now: Date
     @Environment(\.colorScheme) private var colorScheme
+    @State private var animationTick: Int = 0
+
+    private static let eqTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
+
+    private var maxQuotaMinutesPerHour: Double {
+        let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
+        let summaryMax = snapshot.burstSummary?.quotaMinutesPerHour ?? 0
+        return max(1, rowMax, summaryMax)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
-                ForEach(snapshot.rows) { row in
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                if snapshot.hasRunwayContent {
+                    ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) { index, row in
+                        GridRow {
+                            Text(sessionLabel(row))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .gridColumnAlignment(.leading)
+                            Text(RunwayTimeFormatting.quotaRate(row.quotaMinutesPerHour, confidence: row.confidence))
+                                .foregroundStyle(row.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
+                                .gridColumnAlignment(.trailing)
+                            HUDRunwayLoadBar(
+                                quotaMinutesPerHour: row.quotaMinutesPerHour,
+                                maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                                confidence: row.confidence,
+                                animationTick: animationTick,
+                                index: index
+                            )
+                            .gridColumnAlignment(.leading)
+                        }
+                        .help(rowHelp(row))
+                    }
+                    if let summary = snapshot.burstSummary {
+                        GridRow {
+                            Text(summaryLabel(summary))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .gridColumnAlignment(.leading)
+                            Text(RunwayTimeFormatting.quotaRate(summary.quotaMinutesPerHour, confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting))
+                                .foregroundStyle(summary.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
+                                .gridColumnAlignment(.trailing)
+                            HUDRunwayLoadBar(
+                                quotaMinutesPerHour: summary.quotaMinutesPerHour,
+                                maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                                confidence: summary.quotaMinutesPerHour > 0 ? .mixed : .waiting,
+                                animationTick: animationTick,
+                                index: snapshot.rows.count
+                            )
+                            .gridColumnAlignment(.leading)
+                        }
+                        .help(summaryHelp(summary))
+                    }
+                } else {
                     GridRow {
-                        Text(sessionLabel(row))
+                        Text("No active Codex burn")
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .gridColumnAlignment(.leading)
-                        Text(RunwayTimeFormatting.quotaRate(row.quotaMinutesPerHour))
-                            .foregroundStyle(row.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
-                            .gridColumnAlignment(.trailing)
-                    }
-                }
-                if let summary = snapshot.burstSummary {
-                    GridRow {
-                        Text("+\(summary.count) bursts")
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Text(RunwayTimeFormatting.quotaRate(summary.quotaMinutesPerHour))
-                            .foregroundStyle(summary.quotaMinutesPerHour > 0 ? hudProjectionColor(colorScheme) : .secondary)
+                            .gridCellColumns(3)
                     }
                 }
             }
@@ -4006,20 +4325,97 @@ private struct HUDRunwayPanel: View {
                 .frame(height: 0.5)
         }
         .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: -3)
+        .onReceive(Self.eqTimer) { _ in
+            animationTick = (animationTick + 1) % 1024
+        }
     }
 
     private func sessionLabel(_ row: RunwayPauseImpactRow) -> String {
         row.isGoal ? "GOAL \(row.displayName)" : row.displayName
+    }
+
+    private func rowHelp(_ row: RunwayPauseImpactRow) -> String {
+        if row.confidence == .waiting {
+            return "Burn rate is calculating for this active session."
+        }
+        return "Pausing this session is estimated to add \(RunwayTimeFormatting.gain(row.gainedSeconds)) of 5h runway."
+    }
+
+    private func summaryLabel(_ summary: RunwayShortBurstSummary) -> String {
+        summary.quotaMinutesPerHour > 0 ? "+\(summary.count) bursts" : "+\(summary.count) sessions"
+    }
+
+    private func summaryHelp(_ summary: RunwayShortBurstSummary) -> String {
+        if summary.quotaMinutesPerHour <= 0 {
+            return "Burn rate is calculating for these active sessions."
+        }
+        return "Combined short-session burn. Pausing them is estimated to add \(RunwayTimeFormatting.gain(summary.gainedSeconds)) of 5h runway."
+    }
+}
+
+private struct HUDRunwayLoadBar: View {
+    let quotaMinutesPerHour: Double
+    let maxQuotaMinutesPerHour: Double
+    let confidence: RunwayAttributionConfidence
+    let animationTick: Int
+    let index: Int
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var fillFraction: CGFloat {
+        guard quotaMinutesPerHour.isFinite,
+              quotaMinutesPerHour >= 0,
+              maxQuotaMinutesPerHour.isFinite,
+              maxQuotaMinutesPerHour > 0 else {
+            return 0
+        }
+        let relative = quotaMinutesPerHour / maxQuotaMinutesPerHour
+        let absolutePressure = min(1, quotaMinutesPerHour / 45)
+        let base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
+        let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
+        return CGFloat(min(1, max(0.04, base * wave)))
+    }
+
+    private var fillOpacity: Double {
+        switch confidence {
+        case .waiting:
+            return 0.38
+        case .unsupported:
+            return 0
+        case .direct, .mixed:
+            return 0.82
+        }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(hudProjectionColor(colorScheme).opacity(fillOpacity))
+                    .frame(width: max(0, proxy.size.width * fillFraction))
+                    .animation(.easeInOut(duration: 0.28), value: animationTick)
+            }
+        }
+        .frame(minWidth: 62, maxWidth: .infinity)
+        .frame(height: 6)
+        .accessibilityLabel(RunwayTimeFormatting.quotaRate(quotaMinutesPerHour, confidence: confidence))
     }
 }
 
 private enum RunwayTimeFormatting {
     static let minimumVisibleGain: TimeInterval = 60
 
-    static func quotaRate(_ minutesPerHour: Double) -> String {
+    static func quotaRate(_ minutesPerHour: Double, confidence: RunwayAttributionConfidence = .mixed) -> String {
+        guard confidence != .waiting else { return "calc" }
         guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "flat" }
         let rounded = Int(ceil(minutesPerHour))
         return "\(rounded)m/h"
+    }
+
+    static func gain(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= minimumVisibleGain else { return "-" }
+        return "+\(compactDuration(seconds))"
     }
 
     static func compactDuration(_ seconds: TimeInterval) -> String {

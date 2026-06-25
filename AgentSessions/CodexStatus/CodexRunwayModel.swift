@@ -100,6 +100,19 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     let identities: [RunwaySessionIdentity]
     let now: Date
     let maxRows: Int
+    let recentSessionsRoot: URL?
+
+    init(baseline: RunwayProviderBaseline,
+         identities: [RunwaySessionIdentity],
+         now: Date,
+         maxRows: Int,
+         recentSessionsRoot: URL? = nil) {
+        self.baseline = baseline
+        self.identities = identities
+        self.now = now
+        self.maxRows = maxRows
+        self.recentSessionsRoot = recentSessionsRoot
+    }
 
     var id: String {
         let identityKey = identities.map {
@@ -114,6 +127,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
             baseline.currentRunoutAt.timeIntervalSinceReferenceDate.description,
             baseline.observedAt.timeIntervalSinceReferenceDate.description,
             "\(maxRows)",
+            recentSessionsRoot?.path ?? "",
             "\(refreshBucket)",
             identityKey
         ].joined(separator: "||")
@@ -124,9 +138,11 @@ enum CodexRunwaySnapshotLoader {
     static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                let identities = uniqueIdentities(
-                    request.identities + CodexRunwayRecentSessionScanner.identities(now: request.now)
+                let scannerIdentities = CodexRunwayRecentSessionScanner.identities(
+                    root: request.recentSessionsRoot,
+                    now: request.now
                 )
+                let identities = uniqueIdentities(request.identities + scannerIdentities)
                 let directBurns = identities.compactMap {
                     CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
                 }
@@ -138,9 +154,14 @@ enum CodexRunwaySnapshotLoader {
                     )
                     : []
                 let burns = mergeBurns(directBurns: directBurns, tokenBurns: tokenBurns)
-                let snapshot = CodexRunwayCalculator.snapshot(
+                let snapshot = snapshotWithPendingRows(
                     baseline: request.baseline,
-                    burns: burns,
+                    snapshot: CodexRunwayCalculator.snapshot(
+                        baseline: request.baseline,
+                        burns: burns,
+                        maxRows: request.maxRows
+                    ),
+                    activeIdentities: identities,
                     maxRows: request.maxRows
                 )
                 continuation.resume(returning: snapshot)
@@ -250,6 +271,45 @@ enum CodexRunwaySnapshotLoader {
         }
         return directBurns + indirectBurns
     }
+
+    private static func snapshotWithPendingRows(baseline: RunwayProviderBaseline,
+                                                snapshot: CodexRunwaySnapshot?,
+                                                activeIdentities: [RunwaySessionIdentity],
+                                                maxRows: Int) -> CodexRunwaySnapshot? {
+        guard maxRows > 0 else { return snapshot }
+        let existing = snapshot ?? CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
+        let representedIDs = Set(existing.rows.map(\.id))
+        let pendingIdentities = activeIdentities.filter { !representedIDs.contains($0.id) }
+        guard !pendingIdentities.isEmpty else { return existing }
+
+        let openSlots = max(0, maxRows - existing.rows.count)
+        let pendingRows = pendingIdentities.prefix(openSlots).map { identity in
+            RunwayPauseImpactRow(
+                id: identity.id,
+                displayName: identity.displayName,
+                isGoal: identity.isGoal,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: 0,
+                confidence: .waiting
+            )
+        }
+        let hiddenPendingCount = max(0, pendingIdentities.count - pendingRows.count)
+        let pendingSummary: RunwayShortBurstSummary? = hiddenPendingCount > 0
+            ? RunwayShortBurstSummary(
+                count: hiddenPendingCount,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: 0
+            )
+            : nil
+
+        return CodexRunwaySnapshot(
+            baseline: existing.baseline,
+            rows: existing.rows + pendingRows,
+            burstSummary: existing.burstSummary ?? pendingSummary
+        )
+    }
 }
 
 enum CodexRunwayCalculator {
@@ -323,10 +383,12 @@ enum CodexRunwayCalculator {
         }
 
         let pressureImpacts = impacts
-            .filter { $0.row.gainedSeconds >= minimumDisplayedGain }
             .sorted { lhs, rhs in
                 if lhs.row.gainedSeconds != rhs.row.gainedSeconds {
                     return lhs.row.gainedSeconds > rhs.row.gainedSeconds
+                }
+                if lhs.normalizedRate != rhs.normalizedRate {
+                    return lhs.normalizedRate > rhs.normalizedRate
                 }
                 if lhs.row.isGoal != rhs.row.isGoal {
                     return lhs.row.isGoal && !rhs.row.isGoal
@@ -379,11 +441,10 @@ enum CodexRunwayCalculator {
             remainingRate: max(0, providerRate - hiddenRate)
         )
         let gained = gainedSeconds(baseline: baseline, deadline: deadline)
-        guard gained >= minimumDisplayedGain else { return nil }
         return RunwayShortBurstSummary(
             count: impacts.count,
-            deadline: deadline,
-            gainedSeconds: gained,
+            deadline: gained < minimumDisplayedGain ? .noChange : deadline,
+            gainedSeconds: gained < minimumDisplayedGain ? 0 : gained,
             quotaMinutesPerHour: impacts.reduce(0) { $0 + $1.row.quotaMinutesPerHour }
         )
     }
@@ -732,9 +793,7 @@ enum CodexRunwayRecentSessionScanner {
                 latestCompletionAt = capturedAt ?? now
                 continue
             }
-            if string(payload["type"]) == "token_count"
-                || payload["rate_limits"] != nil
-                || obj["rate_limits"] != nil {
+            if isWorkSample(obj: obj, payload: payload) {
                 latestWorkSampleAt = capturedAt ?? now
                 break
             }
@@ -744,9 +803,24 @@ enum CodexRunwayRecentSessionScanner {
         guard workAge <= maximumActiveSampleAge else { return false }
         if let latestCompletionAt,
            latestCompletionAt >= latestWorkSampleAt {
-            return isGoal && now.timeIntervalSince(latestCompletionAt) <= maximumGoalCompletionGrace
+            return now.timeIntervalSince(latestCompletionAt) <= maximumGoalCompletionGrace
         }
         return true
+    }
+
+    private static func isWorkSample(obj: [String: Any], payload: [String: Any]) -> Bool {
+        if string(payload["type"]) == "token_count"
+            || payload["rate_limits"] != nil
+            || obj["rate_limits"] != nil {
+            return true
+        }
+
+        let envelopeType = string(obj["type"])
+        let payloadType = string(payload["type"])
+        if envelopeType == "response_item" || envelopeType == "event_msg" || envelopeType == "turn_context" {
+            return payloadType != "task_complete"
+        }
+        return payloadType == "message"
     }
 
     private static func metadata(from url: URL) -> SessionMetadata {

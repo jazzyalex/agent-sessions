@@ -64,3 +64,28 @@ enum UsageDisplayMode: String, CaseIterable, Identifiable {
         return Self.clamp(100 - left)
     }
 }
+
+enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
+    case automatic = "auto"
+    case alwaysOn = "always_on"
+    case alwaysOff = "always_off"
+
+    static let storageKey = PreferencesKey.quotaMeterRunwayVisibility
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic:
+            return "Auto"
+        case .alwaysOn:
+            return "Always On"
+        case .alwaysOff:
+            return "Always Off"
+        }
+    }
+
+    static func current(raw: String) -> QuotaMeterRunwayVisibility {
+        QuotaMeterRunwayVisibility(rawValue: raw) ?? .automatic
+    }
+}
