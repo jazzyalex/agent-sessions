@@ -3,9 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Quota Meter: Session Runway now trims the drawer to the measured session-row height and no longer paints a separate darker bottom band below the last visible session.
 - Quota Meter: Session Runway now surfaces active Codex sessions before token burn samples arrive, keeps just-finished sessions visible briefly, and preserves measured low-impact burn rows instead of hiding them as pending calculation.
-- Quota Meter: Session Runway horizontal bars now use the same relative, lightly animated EQ scaling as the top EQ strip, so the highest-burn row no longer renders as a static full-width bar.
-- Quota Meter: Added in-meter Auto, On, and Off controls for the Codex Session Runway drawer, made the optional EQ toggle appear on Quota Meter hover, tightened EQ into a labeled five-bar strip with session abbreviations and burn rates, and changed Session Runway rows to show burn rate plus an unlabeled horizontal load bar for only the top four sessions plus a cumulative others row.
+- Quota Meter: Session Runway horizontal bars now use relative, lightly animated scaling, so the highest-burn row no longer renders as a static full-width bar.
+- Quota Meter: Replaced the in-meter Session Runway controls with a toolbar Runway selector pill (Auto/On/Off) that opens a popover, converted the cockpit view switcher (Full/Compact/Quota Meter) to a matching popover pill to free toolbar space, made "On" surface a real active-session row when one exists (and a "No active Codex burn" placeholder otherwise), removed the separate EQ strip, and kept the animated burn visualization inline with each runway row.
 - Agent Cockpit: Renamed the always-on limits surface to Quota Meter across onboarding, Settings, marketing copy, docs, and assets.
 - Website: Replaced the GitHub Pages landing page with the redesigned product page from the preview, including updated Antigravity positioning, Quota Meter copy, and production download metadata.
 - Providers: Antigravity markdown artifacts in the same conversation now keep distinct session rows while resume/copy actions still use the parent conversation ID, stay visible when low-message filtering is enabled, infer projects from local file links, and local screenshots linked from Antigravity markdown now appear in transcript image handling and the image browser.
@@ -28,8 +29,8 @@ All notable changes to this project will be documented in this file.
 - Unified Window: `#side` searches now ignore the archived-only Codex toggle so recovered side-chat rows stay visible even when archive filtering is enabled.
 - Unified Window: Side-chat recovery now preserves request-only side prompts as searchable titles and refreshes active `#side` search results when side-chat rows arrive later in indexing.
 - Unified Window: Codex side chats can now be recovered from Codex Desktop logs as searchable side-chat rows with readable transcripts and a distinct `side` badge, without labeling them as subagents.
-- Agent Cockpit: Added Runway EQ above the Quota Meter and a compact Runway detail below it, showing the top active Codex sessions by recent quota burn without changing the existing Quota Meter rows; Runway now stays available during reset-first 5h windows when active session burn exists.
-- Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation, fallback reset clocks no longer produce synthetic burn rates, and the EQ avoids blanking between refreshes.
+- Agent Cockpit: Added a compact Runway detail below the Quota Meter, showing the top active Codex sessions by recent quota burn without changing the existing Quota Meter rows; Runway now stays available during reset-first 5h windows when active session burn exists.
+- Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation and fallback reset clocks no longer produce synthetic burn rates.
 - Agent Cockpit: Runway session labels now prefer Codex app/indexed titles and CLI `/rename` names before falling back to the first prompt, tab title, or project directory, and recent Codex subagent logs now roll up under their parent session instead of appearing as duplicate Runway consumers.
 - Agent Cockpit: Runway now keeps the current worktree session identity when Codex logs embed source-session metadata, and nested subagent burn rolls into the worktree parent instead of creating duplicate rows.
 

@@ -88,7 +88,6 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.stripMonochromeMeters) var stripMonochromeGlobal: Bool = false
     @AppStorage(PreferencesKey.usageDisplayMode) var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) var quotaMeterRunwayVisibilityRaw: String = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) var quotaMeterRunwayEQEnabled: Bool = false
     @AppStorage(PreferencesKey.usageLimitNotificationsEnabled) var usageLimitNotificationsEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationVisualEnabled) var usageLimitNotificationVisualEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationSoundEnabled) var usageLimitNotificationSoundEnabled: Bool = true
@@ -758,7 +757,6 @@ struct PreferencesView: View {
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
         quotaMeterRunwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-        quotaMeterRunwayEQEnabled = false
 
         // Reset usage strip preferences
         UserDefaults.standard.set(false, forKey: PreferencesKey.showClaudeUsageStrip)

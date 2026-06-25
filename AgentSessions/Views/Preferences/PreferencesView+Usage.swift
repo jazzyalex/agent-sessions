@@ -197,12 +197,6 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .help("Choose when Quota Meter shows the Codex session runway drawer.")
                 }
-
-                labeledRow("Runway EQ") {
-                    Toggle("Show compact EQ", isOn: $quotaMeterRunwayEQEnabled)
-                        .toggleStyle(.checkbox)
-                        .help("Show a tight five-bar EQ strip for active runway burn. The first four bars are top sessions; the fifth combines the rest.")
-                }
             }
 
             // Menu Bar controls moved to the Menu Bar pane

@@ -85,6 +85,30 @@ enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Compact label for the toolbar pill and segmented control.
+    var shortLabel: String {
+        switch self {
+        case .automatic:
+            return "Auto"
+        case .alwaysOn:
+            return "On"
+        case .alwaysOff:
+            return "Off"
+        }
+    }
+
+    /// One-line explanation shown under the selector for the active option.
+    var detail: String {
+        switch self {
+        case .automatic:
+            return "Shows the session runway only when it’s running low."
+        case .alwaysOn:
+            return "Always shows the session runway drawer."
+        case .alwaysOff:
+            return "Hides the session runway drawer."
+        }
+    }
+
     static func current(raw: String) -> QuotaMeterRunwayVisibility {
         QuotaMeterRunwayVisibility(rawValue: raw) ?? .automatic
     }

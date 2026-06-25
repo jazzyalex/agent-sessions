@@ -196,6 +196,15 @@ enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Compact label for the toolbar pill (full names live in the popover).
+    var shortLabel: String {
+        switch self {
+        case .full: return "Full"
+        case .compact: return "Compact"
+        case .limits: return "Meter"
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .full: return "rectangle.split.3x1"
@@ -588,7 +597,7 @@ struct AgentCockpitHUDView: View {
     @State private var manuallyExpandedStaleProjects: Set<String> = []
     @State private var presentationState: HUDPresentationState = .empty
     @StateObject private var derivedState: AgentCockpitHUDDerivedStateModel
-    @State private var limitsRunwayHeightRows: Int = 0
+    @State private var limitsContentHeight: CGFloat = 30
     @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
@@ -636,18 +645,18 @@ struct AgentCockpitHUDView: View {
         hudDisplayMode == .limits
     }
 
-    private var limitsRowCount: Int {
-        var count = 0
-        if codexAgentEnabledForLimits && codexUsageEnabledForLimits { count += 1 }
-        if claudeAgentEnabledForLimits && claudeUsageEnabledForLimits { count += 1 }
-        let runwayRows = isLimitsOnly ? limitsRunwayHeightRows : 0
-        return max(1, min(count + runwayRows, 9))
+    private var measuredLimitsContentHeight: CGFloat {
+        guard isLimitsOnly else { return 30 }
+        return max(30, limitsContentHeight)
     }
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabledForLimits: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabledForLimits: Bool = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
+    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @State private var showRunwayPopover = false
+    @State private var showModePopover = false
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
@@ -825,8 +834,9 @@ struct AgentCockpitHUDView: View {
         .onHover { hovering in
             handleCompactWindowHoverChange(hovering)
         }
-        .onPreferenceChange(LimitsRunwayHeightRowsKey.self) { rows in
-            limitsRunwayHeightRows = rows
+        .onPreferenceChange(LimitsContentHeightKey.self) { height in
+            guard height.isFinite, height > 0 else { return }
+            limitsContentHeight = height
         }
         .applyIf(isCompact) { view in
             view.ignoresSafeArea(.container, edges: .top)
@@ -854,7 +864,7 @@ struct AgentCockpitHUDView: View {
                 shownSessionCount: displayState.shownSessionCount,
                 isCompact: isCompact,
                 isLimitsOnly: isLimitsOnly,
-                limitsRowCount: limitsRowCount,
+                limitsContentHeight: measuredLimitsContentHeight,
                 activeEnabled: activeEnabled,
                 compactToolbarVisible: showsCompactToolbar,
                 groupByProject: groupByProject,
@@ -1073,14 +1083,29 @@ struct AgentCockpitHUDView: View {
                         HStack(spacing: 6) {
                             cockpitOpenButton
                             cockpitModePicker
+                            if runwayControlAvailable {
+                                cockpitRunwayButton
+                            }
                             cockpitSettingsButton
                             cockpitPinButton
                         }
                         .fixedSize(horizontal: true, vertical: false)
 
                         HStack(spacing: 6) {
-                            cockpitOpenButton
                             cockpitModePicker
+                            if runwayControlAvailable {
+                                cockpitRunwayButton
+                            }
+                            cockpitSettingsButton
+                            cockpitPinButton
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+
+                        HStack(spacing: 6) {
+                            cockpitModePicker
+                            if runwayControlAvailable {
+                                cockpitRunwayButton
+                            }
                             cockpitPinButton
                         }
                         .fixedSize(horizontal: true, vertical: false)
@@ -1158,26 +1183,32 @@ struct AgentCockpitHUDView: View {
     }
 
     private var cockpitModePicker: some View {
-        Picker("", selection: Binding(
-            get: { hudDisplayModeRaw },
-            set: { raw in
-                guard let mode = AgentCockpitHUDDisplayMode(rawValue: raw) else { return }
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    setHUDDisplayMode(mode)
-                }
-            }
-        )) {
-            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
-                Label(mode.title, systemImage: mode.systemImage)
-                    .labelStyle(.iconOnly)
-                    .tag(mode.rawValue)
+        let mode = AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full
+        return Button {
+            showModePopover.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: mode.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(mode.shortLabel)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .opacity(0.6)
             }
         }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .frame(width: 86)
-        .help("Switch Agent Cockpit mode: Full, Compact, or Quota Meter.")
+        .buttonStyle(HUDIconButtonStyle(isOn: showModePopover, tint: nil))
+        .help("Switch Agent Cockpit view: Full, Compact, or Quota Meter.")
+        .popover(isPresented: $showModePopover, arrowEdge: .bottom) {
+            HUDCockpitModePopover(
+                selectedRaw: hudDisplayModeRaw,
+                onSelect: { selected in
+                    showModePopover = false
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        setHUDDisplayMode(selected)
+                    }
+                }
+            )
+        }
     }
 
     private var cockpitSettingsButton: some View {
@@ -1204,6 +1235,32 @@ struct AgentCockpitHUDView: View {
         }
         .buttonStyle(HUDIconButtonStyle(isOn: isPinned, tint: isPinned ? .orange : nil))
         .help(isPinned ? "Unpin — stop keeping on top" : "Pin — keep above all windows")
+    }
+
+    private var runwayControlAvailable: Bool {
+        codexAgentEnabledForLimits && codexUsageEnabledForLimits
+    }
+
+    private var cockpitRunwayButton: some View {
+        let visibility = QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
+        let isForced = visibility != .automatic
+        return Button {
+            showRunwayPopover.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.swap")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(visibility.shortLabel)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .opacity(0.6)
+            }
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: isForced, tint: nil))
+        .help("Runway drawer: choose when the Codex session runway appears.")
+        .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
+            HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
+        }
     }
 
     private func limitsCounterPill(color: Color, count: Int, help: String) -> some View {
@@ -3215,10 +3272,10 @@ private func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?
     }
 }
 
-private struct LimitsRunwayHeightRowsKey: PreferenceKey {
-    static let defaultValue = 0
+private struct LimitsContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
 
-    static func reduce(value: inout Int, nextValue: () -> Int) {
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }
 }
@@ -3401,10 +3458,13 @@ enum HUDRunwayRequestBuilder {
                         fiveHourProjectedRunoutAt: Date?,
                         fiveHourProjectionObservedAt: Date?,
                         now: Date,
-                        maxRows: Int) -> CodexRunwaySnapshotRequest? {
+                        maxRows: Int,
+                        forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
+        // When the user forces the drawer on, build the request even at 0%
+        // remaining so any active session still shows a real runway row.
         guard codexAgentEnabled,
               codexUsageEnabled,
-              fiveHourRemainingPercent > 0,
+              forceVisible || fiveHourRemainingPercent > 0,
               let resetAt = UsageResetText.resetDate(
                 kind: "5h",
                 source: .codex,
@@ -3456,7 +3516,6 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
     @State private var clockNow = Date()
     @State private var isHovering = false
     @State private var isHoveringExpandedPanel = false
@@ -3477,15 +3536,6 @@ private struct HUDLimitsBar: View {
         quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot, visibility: runwayVisibility)
     }
 
-    private var visibleEQSnapshot: CodexRunwaySnapshot? {
-        guard runwayEQEnabled,
-              let runwaySnapshot,
-              runwaySnapshot.hasRunwayContent else {
-            return nil
-        }
-        return runwaySnapshot
-    }
-
     private var hasActiveProjection: Bool {
         guard projectedRunoutEnabled else { return false }
         return entries.contains { entry in
@@ -3501,7 +3551,6 @@ private struct HUDLimitsBar: View {
         var parts: [String] = [mode.rawValue]
         parts.append(projectedRunoutEnabled ? "projection-on" : "projection-off")
         parts.append("runway-\(runwayVisibility.rawValue)")
-        parts.append(runwayEQEnabled ? "eq-on" : "eq-off")
         if codexAgentEnabled && codexUsageEnabled {
             parts.append(
                 [
@@ -3631,8 +3680,7 @@ private struct HUDLimitsBar: View {
             mode: mode,
             now: clockNow,
             runwaySnapshot: visibleRunwaySnapshot,
-            eqSnapshot: visibleEQSnapshot,
-            showsControls: isHovering || isHoveringExpandedPanel
+            forceEmptyDrawer: runwayVisibility == .alwaysOn && visibleRunwaySnapshot == nil
         )
         .id(contentRefreshID)
         .frame(maxWidth: .infinity)
@@ -3657,7 +3705,8 @@ private struct HUDLimitsBar: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             now: clockNow,
-            maxRows: 4
+            maxRows: 4,
+            forceVisible: runwayVisibility == .alwaysOn
         )
     }
 
@@ -3680,7 +3729,8 @@ private struct HUDLimitsBar: View {
                               fiveHourProjectedRunoutAt: Date?,
                               fiveHourProjectionObservedAt: Date?,
                               now: Date,
-                              maxRows: Int) -> CodexRunwaySnapshotRequest? {
+                              maxRows: Int,
+                              forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
         HUDRunwayRequestBuilder.request(
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
@@ -3691,7 +3741,8 @@ private struct HUDLimitsBar: View {
             fiveHourProjectedRunoutAt: fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: fiveHourProjectionObservedAt,
             now: now,
-            maxRows: maxRows
+            maxRows: maxRows,
+            forceVisible: forceVisible
         )
     }
 
@@ -3711,7 +3762,6 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
     @State private var clockNow = Date()
     @State private var runwaySnapshot: CodexRunwaySnapshot?
     @State private var isHovering = false
@@ -3723,33 +3773,6 @@ private struct HUDLimitsRowsPanel: View {
 
     private var visibleRunwaySnapshot: CodexRunwaySnapshot? {
         quotaMeterVisibleRunwaySnapshot(from: runwaySnapshot, visibility: runwayVisibility)
-    }
-
-    private var visibleEQSnapshot: CodexRunwaySnapshot? {
-        guard runwayEQEnabled,
-              let runwaySnapshot,
-              runwaySnapshot.hasRunwayContent else {
-            return nil
-        }
-        return runwaySnapshot
-    }
-
-    private var runwayHeightRows: Int {
-        var rows = 0
-        if showsRunwayControls {
-            rows += 1
-        }
-        if visibleEQSnapshot != nil {
-            rows += 2
-        }
-        if let snapshot = visibleRunwaySnapshot {
-            rows += snapshot.runwayPanelRows
-        }
-        return min(8, rows)
-    }
-
-    private var showsRunwayControls: Bool {
-        codexAgentEnabled && codexUsageEnabled && isHovering
     }
 
     private var entries: [HUDLimitsProviderEntry] {
@@ -3789,20 +3812,6 @@ private struct HUDLimitsRowsPanel: View {
                 emptyRow
             } else {
                 VStack(spacing: 0) {
-                    if showsRunwayControls {
-                        HUDRunwayControlsPanel()
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.08))
-                            .frame(height: 0.5)
-                            .padding(.horizontal, 14)
-                    }
-                    if let snapshot = visibleEQSnapshot {
-                        HUDRunwayEQPanel(snapshot: snapshot)
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.08))
-                            .frame(height: 0.5)
-                            .padding(.horizontal, 14)
-                    }
                     ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
                             Rectangle()
@@ -3818,14 +3827,24 @@ private struct HUDLimitsRowsPanel: View {
                             .frame(height: 0.5)
                             .padding(.horizontal, 14)
                         HUDRunwayPanel(snapshot: snapshot, now: clockNow)
+                    } else if runwayVisibility == .alwaysOn {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.08))
+                            .frame(height: 0.5)
+                            .padding(.horizontal, 14)
+                        HUDRunwayEmptyPanel()
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .background(Color.primary.opacity(0.025))
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: LimitsContentHeightKey.self, value: proxy.size.height)
+            }
+        )
         .onHover { isHovering = $0 }
-        .preference(key: LimitsRunwayHeightRowsKey.self, value: runwayHeightRows)
         .onReceive(Self.clockTimer) { clockNow = $0 }
         .onTapGesture(count: 2) {
             if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
@@ -3883,7 +3902,8 @@ private struct HUDLimitsRowsPanel: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             now: clockNow,
-            maxRows: 4
+            maxRows: 4,
+            forceVisible: runwayVisibility == .alwaysOn
         )
     }
 
@@ -3903,240 +3923,107 @@ private struct HUDLimitsExpandedPanel: View {
     let mode: UsageDisplayMode
     let now: Date
     let runwaySnapshot: CodexRunwaySnapshot?
-    let eqSnapshot: CodexRunwaySnapshot?
-    let showsControls: Bool
-
-    private var showsRunwayControls: Bool {
-        showsControls && entries.contains { $0.source == .codex }
-    }
+    var forceEmptyDrawer: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if showsRunwayControls {
-                HUDRunwayControlsPanel()
-            }
-            if let eqSnapshot {
-                HUDRunwayEQPanel(snapshot: eqSnapshot)
-            }
             HUDLimitsDetailPanel(entries: entries, mode: mode, now: now)
             if let runwaySnapshot {
                 HUDRunwayPanel(snapshot: runwaySnapshot, now: now)
+            } else if forceEmptyDrawer {
+                HUDRunwayEmptyPanel()
             }
         }
     }
 }
 
-private struct HUDRunwayControlsPanel: View {
-    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterRunwayEQEnabled) private var runwayEQEnabled = false
-    @Environment(\.colorScheme) private var colorScheme
+private struct HUDRunwayVisibilityPopover: View {
+    @Binding var runwayVisibilityRaw: String
 
-    private var runwayVisibility: Binding<QuotaMeterRunwayVisibility> {
-        Binding(
-            get: { QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw) },
-            set: { runwayVisibilityRaw = $0.rawValue }
-        )
+    private var selection: QuotaMeterRunwayVisibility {
+        QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("Runway")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Runway drawer")
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .kerning(0.4)
 
-            Picker("", selection: runwayVisibility) {
-                Text("Auto").tag(QuotaMeterRunwayVisibility.automatic)
-                Text("On").tag(QuotaMeterRunwayVisibility.alwaysOn)
-                Text("Off").tag(QuotaMeterRunwayVisibility.alwaysOff)
+            Picker("", selection: Binding(
+                get: { runwayVisibilityRaw },
+                set: { runwayVisibilityRaw = $0 }
+            )) {
+                ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
+                    Text(visibility.shortLabel).tag(visibility.rawValue)
+                }
             }
-            .pickerStyle(.segmented)
-            .controlSize(.mini)
             .labelsHidden()
-            .frame(width: 108)
-            .help("Choose when Quota Meter shows the Codex session runway drawer.")
-
-            Spacer(minLength: 0)
-
-            Toggle(isOn: $runwayEQEnabled) {
-                Text("EQ")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            }
-            .toggleStyle(.checkbox)
+            .pickerStyle(.segmented)
             .controlSize(.small)
-            .help("Show the five-bar Runway EQ strip.")
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(selection.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.02))
+        .padding(12)
+        .frame(width: 236)
     }
 }
 
-private struct HUDRunwayEQPanel: View {
-    let snapshot: CodexRunwaySnapshot
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var animationTick: Int = 0
-
-    private static let eqTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
-    private let barHeight: CGFloat = 24
-    private let channelWidth: CGFloat = 34
-
-    private var channels: [RunwayEQChannel] {
-        var out = snapshot.rows.prefix(4).map {
-            RunwayEQChannel(
-                id: $0.id,
-                label: $0.displayName,
-                quotaMinutesPerHour: $0.quotaMinutesPerHour,
-                confidence: $0.confidence,
-                isOther: false,
-                isEmpty: false
-            )
-        }
-
-        let foldedRows = snapshot.rows.dropFirst(4)
-        let foldedRate = foldedRows.reduce(0) { $0 + $1.quotaMinutesPerHour }
-            + (snapshot.burstSummary?.quotaMinutesPerHour ?? 0)
-        let foldedCount = foldedRows.count + (snapshot.burstSummary?.count ?? 0)
-        if foldedCount > 0 {
-            out.append(
-                RunwayEQChannel(
-                    id: "other-\(foldedCount)",
-                    label: "other",
-                    quotaMinutesPerHour: foldedRate,
-                    confidence: foldedRate > 0 ? .mixed : .waiting,
-                    isOther: true,
-                    isEmpty: false
-                )
-            )
-        }
-
-        while out.count < 5 {
-            out.append(
-                RunwayEQChannel(
-                    id: "empty-\(out.count)",
-                    label: "empty",
-                    quotaMinutesPerHour: 0,
-                    confidence: .unsupported,
-                    isOther: false,
-                    isEmpty: true
-                )
-            )
-        }
-        return Array(out.prefix(5))
-    }
+private struct HUDCockpitModePopover: View {
+    let selectedRaw: String
+    let onSelect: (AgentCockpitHUDDisplayMode) -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text("EQ")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Cockpit view")
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 18, alignment: .leading)
-            HStack(alignment: .bottom, spacing: 6) {
-                ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
-                    VStack(spacing: 2) {
-                        ZStack(alignment: .bottom) {
-                            Capsule()
-                                .fill(Color.primary.opacity(0.08))
-                                .frame(width: 8, height: barHeight)
-                            Capsule()
-                                .fill(channelColor.opacity(channelOpacity(channel)))
-                                .frame(width: 8, height: currentHeight(for: channel, index: index))
-                                .animation(.easeInOut(duration: 0.28), value: animationTick)
-                        }
-                        .frame(width: 12, height: barHeight)
+                .textCase(.uppercase)
+                .kerning(0.4)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
 
-                        Text(channel.shortCode)
-                            .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(channel.isEmpty ? Color.secondary.opacity(0.45) : Color.primary.opacity(0.78))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-
-                        Text(channel.compactRate)
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(channel.isEmpty ? Color.secondary.opacity(0.35) : hudProjectionColor(colorScheme))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.72)
+            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
+                let isSelected = mode.rawValue == selectedRaw
+                Button {
+                    onSelect(mode)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: mode.systemImage)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 18)
+                        Text(mode.title)
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer(minLength: 12)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .opacity(isSelected ? 1 : 0)
                     }
-                    .frame(width: channelWidth)
-                    .accessibilityLabel("\(channel.label), \(channel.compactRate)")
-                    .help("\(channel.label): \(channel.compactRate)")
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(colorScheme == .dark ? 0.025 : 0.015))
-        .onReceive(Self.eqTimer) { _ in
-            animationTick = (animationTick + 1) % 1024
-        }
-    }
-
-    private var channelColor: Color {
-        hudProjectionColor(colorScheme)
-    }
-
-    private var maxQuotaMinutesPerHour: Double {
-        max(1, channels.map(\.quotaMinutesPerHour).max() ?? 1)
-    }
-
-    private func currentHeight(for channel: RunwayEQChannel, index: Int) -> CGFloat {
-        guard !channel.isEmpty else { return 0 }
-        let relative = channel.quotaMinutesPerHour / maxQuotaMinutesPerHour
-        let absolutePressure = min(1, channel.quotaMinutesPerHour / 45)
-        let base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
-        let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
-        return max(3, barHeight * CGFloat(min(1, base * wave)))
-    }
-
-    private func channelOpacity(_ channel: RunwayEQChannel) -> Double {
-        if channel.isEmpty { return 0 }
-        return channel.isOther ? 0.55 : 0.86
-    }
-
-    private struct RunwayEQChannel {
-        let id: String
-        let label: String
-        let quotaMinutesPerHour: Double
-        let confidence: RunwayAttributionConfidence
-        let isOther: Bool
-        let isEmpty: Bool
-
-        var shortCode: String {
-            if isEmpty { return "---" }
-            if isOther { return "OTH" }
-            return Self.shortCode(for: label)
-        }
-
-        var compactRate: String {
-            guard !isEmpty else { return "--" }
-            guard confidence != .waiting else { return "calc" }
-            guard quotaMinutesPerHour.isFinite, quotaMinutesPerHour >= 0.5 else { return "flat" }
-            return "\(Int(ceil(quotaMinutesPerHour)))m/h"
-        }
-
-        private static func shortCode(for label: String) -> String {
-            let cleaned = label
-                .uppercased()
-                .map { character -> Character in
-                    character.isLetter || character.isNumber ? character : " "
-                }
-            let words = String(cleaned)
-                .split(separator: " ")
-                .map(String.init)
-            guard !words.isEmpty else { return "COD" }
-            var code = ""
-            for word in words {
-                let needed = 3 - code.count
-                guard needed > 0 else { break }
-                code += String(word.prefix(needed))
-            }
-            if code.count < 3 {
-                code += String(repeating: "X", count: 3 - code.count)
-            }
-            return code
-        }
+        .padding(8)
+        .frame(width: 200)
     }
 }
 
@@ -4250,7 +4137,7 @@ private struct HUDRunwayPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var animationTick: Int = 0
 
-    private static let eqTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
+    private static let loadTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
 
     private var maxQuotaMinutesPerHour: Double {
         let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
@@ -4316,16 +4203,15 @@ private struct HUDRunwayPanel: View {
         }
         .foregroundStyle(Color.primary)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.top, 6)
+        .padding(.bottom, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 0.5)
         }
-        .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: -3)
-        .onReceive(Self.eqTimer) { _ in
+        .onReceive(Self.loadTimer) { _ in
             animationTick = (animationTick + 1) % 1024
         }
     }
@@ -4350,6 +4236,30 @@ private struct HUDRunwayPanel: View {
             return "Burn rate is calculating for these active sessions."
         }
         return "Combined short-session burn. Pausing them is estimated to add \(RunwayTimeFormatting.gain(summary.gainedSeconds)) of 5h runway."
+    }
+}
+
+/// Placeholder drawer shown when the runway is forced visible ("Always On")
+/// but there is no Codex burn data to display.
+private struct HUDRunwayEmptyPanel: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("No active Codex burn")
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
+        }
     }
 }
 
