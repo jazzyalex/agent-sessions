@@ -9,10 +9,13 @@ import Foundation
 /// (`isSidechain`), so there is no cross-file parent/child merging like Codex.
 enum ClaudeRunwayRecentSessionScanner {
     static let maximumFileAge: TimeInterval = 30 * 60
-    /// A session row disappears this long after its last logged line. Matches
-    /// the token parser's window so the whole row (not just the burn) clears
-    /// promptly once a session stops.
-    static let maximumActiveSampleAge: TimeInterval = 15
+    /// How long a session row stays on screen after its last logged line.
+    /// Claude only writes a line at the end of each turn, so gaps during tool
+    /// calls / thinking routinely exceed 30s — a short window here makes rows
+    /// flicker in and out. Kept wide (matching the Codex scanner) for stable
+    /// row presence; burn-rate freshness is handled separately by the token
+    /// parser's much shorter window.
+    static let maximumActiveSampleAge: TimeInterval = 75
     static let maximumFiles = 12
     static func defaultRoot() -> URL {
         URL(fileURLWithPath: NSHomeDirectory())

@@ -20,11 +20,12 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
 }
 
 enum ClaudeRunwayTokenActivityParser {
-    /// How recent the latest token sample must be for a session to count as
-    /// "burning now". Kept tight so a stopped session's burn/EQ decays quickly
-    /// instead of lingering. (Claude has no per-session rate-limit signal, so
-    /// the only liveness cue is fresh token movement.)
-    static let maximumSampleAge: TimeInterval = 15
+    /// How recent the latest token sample must be to show a live burn rate + EQ
+    /// fill (vs. a spinner). Independent of row presence (the scanner keeps the
+    /// row visible longer): when this lapses the row stays put but its rate
+    /// falls back to "waiting", so a stopped session's number/EQ clears quickly
+    /// without the whole row flickering away.
+    static let maximumSampleAge: TimeInterval = 30
     static let minimumPairInterval: TimeInterval = 10
     static let maximumPairInterval: TimeInterval = 30 * 60
     /// Cache reads are billed at a steep discount; down-weight them so a session
