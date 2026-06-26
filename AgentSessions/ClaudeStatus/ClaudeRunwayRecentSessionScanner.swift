@@ -211,9 +211,7 @@ enum ClaudeRunwayRecentSessionScanner {
     }
 
     private static func compact(_ text: String) -> String {
-        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard collapsed.count > 28 else { return collapsed }
-        return String(collapsed.prefix(27)) + "…"
+        ClaudeRunwayLog.compact(text)
     }
 
     private static func string(_ value: Any?) -> String? {

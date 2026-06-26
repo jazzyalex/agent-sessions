@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Quota Meter: Session Runway now prefers the conversation title shown in Claude Desktop (from the `claude-code-sessions` metadata, keyed by `cliSessionId`) over transcript-derived names, so runway rows match the names users recognize from the app.
 - Quota Meter: Removed the active/idle session color dots and counters from the Quota Meter header; the session filter pills (All/active/idle) remain in the Full and Compact cockpit views.
 - Quota Meter: Added a "Match main Quota Meter text size" preference so Session Runway rows can render at the same 12pt size as the main provider rows instead of the compact size; the compact size remains the default.
 - Quota Meter: Aligned the 5h projection/reset columns across Codex and Claude rows without changing the provider row styling, and made the Session Runway drawer quieter with wider middle-truncated titles.

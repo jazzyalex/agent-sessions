@@ -12,7 +12,21 @@ enum ClaudeRunwaySnapshotLoader {
                     root: request.recentSessionsRoot,
                     now: request.now
                 )
-                let identities = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
+                let merged = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
+                // Prefer the title the user sees in Claude Desktop (keyed by the
+                // transcript session id) over any transcript-derived name. This
+                // wins regardless of whether the name came from a HUD row or the
+                // recent-session scanner.
+                let desktopTitles = ClaudeDesktopSessionTitles.map()
+                let identities = merged.map { identity -> RunwaySessionIdentity in
+                    guard let title = desktopTitles[identity.id] else { return identity }
+                    return RunwaySessionIdentity(
+                        id: identity.id,
+                        displayName: ClaudeRunwayLog.compact(title),
+                        isGoal: identity.isGoal,
+                        logPaths: identity.logPaths
+                    )
+                }
                 let burns = request.baseline.hasProjectedRunout
                     ? ClaudeRunwayTokenActivityParser.burns(
                         identities: identities,

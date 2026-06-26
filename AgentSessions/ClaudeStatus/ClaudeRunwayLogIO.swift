@@ -33,6 +33,13 @@ enum ClaudeRunwayLog {
         return nil
     }
 
+    /// Collapses whitespace and truncates a label for a runway row.
+    static func compact(_ text: String, limit: Int = 28) -> String {
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard collapsed.count > limit else { return collapsed }
+        return String(collapsed.prefix(limit - 1)) + "…"
+    }
+
     /// Parses ISO-8601 timestamps (with or without fractional seconds), the
     /// form Claude writes in transcript lines.
     static func date(_ value: Any?) -> Date? {

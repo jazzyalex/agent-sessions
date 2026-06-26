@@ -200,6 +200,30 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertEqual(identities.first?.logPaths.count, 86)
     }
 
+    func testDesktopSessionTitlesMapKeysByCliSessionId() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-desktop-titles-\(UUID().uuidString)")
+        let convoDir = root.appendingPathComponent("convoA/sessionB", isDirectory: true)
+        try FileManager.default.createDirectory(at: convoDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try """
+        {"sessionId":"local_abc","cliSessionId":"f1d39390-aaaa","title":"Quota meter and runway polish","titleSource":"auto"}
+        """.write(to: convoDir.appendingPathComponent("local_abc.json"), atomically: true, encoding: .utf8)
+        // A record with an empty title is ignored.
+        try """
+        {"sessionId":"local_def","cliSessionId":"99999999-bbbb","title":""}
+        """.write(to: convoDir.appendingPathComponent("local_def.json"), atomically: true, encoding: .utf8)
+        // A non-local file is ignored.
+        try "{\"cliSessionId\":\"zzz\",\"title\":\"nope\"}"
+            .write(to: convoDir.appendingPathComponent("other.json"), atomically: true, encoding: .utf8)
+
+        let map = ClaudeDesktopSessionTitles.map(root: root)
+        XCTAssertEqual(map["f1d39390-aaaa"], "Quota meter and runway polish")
+        XCTAssertNil(map["99999999-bbbb"])
+        XCTAssertNil(map["zzz"])
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,
