@@ -99,6 +99,17 @@ actor ClaudeOAuthUsageClient {
 
         // Check shared file cache first — avoids redundant API calls across
         // AgentSessions restarts and external tools (ClaudeCodeStatusLine).
+        //
+        // Consequence (by design, not a bug): while Claude Code is running, its
+        // statusline keeps this cache continuously warm (< cacheMaxAge), so this
+        // path nearly always returns fromCache=true → source is reported as
+        // "OAuth (cached)" / "recent cache", never "fresh". Because the cached
+        // payload refreshes only at the statusline's coarse cadence and at
+        // whole-percent resolution, the 5h projection (the ▸ETA badge + runway
+        // rate "sharpening") forms far less readily than Codex's fine-grained
+        // CLI-RPC stream. This does NOT affect the runway burn itself — that no
+        // longer depends on a fresh projection. See
+        // docs/claude-usage-projection-freshness.md (decision: accept).
         if let cached = readSharedCache(tokenFingerprint: tokenFP) {
             os_log("ClaudeOAuth: serving from shared cache (age %.0fs)", log: log, type: .debug, cached.age)
             return cached.result
