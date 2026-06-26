@@ -224,6 +224,85 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertNil(map["zzz"])
     }
 
+    // MARK: - Loader: burn without a fresh projection (P1)
+
+    func testLoaderShowsBurnWithoutFreshProjection() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-nogate-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("sess-burn.jsonl")
+        try """
+        \(assistantLine(id: "b1", at: now.addingTimeInterval(-25), inputTokens: 1000, sessionID: "sess-burn", cwd: "/tmp/proj"))
+        \(assistantLine(id: "b2", at: now.addingTimeInterval(-5), inputTokens: 1000, sessionID: "sess-burn", cwd: "/tmp/proj"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        // Baseline with NO fresh projection: runout falls back to the reset time.
+        let baseline = RunwayProviderBaseline(
+            source: .claude,
+            remainingPercent: 50,
+            resetAt: now.addingTimeInterval(2 * 3600),
+            currentRunoutAt: now.addingTimeInterval(2 * 3600),
+            observedAt: now,
+            hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline,
+            identities: [],
+            now: now,
+            maxRows: 4,
+            recentSessionsRoot: root
+        )
+
+        let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
+        let row = snapshot?.rows.first { $0.id == "sess-burn" }
+        XCTAssertNotNil(row, "active session should produce a row")
+        XCTAssertNotEqual(row?.confidence, .waiting, "burn should render, not a waiting spinner")
+        XCTAssertGreaterThan(row?.quotaMinutesPerHour ?? 0, 0, "a real burn rate should show without a fresh projection")
+    }
+
+    func testLoaderBurnSharpensWhenProjectionLands() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-sharpen-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("sess-sharpen.jsonl")
+        try """
+        \(assistantLine(id: "s1", at: now.addingTimeInterval(-25), inputTokens: 1000, sessionID: "sess-sharpen", cwd: "/tmp/proj"))
+        \(assistantLine(id: "s2", at: now.addingTimeInterval(-5), inputTokens: 1000, sessionID: "sess-sharpen", cwd: "/tmp/proj"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        func rate(hasProjection: Bool) async -> Double {
+            // With a projection the runout is near (fast burn); without, it falls
+            // back to the reset time (slow even-burn).
+            let runoutAt = hasProjection ? now.addingTimeInterval(10 * 60) : now.addingTimeInterval(2 * 3600)
+            let baseline = RunwayProviderBaseline(
+                source: .claude,
+                remainingPercent: 50,
+                resetAt: now.addingTimeInterval(2 * 3600),
+                currentRunoutAt: runoutAt,
+                observedAt: now,
+                hasProjectedRunout: hasProjection
+            )
+            let request = CodexRunwaySnapshotRequest(
+                baseline: baseline, identities: [], now: now, maxRows: 4, recentSessionsRoot: root
+            )
+            let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
+            return snapshot?.rows.first { $0.id == "sess-sharpen" }?.quotaMinutesPerHour ?? 0
+        }
+
+        let withoutProjection = await rate(hasProjection: false)
+        let withProjection = await rate(hasProjection: true)
+        XCTAssertGreaterThan(withoutProjection, 0, "burn shows even without a projection")
+        XCTAssertGreaterThan(withProjection, withoutProjection, "rate sharpens to measured velocity once a projection lands")
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,

@@ -27,13 +27,20 @@ enum ClaudeRunwaySnapshotLoader {
                         logPaths: identity.logPaths
                     )
                 }
-                let burns = request.baseline.hasProjectedRunout
-                    ? ClaudeRunwayTokenActivityParser.burns(
-                        identities: identities,
-                        baseline: request.baseline,
-                        now: request.now
-                    )
-                    : []
+                // Token attribution is Claude's only burn signal, so — unlike
+                // Codex, which has an always-on direct rate-limit path — we do
+                // NOT gate it on a fresh projection. Otherwise burn/EQ only
+                // appear while the (cached, ~180s-edge) account projection is
+                // live, so they show up late and flicker. Without a fresh
+                // projection the baseline's runout falls back to the reset time,
+                // giving a conservative "even-burn-to-reset" rate that the
+                // calculator still renders; it sharpens to measured velocity
+                // once a projection lands.
+                let burns = ClaudeRunwayTokenActivityParser.burns(
+                    identities: identities,
+                    baseline: request.baseline,
+                    now: request.now
+                )
                 let snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: request.baseline,
                     snapshot: CodexRunwayCalculator.snapshot(
