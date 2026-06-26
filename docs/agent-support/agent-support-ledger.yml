@@ -27,8 +27,8 @@ entries:
           evidence: ["Resources/Fixtures/stage0/agents/antigravity/small.md", "scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json"]
       copilot:
         sessions:
-          max_verified_version: "1.0.64"
-          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json"]
+          max_verified_version: "1.0.65"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260626-210733Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json"]
       opencode:
         sessions:
           max_verified_version: "1.17.11"
@@ -40,20 +40,25 @@ entries:
       openclaw:
         sessions:
           max_verified_version: "2026.6.10"
-          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json"]
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260626-210749Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json"]
       cursor:
         sessions:
-          max_verified_version: "2026.6.2"
-          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json"]
+          max_verified_version: "2026.6.24"
+          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "/Users/alexm/.cursor/projects/Users-alexm-Repository-Codex-History/agent-transcripts/8e72ca80-2aa1-44f7-bde8-f358ef460525/8e72ca80-2aa1-44f7-bde8-f358ef460525.jsonl", "scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json"]
       pi:
         sessions:
-          max_verified_version: "0.80.1"
-          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring; supports installed 0.80.1 only because upstream is 0.80.2"
-          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json"]
+          max_verified_version: "0.80.2"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
+          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260626-210627Z-prebump/report.json", "scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json"]
     notes:
       - "Session-format follow-up 2026-06-26: weekly report scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json clears the prior format_drift_detected verdicts for Claude and OpenCode and the monitoring_broken verdict for Codex (matches_baseline=True, no unknown types/keys for all three)."
       - "Codex monitoring_broken was a transient codex_status_capture.sh 45s timeout (exit 124), not a format change; rerunning the capture returned ok=true. Codex was bumped 0.142.0->0.142.2 after a fresh prebump against the installed 0.142.2 binary matched baseline in scripts/probe_scan_output/agent_watch/20260626-205841Z-prebump/report.json (is_stale=false, schema_matches_baseline=True)."
       - "Antigravity prebump was rerun with --allow-real-home (scripts/probe_scan_output/agent_watch/20260626-205851Z-prebump/report.json) but remains blocked with antigravity_no_brain_artifact: agy -p print mode returns the marker without persisting a ~/.gemini/antigravity/brain markdown artifact, and the newest real interactive artifact predates the installed CLI. Antigravity stays verified at 1.0.9; a fresh bump requires an interactive agy conversation that writes a new brain markdown."
+      - "CLI refresh 2026-06-26: updated Copilot 1.0.24-cask/1.0.64-running->1.0.65 (brew upgrade --cask copilot-cli), OpenClaw active ~/.npm-global install 2026.5.28->2026.6.10 (npm install -g openclaw@latest), Cursor 2026.06.02->2026.06.24 (curl https://cursor.com/install | bash, because cursor-agent update returns unauthenticated), and Pi 0.80.1->0.80.2 (npm install -g @earendil-works/pi-coding-agent@latest)."
+      - "Copilot bumped 1.0.64->1.0.65; fresh prebump scripts/probe_scan_output/agent_watch/20260626-210733Z-prebump/report.json matched baseline after forwarding GITHUB_TOKEN (from gh auth token) into the sandbox."
+      - "Pi bumped 0.80.1->0.80.2 and now reports supports_latest; fresh prebump scripts/probe_scan_output/agent_watch/20260626-210627Z-prebump/report.json matched baseline."
+      - "OpenClaw fresh evidence: held at verified 2026.6.10 (installed=upstream=2026.6.10); the post-update stale-sample block cleared via real-home prebump scripts/probe_scan_output/agent_watch/20260626-210749Z-prebump/report.json (fresh_matches_baseline=True)."
+      - "Cursor bumped 2026.6.2->2026.6.24: 2026.06.24 added a roleless turn_ended line type ({type, status}). The role-based monitoring fingerprinter buckets roleless lines under assistant, so it surfaced as additive assistant status/type keys; covered by adding a turn_ended line to Resources/Fixtures/stage0/agents/cursor/small.jsonl. CursorSessionParser already renders roleless lines via its fallback-text branch, so no parser/UI change. Verified from the fresh real transcript in scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json (matches_baseline=True); cursor-agent --print prebump remains auth-gated."
       - "Claude 2.1.193 added an additive origin object on user records (origin.kind, e.g. human); Resources/Fixtures/stage0/agents/claude/small.jsonl was updated. ClaudeSessionParser ignores the unknown key, so no parser/UI change was needed."
       - "OpenCode 1.17.11 added an additive part.compaction record type plus message.assistant error/variant keys and part.text metadata/synthetic keys; baseline fixtures were updated (new part/m_assistant_large_1/007.json compaction part, augmented message/s_stage0_large/msg_0002.json and part/m_assistant_large_1/002.json). OpenCodeSessionParser renders unknown part types via its default branch and ignores the extra keys, so no parser/UI change was needed."
   - agent_sessions_version: "3.9.3"
