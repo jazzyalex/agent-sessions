@@ -203,6 +203,26 @@ extension PreferencesView {
                 Toggle("Show Quota Meter footer", isOn: $cockpitShowLimitsFooter)
                     .help("Shows a compact Quota Meter footer at the bottom of the Cockpit window with 5-hour and weekly usage percentages for enabled providers.")
             }
+
+            sectionHeader("Quota Meter")
+            VStack(alignment: .leading, spacing: 12) {
+                labeledRow("Projection") {
+                    Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
+                        .toggleStyle(.checkbox)
+                        .help("Show a compact token such as ▸2h in Cockpit when fresh 5h usage samples project exhaustion before reset.")
+                }
+
+                Text("Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                labeledRow("Runway") {
+                    Toggle("Match main Quota Meter text size", isOn: $usageLimitRunwayMatchMainTextSize)
+                        .toggleStyle(.checkbox)
+                        .help("Render Session Runway rows at the same size as the main Quota Meter rows. Off uses a more compact size.")
+                }
+            }
         }
     }
 

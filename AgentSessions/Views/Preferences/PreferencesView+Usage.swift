@@ -275,26 +275,6 @@ extension PreferencesView {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            sectionHeader("Cockpit Display")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Projection") {
-                    Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
-                        .toggleStyle(.checkbox)
-                        .help("Show a compact token such as ▸2h in Cockpit when fresh 5h usage samples project exhaustion before reset.")
-                }
-
-                Text("Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                labeledRow("Runway") {
-                    Toggle("Match main Quota Meter text size", isOn: $usageLimitRunwayMatchMainTextSize)
-                        .toggleStyle(.checkbox)
-                        .help("Render Session Runway rows at the same size as the main Quota Meter rows. Off uses a more compact size.")
-                }
-            }
-
             sectionHeader("Diagnostics")
             TimelineView(.periodic(from: Date(), by: 30)) { _ in
                 VStack(alignment: .leading, spacing: 8) {

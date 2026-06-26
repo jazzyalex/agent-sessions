@@ -1065,23 +1065,16 @@ struct AgentCockpitHUDView: View {
                     }
                     .disabled(!activeEnabled)
                     .opacity(activeEnabled ? 1 : 0.6)
+                } else {
+                    // Leading action balances the Quota Meter toolbar now that the
+                    // active/idle counters are gone from the left side.
+                    cockpitOpenButton
                 }
 
                 Spacer(minLength: 0)
 
                 if isLimitsOnly {
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
-                            cockpitOpenButton
-                            cockpitModePicker
-                            if runwayControlAvailable {
-                                cockpitRunwayButton
-                            }
-                            cockpitSettingsButton
-                            cockpitPinButton
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
                         HStack(spacing: 6) {
                             cockpitModePicker
                             if runwayControlAvailable {
@@ -3886,10 +3879,11 @@ private struct HUDLimitsRowsPanel: View {
                 VStack(spacing: 0) {
                     ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
+                            // Stronger, full-bleed rule between different agents than the
+                            // subtle inset rule used between a provider row and its runway.
                             Rectangle()
-                                .fill(Color.primary.opacity(0.08))
-                                .frame(height: 0.5)
-                                .padding(.horizontal, 14)
+                                .fill(Color.primary.opacity(0.16))
+                                .frame(height: 1)
                         }
                         row(entry: entry)
                         runwayBlock(for: entry.source)
@@ -4293,11 +4287,9 @@ private struct HUDRunwayPanel: View {
                 if snapshot.hasRunwayContent {
                     ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) { index, row in
                         runwayRow(row, index: index)
-                        .help(rowHelp(row))
                     }
                     if let summary = snapshot.burstSummary {
                         summaryRow(summary)
-                        .help(summaryHelp(summary))
                     }
                 } else {
                     Text("No active \(agentLabel) burn")
@@ -4389,22 +4381,8 @@ private struct HUDRunwayPanel: View {
         row.isGoal ? "GOAL \(row.displayName)" : row.displayName
     }
 
-    private func rowHelp(_ row: RunwayPauseImpactRow) -> String {
-        if row.confidence == .waiting {
-            return "Burn rate is calculating for this active session."
-        }
-        return "Pausing this session is estimated to add \(RunwayTimeFormatting.gain(row.gainedSeconds)) of 5h runway."
-    }
-
     private func summaryLabel(_ summary: RunwayShortBurstSummary) -> String {
         summary.quotaMinutesPerHour > 0 ? "+\(summary.count) bursts" : "+\(summary.count) sessions"
-    }
-
-    private func summaryHelp(_ summary: RunwayShortBurstSummary) -> String {
-        if summary.quotaMinutesPerHour <= 0 {
-            return "Burn rate is calculating for these active sessions."
-        }
-        return "Combined short-session burn. Pausing them is estimated to add \(RunwayTimeFormatting.gain(summary.gainedSeconds)) of 5h runway."
     }
 }
 
@@ -4490,41 +4468,26 @@ private struct HUDRunwayLoadBar: View {
 }
 
 private enum HUDRunwayLayout {
-    static let titleFraction: CGFloat = 2.0 / 3.0
-    static let rateWidth: CGFloat = 42
+    // Wide enough for a 3-digit rate ("137m/h") at the larger "match main" text size.
+    static let rateWidth: CGFloat = 52
     static let minBarWidth: CGFloat = 62
     static let columnSpacing: CGFloat = 8
     static let rowHeight: CGFloat = 14
 
+    /// Give the session title every point not needed by the fixed-width rate
+    /// and the minimum bar, so names only truncate when they genuinely overflow.
     static func titleWidth(for totalWidth: CGFloat) -> CGFloat {
         let reservedWidth = rateWidth + minBarWidth + (columnSpacing * 2)
-        let maximumTitleWidth = max(64, totalWidth - reservedWidth)
-        return min(maximumTitleWidth, max(64, totalWidth * titleFraction))
+        return max(64, totalWidth - reservedWidth)
     }
 }
 
 private enum RunwayTimeFormatting {
-    static let minimumVisibleGain: TimeInterval = 60
-
     static func quotaRate(_ minutesPerHour: Double, confidence: RunwayAttributionConfidence = .mixed) -> String {
         guard confidence != .waiting else { return "calc" }
         guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "flat" }
         let rounded = Int(ceil(minutesPerHour))
         return "\(rounded)m/h"
-    }
-
-    static func gain(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite, seconds >= minimumVisibleGain else { return "-" }
-        return "+\(compactDuration(seconds))"
-    }
-
-    static func compactDuration(_ seconds: TimeInterval) -> String {
-        let minutes = max(1, Int(ceil(seconds / 60)))
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if remainder == 0 { return "\(hours)h" }
-        return "\(hours)h\(remainder)m"
     }
 }
 

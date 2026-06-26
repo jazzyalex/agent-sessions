@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Quota Meter: Session Runway now gives session names the full available row width before truncating, widens the burn-rate column so 3-digit rates like `137m/h` are no longer clipped, separates different agents with a stronger full-bleed rule, rebalances the Quota Meter toolbar with the open-cockpit button as a leading action, and drops the per-row hover tooltips.
+- Agent Cockpit: Moved the Quota Meter cockpit-display settings (5h run-out projection token, Session Runway text size) from the Limit Alerts pane to the Agent Cockpit Settings tab.
 - Quota Meter: Session Runway now prefers the conversation title shown in Claude Desktop (from the `claude-code-sessions` metadata, keyed by `cliSessionId`) over transcript-derived names, so runway rows match the names users recognize from the app.
 - Quota Meter: Removed the active/idle session color dots and counters from the Quota Meter header; the session filter pills (All/active/idle) remain in the Full and Compact cockpit views.
 - Quota Meter: Added a "Match main Quota Meter text size" preference so Session Runway rows can render at the same 12pt size as the main provider rows instead of the compact size; the compact size remains the default.
