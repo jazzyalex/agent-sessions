@@ -25,6 +25,7 @@ enum PreferencesKey {
     static let usageLimitNotificationApproachingEnabled = "UsageLimitNotificationApproachingEnabled"
     static let usageLimitNotificationProjectedEnabled = "UsageLimitNotificationProjectedEnabled"
     static let usageLimitCockpitProjectionEnabled = "UsageLimitCockpitProjectionEnabled"
+    static let usageLimitRunwayMatchMainTextSize = "UsageLimitRunwayMatchMainTextSize"
     static let usageLimitNotificationExhaustedEnabled = "UsageLimitNotificationExhaustedEnabled"
     static let usageLimitNotificationFiveHourResetEnabled = "UsageLimitNotificationFiveHourResetEnabled"
     static let usageLimitDiagnosticsCodexSource = "UsageLimitDiagnosticsCodexSource"

@@ -1022,18 +1022,9 @@ struct AgentCockpitHUDView: View {
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
             HStack(spacing: 10) {
-                if isLimitsOnly {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            limitsCounterPill(color: Color(hex: "30d158"), count: activeCount, help: "Active working sessions")
-                            limitsCounterPill(color: Color(hex: "ffb340"), count: idleCount, help: "Waiting sessions")
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        Color.clear
-                            .frame(width: 0, height: 1)
-                    }
-                    .opacity(activeEnabled ? 1 : 0.6)
-                } else {
+                // Quota Meter intentionally omits the active/idle session dots and
+                // counters; those stay in the Full/Compact cockpit views below.
+                if !isLimitsOnly {
                     HStack(spacing: 6) {
                         Button {
                             guard activeEnabled else { return }
@@ -1261,27 +1252,6 @@ struct AgentCockpitHUDView: View {
         .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
             HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
         }
-    }
-
-    private func limitsCounterPill(color: Color, count: Int, help: String) -> some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-            Text("\(count)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(Color.primary.opacity(0.055))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        )
-        .help(help)
     }
 
     @ViewBuilder
@@ -4303,9 +4273,13 @@ private struct HUDRunwayPanel: View {
     let now: Date
     var agentLabel: String = "Codex"
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PreferencesKey.usageLimitRunwayMatchMainTextSize) private var runwayMatchMainTextSize = false
     @State private var animationTick: Int = 0
 
     private static let loadTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
+
+    private var runwayFontSize: CGFloat { runwayMatchMainTextSize ? 12 : 11 }
+    private var runwayRowHeight: CGFloat { runwayMatchMainTextSize ? 15 : HUDRunwayLayout.rowHeight }
 
     private var maxQuotaMinutesPerHour: Double {
         let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
@@ -4330,10 +4304,10 @@ private struct HUDRunwayPanel: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .foregroundStyle(.secondary)
-                        .frame(height: HUDRunwayLayout.rowHeight, alignment: .center)
+                        .frame(height: runwayRowHeight, alignment: .center)
                 }
             }
-            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .font(.system(size: runwayFontSize, weight: .medium, design: .monospaced))
         }
         .foregroundStyle(Color.primary)
         .padding(.horizontal, 10)
@@ -4384,7 +4358,7 @@ private struct HUDRunwayPanel: View {
                 )
             }
         }
-        .frame(height: HUDRunwayLayout.rowHeight)
+        .frame(height: runwayRowHeight)
     }
 
     private func summaryRow(_ summary: RunwayShortBurstSummary) -> some View {
@@ -4408,7 +4382,7 @@ private struct HUDRunwayPanel: View {
                 )
             }
         }
-        .frame(height: HUDRunwayLayout.rowHeight)
+        .frame(height: runwayRowHeight)
     }
 
     private func sessionLabel(_ row: RunwayPauseImpactRow) -> String {
@@ -4438,11 +4412,12 @@ private struct HUDRunwayPanel: View {
 /// but there is no burn data to display for the agent.
 private struct HUDRunwayEmptyPanel: View {
     var agentLabel: String = "Codex"
+    @AppStorage(PreferencesKey.usageLimitRunwayMatchMainTextSize) private var runwayMatchMainTextSize = false
 
     var body: some View {
         HStack(spacing: 0) {
             Text("No active \(agentLabel) burn")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: runwayMatchMainTextSize ? 12 : 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)

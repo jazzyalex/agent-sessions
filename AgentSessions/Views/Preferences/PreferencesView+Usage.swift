@@ -287,6 +287,12 @@ extension PreferencesView {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                labeledRow("Runway") {
+                    Toggle("Match main Quota Meter text size", isOn: $usageLimitRunwayMatchMainTextSize)
+                        .toggleStyle(.checkbox)
+                        .help("Render Session Runway rows at the same size as the main Quota Meter rows. Off uses a more compact size.")
+                }
             }
 
             sectionHeader("Diagnostics")
