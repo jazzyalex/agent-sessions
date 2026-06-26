@@ -97,7 +97,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.usageLimitNotificationApproachingEnabled) var usageLimitNotificationApproachingEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationProjectedEnabled) var usageLimitNotificationProjectedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) var usageLimitCockpitProjectionEnabled: Bool = true
-    @AppStorage(PreferencesKey.usageLimitRunwayMatchMainTextSize) var usageLimitRunwayMatchMainTextSize: Bool = false
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) var quotaMeterEnlarged: Bool = false
     @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexSource) var usageLimitDiagnosticsCodexSource: String = ""
@@ -757,7 +757,7 @@ struct PreferencesView: View {
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
-        usageLimitRunwayMatchMainTextSize = false
+        quotaMeterEnlarged = false
         quotaMeterRunwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
 
         // Reset usage strip preferences

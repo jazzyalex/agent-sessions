@@ -217,10 +217,15 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                labeledRow("Runway") {
-                    Toggle("Match main Quota Meter text size", isOn: $usageLimitRunwayMatchMainTextSize)
-                        .toggleStyle(.checkbox)
-                        .help("Render Session Runway rows at the same size as the main Quota Meter rows. Off uses a more compact size.")
+                labeledRow("Size") {
+                    Picker("", selection: $quotaMeterEnlarged) {
+                        Text("Standard").tag(false)
+                        Text("Enlarged").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
+                    .help("Enlarged raises every Quota Meter font by one point (provider rows and Session Runway alike) for easier reading, keeping the same relative scale.")
                 }
             }
         }

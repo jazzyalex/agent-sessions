@@ -3,11 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Agent Cockpit: The compact session HUD and Quota Meter now wait ~0.35s of hover before revealing their toolbar (so a quick pass over the pinned window no longer expands it), collapse ~0.7s after the pointer leaves instead of after 3s, and animate the window resize in step with the toolbar reveal/hide instead of snapping.
+- Quota Meter: Each agent now reads as one block — a faint rule between a provider row and its own runway, with whitespace plus a stronger rule between different agents, and the Session Runway aligned to the provider's left gridline so it no longer hangs further left than the agent icon.
 - Quota Meter: Session Runway now gives session names the full available row width before truncating, widens the burn-rate column so 3-digit rates like `137m/h` are no longer clipped, separates different agents with a stronger full-bleed rule, rebalances the Quota Meter toolbar with the open-cockpit button as a leading action, and drops the per-row hover tooltips.
 - Agent Cockpit: Moved the Quota Meter cockpit-display settings (5h run-out projection token, Session Runway text size) from the Limit Alerts pane to the Agent Cockpit Settings tab.
 - Quota Meter: Session Runway now prefers the conversation title shown in Claude Desktop (from the `claude-code-sessions` metadata, keyed by `cliSessionId`) over transcript-derived names, so runway rows match the names users recognize from the app.
 - Quota Meter: Removed the active/idle session color dots and counters from the Quota Meter header; the session filter pills (All/active/idle) remain in the Full and Compact cockpit views.
-- Quota Meter: Added a "Match main Quota Meter text size" preference so Session Runway rows can render at the same 12pt size as the main provider rows instead of the compact size; the compact size remains the default.
+- Quota Meter: Added a Standard / Enlarged size control (Agent Cockpit settings); Enlarged raises every Quota Meter font by one point — provider rows and Session Runway alike — and scales the provider columns to match, preserving the relative scale. Standard remains the default.
 - Quota Meter: Aligned the 5h projection/reset columns across Codex and Claude rows without changing the provider row styling, and made the Session Runway drawer quieter with wider middle-truncated titles.
 - Quota Meter: Session Runway now keeps real active-session titles while still falling back to tab titles for synthesized "Active Codex session" placeholders, and Claude subagent transcript volume no longer crowds other active sessions out of Runway discovery.
 - Quota Meter: Session Runway now trims the drawer to the measured session-row height and no longer paints a separate darker bottom band below the last visible session.

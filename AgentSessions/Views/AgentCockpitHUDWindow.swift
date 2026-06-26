@@ -614,7 +614,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             frame.origin.y += frame.height - targetHeight
             frame.size.height = targetHeight
-            setWindowFrame(frame, display: true, animate: false)
+            // This path only runs when the toolbar visibility toggles, so the
+            // window resize animates with the toolbar reveal/hide.
+            setWindowFrame(frame, display: true, animate: true)
         }
 
         private func applyCompactVisibleRowsAutoHeight(shownSessionCount: Int,
@@ -685,7 +687,10 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             if shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight) {
                 frame.origin.y += oldHeight - targetHeight
             }
-            setWindowFrame(frame, display: true, animate: false)
+            // Animate only when the toolbar is toggling, so the window resize
+            // moves with the toolbar reveal/hide instead of snapping. Other
+            // limits resizes (content height changes) stay instant.
+            setWindowFrame(frame, display: true, animate: animated)
         }
 
         private func shouldGrowLimitsWindowDown(window: NSWindow, targetHeight: CGFloat) -> Bool {

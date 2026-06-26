@@ -593,6 +593,7 @@ struct AgentCockpitHUDView: View {
     @State private var isCockpitWindowKey: Bool = true
     @State private var isCompactWindowHovered: Bool = false
     @State private var compactToolbarHideTask: Task<Void, Never>? = nil
+    @State private var compactToolbarRevealTask: Task<Void, Never>? = nil
     @State private var staleAutoCollapsedProjects: Set<String> = []
     @State private var manuallyExpandedStaleProjects: Set<String> = []
     @State private var presentationState: HUDPresentationState = .empty
@@ -697,6 +698,7 @@ struct AgentCockpitHUDView: View {
             UserDefaults.standard.set(false, forKey: PreferencesKey.Cockpit.hudOpen)
             CodexUsageModel.shared.setCockpitVisible(false, pinned: false)
             ClaudeUsageModel.shared.setCockpitVisible(false, pinned: false)
+            cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -953,27 +955,43 @@ struct AgentCockpitHUDView: View {
 
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
         guard isCompact else {
+            cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
             if isCompactWindowHovered {
-                withAnimation(.easeInOut(duration: 0.14)) {
+                withAnimation(.easeInOut(duration: 0.2)) {
                     isCompactWindowHovered = false
                 }
             }
             return
         }
 
-        cancelCompactToolbarHideTask()
         if hovering {
-            withAnimation(.easeInOut(duration: 0.14)) {
-                isCompactWindowHovered = true
+            // Hover intent: require a short dwell before revealing so a quick
+            // accidental pass over the pinned window does not expand it. This
+            // does not depend on window focus, so it works on a pinned,
+            // non-active window.
+            cancelCompactToolbarHideTask()
+            guard !isCompactWindowHovered, compactToolbarRevealTask == nil else { return }
+            compactToolbarRevealTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isCompactWindowHovered = true
+                }
+                compactToolbarRevealTask = nil
             }
             return
         }
 
+        // Hover out: drop a pending dwell, then collapse promptly so the window
+        // returns to its compact widget footprint.
+        cancelCompactToolbarRevealTask()
+        cancelCompactToolbarHideTask()
+        guard isCompactWindowHovered else { return }
         compactToolbarHideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.18)) {
+            withAnimation(.easeInOut(duration: 0.2)) {
                 isCompactWindowHovered = false
             }
             compactToolbarHideTask = nil
@@ -982,18 +1000,25 @@ struct AgentCockpitHUDView: View {
 
     private func handleCompactModeChange() {
         guard isCompact else {
+            cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
             if isCompactWindowHovered {
                 isCompactWindowHovered = false
             }
             return
         }
+        cancelCompactToolbarRevealTask()
         isCompactWindowHovered = false
     }
 
     private func cancelCompactToolbarHideTask() {
         compactToolbarHideTask?.cancel()
         compactToolbarHideTask = nil
+    }
+
+    private func cancelCompactToolbarRevealTask() {
+        compactToolbarRevealTask?.cancel()
+        compactToolbarRevealTask = nil
     }
 
     private func normalizeHUDDisplayMode() {
@@ -3814,6 +3839,7 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
     @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
@@ -3879,10 +3905,13 @@ private struct HUDLimitsRowsPanel: View {
                 VStack(spacing: 0) {
                     ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
-                            // Stronger, full-bleed rule between different agents than the
-                            // subtle inset rule used between a provider row and its runway.
+                            // Group separation: whitespace does the grouping, with a
+                            // stronger full-bleed rule on top. This is deliberately
+                            // heavier than the faint inset rule inside an agent block
+                            // (provider row ↔ its own runway).
+                            Color.clear.frame(height: 7)
                             Rectangle()
-                                .fill(Color.primary.opacity(0.16))
+                                .fill(Color.primary.opacity(0.18))
                                 .frame(height: 1)
                         }
                         row(entry: entry)
@@ -3923,6 +3952,7 @@ private struct HUDLimitsRowsPanel: View {
                 showProjection: true,
                 alignColumns: entries.count > 1,
                 reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
+                enlarged: quotaMeterEnlarged,
                 now: clockNow
             )
                 .lineLimit(1)
@@ -3931,22 +3961,16 @@ private struct HUDLimitsRowsPanel: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .frame(height: 30)
+        .frame(height: QuotaMeterTextMetrics.providerRowHeight(enlarged: quotaMeterEnlarged))
     }
 
     @ViewBuilder
     private func runwayBlock(for source: UsageTrackingSource) -> some View {
+        // The runway panels draw their own faint top rule (the within-agent
+        // QM ↔ runway separator), so no extra divider is added here.
         if let snapshot = visibleRunwaySnapshot(for: source) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(height: 0.5)
-                .padding(.horizontal, 14)
             HUDRunwayPanel(snapshot: snapshot, now: clockNow, agentLabel: source == .claude ? "Claude" : "Codex")
         } else if runwayVisibility == .alwaysOn {
-            Rectangle()
-                .fill(Color.primary.opacity(0.08))
-                .frame(height: 0.5)
-                .padding(.horizontal, 14)
             HUDRunwayEmptyPanel(agentLabel: source == .claude ? "Claude" : "Codex")
         }
     }
@@ -4267,13 +4291,13 @@ private struct HUDRunwayPanel: View {
     let now: Date
     var agentLabel: String = "Codex"
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(PreferencesKey.usageLimitRunwayMatchMainTextSize) private var runwayMatchMainTextSize = false
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var animationTick: Int = 0
 
     private static let loadTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
 
-    private var runwayFontSize: CGFloat { runwayMatchMainTextSize ? 12 : 11 }
-    private var runwayRowHeight: CGFloat { runwayMatchMainTextSize ? 15 : HUDRunwayLayout.rowHeight }
+    private var runwayFontSize: CGFloat { QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged) }
+    private var runwayRowHeight: CGFloat { QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged) }
 
     private var maxQuotaMinutesPerHour: Double {
         let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
@@ -4302,7 +4326,9 @@ private struct HUDRunwayPanel: View {
             .font(.system(size: runwayFontSize, weight: .medium, design: .monospaced))
         }
         .foregroundStyle(Color.primary)
-        .padding(.horizontal, 10)
+        // Match the provider row's 14pt inset so the runway hangs off the same
+        // left gridline instead of sitting further left than the agent icon.
+        .padding(.horizontal, 14)
         .padding(.top, 4)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4390,18 +4416,18 @@ private struct HUDRunwayPanel: View {
 /// but there is no burn data to display for the agent.
 private struct HUDRunwayEmptyPanel: View {
     var agentLabel: String = "Codex"
-    @AppStorage(PreferencesKey.usageLimitRunwayMatchMainTextSize) private var runwayMatchMainTextSize = false
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
 
     var body: some View {
         HStack(spacing: 0) {
             Text("No active \(agentLabel) burn")
-                .font(.system(size: runwayMatchMainTextSize ? 12 : 11, weight: .medium, design: .monospaced))
+                .font(.system(size: QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged), weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 14)
         .padding(.top, 4)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -4515,6 +4541,18 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
         : Color(red: 0.82, green: 0.30, blue: 0.00)
 }
 
+/// Quota Meter type scale. Standard keeps the established sizes; Enlarged raises
+/// every Quota Meter font by one point (provider rows and Session Runway alike),
+/// preserving the runway-one-below-provider relationship, and scales the fixed
+/// provider columns by the same ratio so the larger text isn't clamped.
+private enum QuotaMeterTextMetrics {
+    static func providerFontSize(enlarged: Bool) -> CGFloat { enlarged ? 13 : 12 }
+    static func runwayFontSize(enlarged: Bool) -> CGFloat { enlarged ? 12 : 11 }
+    static func providerRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 32 : 30 }
+    static func runwayRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 15 : 14 }
+    static func columnScale(enlarged: Bool) -> CGFloat { enlarged ? 13.0 / 12.0 : 1.0 }
+}
+
 private enum HUDLimitsColumnLayout {
     static let compactSpacing: CGFloat = 3
     static let compactFiveHourPercentWidth: CGFloat = 52
@@ -4612,6 +4650,7 @@ private struct HUDLimitsProviderText: View {
     var showProjection: Bool = true
     var alignColumns: Bool = false
     var reserveProjectionSlot: Bool = false
+    var enlarged: Bool = false
     var now: Date = Date()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
@@ -4665,38 +4704,39 @@ private struct HUDLimitsProviderText: View {
 
     @ViewBuilder
     private var alignedContent: some View {
-        HStack(spacing: HUDLimitsColumnLayout.compactSpacing) {
+        let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
+        HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
             HStack(spacing: 0) {
                 Text("5h: ")
                 Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
 
             if reserveProjectionSlot || fiveHourProjectionLabel != nil {
                 HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, reserve: reserveProjectionSlot)
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale, alignment: .leading)
             }
 
             if showResets, let r = fiveHourResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
             }
 
             Text("|")
                 .foregroundStyle(Color.primary.opacity(0.25))
-                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth, alignment: .center)
+                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth * scale, alignment: .center)
 
             HStack(spacing: 0) {
                 Text("Wk: ")
                 Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
                     .foregroundStyle(hudPctColor(entry.weekLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth * scale, alignment: .leading)
 
             if showResets, let r = weekResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth * scale, alignment: .leading)
             }
         }
     }
@@ -4725,7 +4765,7 @@ private struct HUDLimitsProviderText: View {
             } else {
                 if alignColumns && !onlyBottleneck {
                     alignedContent
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                         .foregroundStyle(Color.primary)
                         .transition(.opacity)
                 } else {
@@ -4763,7 +4803,7 @@ private struct HUDLimitsProviderText: View {
                             }
                         }
                     }
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.primary)
                     .transition(.opacity)
                 }
