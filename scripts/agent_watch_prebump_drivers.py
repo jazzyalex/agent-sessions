@@ -438,7 +438,7 @@ class AntigravityPrintDriver:
 
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
         session_home = Path(env.get("AGENT_WATCH_SESSION_HOME") or env.get("HOME") or str(sandbox))
-        brain_root = session_home / ".gemini" / "antigravity" / "brain"
+        brain_root = session_home / ".gemini" / "antigravity-cli" / "brain"
         brain_root.mkdir(parents=True, exist_ok=True)
         # F2: env comes from prepare_auth.
         env = dict(env)
@@ -468,11 +468,13 @@ class AntigravityPrintDriver:
             stderr_file.write_text(f"agy not found: {exc}")
             return DriverResult(False, None, stdout_file, stderr_file, 127, "agy_not_found")
 
-        newest = _newest_matching_after_with_text(brain_root, ("*.md",), run_started, marker)
+        newest = _newest_matching_after_with_text(
+            brain_root, ("*/.system_generated/logs/transcript.jsonl",), run_started, marker
+        )
 
         if rc != 0 or newest is None:
             if rc == 0 and marker in (proc.stdout or ""):
-                return DriverResult(False, newest, stdout_file, stderr_file, rc, "antigravity_no_brain_artifact")
+                return DriverResult(False, newest, stdout_file, stderr_file, rc, "antigravity_no_transcript_artifact")
             return DriverResult(False, newest, stdout_file, stderr_file, rc, f"antigravity_print_failed rc={rc}")
         return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
 

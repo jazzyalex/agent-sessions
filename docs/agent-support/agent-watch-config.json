@@ -226,20 +226,20 @@
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.antigravity.max_verified_version",
       "upstream": [],
       "risk_keywords": {
-        "schema": ["session", "transcript", "markdown", "format"],
+        "schema": ["session", "transcript", "markdown", "format", "transcript.jsonl", "jsonl"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
       },
       "weekly": {
         "local_schema": {
-          "kind": "antigravity_markdown_newest",
-          "roots": ["~/.gemini/antigravity/brain"],
-          "glob": "*/*.md",
+          "kind": "jsonl_newest",
+          "roots": ["~/.gemini/antigravity-cli/brain"],
+          "glob": "*/.system_generated/logs/transcript.jsonl",
           "max_lines": 2500
         },
         "freshness_window_days": 30,
         "discovery_path_contract": {
           "description": "Antigravity brain artifacts should be under ~/.gemini/antigravity/brain/<conversation-id>/*.md.",
-          "patterns": ["/\\.gemini/antigravity/brain/[^/]+/[^/]+\\.md$"]
+          "patterns": ["/\\.gemini/antigravity-cli/brain/[^/]+/\\.system_generated/logs/transcript\\.jsonl$"]
         },
         "probes": [
           {
@@ -261,9 +261,9 @@
         "credential_files": [],
         "support_files": [],
         "discover_session": {
-          "kind": "antigravity_markdown_newest",
-          "roots": [".gemini/antigravity/brain"],
-          "globs": ["*/*.md"],
+          "kind": "jsonl_newest",
+          "roots": [".gemini/antigravity-cli/brain"],
+          "globs": ["*/.system_generated/logs/transcript.jsonl"],
           "required_types": []
         }
       }

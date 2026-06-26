@@ -227,6 +227,27 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testAntigravityCLITranscriptFixtureParses() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/antigravity/cli_small.jsonl")
+        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview nil") }
+        XCTAssertEqual(preview.source, .antigravity)
+        XCTAssertTrue(preview.events.isEmpty)
+        XCTAssertGreaterThan(preview.eventCount, 0)
+
+        guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full nil") }
+        XCTAssertEqual(full.source, .antigravity)
+        XCTAssertTrue(full.events.contains { $0.kind == .user })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "list_dir" })
+        XCTAssertTrue(full.events.contains { $0.kind == .tool_result })
+        XCTAssertEqual(full.model, "Gemini 3.5 Flash (Medium)")
+        // The model's actual answer (PLANNER_RESPONSE.content) is surfaced, not just thinking.
+        XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("The directory contains a.txt and b.txt.") })
+
+        // Legacy markdown still parses.
+        let md = FixturePaths.stage0FixtureURL("agents/antigravity/small.md")
+        XCTAssertNotNil(GeminiSessionParser.parseFileFull(at: md))
+    }
+
     func testOpenCodeFixturesParse() throws {
         // v2 fixtures
         for name in ["agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json",

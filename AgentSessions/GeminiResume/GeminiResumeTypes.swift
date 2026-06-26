@@ -30,6 +30,11 @@ enum GeminiSessionIDHelper {
     }
 
     static func conversationID(fromArtifactURL url: URL) -> String? {
+        let comps = url.pathComponents
+        if let i = comps.firstIndex(of: "brain"), i + 1 < comps.count {
+            let id = comps[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            return id.isEmpty ? nil : id
+        }
         let id = url.deletingLastPathComponent().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         return id.isEmpty ? nil : id
     }

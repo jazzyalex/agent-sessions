@@ -5,14 +5,26 @@ import CryptoKit
 final class GeminiSessionParser {
     /// Preview-only parse for list indexing. Builds a lightweight session with empty events.
     static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
-        guard url.pathExtension.lowercased() == "md" else { return nil }
-        return parseAntigravityMarkdown(at: url, forcedID: forcedID, includeEvents: false)
+        switch url.pathExtension.lowercased() {
+        case "md":
+            return parseAntigravityMarkdown(at: url, forcedID: forcedID, includeEvents: false)
+        case "jsonl":
+            return AntigravityTranscriptParser.parse(at: url, forcedID: forcedID, includeEvents: false)
+        default:
+            return nil
+        }
     }
 
-    /// Full parse that normalizes an Antigravity markdown artifact into a single transcript event.
+    /// Full parse that normalizes an Antigravity artifact into transcript events.
     static func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
-        guard url.pathExtension.lowercased() == "md" else { return nil }
-        return parseAntigravityMarkdown(at: url, forcedID: forcedID, includeEvents: true)
+        switch url.pathExtension.lowercased() {
+        case "md":
+            return parseAntigravityMarkdown(at: url, forcedID: forcedID, includeEvents: true)
+        case "jsonl":
+            return AntigravityTranscriptParser.parse(at: url, forcedID: forcedID, includeEvents: true)
+        default:
+            return nil
+        }
     }
 
     private static func parseAntigravityMarkdown(at url: URL, forcedID: String?, includeEvents: Bool) -> Session? {

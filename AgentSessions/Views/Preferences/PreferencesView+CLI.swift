@@ -465,7 +465,7 @@ extension PreferencesView {
                         .foregroundStyle(.red)
                 }
 
-	                Text("Default: ~/.gemini/antigravity/brain")
+	                Text("Default: ~/.gemini/antigravity/brain and ~/.gemini/antigravity-cli/brain")
 	                    .font(.system(.caption, design: .monospaced))
 	                    .foregroundStyle(.secondary)
 	            }

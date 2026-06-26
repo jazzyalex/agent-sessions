@@ -6,67 +6,59 @@ import Foundation
 /// Expected layout: ~/.gemini/antigravity/brain/<conversation-id>/*.md.
 final class GeminiSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
+    private let cliRoot: String?
 
-    init(customRoot: String? = nil) {
+    init(customRoot: String? = nil, cliRoot: String? = nil) {
         self.customRoot = customRoot
+        self.cliRoot = cliRoot
     }
 
     func sessionsRoot() -> URL {
-        if let custom = customRoot, !custom.isEmpty {
-            return URL(fileURLWithPath: custom)
-        }
+        if let custom = customRoot, !custom.isEmpty { return URL(fileURLWithPath: custom) }
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".gemini/antigravity/brain")
     }
 
+    private func cliSessionsRoot() -> URL {
+        if let c = cliRoot, !c.isEmpty { return URL(fileURLWithPath: c) }
+        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".gemini/antigravity-cli/brain")
+    }
+
     func discoverSessionFiles() -> [URL] {
-        let root = sessionsRoot()
         let fm = FileManager.default
-
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
-            return []
-        }
-
         var out: [URL] = []
-        // Shallow scan: iterate per-conversation directories in ~/.gemini/antigravity/brain.
-        guard let conversations = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
-            return []
-        }
-        for conversation in conversations {
-            guard (try? conversation.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
-            out.append(contentsOf: sessionFiles(in: conversation, fileManager: fm))
-        }
+        out.append(contentsOf: scanMarkdown(root: sessionsRoot(), fm: fm))
+        out.append(contentsOf: scanCLITranscripts(root: cliSessionsRoot(), fm: fm))
+        out.sort { mtime($0) > mtime($1) }
+        return out
+    }
 
-        // Sort by modification time (desc)
-        out.sort { (lhs, rhs) in
-            let lm: Date = {
-                if let rv = try? lhs.resourceValues(forKeys: [.contentModificationDateKey]),
-                   let d = rv.contentModificationDate { return d }
-                return .distantPast
-            }()
-            let rm: Date = {
-                if let rv = try? rhs.resourceValues(forKeys: [.contentModificationDateKey]),
-                   let d = rv.contentModificationDate { return d }
-                return .distantPast
-            }()
-            return lm > rm
+    private func mtime(_ url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+
+    private func scanMarkdown(root: URL, fm: FileManager) -> [URL] {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue,
+              let conversations = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { return [] }
+        var out: [URL] = []
+        for conversation in conversations {
+            guard (try? conversation.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+                  let files = try? fm.contentsOfDirectory(at: conversation, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { continue }
+            out.append(contentsOf: files.filter { $0.pathExtension.lowercased() == "md" })
         }
         return out
     }
 
-    private func sessionFiles(in dir: URL, fileManager fm: FileManager) -> [URL] {
-        guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
-            return []
+    private func scanCLITranscripts(root: URL, fm: FileManager) -> [URL] {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue,
+              let conversations = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { return [] }
+        var out: [URL] = []
+        for conversation in conversations {
+            guard (try? conversation.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            let t = conversation.appendingPathComponent(".system_generated/logs/transcript.jsonl")
+            if fm.fileExists(atPath: t.path) { out.append(t) }
         }
-
-        guard let files = try? fm.contentsOfDirectory(at: dir,
-                                                       includingPropertiesForKeys: [.isRegularFileKey],
-                                                       options: [.skipsHiddenFiles]) else {
-            return []
-        }
-        return files.filter { url in
-            guard url.pathExtension.lowercased() == "md" else { return false }
-            return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-        }
+        return out
     }
 }

@@ -46,10 +46,12 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
   antigravity:
-    max_verified_version: "1.0.9"
+    max_verified_version: "1.0.12"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
+      - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
+      - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
     max_verified_version: "1.0.65"
     version_field: "data.copilotVersion"

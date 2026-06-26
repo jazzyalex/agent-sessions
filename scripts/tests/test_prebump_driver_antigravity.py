@@ -11,7 +11,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 import agent_watch_prebump_drivers as drv_mod
 
 
-def test_antigravity_driver_runs_and_returns_markdown_artifact(tmp_path):
+def test_antigravity_driver_runs_and_returns_transcript_artifact(tmp_path):
     sb = tmp_path / "sb"
     sb.mkdir()
 
@@ -21,10 +21,11 @@ def test_antigravity_driver_runs_and_returns_markdown_artifact(tmp_path):
         assert env.get("HOME") == str(sb)
         marker = next(part for part in argv[2].split() if part.startswith("AGENT_WATCH_PREBUMP_"))
         home = Path(env["HOME"])
-        convo = home / ".gemini" / "antigravity" / "brain" / "conv-abc"
-        convo.mkdir(parents=True, exist_ok=True)
-        out = convo / "task.md"
-        out.write_text(f"# Demo\n\nhello {marker}\n", encoding="utf-8")
+        convo = home / ".gemini" / "antigravity-cli" / "brain" / "conv-abc"
+        logs = convo / ".system_generated" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        out = logs / "transcript.jsonl"
+        out.write_text(f'{{"type":"USER_INPUT","content":"hello {marker}"}}\n', encoding="utf-8")
         now = time.time() + 1
         os_utime = __import__("os").utime
         os_utime(out, (now, now))
@@ -39,8 +40,8 @@ def test_antigravity_driver_runs_and_returns_markdown_artifact(tmp_path):
 
     assert res.ok is True
     assert res.session_path is not None
-    assert res.session_path.suffix == ".md"
-    assert ".gemini/antigravity/brain" in str(res.session_path)
+    assert res.session_path.name == "transcript.jsonl"
+    assert ".gemini/antigravity-cli/brain" in str(res.session_path)
 
 
 def test_antigravity_driver_classifies_stdout_without_brain_artifact(tmp_path):
@@ -59,7 +60,7 @@ def test_antigravity_driver_classifies_stdout_without_brain_artifact(tmp_path):
 
     assert res.ok is False
     assert res.session_path is None
-    assert res.error == "antigravity_no_brain_artifact"
+    assert res.error == "antigravity_no_transcript_artifact"
 
 
 def test_antigravity_config_has_prebump_block():
@@ -67,5 +68,5 @@ def test_antigravity_config_has_prebump_block():
     pb = cfg["agents"]["antigravity"]["prebump"]
     assert pb["driver"] == "antigravity_print"
     assert pb["real_home_session"] is True
-    assert pb["discover_session"]["roots"] == [".gemini/antigravity/brain"]
-    assert pb["discover_session"]["globs"] == ["*/*.md"]
+    assert pb["discover_session"]["roots"] == [".gemini/antigravity-cli/brain"]
+    assert pb["discover_session"]["globs"] == ["*/.system_generated/logs/transcript.jsonl"]

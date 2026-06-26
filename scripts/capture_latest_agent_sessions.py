@@ -67,25 +67,17 @@ def _try_version(cmd: list[str]) -> str | None:
 
 
 def capture_antigravity(dest_root: Path) -> list[CaptureResult]:
-    brain_root = Path.home() / ".gemini" / "antigravity" / "brain"
+    brain_root = Path.home() / ".gemini" / "antigravity-cli" / "brain"
     if not brain_root.exists():
         return []
-
-    candidates = [p for p in brain_root.glob("*/*.md") if p.is_file()]
+    candidates = [p for p in brain_root.glob("*/.system_generated/logs/transcript.jsonl") if p.is_file()]
     if not candidates:
         return []
-
-    src = _newest(candidates)
-    if src is None:
-        return []
-
+    src = max(candidates, key=lambda p: p.stat().st_mtime)
     out_dir = dest_root / "antigravity"
-    try:
-        rel = src.relative_to(brain_root)
-    except ValueError:
-        rel = Path(src.name)
-    dst = out_dir / rel
-    _safe_copy(src, dst)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / f"{src.parent.parent.parent.name}.transcript.jsonl"
+    shutil.copy2(src, dst)
     return [CaptureResult(agent="antigravity", source=src, destination=dst)]
 
 

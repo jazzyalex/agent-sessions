@@ -1325,12 +1325,17 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             if bp.exists():
                 fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
     elif agent_name == "antigravity":
+        # Antigravity has two on-disk formats: legacy markdown brain artifacts and
+        # the current antigravity-cli JSONL transcripts. Fingerprint each fixture by
+        # its type so the baseline covers both and the JSONL drift detector works.
         for p in filtered:
-            if not p.endswith(".md"):
-                continue
             bp = Path(p)
-            if bp.exists():
+            if not bp.exists():
+                continue
+            if p.endswith(".md"):
                 fps.append(_antigravity_markdown_schema_fingerprint(bp, max_lines=5000))
+            elif p.endswith(".jsonl"):
+                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
     elif agent_name == "hermes":
         for p in filtered:
             if not p.endswith(".json"):
@@ -2429,7 +2434,10 @@ def _run_prebump(
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
             if agent_name == "antigravity":
-                fp = _antigravity_markdown_schema_fingerprint(result.session_path, max_lines=5000)
+                if result.session_path.suffix == ".jsonl":
+                    fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
+                else:
+                    fp = _antigravity_markdown_schema_fingerprint(result.session_path, max_lines=5000)
             elif agent_name == "hermes":
                 if result.session_path.name == "state.db":
                     fp = _hermes_state_db_latest_session_schema_fingerprint(result.session_path, max_messages=5000)
