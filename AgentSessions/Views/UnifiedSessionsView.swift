@@ -1026,7 +1026,7 @@ struct UnifiedSessionsView: View {
             Button("Restore") { restoreCandidate = nil; DispatchQueue.main.async { restoreFromArchive(session) } }
             Button("Cancel", role: .cancel) { restoreCandidate = nil }
         } message: { _ in
-            Text("Quit Claude Desktop, then reopen it to see this session. Your transcript isn’t changed.")
+            Text("Relaunch Claude Desktop afterward to see this session. Your transcript isn’t changed.")
         }
         .alert("Restored", isPresented: $showRestoredRelaunch) {
             Button("OK") {}

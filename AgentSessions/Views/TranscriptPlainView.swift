@@ -3997,7 +3997,7 @@ private struct ClaudeArchiveRestoreStripControl: View {
             Button("Restore") { DispatchQueue.main.async { performRestore(sidecarPath: path) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Quit Claude Desktop, then reopen it to see this session. Your transcript isn’t changed.")
+            Text("Relaunch Claude Desktop afterward to see this session. Your transcript isn’t changed.")
         }
         .alert(outcome?.title ?? "",
                isPresented: Binding(get: { outcome != nil }, set: { if !$0 { outcome = nil } }),
@@ -4006,7 +4006,10 @@ private struct ClaudeArchiveRestoreStripControl: View {
         } message: { o in
             Text(o.message)
         }
-        .task(id: session.id) { await loadArchiveState() }
+        .task(id: session.id) { await MainActor.run { refreshArchiveState() } }
+        .onReceive(NotificationCenter.default.publisher(for: .claudeArchiveDidChange)) { _ in
+            refreshArchiveState()
+        }
     }
 
     // cliSessionId used to join the sidecar reader. For Claude Code-tab transcripts this is the
@@ -4018,22 +4021,14 @@ private struct ClaudeArchiveRestoreStripControl: View {
         return session.codexInternalSessionIDHint
     }
 
-    private func loadArchiveState() async {
-        let key: String? = (session.source == .claude) ? Self.archiveJoinKey(for: session) : nil
-        guard let key else {
-            await MainActor.run { archivedSidecarPath = nil; didRestore = false }
+    private func refreshArchiveState() {
+        didRestore = false
+        guard session.source == .claude, let key = Self.archiveJoinKey(for: session) else {
+            archivedSidecarPath = nil
             return
         }
-        // Scan off the main thread: records() enumerates and parses the sidecar tree.
-        let path = await Task.detached(priority: .utility) { () -> String? in
-            guard let rec = ClaudeDesktopSessionTitles.records()[key], rec.isArchived else { return nil }
-            return rec.sidecarPath
-        }.value
-        if Task.isCancelled { return }  // a newer session switch superseded this scan
-        await MainActor.run {
-            archivedSidecarPath = path
-            didRestore = false
-        }
+        let rec = ClaudeDesktopSessionTitles.records()[key]
+        archivedSidecarPath = (rec?.isArchived == true) ? rec?.sidecarPath : nil
     }
 
     private func performRestore(sidecarPath: String) {
