@@ -1211,7 +1211,7 @@ struct UnifiedSessionsView: View {
             try ClaudeArchiveRestore.restore(sidecarPath: path) // reads the gate via isEnabled
             showRestoredRelaunch = true
             // Optimistic overlay mutation: clear the archived flag in place.
-            if let key = session.codexInternalSessionIDHint, var rec = unified.claudeArchive[key] {
+            if let key = session.claudeArchiveJoinKey, var rec = unified.claudeArchive[key] {
                 rec = ClaudeDesktopSidecarRecord(cliSessionID: rec.cliSessionID, title: rec.title,
                                                  isArchived: false, autoArchiveExempt: true,
                                                  sidecarPath: rec.sidecarPath, modifiedAt: rec.modifiedAt)

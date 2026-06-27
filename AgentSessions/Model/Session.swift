@@ -301,6 +301,16 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return isCodexDesktopSession
     }
 
+    /// cliSessionId used to join Claude Desktop sidecar records. For Claude Code-tab transcripts
+    /// this is the filename UUID (~/.claude/projects/.../<UUID>.jsonl, which equals the sidecar's
+    /// cliSessionId); falls back to the parsed hint. Prefer the filename because
+    /// codexInternalSessionIDHint is nil on many hydrated sessions.
+    public var claudeArchiveJoinKey: String? {
+        let base = URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
+        if base.count >= 8 { return base }
+        return codexInternalSessionIDHint
+    }
+
     public var firstUserPreview: String? {
         events.first(where: { $0.kind == .user })?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -507,12 +507,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var claudeArchive: [String: ClaudeDesktopSidecarRecord] = [:]
 
     func isArchivedClaudeDesktop(_ session: Session) -> Bool {
-        guard session.source == .claude, let key = session.codexInternalSessionIDHint else { return false }
+        guard session.source == .claude, let key = session.claudeArchiveJoinKey else { return false }
         return claudeArchive[key]?.isArchived == true
     }
 
     func claudeArchiveSidecarPath(for session: Session) -> String? {
-        guard session.source == .claude, let key = session.codexInternalSessionIDHint else { return nil }
+        guard session.source == .claude, let key = session.claudeArchiveJoinKey else { return nil }
         return claudeArchive[key]?.sidecarPath
     }
 

@@ -4012,18 +4012,9 @@ private struct ClaudeArchiveRestoreStripControl: View {
         }
     }
 
-    // cliSessionId used to join the sidecar reader. For Claude Code-tab transcripts this is the
-    // filename UUID (~/.claude/projects/.../<UUID>.jsonl), which equals the sidecar's cliSessionId.
-    // codexInternalSessionIDHint can be nil on hydrated sessions, so prefer the filename.
-    private static func archiveJoinKey(for session: Session) -> String? {
-        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
-        if base.count >= 8 { return base }
-        return session.codexInternalSessionIDHint
-    }
-
     private func refreshArchiveState() {
         didRestore = false
-        guard session.source == .claude, let key = Self.archiveJoinKey(for: session) else {
+        guard session.source == .claude, let key = session.claudeArchiveJoinKey else {
             archivedSidecarPath = nil
             return
         }

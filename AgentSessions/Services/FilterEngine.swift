@@ -434,7 +434,7 @@ enum FilterEngine {
         // so an explicit #side query should not hide them behind archived-session metadata.
         if !sideChatsOnly, filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession { return false }
         if !sideChatsOnly, filters.archivedClaudeDesktopOnly, session.source == .claude {
-            let isArchived = session.codexInternalSessionIDHint
+            let isArchived = session.claudeArchiveJoinKey
                 .map { filters.archivedClaudeSessionIDs.contains($0) } ?? false
             if !isArchived { return false }
         }
