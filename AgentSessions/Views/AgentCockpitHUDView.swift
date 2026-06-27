@@ -655,7 +655,7 @@ struct AgentCockpitHUDView: View {
     /// limits-only window's fixed width so it hugs its content (no right-edge dead
     /// space) and resizes once when the Enlarged font is toggled.
     private var measuredLimitsContentWidth: CGFloat {
-        HUDLimitsColumnLayout.compactContentWidth(enlarged: quotaMeterEnlargedForLimits)
+        HUDLimitsColumnLayout.compactContentWidth(enlarged: quotaMeterEnlarged)
     }
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabledForLimits: Bool = false
@@ -663,7 +663,7 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlargedForLimits = false
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var showRunwayPopover = false
     @State private var showModePopover = false
 
@@ -1114,6 +1114,7 @@ struct AgentCockpitHUDView: View {
                             if runwayControlAvailable {
                                 cockpitRunwayButton
                             }
+                            cockpitFontSizeButton
                             cockpitSettingsButton
                             cockpitPinButton
                         }
@@ -1124,6 +1125,14 @@ struct AgentCockpitHUDView: View {
                             if runwayControlAvailable {
                                 cockpitRunwayButton
                             }
+                            cockpitFontSizeButton
+                            cockpitPinButton
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+
+                        HStack(spacing: 6) {
+                            cockpitModePicker
+                            cockpitFontSizeButton
                             cockpitPinButton
                         }
                         .fixedSize(horizontal: true, vertical: false)
@@ -1242,6 +1251,20 @@ struct AgentCockpitHUDView: View {
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
         .help("Open Agent Cockpit settings")
+    }
+
+    /// Quick Standard ⇄ Enlarged text-size toggle for the Quota Meter. Highlights when
+    /// Enlarged so it doubles as a status indicator; one tap flips the font and the
+    /// window resizes once to hug the new content width.
+    private var cockpitFontSizeButton: some View {
+        Button {
+            quotaMeterEnlarged.toggle()
+        } label: {
+            Image(systemName: "textformat.size")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: quotaMeterEnlarged, tint: nil))
+        .help(quotaMeterEnlarged ? "Switch to Standard text size" : "Switch to Enlarged text size")
     }
 
     private var cockpitPinButton: some View {
