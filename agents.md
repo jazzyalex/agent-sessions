@@ -9,6 +9,7 @@
 - If test automation or QA scripts force macOS Appearance to Dark Mode, always restore macOS Appearance back to `System` at the end of the run.
 - In Codex Desktop, Swift/Xcode build and test commands commonly need access to Xcode cache directories that are outside the workspace sandbox. For `xcodebuild`, SwiftPM, or XCTest runs, request approved Xcode access up front when the command is expected to touch DerivedData, ModuleCache, SourcePackages, simulator caches, or other Xcode-managed cache paths. If a first run fails only because sandboxing blocked one of those paths, rerun the exact same command with approved Xcode access and report it as a sandbox access retry, not as a code or test failure.
 - Prefer narrow approved command prefixes for trusted repo-local Xcode workflows, such as the canonical AgentSessions build/test commands and `./scripts/xcode_test_stable.sh`. Do not use broad auto-approval rules for arbitrary Xcode-looking commands; if a command falls outside the trusted prefixes, request explicit approved Xcode access for that command.
+- Relaunching the app to test a change is trivial — just `killall AgentSessions 2>/dev/null; open .deriveddata-manual/Build/Products/Debug/AgentSessions.app` (the output of the manual `xcodebuild … -derivedDataPath .deriveddata-manual build`). Do NOT invoke a "run" skill or hunt for a launch skill — there isn't one and none is needed. Only reach for UI automation (computer-use/screenshots) if explicitly asked to drive or screenshot the app.
 
 ## Instructions for Codex CLI
 
@@ -64,6 +65,12 @@ Suggested build steps
 - Equivalent direct command:
   - `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath "$PWD/.deriveddata-tests" -parallel-testing-enabled NO clean test`
 - Rationale: isolates test artifacts/signing state from shared `DerivedData`, which avoids intermittent `AgentSessionsTests.xctest` nested-signature failures.
+
+## Git Branch and Worktree Safety
+- **Never create, switch, rename, or delete a git branch without explicit user approval.** This includes `git checkout -b`, `git switch -c`, `git branch`, `git branch -d/-D`, and `git worktree add`.
+- The repository working tree may be shared by **multiple concurrent agent sessions**. A `git checkout`/`switch` moves `HEAD` for *every* session using that directory and can disrupt or corrupt another session's in-progress work and commits. Treat any branch/HEAD change as a cross-session action requiring approval.
+- Default to working on the **current** branch. Do not branch off `main` (or any branch) on your own initiative — not even to "isolate" a change. If isolation seems warranted, propose it and wait for approval.
+- Same standing rule as commits/pushes: branch and worktree operations are **user-initiated only**.
 
 ## Conventional Commits and Trailers
 - Use Conventional Commits for every commit (feat, fix, docs, chore, etc.).
