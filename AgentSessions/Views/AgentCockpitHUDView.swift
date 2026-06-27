@@ -4555,15 +4555,19 @@ private enum QuotaMeterTextMetrics {
 
 private enum HUDLimitsColumnLayout {
     static let compactSpacing: CGFloat = 3
-    static let compactFiveHourPercentWidth: CGFloat = 52
-    // Wide enough for the worst-case hour-format projection (" ▸4h 59m" ≈ 59pt at
-    // the Standard provider font); columnScale handles the Enlarged size. Sized to
-    // match the reserve placeholder ("▸4h 59m") — a narrower value clips "▸Xh Ym".
+    // Each column is sized to its worst-case NORMAL content at the Standard
+    // provider font (columnScale handles Enlarged), so minimumScaleFactor never
+    // shrinks one column relative to its neighbours — the row keeps one uniform
+    // size and never trims times/percents. The four value columns all top out at
+    // an 8-char string (~59pt: "5h: 100%", " ▸4h 59m", "↻ 4h 59m", "Wk: 100%"),
+    // so they share width 62; the weekly reset ("↻ Wed 12:00 PM" ≈ 104pt) needs 106.
+    // (Long stale/unavailable reset copy still falls back to minimumScaleFactor.)
+    static let compactFiveHourPercentWidth: CGFloat = 62
     static let compactFiveHourProjectionWidth: CGFloat = 62
-    static let compactFiveHourResetWidth: CGFloat = 54
+    static let compactFiveHourResetWidth: CGFloat = 62
     static let compactSeparatorWidth: CGFloat = 5
-    static let compactWeekPercentWidth: CGFloat = 48
-    static let compactWeekResetWidth: CGFloat = 92
+    static let compactWeekPercentWidth: CGFloat = 62
+    static let compactWeekResetWidth: CGFloat = 106
 
     static let detailFiveHourPercentWidth: CGFloat = 58
     // Parity with the compact column: fits hour-format "▸Xh Ym" (this row has no
