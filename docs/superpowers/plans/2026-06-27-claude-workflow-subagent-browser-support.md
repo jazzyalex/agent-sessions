@@ -14,7 +14,7 @@
 - **Test (stable, isolated DerivedData to avoid code-sign flakes):**
   `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath "$PWD/.deriveddata-tests" -parallel-testing-enabled NO clean test`
   (the wrapper `./scripts/xcode_test_stable.sh` runs the equivalent). Add `-only-testing:AgentSessionsTests/ClaudeWorkflowSubagentTests` to scope to this plan's tests.
-- **New Swift files must be registered in the Xcode project** via `./scripts/xcode_add_file.rb AgentSessions.xcodeproj <TARGET> <FILE> <GROUP>`. After running it, verify there is exactly **one** file reference (the script has a known duplicate-ref gotcha): `grep -c "ClaudeWorkflowSubagentTests.swift" AgentSessions.xcodeproj/project.pbxproj` should print a small, expected count (one `PBXFileReference` + one `PBXBuildFile`), not more.
+- **New Swift files must be registered in the Xcode project** via `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ./scripts/xcode_add_file.rb AgentSessions.xcodeproj <TARGET> <FILE> <GROUP>` (the UTF-8 locale exports avoid an "invalid byte sequence in US-ASCII" error from the `xcodeproj` gem). A correct single registration produces **4** raw occurrences of the filename in `project.pbxproj` (one `PBXBuildFile` def, one `PBXFileReference` def, one group-child entry, one Sources-phase entry) — not 2. Verify there is no duplicate with: `grep -c "isa = PBXFileReference.*<File>.swift" project.pbxproj` and `grep -c "isa = PBXBuildFile.*<File>.swift" project.pbxproj`, each of which must print exactly `1`.
 - **Preserve existing flat-subagent behavior.** The flat layout `<parentUUID>/subagents/agent-*.jsonl` must keep resolving exactly as it does today. Every detection/helper change ships with a flat-layout regression test.
 - **Do not rely on `session.events`.** Sessions are usually parsed in *lightweight* mode where `events == []`. Path-based helpers (`detectSubagentInfo`, `deriveSessionID`, `projectRoot`) must work with empty events.
 - **Workflow agent shape — validated against a real run** (`<projectHash> = -Users-alexm-Repository-Codex-History`, `<parentUUID> = 48a26fd3-3a7f-4b7a-8bb7-8b836427f892`, run of 2026-06-26):
@@ -131,18 +131,19 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
 
 - [ ] **Step 2: Register the new test file in the Xcode project**
 
-Run:
+Run (UTF-8 locale exports prevent an `xcodeproj`-gem encoding crash):
 ```bash
-./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests \
+LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests \
   AgentSessionsTests/ClaudeWorkflowSubagentTests.swift \
   AgentSessionsTests
 ```
 Expected: `✓ Added AgentSessionsTests/ClaudeWorkflowSubagentTests.swift to AgentSessionsTests`
-Then verify a single registration:
+Then verify exactly one of each reference type (a correct single registration shows 4 total raw occurrences — build-file def, file-ref def, group child, Sources-phase entry):
 ```bash
-grep -c "ClaudeWorkflowSubagentTests.swift" AgentSessions.xcodeproj/project.pbxproj
+grep -c "isa = PBXFileReference.*ClaudeWorkflowSubagentTests.swift" AgentSessions.xcodeproj/project.pbxproj   # expect 1
+grep -c "isa = PBXBuildFile.*ClaudeWorkflowSubagentTests.swift" AgentSessions.xcodeproj/project.pbxproj       # expect 1
 ```
-Expected: `2` (one `PBXFileReference`, one `PBXBuildFile`). If higher, open the pbxproj and remove the duplicate references before continuing.
+If either prints more than `1`, open the pbxproj and remove the duplicate references before continuing.
 
 - [ ] **Step 3: Run the test to verify it fails**
 
@@ -922,7 +923,7 @@ The parent that spawned a workflow is a **normal session** — it just happens t
 
 **Interfaces:**
 - Consumes: `Session.isClaudeWorkflowSubagent` (from Task 5). **If Task 5 is not being implemented, add that property first** (Task 5 Step 3 — a one-line model property), or inline the equivalent `$0.source == .claude && $0.subagentType == "workflow-subagent"` in Step 3 below.
-- Produces: `SubagentRowMeta.hasWorkflowChildren: Bool` (defaults to `false`; `true` on a parent row when ≥1 resolved child is a Claude workflow agent). The default value keeps every existing `SubagentRowMeta(...)` callsite compiling unchanged.
+- Produces: `SubagentRowMeta.hasWorkflowChildren: Bool` (`true` on a parent row when ≥1 resolved child is a Claude workflow agent). Add it via an **explicit initializer** that defaults the new parameter — a `let` with an inline default value is omitted from the synthesized memberwise init, so the parent callsite could not pass it. The explicit default keeps the other two `SubagentRowMeta(...)` callsites compiling unchanged.
 
 - [ ] **Step 1: Write the failing flag tests**
 
@@ -979,7 +980,7 @@ Expected: **FAIL** to compile — `SubagentRowMeta` has no member `hasWorkflowCh
 
 - [ ] **Step 3: Add the derived flag**
 
-In `AgentSessions/Services/SubagentHierarchyBuilder.swift`, extend the struct (`:4-8`) — declare the new property **last** with a default so existing callsites are unaffected:
+In `AgentSessions/Services/SubagentHierarchyBuilder.swift`, extend the struct (`:4-8`) with an explicit initializer that defaults the new parameter (an inline `let … = false` would be dropped from the memberwise init and could not be passed at the parent callsite):
 
 ```swift
 /// Row metadata for hierarchical session display.
@@ -987,7 +988,14 @@ struct SubagentRowMeta {
     let depth: Int            // 0 = top-level, 1 = subagent child
     let hasChildren: Bool     // true if this session has resolved subagent children
     let childCount: Int       // number of resolved subagent children (0 for non-parents)
-    let hasWorkflowChildren: Bool = false  // true when ≥1 resolved child is a Claude workflow agent
+    let hasWorkflowChildren: Bool  // true when ≥1 resolved child is a Claude workflow agent
+
+    init(depth: Int, hasChildren: Bool, childCount: Int, hasWorkflowChildren: Bool = false) {
+        self.depth = depth
+        self.hasChildren = hasChildren
+        self.childCount = childCount
+        self.hasWorkflowChildren = hasWorkflowChildren
+    }
 }
 ```
 
@@ -1083,6 +1091,37 @@ Tool: Claude
 Model: claude-opus-4-8
 Why: a collapsed parent's generic (N) count cannot reveal a workflow run; derive the marker from children so a general session is never mislabeled as a workflow"
 ```
+
+---
+
+## Task 7: Force-reindex migration for existing installs (MUST-FIX)
+
+The parser/discovery fixes only change *how* files parse — they do not re-parse sessions already in the SQLite index (`session_meta`). On an existing install the 9 workflow agents keep their stale pre-fix rows (`parent_session_id = NULL`, `subagent_type = NULL`) and the `journal.jsonl` row persists, so the run never nests. The app's "Advanced re-index" is delta-based (skips unchanged files), so it does not help. The established mechanism (`DB.swift:378,390,420`) is a one-shot migration key that deletes the source's rows so they rebuild on next launch.
+
+**Files:**
+- Modify: `AgentSessions/Indexing/DB.swift` — add a migration in `bootstrap(...)`, right after the `codex_surface_reindex_v1` block, before `COMMIT`.
+
+```swift
+        // Force a full reindex of Claude sessions so nested Workflow subagents
+        // (.../subagents/workflows/wf_<id>/agent-*.jsonl) get parent_session_id and
+        // subagent_type populated by the generalized detectSubagentInfo, and stale
+        // journal.jsonl rows (no longer discovered) are dropped.
+        let claudeWorkflowReindex = "claude_workflow_subagent_reindex_v1"
+        if !migrationApplied(db, key: claudeWorkflowReindex) {
+            try exec(db, "DELETE FROM files WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_meta WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_search WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_tool_io WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_days WHERE source = 'claude';")
+            try exec(db, "DELETE FROM rollups_daily WHERE source = 'claude';")
+            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:claude:%';")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
+        }
+```
+
+On the next app launch, `bootstrap()` runs once, drops the cached Claude rows, and the indexer re-parses Claude transcripts with the new code → the workflow run nests, journal/sidecar rows disappear.
+
+> **Verification note (learned the hard way):** verify this by **building and running in Xcode**, not via `xcodebuild -derivedDataPath … + open`. An isolated-derived-data bundle launched with `open` (especially after `kill -9` cycles) can come up with no menu-bar/Dock UI even though the process is healthy — a launch artifact, unrelated to this code. `bootstrap()` (and thus the migration) only runs when the index DB initializes, which happens when the **Sessions window opens**.
 
 ---
 

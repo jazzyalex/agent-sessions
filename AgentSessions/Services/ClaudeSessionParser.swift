@@ -1166,19 +1166,35 @@ final class ClaudeSessionParser {
         return d.map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Detect Claude subagent session from file path layout.
-    /// Pattern: .../<parentUUID>/subagents/agent-<agentId>.jsonl
-    /// Also reads adjacent agent-<id>.meta.json for agentType.
+    /// Detect a Claude subagent session from its file-path layout and read its
+    /// agent type from the adjacent meta sidecar.
+    ///
+    /// Two layouts exist:
+    ///   Flat (Task-tool subagents):
+    ///     .../<parentUUID>/subagents/agent-<id>.jsonl
+    ///   Nested (Workflow-spawned subagents):
+    ///     .../<parentUUID>/subagents/workflows/wf_<id>/agent-<id>.jsonl
+    ///
+    /// In BOTH layouts the parent session UUID is the path component immediately
+    /// before the LAST `subagents` component, so we key off that rather than the
+    /// transcript's direct parent directory (which is `wf_<id>` for workflows).
+    /// This matches ClaudeRunwayRecentSessionScanner's `pathComponents.contains("subagents")`.
+    /// The agent-type sidecar (`<basename>.meta.json`) always lives next to the
+    /// transcript, so it is read from the transcript's own directory.
     static func detectSubagentInfo(from url: URL) -> (parentSessionID: String?, subagentType: String?) {
-        let parentDir = url.deletingLastPathComponent()
-        guard parentDir.lastPathComponent == "subagents" else { return (nil, nil) }
-
-        let parentSessionName = parentDir.deletingLastPathComponent().lastPathComponent
+        let components = url.pathComponents
+        guard let subagentsIndex = components.lastIndex(of: "subagents"),
+              subagentsIndex > 0 else {
+            return (nil, nil)
+        }
+        let parentSessionName = components[subagentsIndex - 1]
         guard ClaudeSessionIDHelper.looksLikeUUID(parentSessionName) else { return (nil, nil) }
 
-        // Read adjacent meta.json for agentType
+        // agentType lives in the sidecar adjacent to the transcript, regardless of
+        // flat vs nested layout (e.g. {"agentType":"workflow-subagent","spawnDepth":1}).
+        let agentDir = url.deletingLastPathComponent()
         let baseName = url.deletingPathExtension().lastPathComponent
-        let metaFile = parentDir.appendingPathComponent("\(baseName).meta.json")
+        let metaFile = agentDir.appendingPathComponent("\(baseName).meta.json")
         var agentType: String?
         if let metaData = try? Data(contentsOf: metaFile),
            let metaObj = try? JSONSerialization.jsonObject(with: metaData) as? [String: Any] {

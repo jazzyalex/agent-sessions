@@ -429,6 +429,23 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexSurfaceReindex)
         }
 
+        // Force a full reindex of Claude sessions so nested Workflow subagents
+        // (.../subagents/workflows/wf_<id>/agent-*.jsonl) get parent_session_id and
+        // subagent_type populated by the generalized ClaudeSessionParser.detectSubagentInfo,
+        // and stale journal.jsonl rows (no longer discovered) are dropped. Without this,
+        // already-indexed, unchanged Claude files keep their pre-fix rows.
+        let claudeWorkflowReindex = "claude_workflow_subagent_reindex_v1"
+        if !migrationApplied(db, key: claudeWorkflowReindex) {
+            try exec(db, "DELETE FROM files WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_meta WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_search WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_tool_io WHERE source = 'claude';")
+            try exec(db, "DELETE FROM session_days WHERE source = 'claude';")
+            try exec(db, "DELETE FROM rollups_daily WHERE source = 'claude';")
+            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:claude:%';")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
+        }
+
             try exec(db, "COMMIT;")
         } catch {
             try? exec(db, "ROLLBACK;")

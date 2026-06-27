@@ -2,9 +2,20 @@ import Foundation
 
 /// Row metadata for hierarchical session display.
 struct SubagentRowMeta {
-    let depth: Int        // 0 = top-level, 1 = subagent child
-    let hasChildren: Bool // true if this session has resolved subagent children
-    let childCount: Int   // number of resolved subagent children (0 for non-parents)
+    let depth: Int            // 0 = top-level, 1 = subagent child
+    let hasChildren: Bool     // true if this session has resolved subagent children
+    let childCount: Int       // number of resolved subagent children (0 for non-parents)
+    let hasWorkflowChildren: Bool  // true when ≥1 resolved child is a Claude workflow agent
+
+    // Explicit init so `hasWorkflowChildren` has a default: a `let` with an inline
+    // default value is omitted from the synthesized memberwise initializer, which
+    // would make it impossible to pass at the parent-row callsite.
+    init(depth: Int, hasChildren: Bool, childCount: Int, hasWorkflowChildren: Bool = false) {
+        self.depth = depth
+        self.hasChildren = hasChildren
+        self.childCount = childCount
+        self.hasWorkflowChildren = hasWorkflowChildren
+    }
 }
 
 /// Builds a parent-first flattened session list from a flat `[Session]` array,
@@ -109,7 +120,12 @@ enum SubagentHierarchyBuilder {
             let hasChildren = !children.isEmpty
 
             flatSessions.append(s)
-            rowMeta[s.id] = SubagentRowMeta(depth: 0, hasChildren: hasChildren, childCount: children.count)
+            rowMeta[s.id] = SubagentRowMeta(
+                depth: 0,
+                hasChildren: hasChildren,
+                childCount: children.count,
+                hasWorkflowChildren: children.contains { $0.isClaudeWorkflowSubagent }
+            )
 
             if hasChildren, !collapsedParents.contains(s.id) {
                 for child in children {

@@ -264,6 +264,7 @@
 		BD838E8E186BBAF043CCAAA1 /* AgentCockpitHUDWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818D69C24F0559B1CFE37700 /* AgentCockpitHUDWindow.swift */; };
 		BE30A3B7F4D8011099E1CBFE /* CopilotAttachmentScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1408E330D582B96A23409F81 /* CopilotAttachmentScanner.swift */; };
 		BF169B05FC63470E9B57D885 /* StatsCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB6AD7E29B42399425DBDD /* StatsCardsView.swift */; };
+		BF530B0CDFF74BBB0527813C /* ClaudeWorkflowSubagentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9B9885C7279A88B62FA973 /* ClaudeWorkflowSubagentTests.swift */; };
 		BF7200C9605B4304E115A18B /* CopilotSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE6E4EC02F20236FB460314 /* CopilotSessionParser.swift */; };
 		C04E3F5262A3A373AE8AFF10 /* CrashReportingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7474A9AC95B3E3F43FEDC572 /* CrashReportingService.swift */; };
 		C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
@@ -756,6 +757,7 @@
 		EB18C30F6051ED9989384B5E /* CursorResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CursorResume/CursorResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		EB8AE132426FD113E4564562 /* CodexCLIRPCProbe.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexCLIRPCProbe.swift; sourceTree = SOURCE_ROOT; };
 		EC634024CF768951D08698DC /* ClaudeUsageSnapshotStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeUsageSnapshotStoreTests.swift; sourceTree = SOURCE_ROOT; };
+		ED9B9885C7279A88B62FA973 /* ClaudeWorkflowSubagentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeWorkflowSubagentTests.swift; sourceTree = SOURCE_ROOT; };
 		EE51E91DDB45FF63A7579B6B /* ImageBrowserIndexCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserIndexCache.swift; sourceTree = SOURCE_ROOT; };
 		EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/CursorSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/AgentTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
@@ -1333,6 +1335,7 @@
 				EF47E1D1397757AF0B4E3797 /* ClaudeRunwayParserTests.swift */,
 				6033C7F8262369FD998C7CAA /* AntigravityTranscriptParserTests.swift */,
 				AFC3898841A37E5C57E22E02 /* AntigravityResumeTypesTests.swift */,
+				ED9B9885C7279A88B62FA973 /* ClaudeWorkflowSubagentTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2314,6 +2317,7 @@
 				25E3C7E37877B1C9E515016E /* ClaudeRunwayParserTests.swift in Sources */,
 				08344C1AF498200B9FEC036A /* AntigravityTranscriptParserTests.swift in Sources */,
 				C557F0F8093FA2ED6BB4B7C5 /* AntigravityResumeTypesTests.swift in Sources */,
+				BF530B0CDFF74BBB0527813C /* ClaudeWorkflowSubagentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

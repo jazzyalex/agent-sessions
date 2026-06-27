@@ -1,6 +1,14 @@
 import SwiftUI
 import AppKit
 
+/// Display mapping for subagent-type badges. Keeps long internal type names
+/// (e.g. "workflow-subagent") short in the session list.
+enum WorkflowSubagentBadge {
+    static func displayLabel(for agentType: String) -> String {
+        agentType == Session.claudeWorkflowSubagentType ? "workflow" : agentType
+    }
+}
+
 enum UnifiedTableSelectionPolicy {
     static func shouldClearCanonicalSelectionOnTableDeselection(
         isDatasetChurning: Bool,
@@ -2697,7 +2705,9 @@ struct UnifiedSessionsView: View {
         switch s.source {
         case .codex:
             return canResumeCodexInCLI(s)
-        case .claude, .opencode, .hermes, .copilot, .cursor, .pi:
+        case .claude:
+            return !s.isClaudeWorkflowSubagent
+        case .opencode, .hermes, .copilot, .cursor, .pi:
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
@@ -2711,6 +2721,7 @@ struct UnifiedSessionsView: View {
     }
 
     private func resume(_ s: Session) {
+        guard !s.isClaudeWorkflowSubagent else { return }
         switch s.source {
         case .codex:
             Task { @MainActor in
@@ -3544,6 +3555,13 @@ private struct SessionTitleCell: View {
                 .buttonStyle(.plain)
                 .frame(width: 16)
                 .foregroundStyle(.secondary)
+                if meta.hasWorkflowChildren {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .help("Spawned a workflow · \(meta.childCount) agents")
+                        .accessibilityLabel("Spawned a workflow")
+                }
                 Text("(\(meta.childCount))")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -3579,7 +3597,7 @@ private struct SessionTitleCell: View {
             // Subagent type badge (only when hierarchy nesting is active)
             if isNestedSubagent {
                 if let agentType = session.subagentType, !agentType.isEmpty {
-                    Text(agentType)
+                    Text(WorkflowSubagentBadge.displayLabel(for: agentType))
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)

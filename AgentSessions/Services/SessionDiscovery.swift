@@ -596,7 +596,8 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         return Array(sorted.prefix(max(1, limit)))
     }
 
-    private func collectSessionFiles(in root: URL, fileCap: Int) -> (files: [URL], hitCap: Bool) {
+    // internal (not private) so the visit-cap behavior is unit-testable.
+    func collectSessionFiles(in root: URL, fileCap: Int) -> (files: [URL], hitCap: Bool) {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: root,
                                              includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
@@ -609,15 +610,21 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         for case let file as URL in enumerator {
             let values = try? file.resourceValues(forKeys: [.isRegularFileKey])
             guard values?.isRegularFile == true else { continue }
+
+            // Only transcript files are candidates. Skipping sidecars (.meta.json,
+            // .js, .json, .txt) and the workflow run-control log (journal.jsonl)
+            // BEFORE counting toward the cap keeps the budget for real transcripts
+            // and stops the journal from being parsed as a junk session.
+            let ext = file.pathExtension.lowercased()
+            guard ext == "jsonl" || ext == "ndjson" else { continue }
+            if file.lastPathComponent == "journal.jsonl" { continue }
+
             visited += 1
             if visited > fileCap {
                 hitCap = true
                 break
             }
-            let ext = file.pathExtension.lowercased()
-            if ext == "jsonl" || ext == "ndjson" {
-                out.append(file)
-            }
+            out.append(file)
         }
         return (out, hitCap)
     }

@@ -14,10 +14,12 @@ enum ClaudeSessionIDHelper {
         // Direct session: filename IS the UUID
         if looksLikeUUID(base) { return base }
 
-        // Subagent session: .../\<parentUUID\>/subagents/agent-*.jsonl
-        let parent = url.deletingLastPathComponent()
-        if parent.lastPathComponent == "subagents" {
-            let parentSessionName = parent.deletingLastPathComponent().lastPathComponent
+        // Subagent session (flat OR nested workflow layout): the parent UUID is the
+        // component immediately before the last `subagents` component. The CLI
+        // resumes the PARENT, so that's the ID we want.
+        let components = url.pathComponents
+        if let subagentsIndex = components.lastIndex(of: "subagents"), subagentsIndex > 0 {
+            let parentSessionName = components[subagentsIndex - 1]
             if looksLikeUUID(parentSessionName) { return parentSessionName }
         }
 
@@ -43,8 +45,17 @@ enum ClaudeSessionIDHelper {
         let settings = settings ?? .shared
         let url = URL(fileURLWithPath: session.filePath)
         var projectDir = url.deletingLastPathComponent()
-        if projectDir.lastPathComponent == "subagents" {
-            projectDir = projectDir.deletingLastPathComponent().deletingLastPathComponent()
+        // Strip subagent nesting to reach <projectHash>. The project dir is the
+        // component just before <parentUUID>, i.e. two before the last `subagents`.
+        // Works for both flat (.../<parentUUID>/subagents/agent.jsonl) and nested
+        // (.../<parentUUID>/subagents/workflows/wf_<id>/agent.jsonl) layouts.
+        // Need at least <projectHash>/<parentUUID>/subagents/…, so the project dir
+        // is two components before `subagents` (guard subagentsIndex >= 2 to avoid
+        // a degenerate empty path).
+        let components = url.pathComponents
+        if let subagentsIndex = components.lastIndex(of: "subagents"), subagentsIndex >= 2 {
+            let projectComponents = Array(components[0..<(subagentsIndex - 1)])
+            projectDir = URL(fileURLWithPath: NSString.path(withComponents: projectComponents))
         }
         let indexFile = projectDir.appendingPathComponent("sessions-index.json")
         if let data = try? Data(contentsOf: indexFile),

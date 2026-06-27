@@ -68,6 +68,18 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var isSubagent: Bool { effectiveRelationshipKind == .subagent }
     public var isSideChat: Bool { effectiveRelationshipKind == .sideChat }
 
+    /// The `agentType` value Claude Code writes (in agent-<id>.meta.json) for
+    /// Workflow-spawned subagents. Single source of truth for detection + badge.
+    public static let claudeWorkflowSubagentType = "workflow-subagent"
+
+    /// A Claude subagent spawned by a Workflow run (nested
+    /// subagents/workflows/wf_<id>/ layout, agentType == "workflow-subagent").
+    /// Resuming one resolves to the parent, which is already its own row, so the
+    /// UI suppresses Resume for these.
+    public var isClaudeWorkflowSubagent: Bool {
+        source == .claude && subagentType == Self.claudeWorkflowSubagentType
+    }
+
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
 
