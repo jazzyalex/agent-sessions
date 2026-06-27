@@ -495,6 +495,34 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var showArchivedClaudeDesktopOnly: Bool = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedClaudeDesktopOnly) {
+        didSet {
+            UserDefaults.standard.set(showArchivedClaudeDesktopOnly, forKey: PreferencesKey.Unified.showArchivedClaudeDesktopOnly)
+        }
+    }
+
+    /// Read-only overlay of Claude Desktop sidecar records, keyed by cliSessionId
+    /// (== a session's codexInternalSessionIDHint for Code-tab transcripts).
+    @Published private(set) var claudeArchive: [String: ClaudeDesktopSidecarRecord] = [:]
+
+    func isArchivedClaudeDesktop(_ session: Session) -> Bool {
+        guard session.source == .claude, let key = session.codexInternalSessionIDHint else { return false }
+        return claudeArchive[key]?.isArchived == true
+    }
+
+    func claudeArchiveSidecarPath(for session: Session) -> String? {
+        guard session.source == .claude, let key = session.codexInternalSessionIDHint else { return nil }
+        return claudeArchive[key]?.sidecarPath
+    }
+
+    var archivedClaudeSessionIDs: Set<String> {
+        Set(claudeArchive.compactMap { $0.value.isArchived ? $0.key : nil })
+    }
+
+    func rebuildClaudeArchiveOverlay() {
+        let records = ClaudeDesktopSessionTitles.records()
+        if records != claudeArchive { claudeArchive = records }
+    }
 
     // Source filters (persisted with @Published for Combine compatibility)
     @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
@@ -753,6 +781,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     guard let self,
                           Self.shouldPublishAggregationResult(result, currentFavoritesVersion: self.favoritesSnapshotVersion) else { return }
                     self.allSessions = result.sessions
+                    self.rebuildClaudeArchiveOverlay()
                 }
             }
             .store(in: &cancellables)
@@ -978,6 +1007,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                                       repoName: self.projectFilter,
                                       pathContains: nil,
                                       archivedCodexDesktopOnly: self.showArchivedCodexDesktopOnly,
+                                      archivedClaudeDesktopOnly: self.showArchivedClaudeDesktopOnly,
+                                      archivedClaudeSessionIDs: self.archivedClaudeSessionIDs,
                                       sideChatsOnly: false)
                 var results = FilterEngine.filterSessions(base, filters: filters)
 
@@ -1051,6 +1082,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
             }
         })
+        rebuildClaudeArchiveOverlay()
     }
 
     func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
@@ -2381,6 +2413,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                               repoName: projectFilter,
                               pathContains: nil,
                               archivedCodexDesktopOnly: showArchivedCodexDesktopOnly,
+                              archivedClaudeDesktopOnly: showArchivedClaudeDesktopOnly,
+                              archivedClaudeSessionIDs: archivedClaudeSessionIDs,
                               sideChatsOnly: false)
         var results = FilterEngine.filterSessions(base, filters: filters)
 
