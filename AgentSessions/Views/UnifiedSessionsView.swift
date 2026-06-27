@@ -1507,13 +1507,17 @@ struct UnifiedSessionsView: View {
                 }
 
                 if claudeAgentEnabled {
-                    AgentTabToggle(title: "Claude", color: Color.agentClaude, isMonochrome: stripMonochrome, isOn: $unified.includeClaude)
-                        .help("Show or hide Claude sessions in the list (⌘2)")
+                    Button("") { unified.includeClaude.toggle() }
                         .keyboardShortcut("2", modifiers: .command)
-                    ArchivedClaudeDesktopIconToggle(
-                        isOn: $unified.showArchivedClaudeDesktopOnly,
-                        includeClaude: $unified.includeClaude
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+
+                    ClaudeSegmentedPill(
+                        isClaudeOn: $unified.includeClaude,
+                        isArchivedOn: $unified.showArchivedClaudeDesktopOnly,
+                        isMonochrome: stripMonochrome
                     )
+                    .help("Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.")
                 }
 
                 if antigravityAgentEnabled {
@@ -3250,38 +3254,59 @@ private struct ArchivedCodexDesktopIconToggle: View {
     }
 }
 
-private struct ArchivedClaudeDesktopIconToggle: View {
-    @Binding var isOn: Bool
-    @Binding var includeClaude: Bool
+private struct ClaudeSegmentedPill: View {
+    @Binding var isClaudeOn: Bool
+    @Binding var isArchivedOn: Bool
+    let isMonochrome: Bool
 
-    var body: some View {
-        Button(action: toggle) {
-            Image(systemName: isOn ? "archivebox.fill" : "archivebox")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
-                .frame(minWidth: 14)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(UnifiedSessionsStyle.agentPillFill)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(isOn ? UnifiedSessionsStyle.selectionAccent.opacity(0.55) : UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Narrow Claude results to archived Desktop sessions; other enabled agents remain visible.")
-        .accessibilityLabel(Text("Narrow Claude to archived Desktop sessions"))
-        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    private var claudeAccent: Color { isMonochrome ? .primary : Color.agentClaude }
+    private var claudeTextColor: Color {
+        if isClaudeOn { return claudeAccent }
+        return isMonochrome ? .secondary : .primary
     }
 
-    private func toggle() {
-        let nextValue = !isOn
-        if nextValue, !includeClaude { includeClaude = true }
-        isOn = nextValue
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: { isClaudeOn.toggle() }) {
+                Text("Claude")
+                    .font(UnifiedSessionsStyle.agentTabFont)
+                    .foregroundStyle(claudeTextColor)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Claude"))
+            .accessibilityValue(Text(isClaudeOn ? "On" : "Off"))
+
+            Rectangle()
+                .fill(UnifiedSessionsStyle.agentPillStroke)
+                .frame(width: 1)
+                .padding(.vertical, 4)
+
+            Button(action: archiveToggle) {
+                Image(systemName: isArchivedOn ? "archivebox.fill" : "archivebox")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isArchivedOn ? UnifiedSessionsStyle.selectionAccent : .secondary)
+                    .frame(minWidth: 14)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Narrow Claude to archived Desktop sessions"))
+            .accessibilityValue(Text(isArchivedOn ? "On" : "Off"))
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .background(Capsule(style: .continuous).fill(UnifiedSessionsStyle.agentPillFill))
+        .overlay(Capsule(style: .continuous).stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1))
+    }
+
+    private func archiveToggle() {
+        let next = !isArchivedOn
+        if next, !isClaudeOn { isClaudeOn = true }
+        isArchivedOn = next
     }
 }
 
