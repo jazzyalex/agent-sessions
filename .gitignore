@@ -64,6 +64,10 @@ scripts/probe_scan_output/
 scripts/agent_captures/
 scripts/energy_samples*/
 
+# Local research/probe scratch (not shipped)
+side-chat-probes-tmp/
+*-probes-tmp/
+
 # Local release artifacts (use GitHub Releases instead of tracking binaries)
 *.dmg
 
