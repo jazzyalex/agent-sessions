@@ -2,8 +2,8 @@
 import Foundation
 
 @MainActor
-final class GeminiCLISettings: ObservableObject {
-    static let shared = GeminiCLISettings()
+final class AntigravityCLISettings: ObservableObject {
+    static let shared = AntigravityCLISettings()
 
     enum Keys {
         static let binaryOverride = "AntigravityCLIBinaryOverride"

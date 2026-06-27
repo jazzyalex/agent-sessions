@@ -14,7 +14,7 @@ final class AnalyticsService: ObservableObject {
 
     private let codexIndexer: SessionIndexer
     private let claudeIndexer: ClaudeSessionIndexer
-    private let geminiIndexer: GeminiSessionIndexer
+    private let antigravityIndexer: AntigravitySessionIndexer
     private let opencodeIndexer: OpenCodeSessionIndexer
     private let hermesIndexer: HermesSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
@@ -30,14 +30,14 @@ final class AnalyticsService: ObservableObject {
 
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
-         geminiIndexer: GeminiSessionIndexer,
+         antigravityIndexer: AntigravitySessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
          hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
-        self.geminiIndexer = geminiIndexer
+        self.antigravityIndexer = antigravityIndexer
         self.opencodeIndexer = opencodeIndexer
         self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
@@ -85,7 +85,7 @@ final class AnalyticsService: ObservableObject {
         var allSessions: [Session] = []
         if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: antigravityIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
@@ -117,7 +117,7 @@ final class AnalyticsService: ObservableObject {
         var allSessions: [Session] = []
         if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
         if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: geminiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: antigravityIndexer.allSessions) }
         if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
@@ -382,7 +382,7 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
             raw = [SessionSource.claude.rawValue]
-        case .geminiOnly:
+        case .antigravityOnly:
             raw = [SessionSource.antigravity.rawValue]
         case .opencodeOnly:
             raw = [SessionSource.opencode.rawValue]
@@ -725,7 +725,7 @@ final class AnalyticsService: ObservableObject {
     private func setupObservers() {
         // Observe when session data changes (for auto-refresh when window visible)
         Publishers.CombineLatest3(
-            Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, geminiIndexer.$allSessions, opencodeIndexer.$allSessions),
+            Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, antigravityIndexer.$allSessions, opencodeIndexer.$allSessions),
             Publishers.CombineLatest(hermesIndexer.$allSessions, copilotIndexer.$allSessions),
             droidIndexer.$allSessions
         )
@@ -736,7 +736,7 @@ final class AnalyticsService: ObservableObject {
             .store(in: &cancellables)
 
         Publishers.CombineLatest3(
-            Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, geminiIndexer.$launchPhase, opencodeIndexer.$launchPhase),
+            Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
             Publishers.CombineLatest(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase),
             droidIndexer.$launchPhase
         )
@@ -755,7 +755,7 @@ final class AnalyticsService: ObservableObject {
             let phases = [
                 (SessionSource.codex, codexIndexer.launchPhase),
                 (SessionSource.claude, claudeIndexer.launchPhase),
-                (SessionSource.antigravity, geminiIndexer.launchPhase),
+                (SessionSource.antigravity, antigravityIndexer.launchPhase),
                 (SessionSource.opencode, opencodeIndexer.launchPhase),
                 (SessionSource.hermes, hermesIndexer.launchPhase),
                 (SessionSource.copilot, copilotIndexer.launchPhase),

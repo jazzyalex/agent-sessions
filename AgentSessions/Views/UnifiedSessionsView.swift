@@ -264,7 +264,7 @@ struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
     let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
@@ -317,7 +317,7 @@ struct UnifiedSessionsView: View {
 	@AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
 	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
+	@AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
@@ -366,7 +366,7 @@ struct UnifiedSessionsView: View {
     init(unified: UnifiedSessionIndexer,
          codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
-         geminiIndexer: GeminiSessionIndexer,
+         antigravityIndexer: AntigravitySessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
          hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
@@ -382,7 +382,7 @@ struct UnifiedSessionsView: View {
         self.unified = unified
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
-        self.geminiIndexer = geminiIndexer
+        self.antigravityIndexer = antigravityIndexer
         self.opencodeIndexer = opencodeIndexer
         self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
@@ -407,9 +407,9 @@ struct UnifiedSessionsView: View {
                 parseFull: { url, forcedID in ClaudeSessionParser.parseFileFull(at: url, forcedID: forcedID) }
             ),
             .antigravity: .init(
-                transcriptCache: geminiIndexer.searchTranscriptCache,
-                update: { geminiIndexer.updateSession($0) },
-                parseFull: { url, forcedID in GeminiSessionParser.parseFileFull(at: url, forcedID: forcedID) }
+                transcriptCache: antigravityIndexer.searchTranscriptCache,
+                update: { antigravityIndexer.updateSession($0) },
+                parseFull: { url, forcedID in AntigravitySessionParser.parseFileFull(at: url, forcedID: forcedID) }
             ),
             .opencode: .init(
                 transcriptCache: opencodeIndexer.searchTranscriptCache,
@@ -537,9 +537,9 @@ struct UnifiedSessionsView: View {
             .onChange(of: unified.showArchivedCodexDesktopOnly) { _, _ in restartSearchForActiveQuery() }
         let afterClaude = afterArchived
             .onChange(of: unified.includeClaude) { _, _ in restartSearchIfRunning() }
-		let afterGemini = afterClaude
-			.onChange(of: unified.includeGemini) { _, _ in restartSearchIfRunning() }
-		let afterOpenCode = afterGemini
+		let afterAntigravity = afterClaude
+			.onChange(of: unified.includeAntigravity) { _, _ in restartSearchIfRunning() }
+		let afterOpenCode = afterAntigravity
 			.onChange(of: unified.includeOpenCode) { _, _ in restartSearchIfRunning() }
 		let afterCopilot = afterOpenCode
 			.onChange(of: unified.includeCopilot) { _, _ in restartSearchIfRunning() }
@@ -603,7 +603,7 @@ struct UnifiedSessionsView: View {
 				flashAgentEnablementNoticeIfNeeded()
 				updateFooterUsageVisibility()
 			}
-			.onChange(of: geminiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+			.onChange(of: antigravityAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 
@@ -841,7 +841,7 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.listTitle) { s in
                 SessionTitleCell(
                     session: s,
-                    geminiIndexer: geminiIndexer,
+                    antigravityIndexer: antigravityIndexer,
                     rowMeta: hierarchyRowMeta[s.id],
                     sideChatParentContext: sideChatParentContextByID[s.id],
                     isExpanded: !collapsedParents.contains(s.id),
@@ -940,8 +940,8 @@ struct UnifiedSessionsView: View {
 			                Button(s.isFavorite ? "Remove from Saved" : "Save") { unified.toggleFavorite(s) }
 			                Divider()
 	                // Derive Antigravity conversation ID once to avoid repeated disk reads
-	                let geminiCLISessionID = (s.source == .antigravity) ? GeminiSessionIDHelper.deriveSessionID(from: s) : nil
-	                if canResumeSession(s, geminiCLISessionID: geminiCLISessionID) {
+	                let antigravityCLISessionID = (s.source == .antigravity) ? AntigravitySessionIDHelper.deriveSessionID(from: s) : nil
+	                if canResumeSession(s, antigravityCLISessionID: antigravityCLISessionID) {
 	                    Button("Resume in \(resumeAgentLabel(s.source)) (\(CodexLaunchMode.selectedResumeTerminalTitle()))") { resume(s) }
 	                        .keyboardShortcut("r", modifiers: [.command, .control])
 	                        .help("Resume the selected session in its original CLI (⌃⌘R)")
@@ -970,8 +970,8 @@ struct UnifiedSessionsView: View {
                         .disabled(true)
                         .help("No parent session ID is available for this side chat")
                 }
-                Button("Copy Resume Command") { copyResumeCommand(s, geminiCLISessionID: geminiCLISessionID) }
-                    .disabled(!canCopyResumeCommand(s, geminiCLISessionID: geminiCLISessionID))
+                Button("Copy Resume Command") { copyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID) }
+                    .disabled(!canCopyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
                 // Git Context Inspector (Codex + Claude; feature-flagged)
                 if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
@@ -1188,7 +1188,7 @@ struct UnifiedSessionsView: View {
             return nonEmptySessionID(session.parentSessionID)
         }
         if session.source == .antigravity {
-            return GeminiSessionIDHelper.deriveSessionID(from: session)
+            return AntigravitySessionIDHelper.deriveSessionID(from: session)
         }
         return nonEmptySessionID(session.id)
     }
@@ -1200,7 +1200,7 @@ struct UnifiedSessionsView: View {
         return value
     }
 
-    private func canCopyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) -> Bool {
+    private func canCopyResumeCommand(_ session: Session, antigravityCLISessionID: String? = nil) -> Bool {
         switch session.source {
         case .claude:
             return true // falls back to --continue
@@ -1218,13 +1218,13 @@ struct UnifiedSessionsView: View {
         case .pi:
             return true // session file path or id; falls back to --continue
         case .antigravity:
-            return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session)) != nil
+            return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         default:
             return false
         }
     }
 
-    private func copyResumeCommand(_ session: Session, geminiCLISessionID: String? = nil) {
+    private func copyResumeCommand(_ session: Session, antigravityCLISessionID: String? = nil) {
         let pb = NSPasteboard.general
         pb.clearContents()
 
@@ -1319,11 +1319,11 @@ struct UnifiedSessionsView: View {
             pb.setString(command, forType: .string)
 
         case .antigravity:
-            let settings = GeminiCLISettings.shared
-            guard let sid = geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: session) else { return }
+            let settings = AntigravityCLISettings.shared
+            guard let sid = antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session) else { return }
             let wd = settings.effectiveWorkingDirectory(for: session)
             let binary = settings.binaryOverride.isEmpty ? "agy" : settings.binaryOverride
-            let builder = GeminiResumeCommandBuilder()
+            let builder = AntigravityResumeCommandBuilder()
             let core = "\(builder.shellQuoteIfNeeded(binary)) --conversation \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
@@ -1340,7 +1340,7 @@ struct UnifiedSessionsView: View {
 	                               selection: selection,
 	                               codexIndexer: codexIndexer,
                                claudeIndexer: claudeIndexer,
-                               geminiIndexer: geminiIndexer,
+                               antigravityIndexer: antigravityIndexer,
                                opencodeIndexer: opencodeIndexer,
                                hermesIndexer: hermesIndexer,
                                copilotIndexer: copilotIndexer,
@@ -1390,7 +1390,7 @@ struct UnifiedSessionsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
-                } else if s.source == .antigravity, geminiIndexer.unreadableSessionIDs.contains(s.id) {
+                } else if s.source == .antigravity, antigravityIndexer.unreadableSessionIDs.contains(s.id) {
                     VStack(spacing: 12) {
                         Label("Could not open session", systemImage: "exclamationmark.triangle.fill")
                             .font(.headline)
@@ -1475,8 +1475,8 @@ struct UnifiedSessionsView: View {
                         .keyboardShortcut("2", modifiers: .command)
                 }
 
-                if geminiAgentEnabled {
-                    AgentTabToggle(title: "Antigravity", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeGemini)
+                if antigravityAgentEnabled {
+                    AgentTabToggle(title: "Antigravity", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeAntigravity)
                         .help("Show or hide Antigravity sessions in the list (⌘3)")
                         .keyboardShortcut("3", modifiers: .command)
                 }
@@ -1904,8 +1904,8 @@ struct UnifiedSessionsView: View {
         } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             claudeIndexer.reloadSession(id: id)
             requestedSelectionReload = true
-        } else if s.source == .antigravity, let exist = geminiIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            geminiIndexer.reloadSession(id: id)
+        } else if s.source == .antigravity, let exist = antigravityIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
+            antigravityIndexer.reloadSession(id: id)
             requestedSelectionReload = true
         } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
             opencodeIndexer.reloadSession(id: id)
@@ -2081,7 +2081,7 @@ struct UnifiedSessionsView: View {
         case .claude:
             if !unified.includeClaude { unified.includeClaude = true }
         case .antigravity:
-            if !unified.includeGemini { unified.includeGemini = true }
+            if !unified.includeAntigravity { unified.includeAntigravity = true }
         case .opencode:
             if !unified.includeOpenCode { unified.includeOpenCode = true }
         case .hermes:
@@ -2573,10 +2573,10 @@ struct UnifiedSessionsView: View {
 
     private var canResumeSelectedSession: Bool {
         guard let selectedSession else { return false }
-        let geminiCLISessionID = selectedSession.source == .antigravity
-            ? GeminiSessionIDHelper.deriveSessionID(from: selectedSession)
+        let antigravityCLISessionID = selectedSession.source == .antigravity
+            ? AntigravitySessionIDHelper.deriveSessionID(from: selectedSession)
             : nil
-        return canResumeSession(selectedSession, geminiCLISessionID: geminiCLISessionID)
+        return canResumeSession(selectedSession, antigravityCLISessionID: antigravityCLISessionID)
     }
 
     private func effectiveWorkingDirectoryURL(for session: Session) -> URL? {
@@ -2599,7 +2599,7 @@ struct UnifiedSessionsView: View {
         case .pi:
             return PiSettings.shared.effectiveWorkingDirectory(for: session)
         case .antigravity:
-            return GeminiCLISettings.shared.effectiveWorkingDirectory(for: session)
+            return AntigravityCLISettings.shared.effectiveWorkingDirectory(for: session)
         default:
             guard let path = session.cwd, !path.isEmpty else { return nil }
             return URL(fileURLWithPath: path)
@@ -2639,14 +2639,14 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    private func canResumeSession(_ s: Session, geminiCLISessionID: String? = nil) -> Bool {
+    private func canResumeSession(_ s: Session, antigravityCLISessionID: String? = nil) -> Bool {
         switch s.source {
         case .codex:
             return canResumeCodexInCLI(s)
         case .claude, .opencode, .hermes, .copilot, .cursor, .pi:
             return true
         case .antigravity:
-            return (geminiCLISessionID ?? GeminiSessionIDHelper.deriveSessionID(from: s)) != nil
+            return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
         default:
             return false
         }
@@ -2754,21 +2754,21 @@ struct UnifiedSessionsView: View {
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
             }
         case .antigravity:
-            let settings = GeminiCLISettings.shared
-            let sid = GeminiSessionIDHelper.deriveSessionID(from: s)
+            let settings = AntigravityCLISettings.shared
+            let sid = AntigravitySessionIDHelper.deriveSessionID(from: s)
             let wd = settings.effectiveWorkingDirectory(for: s)
             let bin = settings.binaryOverride.isEmpty ? nil : settings.binaryOverride
-            let input = GeminiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            let input = AntigravityResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
             Task { @MainActor in
-                let launcher: GeminiTerminalLaunching = {
+                let launcher: AntigravityTerminalLaunching = {
                     switch ResumePreferenceHelpers.resolveTerminalKind() {
-                    case .iterm2:                  return GeminiITermLauncher()
-                    case .warp:                    return GeminiWarpLauncher()
-                    case .warpPreview:             return GeminiWarpPreviewLauncher()
-                    case .terminalApp, .unknown:   return GeminiTerminalLauncher()
+                    case .iterm2:                  return AntigravityITermLauncher()
+                    case .warp:                    return AntigravityWarpLauncher()
+                    case .warpPreview:             return AntigravityWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return AntigravityTerminalLauncher()
                     }
                 }()
-                let coord = GeminiResumeCoordinator(env: GeminiCLIEnvironment(), builder: GeminiResumeCommandBuilder(), launcher: launcher)
+                let coord = AntigravityResumeCoordinator(env: AntigravityCLIEnvironment(), builder: AntigravityResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, dryRun: false)
             }
         case .claude:
@@ -2855,7 +2855,7 @@ struct UnifiedSessionsView: View {
                                 filters: filters,
                                 includeCodex: unified.includeCodex && codexAgentEnabled,
                                 includeClaude: unified.includeClaude && claudeAgentEnabled,
-                                includeGemini: unified.includeGemini && geminiAgentEnabled,
+                                includeAntigravity: unified.includeAntigravity && antigravityAgentEnabled,
                                 includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
                                 includeHermes: unified.includeHermes && hermesAgentEnabled,
                                 includeCopilot: unified.includeCopilot && copilotAgentEnabled,
@@ -2868,7 +2868,7 @@ struct UnifiedSessionsView: View {
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -3364,7 +3364,7 @@ private struct TranscriptHostView: View {
     let selection: String?
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
-    let geminiIndexer: GeminiSessionIndexer
+    let antigravityIndexer: AntigravitySessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
     let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
@@ -3380,7 +3380,7 @@ private struct TranscriptHostView: View {
                 .opacity(kind == .codex ? 1 : 0)
             ClaudeTranscriptView(indexer: claudeIndexer, sessionID: selection)
                 .opacity(kind == .claude ? 1 : 0)
-            GeminiTranscriptView(indexer: geminiIndexer, sessionID: selection)
+            AntigravityTranscriptView(indexer: antigravityIndexer, sessionID: selection)
                 .opacity(kind == .antigravity ? 1 : 0)
             OpenCodeTranscriptView(indexer: opencodeIndexer, sessionID: selection)
                 .opacity(kind == .opencode ? 1 : 0)
@@ -3411,7 +3411,7 @@ private struct TranscriptHostView: View {
 // Session title cell with inline Antigravity refresh affordance (hover-only)
 private struct SessionTitleCell: View {
     let session: Session
-    @ObservedObject var geminiIndexer: GeminiSessionIndexer
+    @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
     let rowMeta: SubagentRowMeta?
     let sideChatParentContext: String?
     let isExpanded: Bool
@@ -3516,8 +3516,8 @@ private struct SessionTitleCell: View {
             .background(Color.clear)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if session.source == .antigravity, geminiIndexer.isPreviewStale(id: session.id) {
-                Button(action: { geminiIndexer.refreshPreview(id: session.id) }) {
+            if session.source == .antigravity, antigravityIndexer.isPreviewStale(id: session.id) {
+                Button(action: { antigravityIndexer.refreshPreview(id: session.id) }) {
                     Text("Refresh")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                 }
@@ -3696,7 +3696,7 @@ private struct UnifiedSearchFiltersView: View {
                      filters: filters,
                      includeCodex: unified.includeCodex,
                      includeClaude: unified.includeClaude,
-                     includeGemini: unified.includeGemini,
+                     includeAntigravity: unified.includeAntigravity,
                      includeOpenCode: unified.includeOpenCode,
                      includeHermes: unified.includeHermes,
                      includeCopilot: unified.includeCopilot,
@@ -3732,7 +3732,7 @@ private struct UnifiedSearchFiltersView: View {
                          filters: filters,
                          includeCodex: unified.includeCodex,
                          includeClaude: unified.includeClaude,
-                         includeGemini: unified.includeGemini,
+                         includeAntigravity: unified.includeAntigravity,
                          includeOpenCode: unified.includeOpenCode,
                          includeHermes: unified.includeHermes,
                          includeCopilot: unified.includeCopilot,

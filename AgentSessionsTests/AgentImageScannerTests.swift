@@ -72,7 +72,7 @@ final class AgentImageScannerTests: XCTestCase {
         ![Preview](preview.png)
         """.write(to: markdownURL, atomically: true, encoding: .utf8)
 
-        guard let session = GeminiSessionParser.parseFileFull(at: markdownURL) else {
+        guard let session = AntigravitySessionParser.parseFileFull(at: markdownURL) else {
             return XCTFail("parse returned nil")
         }
 
@@ -99,7 +99,7 @@ final class AgentImageScannerTests: XCTestCase {
         ![Preview](preview.png)
         """.write(to: markdownURL, atomically: true, encoding: .utf8)
 
-        guard let session = GeminiSessionParser.parseFileFull(at: markdownURL) else {
+        guard let session = AntigravitySessionParser.parseFileFull(at: markdownURL) else {
             return XCTFail("parse returned nil")
         }
 

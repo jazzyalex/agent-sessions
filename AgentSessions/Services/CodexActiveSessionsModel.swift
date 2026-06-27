@@ -1532,7 +1532,7 @@ final class CodexActiveSessionsModel: ObservableObject {
     private func antigravitySessionsRoots() -> [URL] {
         let defaults = UserDefaults.standard
         let override = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
-        let discovery = GeminiSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        let discovery = AntigravitySessionDiscovery(customRoot: override.isEmpty ? nil : override)
         return dedupRoots([discovery.sessionsRoot()])
     }
 
@@ -4325,7 +4325,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             }
             return nil
         case .antigravity:
-            return GeminiSessionIDHelper.artifactID(fromArtifactURL: URL(fileURLWithPath: path))
+            return AntigravitySessionIDHelper.artifactID(fromArtifactURL: URL(fileURLWithPath: path))
         default:
             return nil
         }

@@ -322,11 +322,11 @@ extension PreferencesView {
 	        }
 	    }
 
-	    var geminiCLITab: some View {
+	    var antigravityCLITab: some View {
 	        VStack(alignment: .leading, spacing: 18) {
 	            Text("Antigravity CLI").font(.title2).fontWeight(.semibold)
 
-	            if !geminiAgentEnabled {
+	            if !antigravityAgentEnabled {
 	                PreferenceCallout {
 	                    Text("This agent is disabled in General → Active CLI agents.")
 	                        .font(.caption)
@@ -340,15 +340,15 @@ extension PreferencesView {
                 // Binary source segmented: Auto | Custom
                 labeledRow("Binary Source") {
                     Picker("", selection: Binding(
-                        get: { geminiSettings.binaryOverride.isEmpty ? 0 : 1 },
+                        get: { antigravitySettings.binaryOverride.isEmpty ? 0 : 1 },
                         set: { idx in
                             if idx == 0 {
                                 // Auto: clear override
-                                geminiSettings.setBinaryOverride("")
-                                scheduleGeminiProbe()
+                                antigravitySettings.setBinaryOverride("")
+                                scheduleAntigravityProbe()
                             } else {
                                 // Custom: open file picker
-                                pickGeminiBinary()
+                                pickAntigravityBinary()
                             }
                         }
                     )) {
@@ -361,17 +361,17 @@ extension PreferencesView {
                 }
 
                 // Auto row (detected path + version + actions)
-                if geminiSettings.binaryOverride.isEmpty {
+                if antigravitySettings.binaryOverride.isEmpty {
                     HStack {
                         Text("Detected:").font(.caption)
-                        Text(geminiVersionString ?? "unknown").font(.caption).monospaced()
+                        Text(antigravityVersionString ?? "unknown").font(.caption).monospaced()
                     }
-                    if let path = geminiResolvedPath {
+                    if let path = antigravityResolvedPath {
                         Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     }
 
                     // Show helpful message if binary not found
-                    if geminiProbeState == .failure && geminiVersionString == nil {
+                    if antigravityProbeState == .failure && antigravityVersionString == nil {
                         PreferenceCallout {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Antigravity CLI not found")
@@ -385,7 +385,7 @@ extension PreferencesView {
                     }
 
                     HStack(spacing: 12) {
-                        Button("Check Version") { probeGemini() }
+                        Button("Check Version") { probeAntigravity() }
                             .buttonStyle(.bordered)
                             .help("Query the detected Antigravity CLI for its version")
                         Button(agentUpdateButtonTitle(for: .antigravity)) { runAgentUpdateFlow(for: .antigravity) }
@@ -393,37 +393,37 @@ extension PreferencesView {
                             .help("Check for a newer Antigravity CLI version and optionally update it")
                             .disabled(isAgentUpdateBusy(.antigravity))
                         Button("Copy Path") {
-                            if let p = geminiResolvedPath {
+                            if let p = antigravityResolvedPath {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(p, forType: .string)
                             }
                         }
                         .buttonStyle(.bordered)
                         .help("Copy the detected Antigravity CLI path to clipboard")
-                        .disabled(geminiResolvedPath == nil)
+                        .disabled(antigravityResolvedPath == nil)
                         Button("Reveal") {
-                            if let p = geminiResolvedPath {
+                            if let p = antigravityResolvedPath {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
                             }
                         }
                         .buttonStyle(.bordered)
                         .help("Reveal the detected Antigravity CLI binary in Finder")
-                        .disabled(geminiResolvedPath == nil)
+                        .disabled(antigravityResolvedPath == nil)
                     }
                 } else {
                     // Custom mode: text field for override
                     HStack(spacing: 10) {
-                        TextField("/path/to/agy", text: Binding(get: { geminiSettings.binaryOverride }, set: { geminiSettings.setBinaryOverride($0) }))
+                        TextField("/path/to/agy", text: Binding(get: { antigravitySettings.binaryOverride }, set: { antigravitySettings.setBinaryOverride($0) }))
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 360)
-                            .onSubmit { scheduleGeminiProbe() }
-                            .onChange(of: geminiSettings.binaryOverride) { _, _ in scheduleGeminiProbe() }
+                            .onSubmit { scheduleAntigravityProbe() }
+                            .onChange(of: antigravitySettings.binaryOverride) { _, _ in scheduleAntigravityProbe() }
                             .help("Enter the full path to a custom Antigravity CLI binary")
-                        Button("Choose…", action: pickGeminiBinary)
+                        Button("Choose…", action: pickAntigravityBinary)
                             .buttonStyle(.borderedProminent)
                             .help("Select the Antigravity CLI binary from the filesystem")
                         Button("Clear") {
-                            geminiSettings.setBinaryOverride("")
+                            antigravitySettings.setBinaryOverride("")
                         }
                         .buttonStyle(.bordered)
                         .help("Remove the custom binary override")
@@ -435,23 +435,23 @@ extension PreferencesView {
             sectionHeader("Sessions Directory")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    TextField("Custom path (optional)", text: $geminiSessionsPath)
+                    TextField("Custom path (optional)", text: $antigravitySessionsPath)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 360)
                         .onSubmit {
-                            validateGeminiSessionsPath()
-                            commitGeminiSessionsPathIfValid()
+                            validateAntigravitySessionsPath()
+                            commitAntigravitySessionsPathIfValid()
                         }
-                        .onChange(of: geminiSessionsPath) { _, _ in
-                            validateGeminiSessionsPath()
-                            geminiSessionsPathDebounce?.cancel()
-                            let work = DispatchWorkItem { commitGeminiSessionsPathIfValid() }
-                            geminiSessionsPathDebounce = work
+                        .onChange(of: antigravitySessionsPath) { _, _ in
+                            validateAntigravitySessionsPath()
+                            antigravitySessionsPathDebounce?.cancel()
+                            let work = DispatchWorkItem { commitAntigravitySessionsPathIfValid() }
+                            antigravitySessionsPathDebounce = work
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                         }
                         .help("Override the Antigravity artifact directory. Leave blank to use the default location")
 
-                    Button(action: pickGeminiSessionsFolder) {
+                    Button(action: pickAntigravitySessionsFolder) {
                         Label("Choose…", systemImage: "folder")
                             .labelStyle(.titleAndIcon)
                     }
@@ -459,7 +459,7 @@ extension PreferencesView {
                     .help("Browse for a directory that stores Antigravity artifacts")
                 }
 
-                if !geminiSessionsPathValid {
+                if !antigravitySessionsPathValid {
                     Label("Path must point to an existing folder", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -470,7 +470,7 @@ extension PreferencesView {
 	                    .foregroundStyle(.secondary)
 	            }
 	            }
-	            .disabled(!geminiAgentEnabled)
+	            .disabled(!antigravityAgentEnabled)
 
 	            Spacer()
 	        }
@@ -478,7 +478,7 @@ extension PreferencesView {
 
     // MARK: - Antigravity Pickers
 
-    func pickGeminiSessionsFolder() {
+    func pickAntigravitySessionsFolder() {
         let panel = NSOpenPanel()
         panel.title = "Select Antigravity Artifact Directory"
         panel.message = "Choose the folder where Antigravity brain artifacts are stored"
@@ -488,35 +488,35 @@ extension PreferencesView {
         panel.canCreateDirectories = true
 
         // Start at current override or default
-        if !geminiSessionsPath.isEmpty {
-            let expanded = (geminiSessionsPath as NSString).expandingTildeInPath
+        if !antigravitySessionsPath.isEmpty {
+            let expanded = (antigravitySessionsPath as NSString).expandingTildeInPath
             panel.directoryURL = URL(fileURLWithPath: expanded)
         } else if let homeDir = FileManager.default.homeDirectoryForCurrentUser as URL? {
             panel.directoryURL = homeDir.appendingPathComponent(".gemini/antigravity/brain")
         }
 
         if panel.runModal() == .OK, let url = panel.url {
-            geminiSessionsPath = url.path
-            validateGeminiSessionsPath()
-            commitGeminiSessionsPathIfValid()
+            antigravitySessionsPath = url.path
+            validateAntigravitySessionsPath()
+            commitAntigravitySessionsPathIfValid()
         }
     }
 
     // MARK: - Antigravity Path Validation
 
-    func validateGeminiSessionsPath() {
-        guard !geminiSessionsPath.isEmpty else {
-            geminiSessionsPathValid = true
+    func validateAntigravitySessionsPath() {
+        guard !antigravitySessionsPath.isEmpty else {
+            antigravitySessionsPathValid = true
             return
         }
-        let expanded = (geminiSessionsPath as NSString).expandingTildeInPath
+        let expanded = (antigravitySessionsPath as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
-        geminiSessionsPathValid = exists && isDir.boolValue
+        antigravitySessionsPathValid = exists && isDir.boolValue
     }
 
-    func commitGeminiSessionsPathIfValid() {
-        guard geminiSessionsPathValid else { return }
+    func commitAntigravitySessionsPathIfValid() {
+        guard antigravitySessionsPathValid else { return }
         // The @AppStorage binding will automatically persist the value
         // Antigravity indexer listens to UserDefaults changes and triggers its own refresh.
     }

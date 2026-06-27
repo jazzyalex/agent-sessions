@@ -6,7 +6,7 @@ struct OnboardingSheetView: View {
     @ObservedObject var coordinator: OnboardingCoordinator
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
-    let geminiIndexer: GeminiSessionIndexer
+    let antigravityIndexer: AntigravitySessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
     let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
@@ -22,7 +22,7 @@ struct OnboardingSheetView: View {
 
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
@@ -130,7 +130,7 @@ struct OnboardingSheetView: View {
         }
         .onReceive(codexIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(claudeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(geminiIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(antigravityIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(opencodeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(hermesIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(copilotIndexer.$allSessions) { _ in handleSessionDataUpdate() }
@@ -627,7 +627,7 @@ struct OnboardingSheetView: View {
             )
         case .antigravity:
             return Binding(
-                get: { geminiAgentEnabled },
+                get: { antigravityAgentEnabled },
                 set: { _ = AgentEnablement.setEnabled(.antigravity, enabled: $0) }
             )
         case .opencode:
@@ -734,7 +734,7 @@ struct OnboardingSheetView: View {
         switch source {
         case .codex: return codexIndexer.allSessions
         case .claude: return claudeIndexer.allSessions
-        case .antigravity: return geminiIndexer.allSessions
+        case .antigravity: return antigravityIndexer.allSessions
         case .opencode: return opencodeIndexer.allSessions
         case .hermes: return hermesIndexer.allSessions
         case .copilot: return copilotIndexer.allSessions
@@ -749,7 +749,7 @@ struct OnboardingSheetView: View {
         switch source {
         case .codex: return codexAgentEnabled
         case .claude: return claudeAgentEnabled
-        case .antigravity: return geminiAgentEnabled
+        case .antigravity: return antigravityAgentEnabled
         case .opencode: return openCodeAgentEnabled
         case .hermes: return hermesAgentEnabled
         case .copilot: return copilotAgentEnabled
@@ -799,7 +799,7 @@ struct OnboardingSheetView: View {
     private var weeklyActivity: [WeeklyActivityDay] {
         let sessions = codexIndexer.allSessions
             + claudeIndexer.allSessions
-            + geminiIndexer.allSessions
+            + antigravityIndexer.allSessions
             + opencodeIndexer.allSessions
             + hermesIndexer.allSessions
             + copilotIndexer.allSessions

@@ -1,6 +1,6 @@
 import Foundation
 
-struct GeminiCLIEnvironment {
+struct AntigravityCLIEnvironment {
     struct ProbeResult {
         let versionString: String
         let binaryURL: URL

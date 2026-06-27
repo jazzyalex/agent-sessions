@@ -234,7 +234,7 @@ enum AgentEnablement {
             root = discovery.sessionsRoot()
         case .antigravity:
             let custom = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
-            root = GeminiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+            root = AntigravitySessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .opencode:
             let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
             // Check opencode.db first (v1.2+ SQLite backend)

@@ -1815,8 +1815,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return codex.searchTranscriptCache.getCached(id)
         } else if let claude = indexer as? ClaudeSessionIndexer {
             return claude.searchTranscriptCache.getCached(id)
-        } else if let gemini = indexer as? GeminiSessionIndexer {
-            return gemini.searchTranscriptCache.getCached(id)
+        } else if let antigravity = indexer as? AntigravitySessionIndexer {
+            return antigravity.searchTranscriptCache.getCached(id)
         }
         return nil
     }

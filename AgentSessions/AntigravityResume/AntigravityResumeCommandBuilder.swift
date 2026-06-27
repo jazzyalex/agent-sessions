@@ -1,6 +1,6 @@
 import Foundation
 
-struct GeminiResumeCommandBuilder {
+struct AntigravityResumeCommandBuilder {
     struct CommandPackage {
         let shellCommand: String
         let displayCommand: String

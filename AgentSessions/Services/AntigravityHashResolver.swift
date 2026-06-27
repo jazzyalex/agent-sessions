@@ -8,10 +8,10 @@ import CryptoKit
 /// without a trailing slash. Example:
 /// sha256("/Users/alexm/Repository/Codex-History")
 ///   = 205016864bd110904e9ad8314192344ab398d043e779da15bedbb9ee9be00da2
-final class GeminiHashResolver: @unchecked Sendable {
-    static let shared = GeminiHashResolver()
+final class AntigravityHashResolver: @unchecked Sendable {
+    static let shared = AntigravityHashResolver()
 
-    private let queue = DispatchQueue(label: "GeminiHashResolver", qos: .utility)
+    private let queue = DispatchQueue(label: "AntigravityHashResolver", qos: .utility)
     private var map: [String: String] = [:] // hash -> absolute path
 
     private init() {}

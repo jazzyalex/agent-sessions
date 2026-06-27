@@ -1101,12 +1101,12 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         terminal.itermSessionId = "w0t0p0:CLA"
         claude.terminal = terminal
 
-        var gemini = CodexActivePresence()
-        gemini.source = .antigravity
-        gemini.sessionId = "sid-gemini"
-        gemini.tty = "/dev/ttys003"
+        var antigravity = CodexActivePresence()
+        antigravity.source = .antigravity
+        antigravity.sessionId = "sid-gemini"
+        antigravity.tty = "/dev/ttys003"
 
-        let keys = Set(CodexActiveSessionsModel.itermProbeCandidateKeys(for: [codex, claude, gemini]))
+        let keys = Set(CodexActiveSessionsModel.itermProbeCandidateKeys(for: [codex, claude, antigravity]))
         XCTAssertEqual(keys.count, 3)
         XCTAssertTrue(keys.contains("codex|sid:sid-codex"))
         XCTAssertTrue(keys.contains("claude|sid:sid-claude"))
@@ -3626,12 +3626,12 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let now = Date()
         let codex = makeFallbackSession(id: "codex-a", source: .codex, cwd: nil, modifiedAt: now)
         let claude = makeFallbackSession(id: "claude-z", source: .claude, cwd: nil, modifiedAt: now.addingTimeInterval(5))
-        let hiddenGemini = makeFallbackSession(id: "gemini-hidden", source: .antigravity, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
+        let hiddenAntigravity = makeFallbackSession(id: "gemini-hidden", source: .antigravity, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
         let favoriteKey = StarredSessionKey(source: .claude, id: claude.id)
         let work = UnifiedSessionIndexer.SessionAggregationWork(
             codexList: [codex],
             claudeList: [claude],
-            geminiList: [hiddenGemini],
+            antigravityList: [hiddenAntigravity],
             opencodeList: [],
             hermesList: [],
             copilotList: [],
@@ -3644,7 +3644,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
                 codex: true,
                 claude: true,
-                gemini: false,
+                antigravity: false,
                 openCode: false,
                 hermes: false,
                 copilot: false,
@@ -3667,7 +3667,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let work = UnifiedSessionIndexer.SessionAggregationWork(
             codexList: [session],
             claudeList: [],
-            geminiList: [],
+            antigravityList: [],
             opencodeList: [],
             hermesList: [],
             copilotList: [],
@@ -3680,7 +3680,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
                 codex: true,
                 claude: false,
-                gemini: false,
+                antigravity: false,
                 openCode: false,
                 hermes: false,
                 copilot: false,

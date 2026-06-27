@@ -11,7 +11,7 @@ extension Color {
     static let agentClaude: Color = TranscriptColorSystem.agentBrandAccent(source: .claude)
 
     /// Antigravity brand color
-    static let agentGemini: Color = TranscriptColorSystem.agentBrandAccent(source: .antigravity)
+    static let agentAntigravity: Color = TranscriptColorSystem.agentBrandAccent(source: .antigravity)
     /// OpenCode brand color
     static let agentOpenCode: Color = TranscriptColorSystem.agentBrandAccent(source: .opencode)
     /// Hermes brand color
@@ -32,7 +32,7 @@ extension Color {
     /// Monochrome gray shades for each agent (maintains visual distinction)
     static let agentCodexGray = Color(white: 0.4)   // Darker gray
     static let agentClaudeGray = Color(white: 0.5)  // Medium gray
-    static let agentGeminiGray = Color(white: 0.6)  // Lighter gray
+    static let agentAntigravityGray = Color(white: 0.6)  // Lighter gray
     static let agentOpenCodeGray = Color(white: 0.7) // Lightest gray
     static let agentHermesGray = Color(white: 0.72)
     static let agentCopilotGray = Color(white: 0.75) // Very light gray
@@ -46,7 +46,7 @@ extension Color {
         switch source {
         case .codex: return .agentCodex
         case .claude: return .agentClaude
-        case .antigravity: return .agentGemini
+        case .antigravity: return .agentAntigravity
         case .opencode: return .agentOpenCode
         case .hermes: return .agentHermes
         case .copilot: return .agentCopilot
@@ -63,7 +63,7 @@ extension Color {
             switch source {
             case .codex: return .agentCodexGray
             case .claude: return .agentClaudeGray
-            case .antigravity: return .agentGeminiGray
+            case .antigravity: return .agentAntigravityGray
             case .opencode: return .agentOpenCodeGray
             case .hermes: return .agentHermesGray
             case .copilot: return .agentCopilotGray
@@ -85,7 +85,7 @@ extension Color {
         } else if lower.contains("claude") {
             return .agentClaude
         } else if lower.contains("gemini") {
-            return .agentGemini
+            return .agentAntigravity
         } else if lower.contains("opencode") {
             return .agentOpenCode
         } else if lower.contains("hermes") {
@@ -114,7 +114,7 @@ extension Color {
             } else if lower.contains("claude") {
                 return .agentClaudeGray
             } else if lower.contains("gemini") {
-                return .agentGeminiGray
+                return .agentAntigravityGray
             } else if lower.contains("opencode") {
                 return .agentOpenCodeGray
             } else if lower.contains("hermes") {

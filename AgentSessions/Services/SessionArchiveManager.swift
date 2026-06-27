@@ -393,12 +393,12 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             }
         case .antigravity:
             let custom = defaults.string(forKey: "AntigravitySessionsRootOverride")
-            let discovery = GeminiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            let discovery = AntigravitySessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
-                if let session = GeminiSessionParser.parseFile(at: url), !session.id.isEmpty {
+                if let session = AntigravitySessionParser.parseFile(at: url), !session.id.isEmpty {
                     map[session.id] = url
                 }
-                if let conversationID = GeminiSessionIDHelper.conversationID(fromArtifactURL: url),
+                if let conversationID = AntigravitySessionIDHelper.conversationID(fromArtifactURL: url),
                    map[conversationID] == nil {
                     map[conversationID] = url
                 }
@@ -473,7 +473,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         case .claude:
             return ClaudeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .antigravity:
-            return GeminiSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+            return AntigravitySessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .opencode:
             return OpenCodeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .hermes:

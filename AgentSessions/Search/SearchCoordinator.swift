@@ -166,7 +166,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                filters: Filters,
                includeCodex: Bool,
                includeClaude: Bool,
-               includeGemini: Bool,
+               includeAntigravity: Bool,
                includeOpenCode: Bool,
                includeHermes: Bool,
                includeCopilot: Bool,
@@ -188,7 +188,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             var set = Set<SessionSource>()
             if includeCodex { set.insert(.codex) }
             if includeClaude { set.insert(.claude) }
-            if includeGemini { set.insert(.antigravity) }
+            if includeAntigravity { set.insert(.antigravity) }
             if includeOpenCode { set.insert(.opencode) }
             if includeHermes { set.insert(.hermes) }
             if includeCopilot { set.insert(.copilot) }

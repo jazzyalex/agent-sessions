@@ -176,7 +176,7 @@ struct AgentSessionsApp: App {
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @StateObject private var activeCodexSessions = CodexActiveSessionsModel()
-    @StateObject private var geminiIndexer = GeminiSessionIndexer()
+    @StateObject private var antigravityIndexer = AntigravitySessionIndexer()
     @StateObject private var hermesIndexer = HermesSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
     @StateObject private var droidIndexer = DroidSessionIndexer()
@@ -211,7 +211,7 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
@@ -263,7 +263,7 @@ struct AgentSessionsApp: App {
             let unified = unifiedIndexerHolder.makeUnified(
                 codexIndexer: indexer,
                 claudeIndexer: claudeIndexer,
-                geminiIndexer: geminiIndexer,
+                antigravityIndexer: antigravityIndexer,
                 opencodeIndexer: opencodeIndexer,
                 hermesIndexer: hermesIndexer,
                 copilotIndexer: copilotIndexer,
@@ -283,7 +283,7 @@ struct AgentSessionsApp: App {
             unified: unified,
             codexIndexer: indexer,
             claudeIndexer: claudeIndexer,
-            geminiIndexer: geminiIndexer,
+            antigravityIndexer: antigravityIndexer,
             opencodeIndexer: opencodeIndexer,
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
@@ -339,7 +339,7 @@ struct AgentSessionsApp: App {
         }
         .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
-        .onChange(of: geminiAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        .onChange(of: antigravityAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onChange(of: piAgentEnabled) { _, _ in handleAgentEnablementChange() }
         .onAppear {
@@ -362,7 +362,7 @@ struct AgentSessionsApp: App {
                     coordinator: onboardingCoordinator,
                     codexIndexer: indexer,
                     claudeIndexer: claudeIndexer,
-                    geminiIndexer: geminiIndexer,
+                    antigravityIndexer: antigravityIndexer,
                     opencodeIndexer: opencodeIndexer,
                     hermesIndexer: hermesIndexer,
                     copilotIndexer: copilotIndexer,
@@ -454,7 +454,7 @@ struct AgentSessionsApp: App {
                     unified: unifiedIndexerHolder.makeUnified(
                         codexIndexer: indexer,
                         claudeIndexer: claudeIndexer,
-                        geminiIndexer: geminiIndexer,
+                        antigravityIndexer: antigravityIndexer,
                         opencodeIndexer: opencodeIndexer,
                         hermesIndexer: hermesIndexer,
                         copilotIndexer: copilotIndexer,
@@ -515,7 +515,7 @@ final class _UnifiedHolder: ObservableObject {
     var unified: UnifiedSessionIndexer? = nil
     func makeUnified(codexIndexer: SessionIndexer,
                      claudeIndexer: ClaudeSessionIndexer,
-                     geminiIndexer: GeminiSessionIndexer,
+                     antigravityIndexer: AntigravitySessionIndexer,
                      opencodeIndexer: OpenCodeSessionIndexer,
                      hermesIndexer: HermesSessionIndexer,
                      copilotIndexer: CopilotSessionIndexer,
@@ -526,7 +526,7 @@ final class _UnifiedHolder: ObservableObject {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
-                                      geminiIndexer: geminiIndexer,
+                                      antigravityIndexer: antigravityIndexer,
                                       opencodeIndexer: opencodeIndexer,
                                       hermesIndexer: hermesIndexer,
                                       copilotIndexer: copilotIndexer,
@@ -663,7 +663,7 @@ extension AgentSessionsApp {
         unifiedIndexerHolder.makeUnified(
             codexIndexer: indexer,
             claudeIndexer: claudeIndexer,
-            geminiIndexer: geminiIndexer,
+            antigravityIndexer: antigravityIndexer,
             opencodeIndexer: opencodeIndexer,
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
@@ -961,7 +961,7 @@ extension AgentSessionsApp {
         let service = AnalyticsService(
             codexIndexer: indexer,
             claudeIndexer: claudeIndexer,
-            geminiIndexer: geminiIndexer,
+            antigravityIndexer: antigravityIndexer,
             opencodeIndexer: opencodeIndexer,
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
@@ -1179,7 +1179,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         coordinator: OnboardingCoordinator,
         codexIndexer: SessionIndexer,
         claudeIndexer: ClaudeSessionIndexer,
-        geminiIndexer: GeminiSessionIndexer,
+        antigravityIndexer: AntigravitySessionIndexer,
         opencodeIndexer: OpenCodeSessionIndexer,
         hermesIndexer: HermesSessionIndexer,
         copilotIndexer: CopilotSessionIndexer,
@@ -1196,7 +1196,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             coordinator: coordinator,
             codexIndexer: codexIndexer,
             claudeIndexer: claudeIndexer,
-            geminiIndexer: geminiIndexer,
+            antigravityIndexer: antigravityIndexer,
             opencodeIndexer: opencodeIndexer,
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
@@ -1288,7 +1288,7 @@ private struct OnboardingWindowState {
     let coordinator: OnboardingCoordinator
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
-    let geminiIndexer: GeminiSessionIndexer
+    let antigravityIndexer: AntigravitySessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
     let hermesIndexer: HermesSessionIndexer
     let copilotIndexer: CopilotSessionIndexer
@@ -1310,7 +1310,7 @@ private struct OnboardingWindowRoot: View {
             coordinator: state.coordinator,
             codexIndexer: state.codexIndexer,
             claudeIndexer: state.claudeIndexer,
-            geminiIndexer: state.geminiIndexer,
+            antigravityIndexer: state.antigravityIndexer,
             opencodeIndexer: state.opencodeIndexer,
             hermesIndexer: state.hermesIndexer,
             copilotIndexer: state.copilotIndexer,

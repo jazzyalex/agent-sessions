@@ -1,19 +1,19 @@
 import Foundation
 
-struct GeminiResumeInput {
+struct AntigravityResumeInput {
     var sessionID: String?
     var workingDirectory: URL?
     var binaryOverride: String?
 }
 
-enum GeminiStrategyUsed {
+enum AntigravityStrategyUsed {
     case resumeByID
     case none
 }
 
-struct GeminiResumeResult {
+struct AntigravityResumeResult {
     let launched: Bool
-    let strategy: GeminiStrategyUsed
+    let strategy: AntigravityStrategyUsed
     let error: String?
     let command: String?
 }
@@ -21,7 +21,7 @@ struct GeminiResumeResult {
 /// Extracts the Antigravity CLI conversation ID from the local artifact path.
 /// Antigravity brain artifacts live under
 /// `~/.gemini/antigravity/brain/<conversation-id>/*.md`.
-enum GeminiSessionIDHelper {
+enum AntigravitySessionIDHelper {
     static func artifactID(fromArtifactURL url: URL) -> String? {
         guard let conversationID = conversationID(fromArtifactURL: url) else { return nil }
         let artifact = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)

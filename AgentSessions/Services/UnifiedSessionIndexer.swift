@@ -148,9 +148,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                 indexer.sourceAwareFocusedSignaturePath(for: context)
             },
             reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.geminiAgentEnabled else { return }
+                guard indexer.antigravityAgentEnabled else { return }
                 let force = (trigger != .selection)
-                let reason: GeminiSessionIndexer.ReloadReason
+                let reason: AntigravitySessionIndexer.ReloadReason
                 switch trigger {
                 case .selection:
                     reason = .selection
@@ -159,7 +159,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 case .manual:
                     reason = .manualRefresh
                 }
-                indexer.gemini.reloadSession(id: context.sessionID, force: force, reason: reason)
+                indexer.antigravity.reloadSession(id: context.sessionID, force: force, reason: reason)
             }
         ),
         .opencode: FocusedMonitorCapability(
@@ -394,7 +394,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     struct AgentEnablementSnapshot {
         let codex: Bool
         let claude: Bool
-        let gemini: Bool
+        let antigravity: Bool
         let openCode: Bool
         let hermes: Bool
         let copilot: Bool
@@ -407,7 +407,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     struct SessionAggregationWork {
         let codexList: [Session]
         let claudeList: [Session]
-        let geminiList: [Session]
+        let antigravityList: [Session]
         let opencodeList: [Session]
         let hermesList: [Session]
         let copilotList: [Session]
@@ -422,7 +422,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         static let empty = SessionAggregationWork(
             codexList: [],
             claudeList: [],
-            geminiList: [],
+            antigravityList: [],
             opencodeList: [],
             hermesList: [],
             copilotList: [],
@@ -435,7 +435,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             enablement: AgentEnablementSnapshot(
                 codex: false,
                 claude: false,
-                gemini: false,
+                antigravity: false,
                 openCode: false,
                 hermes: false,
                 copilot: false,
@@ -509,9 +509,9 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
-    @Published var includeGemini: Bool = UserDefaults.standard.object(forKey: "IncludeGeminiSessions") as? Bool ?? true {
+    @Published var includeAntigravity: Bool = UserDefaults.standard.object(forKey: "IncludeAntigravitySessions") as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeGemini, forKey: "IncludeGeminiSessions")
+            UserDefaults.standard.set(includeAntigravity, forKey: "IncludeAntigravitySessions")
             recomputeNow()
         }
     }
@@ -561,7 +561,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     // Global agent enablement (drives app-wide availability)
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
     @Published private(set) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
-    @Published private(set) var geminiAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
+    @Published private(set) var antigravityAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
     @Published private(set) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
     @Published private(set) var hermesAgentEnabled: Bool = AgentEnablement.isEnabled(.hermes)
     @Published private(set) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
@@ -602,7 +602,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
-    private let gemini: GeminiSessionIndexer
+    private let antigravity: AntigravitySessionIndexer
     private let opencode: OpenCodeSessionIndexer
     private let hermes: HermesSessionIndexer
     private let copilot: CopilotSessionIndexer
@@ -653,7 +653,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
-         geminiIndexer: GeminiSessionIndexer,
+         antigravityIndexer: AntigravitySessionIndexer,
          opencodeIndexer: OpenCodeSessionIndexer,
          hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
@@ -663,7 +663,7 @@ final class UnifiedSessionIndexer: ObservableObject {
          piIndexer: PiSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
-        self.gemini = geminiIndexer
+        self.antigravity = antigravityIndexer
         self.opencode = opencodeIndexer
         self.hermes = hermesIndexer
         self.copilot = copilotIndexer
@@ -685,7 +685,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         })
 
         let agentEnabledFlags = Publishers.CombineLatest(
-            Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $geminiAgentEnabled, $openCodeAgentEnabled),
+            Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $antigravityAgentEnabled, $openCodeAgentEnabled),
             Publishers.CombineLatest(
                 $hermesAgentEnabled,
                 Publishers.CombineLatest4($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled, $cursorAgentEnabled)
@@ -695,7 +695,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, gemini.$allSessions, opencode.$allSessions),
+            Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, antigravity.$allSessions, opencode.$allSessions),
             Publishers.CombineLatest(
                 hermes.$allSessions,
                 Publishers.CombineLatest4(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions, cursor.$allSessions)
@@ -708,18 +708,18 @@ final class UnifiedSessionIndexer: ObservableObject {
                 guard let self else { return .empty }
                 let (sourceListsBase, piList) = sourceLists
                 let (combined, tail) = sourceListsBase
-                let (codexList, claudeList, geminiList, opencodeList) = combined
+                let (codexList, claudeList, antigravityList, opencodeList) = combined
                 let (hermesList, tailLists) = tail
                 let (copilotList, droidList, openclawList, cursorList) = tailLists
                 let (baseFlags, piEnabled) = flags
                 let (enabled4, enabledTail) = baseFlags
-                let (codexEnabled, claudeEnabled, geminiEnabled, openCodeEnabled) = enabled4
+                let (codexEnabled, claudeEnabled, antigravityEnabled, openCodeEnabled) = enabled4
                 let (hermesEnabled, tailEnabled) = enabledTail
                 let (copilotEnabled, droidEnabled, openClawEnabled, cursorEnabled) = tailEnabled
                 return SessionAggregationWork(
                     codexList: codexList,
                     claudeList: claudeList,
-                    geminiList: geminiList,
+                    antigravityList: antigravityList,
                     opencodeList: opencodeList,
                     hermesList: hermesList,
                     copilotList: copilotList,
@@ -732,7 +732,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     enablement: AgentEnablementSnapshot(
                         codex: codexEnabled,
                         claude: claudeEnabled,
-                        gemini: geminiEnabled,
+                        antigravity: antigravityEnabled,
                         openCode: openCodeEnabled,
                         hermes: hermesEnabled,
                         copilot: copilotEnabled,
@@ -759,7 +759,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // isIndexing reflects any enabled indexer working
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing),
+            Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, antigravity.$isIndexing, opencode.$isIndexing),
             Publishers.CombineLatest(
                 hermes.$isIndexing,
                 Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
@@ -792,24 +792,24 @@ final class UnifiedSessionIndexer: ObservableObject {
             .store(in: &cancellables)
 
         // Aggregate core indexing progress across enabled providers.
-        // Provider tuple order is fixed: codex, claude, gemini, opencode, hermes, copilot, droid, openclaw, cursor.
+        // Provider tuple order is fixed: codex, claude, antigravity, opencode, hermes, copilot, droid, openclaw, cursor.
         Publishers.CombineLatest3(
             Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$filesProcessed, claude.$filesProcessed, gemini.$filesProcessed, opencode.$filesProcessed),
+                Publishers.CombineLatest4(codex.$filesProcessed, claude.$filesProcessed, antigravity.$filesProcessed, opencode.$filesProcessed),
                 Publishers.CombineLatest(
                     hermes.$filesProcessed,
                     Publishers.CombineLatest4(copilot.$filesProcessed, droid.$filesProcessed, openclaw.$filesProcessed, cursor.$filesProcessed)
                 )
             ).combineLatest(pi.$filesProcessed),
             Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$totalFiles, claude.$totalFiles, gemini.$totalFiles, opencode.$totalFiles),
+                Publishers.CombineLatest4(codex.$totalFiles, claude.$totalFiles, antigravity.$totalFiles, opencode.$totalFiles),
                 Publishers.CombineLatest(
                     hermes.$totalFiles,
                     Publishers.CombineLatest4(copilot.$totalFiles, droid.$totalFiles, openclaw.$totalFiles, cursor.$totalFiles)
                 )
             ).combineLatest(pi.$totalFiles),
             Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, gemini.$isIndexing, opencode.$isIndexing),
+                Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, antigravity.$isIndexing, opencode.$isIndexing),
                 Publishers.CombineLatest(
                     hermes.$isIndexing,
                     Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
@@ -834,7 +834,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // isProcessingTranscripts reflects any enabled indexer processing transcripts
         Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, gemini.$isProcessingTranscripts, opencode.$isProcessingTranscripts),
+            Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, antigravity.$isProcessingTranscripts, opencode.$isProcessingTranscripts),
             Publishers.CombineLatest(
                 hermes.$isProcessingTranscripts,
                 Publishers.CombineLatest4(copilot.$isProcessingTranscripts, droid.$isProcessingTranscripts, openclaw.$isProcessingTranscripts, cursor.$isProcessingTranscripts)
@@ -863,11 +863,11 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Forward errors (preference order codex → claude → gemini → opencode → hermes → copilot), ignoring disabled agents.
+        // Forward errors (preference order codex → claude → antigravity → opencode → hermes → copilot), ignoring disabled agents.
         let indexingErrorHead = Publishers.CombineLatest4(
             codex.$indexingError,
             claude.$indexingError,
-            gemini.$indexingError,
+            antigravity.$indexingError,
             opencode.$indexingError
         )
         let indexingErrorTail = Publishers.CombineLatest(
@@ -915,7 +915,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             $selectedModel.removeDuplicates()
         )
         let includes = Publishers.CombineLatest(
-            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode),
+            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeAntigravity, $includeOpenCode),
             Publishers.CombineLatest(
                 $includeHermes,
                 Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
@@ -934,17 +934,17 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (sources, enabledFlags) = combinedFlags
                 let (baseSources, incPi) = sources
                 let (src4, tailSources) = baseSources
-                let (incCodex, incClaude, incGemini, incOpenCode) = src4
+                let (incCodex, incClaude, incAntigravity, incOpenCode) = src4
                 let (incHermes, sourcesTail) = tailSources
                 let (incCopilot, incDroid, incOpenClaw, incCursor) = sourcesTail
                 let (baseEnabled, enPi) = enabledFlags
                 let (en4, enabledTail) = baseEnabled
-                let (enCodex, enClaude, enGemini, enOpenCode) = en4
+                let (enCodex, enClaude, enAntigravity, enOpenCode) = en4
                 let (enHermes, tailEnabled) = enabledTail
                 let (enCopilot, enDroid, enOpenClaw, enCursor) = tailEnabled
                 let effectiveCodex = incCodex && enCodex
                 let effectiveClaude = incClaude && enClaude
-                let effectiveGemini = incGemini && enGemini
+                let effectiveAntigravity = incAntigravity && enAntigravity
                 let effectiveOpenCode = incOpenCode && enOpenCode
                 let effectiveHermes = incHermes && enHermes
                 let effectiveCopilot = incCopilot && enCopilot
@@ -955,11 +955,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !(effectiveCodex && effectiveClaude && effectiveGemini && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi) {
+                if !(effectiveCodex && effectiveClaude && effectiveAntigravity && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi) {
                     base = base.filter { s in
                         (s.source == .codex && effectiveCodex) ||
                         (s.source == .claude && effectiveClaude) ||
-                        (s.source == .antigravity && effectiveGemini) ||
+                        (s.source == .antigravity && effectiveAntigravity) ||
                         (s.source == .opencode && effectiveOpenCode) ||
                         (s.source == .hermes && effectiveHermes) ||
                         (s.source == .copilot && effectiveCopilot) ||
@@ -1008,7 +1008,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             .sink { [weak self] _ in self?.recomputeNow() }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, gemini.$launchPhase, opencode.$launchPhase),
+        Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, antigravity.$launchPhase, opencode.$launchPhase),
                                 Publishers.CombineLatest(
                                     hermes.$launchPhase,
                                     Publishers.CombineLatest4(copilot.$launchPhase, droid.$launchPhase, openclaw.$launchPhase, cursor.$launchPhase)
@@ -1021,7 +1021,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             .store(in: &cancellables)
 
         Publishers.CombineLatest(
-            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeGemini, $includeOpenCode),
+            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeAntigravity, $includeOpenCode),
             Publishers.CombineLatest(
                 $includeHermes,
                 Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
@@ -1058,7 +1058,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let previousEnablementBySource: [SessionSource: Bool] = [
             .codex: codexAgentEnabled,
             .claude: claudeAgentEnabled,
-            .antigravity: geminiAgentEnabled,
+            .antigravity: antigravityAgentEnabled,
             .opencode: openCodeAgentEnabled,
             .hermes: hermesAgentEnabled,
             .copilot: copilotAgentEnabled,
@@ -1079,7 +1079,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let c10 = AgentEnablement.isEnabled(.pi, defaults: defaults)
         if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
         if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
-        if c3 != geminiAgentEnabled { geminiAgentEnabled = c3 }
+        if c3 != antigravityAgentEnabled { antigravityAgentEnabled = c3 }
         if c4 != openCodeAgentEnabled { openCodeAgentEnabled = c4 }
         if c5 != hermesAgentEnabled { hermesAgentEnabled = c5 }
         if c6 != copilotAgentEnabled { copilotAgentEnabled = c6 }
@@ -1131,7 +1131,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let sources: [SessionSource] = [
             codexAgentEnabled ? .codex : nil,
             claudeAgentEnabled ? .claude : nil,
-            geminiAgentEnabled ? .antigravity : nil,
+            antigravityAgentEnabled ? .antigravity : nil,
             openCodeAgentEnabled ? .opencode : nil,
             hermesAgentEnabled ? .hermes : nil,
             copilotAgentEnabled ? .copilot : nil,
@@ -1181,17 +1181,17 @@ final class UnifiedSessionIndexer: ObservableObject {
         headFlags: AgentEnablementHead,
         tailFlags: AgentEnablementTail
     ) -> String? {
-        let (codexErr, claudeErr, geminiErr, opencodeErr) = headErrors
+        let (codexErr, claudeErr, antigravityErr, opencodeErr) = headErrors
         let (hermesErr, tailErrValues) = tailErrors
         let (copilotErr, droidErr, openclawErr, cursorErr) = tailErrValues
-        let (codexEnabled, claudeEnabled, geminiEnabled, openCodeEnabled) = headFlags
+        let (codexEnabled, claudeEnabled, antigravityEnabled, openCodeEnabled) = headFlags
         let (hermesEnabled, tailFlagValues) = tailFlags
         let (copilotEnabled, droidEnabled, openClawEnabled, cursorEnabled) = tailFlagValues
 
         let errors: [String?] = [
             codexEnabled ? codexErr : nil,
             claudeEnabled ? claudeErr : nil,
-            geminiEnabled ? geminiErr : nil,
+            antigravityEnabled ? antigravityErr : nil,
             openCodeEnabled ? opencodeErr : nil,
             hermesEnabled ? hermesErr : nil,
             copilotEnabled ? copilotErr : nil,
@@ -1224,26 +1224,26 @@ final class UnifiedSessionIndexer: ObservableObject {
     ) -> [CoreProviderSnapshot] {
         let (processedTuple, totalsTuple, indexingTuple) = metrics
         let (processed4, processedTail) = processedTuple
-        let (pCodex, pClaude, pGemini, pOpenCode) = processed4
+        let (pCodex, pClaude, pAntigravity, pOpenCode) = processed4
         let (pHermes, processedTail4) = processedTail
         let (pCopilot, pDroid, pOpenClaw, pCursor) = processedTail4
         let (totals4, totalsTail) = totalsTuple
-        let (tCodex, tClaude, tGemini, tOpenCode) = totals4
+        let (tCodex, tClaude, tAntigravity, tOpenCode) = totals4
         let (tHermes, totalsTail4) = totalsTail
         let (tCopilot, tDroid, tOpenClaw, tCursor) = totalsTail4
         let (index4, indexTail) = indexingTuple
-        let (iCodex, iClaude, iGemini, iOpenCode) = index4
+        let (iCodex, iClaude, iAntigravity, iOpenCode) = index4
         let (iHermes, indexTail4) = indexTail
         let (iCopilot, iDroid, iOpenClaw, iCursor) = indexTail4
         let (f4, flagsTail) = flags
-        let (eCodex, eClaude, eGemini, eOpenCode) = f4
+        let (eCodex, eClaude, eAntigravity, eOpenCode) = f4
         let (eHermes, tailFlags) = flagsTail
         let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
 
         return [
             CoreProviderSnapshot(source: .codex, enabled: eCodex, indexing: iCodex, processed: pCodex, total: tCodex),
             CoreProviderSnapshot(source: .claude, enabled: eClaude, indexing: iClaude, processed: pClaude, total: tClaude),
-            CoreProviderSnapshot(source: .antigravity, enabled: eGemini, indexing: iGemini, processed: pGemini, total: tGemini),
+            CoreProviderSnapshot(source: .antigravity, enabled: eAntigravity, indexing: iAntigravity, processed: pAntigravity, total: tAntigravity),
             CoreProviderSnapshot(source: .opencode, enabled: eOpenCode, indexing: iOpenCode, processed: pOpenCode, total: tOpenCode),
             CoreProviderSnapshot(source: .hermes, enabled: eHermes, indexing: iHermes, processed: pHermes, total: tHermes),
             CoreProviderSnapshot(source: .copilot, enabled: eCopilot, indexing: iCopilot, processed: pCopilot, total: tCopilot),
@@ -1825,7 +1825,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: return codexAgentEnabled && !codex.isIndexing
         case .claude: return claudeAgentEnabled && !claude.isIndexing
-        case .antigravity: return geminiAgentEnabled && !gemini.isIndexing
+        case .antigravity: return antigravityAgentEnabled && !antigravity.isIndexing
         case .opencode: return openCodeAgentEnabled && !opencode.isIndexing
         case .hermes: return hermesAgentEnabled && !hermes.isIndexing
         case .copilot: return copilotAgentEnabled && !copilot.isIndexing
@@ -1933,7 +1933,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .claude:
             livePath = claude.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .antigravity:
-            livePath = gemini.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+            livePath = antigravity.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .opencode:
             livePath = opencode.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .hermes:
@@ -2041,7 +2041,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: codex.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .claude: claude.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .antigravity: gemini.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .antigravity: antigravity.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .opencode: opencode.refresh()
         case .hermes: hermes.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .copilot: copilot.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
@@ -2057,7 +2057,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         switch source {
         case .codex: return codex.isIndexing
         case .claude: return claude.isIndexing
-        case .antigravity: return gemini.isIndexing
+        case .antigravity: return antigravity.isIndexing
         case .opencode: return opencode.isIndexing
         case .hermes: return hermes.isIndexing
         case .copilot: return copilot.isIndexing
@@ -2073,7 +2073,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         var enabled = Set<String>()
         if codexAgentEnabled { enabled.insert("codex") }
         if claudeAgentEnabled { enabled.insert("claude") }
-        if geminiAgentEnabled { enabled.insert("antigravity") }
+        if antigravityAgentEnabled { enabled.insert("antigravity") }
         if openCodeAgentEnabled { enabled.insert("opencode") }
         if hermesAgentEnabled { enabled.insert("hermes") }
         if copilotAgentEnabled { enabled.insert("copilot") }
@@ -2266,7 +2266,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         var phases: [SessionSource: LaunchPhase] = [:]
         phases[.codex] = (codexAgentEnabled && includeCodex) ? codex.launchPhase : .ready
         phases[.claude] = (claudeAgentEnabled && includeClaude) ? claude.launchPhase : .ready
-        phases[.antigravity] = (geminiAgentEnabled && includeGemini) ? gemini.launchPhase : .ready
+        phases[.antigravity] = (antigravityAgentEnabled && includeAntigravity) ? antigravity.launchPhase : .ready
         phases[.opencode] = (openCodeAgentEnabled && includeOpenCode) ? opencode.launchPhase : .ready
         phases[.hermes] = (hermesAgentEnabled && includeHermes) ? hermes.launchPhase : .ready
         phases[.copilot] = (copilotAgentEnabled && includeCopilot) ? copilot.launchPhase : .ready
@@ -2313,7 +2313,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         var merged: [Session] = []
         if work.enablement.codex { merged.append(contentsOf: work.codexList) }
         if work.enablement.claude { merged.append(contentsOf: work.claudeList) }
-        if work.enablement.gemini { merged.append(contentsOf: work.geminiList) }
+        if work.enablement.antigravity { merged.append(contentsOf: work.antigravityList) }
         if work.enablement.openCode { merged.append(contentsOf: work.opencodeList) }
         if work.enablement.hermes { merged.append(contentsOf: work.hermesList) }
         if work.enablement.copilot { merged.append(contentsOf: work.copilotList) }
@@ -2361,7 +2361,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             switch s.source {
             case .codex:    return codexAgentEnabled && includeCodex
             case .claude:   return claudeAgentEnabled && includeClaude
-            case .antigravity:   return geminiAgentEnabled && includeGemini
+            case .antigravity:   return antigravityAgentEnabled && includeAntigravity
             case .opencode: return openCodeAgentEnabled && includeOpenCode
             case .hermes:   return hermesAgentEnabled && includeHermes
             case .copilot:  return copilotAgentEnabled && includeCopilot

@@ -6,7 +6,7 @@ struct AnalyticsView: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
@@ -20,7 +20,7 @@ struct AnalyticsView: View {
     @State private var aggregationMetric: AnalyticsAggregationMetric = .messages
 
     private var hasEnabledSources: Bool {
-        codexAgentEnabled || claudeAgentEnabled || geminiAgentEnabled ||
+        codexAgentEnabled || claudeAgentEnabled || antigravityAgentEnabled ||
         openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled
     }
 
@@ -90,7 +90,7 @@ struct AnalyticsView: View {
         .onChange(of: projectFilter) { _, _ in refreshData() }
         .onChange(of: codexAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: claudeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: geminiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: antigravityAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: hermesAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
@@ -336,14 +336,14 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && geminiAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
+        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
         var out: [AnalyticsAgentFilter] = [.all]
         if codexAgentEnabled { out.append(.codexOnly) }
         if claudeAgentEnabled { out.append(.claudeOnly) }
-        if geminiAgentEnabled { out.append(.geminiOnly) }
+        if antigravityAgentEnabled { out.append(.antigravityOnly) }
         if openCodeAgentEnabled { out.append(.opencodeOnly) }
         if hermesAgentEnabled { out.append(.hermesOnly) }
         if copilotAgentEnabled { out.append(.copilotOnly) }
@@ -380,7 +380,7 @@ extension View {
 #Preview("Analytics View") {
     let codexIndexer = SessionIndexer()
     let claudeIndexer = ClaudeSessionIndexer()
-    let geminiIndexer = GeminiSessionIndexer()
+    let antigravityIndexer = AntigravitySessionIndexer()
     let opencodeIndexer = OpenCodeSessionIndexer()
     let hermesIndexer = HermesSessionIndexer()
     let copilotIndexer = CopilotSessionIndexer()
@@ -388,7 +388,7 @@ extension View {
     let service = AnalyticsService(
         codexIndexer: codexIndexer,
         claudeIndexer: claudeIndexer,
-        geminiIndexer: geminiIndexer,
+        antigravityIndexer: antigravityIndexer,
         opencodeIndexer: opencodeIndexer,
         hermesIndexer: hermesIndexer,
         copilotIndexer: copilotIndexer,

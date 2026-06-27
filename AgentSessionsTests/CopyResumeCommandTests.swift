@@ -161,7 +161,7 @@ final class CopyResumeCommandTests: XCTestCase {
     // MARK: - Antigravity copy/resume command scenarios
 
     func testAntigravity_conversationID_and_cwd() throws {
-        let package = try GeminiResumeCommandBuilder().makeCommand(
+        let package = try AntigravityResumeCommandBuilder().makeCommand(
             strategy: .resumeByID(id: "conv-abc"),
             binaryURL: URL(fileURLWithPath: "/Users/alexm/.local/bin/agy"),
             workingDirectory: URL(fileURLWithPath: "/Users/alexm/my repo")
@@ -171,7 +171,7 @@ final class CopyResumeCommandTests: XCTestCase {
     }
 
     func testAntigravity_continueRecent() throws {
-        let package = try GeminiResumeCommandBuilder().makeCommand(
+        let package = try AntigravityResumeCommandBuilder().makeCommand(
             strategy: .continueRecent,
             binaryURL: URL(fileURLWithPath: "agy"),
             workingDirectory: nil

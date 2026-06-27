@@ -13,7 +13,7 @@ struct PreferencesView: View {
     private let initialTabArg: PreferencesTab
     @ObservedObject var resumeSettings = CodexResumeSettings.shared
     @ObservedObject var claudeSettings = ClaudeResumeSettings.shared
-    @ObservedObject var geminiSettings = GeminiCLISettings.shared
+    @ObservedObject var antigravitySettings = AntigravityCLISettings.shared
     @ObservedObject var hermesSettings = HermesSettings.shared
     @ObservedObject var copilotSettings = CopilotSettings.shared
     @ObservedObject var cursorSettings = CursorSettings.shared
@@ -62,7 +62,7 @@ struct PreferencesView: View {
     // CLI availability (assume installed until a probe fails)
     @AppStorage(PreferencesKey.codexCLIAvailable) var codexCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.claudeCLIAvailable) var claudeCLIAvailable: Bool = true
-    @AppStorage(PreferencesKey.antigravityCLIAvailable) var geminiCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.antigravityCLIAvailable) var antigravityCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.openCodeCLIAvailable) var openCodeCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.hermesCLIAvailable) var hermesCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.copilotCLIAvailable) var copilotCLIAvailable: Bool = true
@@ -72,7 +72,7 @@ struct PreferencesView: View {
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) var geminiAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) var antigravityAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.hermesEnabled) var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
@@ -189,14 +189,14 @@ struct PreferencesView: View {
     @State var claudePathDebounce: DispatchWorkItem? = nil
 
     // Antigravity CLI probe state
-    @State var geminiProbeState: ProbeState = .idle
-    @State var geminiVersionString: String? = nil
-    @State var geminiResolvedPath: String? = nil
-    @State var geminiProbeDebounce: DispatchWorkItem? = nil
+    @State var antigravityProbeState: ProbeState = .idle
+    @State var antigravityVersionString: String? = nil
+    @State var antigravityResolvedPath: String? = nil
+    @State var antigravityProbeDebounce: DispatchWorkItem? = nil
     // Antigravity artifact directory override
-    @AppStorage("AntigravitySessionsRootOverride") var geminiSessionsPath: String = ""
-    @State var geminiSessionsPathValid: Bool = true
-    @State var geminiSessionsPathDebounce: DispatchWorkItem? = nil
+    @AppStorage("AntigravitySessionsRootOverride") var antigravitySessionsPath: String = ""
+    @State var antigravitySessionsPathValid: Bool = true
+    @State var antigravitySessionsPathDebounce: DispatchWorkItem? = nil
 
     // OpenCode probe state
     @ObservedObject var opencodeSettings = OpenCodeSettings.shared
@@ -271,7 +271,7 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .geminiCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -279,7 +279,7 @@ struct PreferencesView: View {
                     .padding(.top, 1)
                     .tag(PreferencesTab.about)
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -411,8 +411,8 @@ struct PreferencesView: View {
                 claudeResumeTab
             case .opencode:
                 openCodeTab
-            case .geminiCLI:
-                geminiCLITab
+            case .antigravityCLI:
+                antigravityCLITab
             case .hermesCLI:
                 hermesCLITab
             case .copilotCLI:
@@ -677,14 +677,14 @@ struct PreferencesView: View {
         }
     }
 
-    func pickGeminiBinary() {
+    func pickAntigravityBinary() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.begin { response in
             if response == .OK, let url = panel.url {
-                geminiSettings.setBinaryOverride(url.path)
+                antigravitySettings.setBinaryOverride(url.path)
             }
         }
     }
@@ -734,7 +734,7 @@ struct PreferencesView: View {
         preferredLaunchMode = .terminal
         resumeSettings.setLaunchMode(.terminal)
 
-        geminiSettings.setBinaryOverride("")
+        antigravitySettings.setBinaryOverride("")
         copilotSettings.setBinaryPath("")
         cursorSettings.setBinaryPath("")
         cursorSettings.setResolvedBinaryPath(nil)
@@ -767,7 +767,7 @@ struct PreferencesView: View {
         // Re-probe after reset
         scheduleCodexProbe()
         scheduleClaudeProbe()
-        scheduleGeminiProbe()
+        scheduleAntigravityProbe()
         scheduleCopilotProbe()
         scheduleCursorProbe()
         scheduleDroidProbe()
@@ -886,7 +886,7 @@ struct PreferencesView: View {
         switch source {
         case .codex: scheduleCodexProbe()
         case .claude: scheduleClaudeProbe()
-        case .antigravity: scheduleGeminiProbe()
+        case .antigravity: scheduleAntigravityProbe()
         case .opencode: scheduleOpenCodeProbe()
         case .hermes: scheduleHermesProbe()
         case .copilot: scheduleCopilotProbe()
@@ -904,7 +904,7 @@ struct PreferencesView: View {
         case .claude:
             return claudeResolvedPath
         case .antigravity:
-            return geminiResolvedPath
+            return antigravityResolvedPath
         case .opencode:
             return opencodeResolvedPath
         case .hermes:
@@ -931,7 +931,7 @@ struct PreferencesView: View {
             let value = claudeSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .antigravity:
-            let value = geminiSettings.binaryOverride
+            let value = antigravitySettings.binaryOverride
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .opencode:
             let value = opencodeSettings.binaryPath
@@ -1081,7 +1081,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case codexCLI
     case claudeResume
     case opencode
-    case geminiCLI
+    case antigravityCLI
     case hermesCLI
     case copilotCLI
     case droidCLI
@@ -1105,7 +1105,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
-        case .geminiCLI: return "Antigravity CLI"
+        case .antigravityCLI: return "Antigravity CLI"
         case .hermesCLI: return "Hermes"
         case .copilotCLI: return "GitHub Copilot CLI"
         case .droidCLI: return "Droid"
@@ -1129,7 +1129,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .codexCLI: return "terminal"
         case .claudeResume: return "c.square"
         case .opencode: return "chevron.left.slash.chevron.right"
-        case .geminiCLI: return "sparkles"
+        case .antigravityCLI: return "sparkles"
         case .hermesCLI: return "brain"
         case .copilotCLI: return "bolt.horizontal.circle"
         case .droidCLI: return "d.circle"
@@ -1143,7 +1143,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .geminiCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
 }
 
 // MARK: - Probe helpers
@@ -1203,27 +1203,27 @@ extension PreferencesView {
         }
     }
 
-    func probeGemini() {
-        if geminiProbeState == .probing { return }
-        geminiProbeState = .probing
-        geminiVersionString = nil
-        geminiResolvedPath = nil
-        let override = geminiSettings.binaryOverride.isEmpty ? nil : geminiSettings.binaryOverride
+    func probeAntigravity() {
+        if antigravityProbeState == .probing { return }
+        antigravityProbeState = .probing
+        antigravityVersionString = nil
+        antigravityResolvedPath = nil
+        let override = antigravitySettings.binaryOverride.isEmpty ? nil : antigravitySettings.binaryOverride
         DispatchQueue.global(qos: .userInitiated).async {
-            let env = GeminiCLIEnvironment()
+            let env = AntigravityCLIEnvironment()
             let result = env.probe(customPath: override)
             DispatchQueue.main.async {
                 switch result {
                 case .success(let res):
-                    self.geminiVersionString = res.versionString
-                    self.geminiResolvedPath = res.binaryURL.path
-                    self.geminiProbeState = .success
-                    self.geminiCLIAvailable = true
+                    self.antigravityVersionString = res.versionString
+                    self.antigravityResolvedPath = res.binaryURL.path
+                    self.antigravityProbeState = .success
+                    self.antigravityCLIAvailable = true
                 case .failure:
-                    self.geminiVersionString = nil
-                    self.geminiResolvedPath = nil
-                    self.geminiProbeState = .failure
-                    self.geminiCLIAvailable = false
+                    self.antigravityVersionString = nil
+                    self.antigravityResolvedPath = nil
+                    self.antigravityProbeState = .failure
+                    self.antigravityCLIAvailable = false
                 }
             }
         }
@@ -1357,8 +1357,8 @@ extension PreferencesView {
             if claudeVersionString == nil && claudeProbeState != .probing { probeClaude() }
         case .opencode:
             if opencodeVersionString == nil && opencodeProbeState != .probing { probeOpenCode() }
-        case .geminiCLI:
-            if geminiVersionString == nil && geminiProbeState != .probing { probeGemini() }
+        case .antigravityCLI:
+            if antigravityVersionString == nil && antigravityProbeState != .probing { probeAntigravity() }
         case .hermesCLI:
             if hermesVersionString == nil && hermesProbeState != .probing { probeHermes() }
         case .copilotCLI:
@@ -1390,10 +1390,10 @@ extension PreferencesView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
-    func scheduleGeminiProbe() {
-        geminiProbeDebounce?.cancel()
-        let work = DispatchWorkItem { probeGemini() }
-        geminiProbeDebounce = work
+    func scheduleAntigravityProbe() {
+        antigravityProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeAntigravity() }
+        antigravityProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

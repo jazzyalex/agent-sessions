@@ -1,7 +1,7 @@
 import XCTest
 @testable import AgentSessions
 
-final class GeminiParserTests: XCTestCase {
+final class AntigravityParserTests: XCTestCase {
     private func writeTemp(_ json: String) throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gemini_test_\(UUID().uuidString).json")
         try json.data(using: .utf8)?.write(to: url)
@@ -18,7 +18,7 @@ final class GeminiParserTests: XCTestCase {
         let url = try writeTemp(json)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.events.count, 2)
         XCTAssertEqual(session.events[0].kind, .user)
         XCTAssertEqual(session.events[0].role, "user")
@@ -43,7 +43,7 @@ final class GeminiParserTests: XCTestCase {
         let url = try writeTemp(json)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.events.count, 2)
         XCTAssertEqual(session.events[0].kind, .user)
         XCTAssertEqual(session.events[1].kind, .assistant)
@@ -64,7 +64,7 @@ final class GeminiParserTests: XCTestCase {
         let url = try writeTemp(json)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.events.count, 2)
         XCTAssertTrue(session.events[0].text?.contains("[inline data omitted]") == true)
         XCTAssertEqual(session.events[1].text, "It looks like...")
@@ -123,7 +123,7 @@ final class GeminiParserTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
 
         // Full parse: toolCalls become explicit tool events; info becomes meta.
-        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.events.filter { $0.kind == .user }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .tool_result }.count, 1)
@@ -140,7 +140,7 @@ final class GeminiParserTests: XCTestCase {
         XCTAssertEqual(meta?.text, "Request cancelled.")
 
         // Preview parse: toolCalls contribute to eventCount; info does not.
-        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        guard let preview = AntigravitySessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
         XCTAssertEqual(preview.eventCount, 3)
         XCTAssertEqual(preview.messageCount, 3)
     }
@@ -193,7 +193,7 @@ final class GeminiParserTests: XCTestCase {
         let url = try writeTemp(json)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        guard let session = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.events.filter { $0.kind == .tool_call }.count, 1)
         XCTAssertEqual(session.events.filter { $0.kind == .error }.count, 1)
         let toolError = session.events.first(where: { $0.kind == .error })

@@ -394,7 +394,7 @@ final class SessionParserTests: XCTestCase {
                           filters: Filters(query: "#side"),
                           includeCodex: true,
                           includeClaude: false,
-                          includeGemini: false,
+                          includeAntigravity: false,
                           includeOpenCode: false,
                           includeHermes: false,
                           includeCopilot: false,
@@ -431,7 +431,7 @@ final class SessionParserTests: XCTestCase {
                           filters: Filters(query: "#side", archivedCodexDesktopOnly: true),
                           includeCodex: true,
                           includeClaude: false,
-                          includeGemini: false,
+                          includeAntigravity: false,
                           includeOpenCode: false,
                           includeHermes: false,
                           includeCopilot: false,
@@ -2882,27 +2882,27 @@ final class SessionParserTests: XCTestCase {
         defer { try? fm.removeItem(at: root) }
 
         let conversation = root.appendingPathComponent("conv-123", isDirectory: true)
-        let oldGeminiProject = root.appendingPathComponent("radio4j/chats", isDirectory: true)
+        let oldAntigravityProject = root.appendingPathComponent("radio4j/chats", isDirectory: true)
         try fm.createDirectory(at: conversation, withIntermediateDirectories: true)
-        try fm.createDirectory(at: oldGeminiProject, withIntermediateDirectories: true)
+        try fm.createDirectory(at: oldAntigravityProject, withIntermediateDirectories: true)
 
         let task = conversation.appendingPathComponent("task.md")
         let walkthrough = conversation.appendingPathComponent("walkthrough.md")
-        let oldGeminiSession = oldGeminiProject.appendingPathComponent("session-1.json")
+        let oldAntigravitySession = oldAntigravityProject.appendingPathComponent("session-1.json")
         let unrelatedMarkdown = conversation.appendingPathComponent("notes.md")
 
         try writeText("# Build plan\n", to: task)
         try writeText("# Walkthrough\n", to: walkthrough)
-        try writeText("{}", to: oldGeminiSession)
+        try writeText("{}", to: oldAntigravitySession)
         try writeText("# Notes\n", to: unrelatedMarkdown)
 
-        let discovery = GeminiSessionDiscovery(customRoot: root.path)
+        let discovery = AntigravitySessionDiscovery(customRoot: root.path)
         let found = Set(discovery.discoverSessionFiles().map(canonicalPath))
 
         XCTAssertTrue(found.contains(canonicalPath(task)))
         XCTAssertTrue(found.contains(canonicalPath(walkthrough)))
         XCTAssertTrue(found.contains(canonicalPath(unrelatedMarkdown)))
-        XCTAssertFalse(found.contains(canonicalPath(oldGeminiSession)))
+        XCTAssertFalse(found.contains(canonicalPath(oldAntigravitySession)))
     }
 
     func testAntigravityMarkdownArtifactParsesConversationIDAndTitle() throws {
@@ -2919,18 +2919,18 @@ final class SessionParserTests: XCTestCase {
         Use agy for this conversation.
         """, to: url)
 
-        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
+        guard let preview = AntigravitySessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
         XCTAssertEqual(preview.source, .antigravity)
         XCTAssertEqual(preview.id, "conv-abc#task")
-        XCTAssertEqual(GeminiSessionIDHelper.deriveSessionID(from: preview), "conv-abc")
+        XCTAssertEqual(AntigravitySessionIDHelper.deriveSessionID(from: preview), "conv-abc")
         XCTAssertEqual(preview.title, "Replace unsupported provider")
         XCTAssertEqual(preview.eventCount, 1)
         XCTAssertTrue(preview.events.isEmpty)
 
-        guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        guard let full = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
         XCTAssertEqual(full.source, .antigravity)
         XCTAssertEqual(full.id, "conv-abc#task")
-        XCTAssertEqual(GeminiSessionIDHelper.deriveSessionID(from: full), "conv-abc")
+        XCTAssertEqual(AntigravitySessionIDHelper.deriveSessionID(from: full), "conv-abc")
         XCTAssertEqual(full.events.count, 1)
         XCTAssertEqual(full.events.first?.kind, .assistant)
         XCTAssertTrue(full.events.first?.text?.contains("Use agy") == true)
@@ -2957,7 +2957,7 @@ final class SessionParserTests: XCTestCase {
         See [Feature.swift](file://\(sourceFile.path)).
         """, to: task)
 
-        guard let session = GeminiSessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.cwd, repo.path)
         XCTAssertEqual(session.rowRepoName, "ExampleProject")
     }
@@ -2985,7 +2985,7 @@ final class SessionParserTests: XCTestCase {
         Open `file://\(doc.path)` in the browser.
         """, to: walkthrough)
 
-        guard let session = GeminiSessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
+        guard let session = AntigravitySessionParser.parseFile(at: task) else { return XCTFail("parse returned nil") }
         XCTAssertEqual(session.cwd, repo.path)
         XCTAssertEqual(session.rowRepoName, "SiblingProject")
     }
@@ -3002,9 +3002,9 @@ final class SessionParserTests: XCTestCase {
         try writeText("# Task\n", to: task)
         try writeText("# Walkthrough\n", to: walkthrough)
 
-        let sessions = [task, walkthrough].compactMap { GeminiSessionParser.parseFile(at: $0) }
+        let sessions = [task, walkthrough].compactMap { AntigravitySessionParser.parseFile(at: $0) }
         XCTAssertEqual(Set(sessions.map(\.id)), ["conv-shared#task", "conv-shared#walkthrough"])
-        XCTAssertEqual(Set(sessions.compactMap { GeminiSessionIDHelper.deriveSessionID(from: $0) }), ["conv-shared"])
+        XCTAssertEqual(Set(sessions.compactMap { AntigravitySessionIDHelper.deriveSessionID(from: $0) }), ["conv-shared"])
     }
 
     func testOpenClawDiscoveryFindsAgentSessionFiles() throws {

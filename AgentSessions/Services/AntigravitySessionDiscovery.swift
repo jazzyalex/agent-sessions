@@ -4,7 +4,7 @@ import Foundation
 
 /// Discovery for Antigravity local brain artifacts.
 /// Expected layout: ~/.gemini/antigravity/brain/<conversation-id>/*.md.
-final class GeminiSessionDiscovery: SessionDiscovery {
+final class AntigravitySessionDiscovery: SessionDiscovery {
     private let customRoot: String?
     private let cliRoot: String?
 

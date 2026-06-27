@@ -7,7 +7,7 @@ final class Stage0PerfHarnessTests: XCTestCase {
 
         let codexURL = FixturePaths.stage0FixtureURL("agents/codex/large.jsonl")
         let claudeURL = FixturePaths.stage0FixtureURL("agents/claude/large.jsonl")
-        let geminiURL = FixturePaths.stage0FixtureURL("agents/gemini/large.json")
+        let antigravityURL = FixturePaths.stage0FixtureURL("agents/antigravity/cli_small.jsonl")
         let opencodeURL = FixturePaths.stage0FixtureURL("agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json")
         let copilotURL = FixturePaths.stage0FixtureURL("agents/copilot/large.jsonl")
         let droidURL = FixturePaths.stage0FixtureURL("agents/droid/stream_json_large.jsonl")
@@ -23,7 +23,7 @@ final class Stage0PerfHarnessTests: XCTestCase {
             let idx = SessionIndexer()
             if let s = idx.parseFileFull(at: codexURL) { sessions.append(s) }
             if let s = ClaudeSessionParser.parseFileFull(at: claudeURL) { sessions.append(s) }
-            if let s = GeminiSessionParser.parseFileFull(at: geminiURL) { sessions.append(s) }
+            if let s = AntigravitySessionParser.parseFileFull(at: antigravityURL) { sessions.append(s) }
             if let s = OpenCodeSessionParser.parseFileFull(at: opencodeURL) { sessions.append(s) }
             if let s = CopilotSessionParser.parseFileFull(at: copilotURL) { sessions.append(s) }
             if let s = DroidSessionParser.parseFileFull(at: droidURL) { sessions.append(s) }

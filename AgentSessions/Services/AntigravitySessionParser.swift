@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 /// Parser for Antigravity markdown artifacts.
-final class GeminiSessionParser {
+final class AntigravitySessionParser {
     /// Preview-only parse for list indexing. Builds a lightweight session with empty events.
     static func parseFile(at url: URL, forcedID: String? = nil) -> Session? {
         switch url.pathExtension.lowercased() {
@@ -36,7 +36,7 @@ final class GeminiSessionParser {
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let mtime = (attrs[.modificationDate] as? Date) ?? Date()
         let ctime = (attrs[.creationDate] as? Date) ?? mtime
-        let sid = forcedID ?? GeminiSessionIDHelper.artifactID(fromArtifactURL: url) ?? sha256(path: url.path)
+        let sid = forcedID ?? AntigravitySessionIDHelper.artifactID(fromArtifactURL: url) ?? sha256(path: url.path)
         let title = firstMarkdownHeading(in: trimmed)
             ?? url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").capitalized
 

@@ -51,7 +51,7 @@ extension PreferencesView {
                             claudeSettings.setPreferITerm(preferITerm)
                             opencodeSettings.setPreferITerm(preferITerm)
                             copilotSettings.setPreferITerm(preferITerm)
-                            geminiSettings.setPreferITerm(preferITerm)
+                            antigravitySettings.setPreferITerm(preferITerm)
                             cursorSettings.setPreferITerm(preferITerm)
                             piSettings.setPreferITerm(preferITerm)
                         }
@@ -70,11 +70,11 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, geminiAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled, piAgentEnabled].filter { $0 }.count
+                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, antigravityAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled, piAgentEnabled].filter { $0 }.count
 
                 agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Antigravity", source: .antigravity, isOn: $geminiAgentEnabled, enabledCount: enabledCount)
+                agentEnableToggle(title: "Antigravity", source: .antigravity, isOn: $antigravityAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Hermes", source: .hermes, isOn: $hermesAgentEnabled, enabledCount: enabledCount)
                 agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)

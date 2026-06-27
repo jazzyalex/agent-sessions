@@ -46,17 +46,17 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         XCTAssertGreaterThan(s.eventCount, 0)
     }
 
-    func testGeminiParserDispatchesJSONLAndMarkdown() throws {
+    func testAntigravityParserDispatchesJSONLAndMarkdown() throws {
         let jsonl = writeTranscript([
             #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-26T21:16:16Z","content":"<USER_REQUEST>\nhello\n</USER_REQUEST>"}"#,
         ])
-        XCTAssertNotNil(GeminiSessionParser.parseFileFull(at: jsonl))
+        XCTAssertNotNil(AntigravitySessionParser.parseFileFull(at: jsonl))
 
         let mdDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "/conv-md", isDirectory: true)
         try? FileManager.default.createDirectory(at: mdDir, withIntermediateDirectories: true)
         let md = mdDir.appendingPathComponent("task.md")
         try "# Title\n\nbody".write(to: md, atomically: true, encoding: .utf8)
-        XCTAssertNotNil(GeminiSessionParser.parseFileFull(at: md))
+        XCTAssertNotNil(AntigravitySessionParser.parseFileFull(at: md))
     }
 
     func testDiscoveryFindsNewCLITranscripts() throws {
@@ -67,7 +67,7 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         let t = logs.appendingPathComponent("transcript.jsonl")
         try #"{"type":"USER_INPUT","content":"<USER_REQUEST>\nhi\n</USER_REQUEST>"}"#.write(to: t, atomically: true, encoding: .utf8)
 
-        let disco = GeminiSessionDiscovery(cliRoot: cliRoot.path)
+        let disco = AntigravitySessionDiscovery(cliRoot: cliRoot.path)
         XCTAssertTrue(disco.discoverSessionFiles().contains { $0.lastPathComponent == "transcript.jsonl" })
     }
 }

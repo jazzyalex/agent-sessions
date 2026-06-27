@@ -580,7 +580,7 @@ extension SessionsChartView {
 
             let codexSessions = Int.random(in: 3...12)
             let claudeSessions = Int.random(in: 2...8)
-            let geminiSessions = Int.random(in: 1...5)
+            let antigravitySessions = Int.random(in: 1...5)
 
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
@@ -599,8 +599,8 @@ extension SessionsChartView {
             points.append(AnalyticsTimeSeriesPoint(
                 date: date,
                 agent: .antigravity,
-                sessionCount: geminiSessions,
-                messageCount: geminiSessions * Int.random(in: 2...5)
+                sessionCount: antigravitySessions,
+                messageCount: antigravitySessions * Int.random(in: 2...5)
             ))
         }
 

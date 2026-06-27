@@ -222,19 +222,19 @@ final class Stage0GoldenFixturesTests: XCTestCase {
     func testGeminiFixturesAreIgnoredAfterAntigravityMigration() throws {
         for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json", "agents/gemini/jsonl_v040.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)
-            XCTAssertNil(GeminiSessionParser.parseFile(at: url), name)
-            XCTAssertNil(GeminiSessionParser.parseFileFull(at: url), name)
+            XCTAssertNil(AntigravitySessionParser.parseFile(at: url), name)
+            XCTAssertNil(AntigravitySessionParser.parseFileFull(at: url), name)
         }
     }
 
     func testAntigravityCLITranscriptFixtureParses() throws {
         let url = FixturePaths.stage0FixtureURL("agents/antigravity/cli_small.jsonl")
-        guard let preview = GeminiSessionParser.parseFile(at: url) else { return XCTFail("preview nil") }
+        guard let preview = AntigravitySessionParser.parseFile(at: url) else { return XCTFail("preview nil") }
         XCTAssertEqual(preview.source, .antigravity)
         XCTAssertTrue(preview.events.isEmpty)
         XCTAssertGreaterThan(preview.eventCount, 0)
 
-        guard let full = GeminiSessionParser.parseFileFull(at: url) else { return XCTFail("full nil") }
+        guard let full = AntigravitySessionParser.parseFileFull(at: url) else { return XCTFail("full nil") }
         XCTAssertEqual(full.source, .antigravity)
         XCTAssertTrue(full.events.contains { $0.kind == .user })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "list_dir" })
@@ -245,7 +245,7 @@ final class Stage0GoldenFixturesTests: XCTestCase {
 
         // Legacy markdown still parses.
         let md = FixturePaths.stage0FixtureURL("agents/antigravity/small.md")
-        XCTAssertNotNil(GeminiSessionParser.parseFileFull(at: md))
+        XCTAssertNotNil(AntigravitySessionParser.parseFileFull(at: md))
     }
 
     func testOpenCodeFixturesParse() throws {

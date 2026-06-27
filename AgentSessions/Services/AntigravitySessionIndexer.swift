@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Session indexer for Antigravity CLI artifacts.
-final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
+final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private(set) var allSessions: [Session] = []
     @Published private(set) var sessions: [Session] = []
     @Published var isIndexing: Bool = false
@@ -33,7 +33,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published var activeSearchUI: SessionIndexer.ActiveSearchUI = .none
 
     // Minimal transcript cache is not needed for MVP indexing; search integration comes later
-    private let discovery: GeminiSessionDiscovery
+    private let discovery: AntigravitySessionDiscovery
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
@@ -43,7 +43,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
 
     init() {
-        self.discovery = GeminiSessionDiscovery()
+        self.discovery = AntigravitySessionDiscovery()
 
         // Debounced filtering similar to Claude indexer
         let inputs = Publishers.CombineLatest4(
@@ -108,7 +108,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 	                    LaunchProfiler.log("Antigravity.refresh: file enumeration done (files=\(files.count))")
 	                    return files
 	                },
-	                parseLightweight: { GeminiSessionParser.parseFile(at: $0) },
+	                parseLightweight: { AntigravitySessionParser.parseFile(at: $0) },
 		                shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
 		                throttler: self.progressThrottler,
                         workerCount: executionProfile.workerCount,
@@ -310,7 +310,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            let full = GeminiSessionParser.parseFileFull(at: url, forcedID: id)
+            let full = AntigravitySessionParser.parseFileFull(at: url, forcedID: id)
 
             let postParseStat = Self.fileStat(for: url)
             self.reloadLock.lock()
@@ -388,7 +388,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 	        let url = URL(fileURLWithPath: existing.filePath)
 	        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
 	        bgQueue.async {
-	            if let light = GeminiSessionParser.parseFile(at: url, forcedID: id) {
+	            if let light = AntigravitySessionParser.parseFile(at: url, forcedID: id) {
 	                Task { @MainActor [weak self] in
 	                    guard let self else { return }
 	                    if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
@@ -427,7 +427,7 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 
             // Parse on background thread
             let fullSession = await Task.detached(priority: .userInitiated) {
-                return GeminiSessionParser.parseFileFull(at: url)
+                return AntigravitySessionParser.parseFileFull(at: url)
             }.value
 
             // Update allSessions on main thread
@@ -469,4 +469,4 @@ final class GeminiSessionIndexer: ObservableObject, @unchecked Sendable {
 }
 
 // MARK: - SessionIndexerProtocol Conformance
-extension GeminiSessionIndexer: SessionIndexerProtocol {}
+extension AntigravitySessionIndexer: SessionIndexerProtocol {}
