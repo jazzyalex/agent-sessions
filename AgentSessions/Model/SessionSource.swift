@@ -46,7 +46,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     public var versionIntroduced: String {
         switch self {
         case .codex, .claude:   return "1.0"
-        case .antigravity:      return "3.9"
+        case .antigravity:      return "4.0"
         case .opencode:         return "2.8"
         case .hermes:           return "3.7"
         case .copilot:          return "2.11"
