@@ -1122,6 +1122,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
 
             Spacer(minLength: 0)
+
+            ClaudeArchiveRestoreStripControl(session: session)
         }
         .padding(.horizontal, 12)
         .fixedSize(horizontal: false, vertical: true)
@@ -3915,6 +3917,77 @@ private struct WholeSessionRawPrettySheet: View {
             rawJSON = raw
             prettyJSON = pretty
             loadedSessionID = session.id
+        }
+    }
+}
+
+// Restore affordance shown in the transcript identity strip for archived Claude
+// Desktop sessions only. Self-contained: reads archive state straight from the
+// sidecar reader and writes through the gated restore service — no UnifiedSessionIndexer
+// dependency, so it works inside the shared (multi-agent) transcript view.
+private struct ClaudeArchiveRestoreStripControl: View {
+    let session: Session
+
+    @State private var record: ClaudeDesktopSidecarRecord?
+    @State private var didRestore = false
+    @State private var showConfirm = false
+    @State private var showRestoredAlert = false
+
+    private var gateOn: Bool {
+        UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
+    }
+
+    var body: some View {
+        Group {
+            if session.source == .claude {
+                if didRestore {
+                    Label("Restored — relaunch Claude Desktop", systemImage: "checkmark.circle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                } else if let rec = record, rec.isArchived {
+                    Button { showConfirm = true } label: {
+                        Label("Restore from Archive", systemImage: "arrow.uturn.backward")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(gateOn ? Color.accentColor : .secondary)
+                    .disabled(!gateOn)
+                    .help(gateOn
+                          ? "Set this Claude session back to active in Claude Desktop"
+                          : "Enable “Allow restoring archived Claude sessions” in Preferences → Advanced")
+                    .confirmationDialog("Restore this session in Claude Desktop?", isPresented: $showConfirm) {
+                        Button("Restore") { performRestore(rec) }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude Desktop to see it back in your list. Your transcript is not modified.")
+                    }
+                    .alert("Session restored", isPresented: $showRestoredAlert) {
+                        Button("OK") {}
+                    } message: {
+                        Text("Quit and reopen Claude Desktop to see this session back in your list. Your transcript was not changed.")
+                    }
+                }
+            }
+        }
+        .task(id: session.id) { loadRecord() }
+    }
+
+    private func loadRecord() {
+        didRestore = false
+        guard session.source == .claude, let key = session.codexInternalSessionIDHint else {
+            record = nil
+            return
+        }
+        record = ClaudeDesktopSessionTitles.records()[key]
+    }
+
+    private func performRestore(_ rec: ClaudeDesktopSidecarRecord) {
+        do {
+            try ClaudeArchiveRestore.restore(sidecarPath: rec.sidecarPath) // gate re-checked inside
+            didRestore = true
+            showRestoredAlert = true
+        } catch {
+            NSLog("Claude archive restore (strip) failed: \(error)")
         }
     }
 }
