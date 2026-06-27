@@ -104,6 +104,7 @@ enum PreferencesKey {
         static let showStarColumn = "UnifiedShowStarColumn"
         static let hasCommandsOnly = "UnifiedHasCommandsOnly"
         static let showArchivedCodexDesktopOnly = "UnifiedShowArchivedCodexDesktopOnly"
+        static let showArchivedClaudeDesktopOnly = "UnifiedShowArchivedClaudeDesktopOnly"
         static let collapsedHierarchyParents = "UnifiedCollapsedHierarchyParents"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
         static let sessionViewAutoScrollTarget = "UnifiedSessionViewAutoScrollTarget"
@@ -129,6 +130,7 @@ enum PreferencesKey {
         static let enableRecentToolIOIndex = "EnableRecentToolIOIndex"
         static let includeOpenClawDeletedSessions = "OpenClawIncludeDeletedSessions"
         static let hideDockIcon = "HideDockIcon"
+        static let allowClaudeArchiveRestore = ClaudeArchiveRestore.allowWritesDefaultsKey
     }
 
     enum Paths {

@@ -295,6 +295,18 @@ extension PreferencesView {
             ))
             .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
 
+            sectionHeader("Claude Archived Sessions")
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Allow restoring archived Claude sessions", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore) },
+                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore) }
+                ))
+                .help("Agent Sessions is otherwise read-only. Enabling this lets it modify Claude Desktop's session metadata to un-archive a session. Best done while Claude Desktop is quit, since Claude may overwrite the change. Your transcripts are never altered.")
+                Text("Off by default. Agent Sessions only writes to Claude's files when this is enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             sectionHeader("Indexing")
             VStack(alignment: .leading, spacing: 8) {
                 Button("Rebuild Core Index…") {
