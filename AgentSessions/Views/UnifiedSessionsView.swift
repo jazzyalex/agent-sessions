@@ -349,6 +349,7 @@ struct UnifiedSessionsView: View {
     @StateObject private var searchState = UnifiedSearchState()
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
+    @State private var restoreCandidate: Session? = nil
     private var rows: [Session] {
         let baseRows: [Session]
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -986,6 +987,15 @@ struct UnifiedSessionsView: View {
                         .keyboardShortcut("p", modifiers: [.command, .option])
                         .help("Show only sessions from \(name) (⌥⌘P)")
                 }
+                if unified.isArchivedClaudeDesktop(s) {
+                    let canRestore = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
+                    Button("Restore from Archive") { restoreCandidate = s }
+                        .disabled(!canRestore)
+                        .help(canRestore
+                              ? "Set this Claude session back to active in Claude Desktop"
+                              : "Enable 'Allow restoring archived Claude sessions' in Preferences -> Advanced")
+                    Divider()
+                }
             } else {
                 Button("Resume") {}
                     .disabled(true)
@@ -1005,6 +1015,16 @@ struct UnifiedSessionsView: View {
                     .disabled(true)
                     .help("Select a session with project metadata to filter")
             }
+        }
+        .confirmationDialog(
+            "Restore this session in Claude Desktop?",
+            isPresented: Binding(get: { restoreCandidate != nil }, set: { if !$0 { restoreCandidate = nil } }),
+            presenting: restoreCandidate
+        ) { session in
+            Button("Restore") { restoreFromArchive(session); restoreCandidate = nil }
+            Button("Cancel", role: .cancel) { restoreCandidate = nil }
+        } message: { _ in
+            Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude to see it back in the list. Your transcript is not modified.")
         }
         .onChange(of: sortOrder) { _, newValue in
             if let first = newValue.first {
@@ -1175,6 +1195,22 @@ struct UnifiedSessionsView: View {
         GitInspectorWindowController.shared.show(for: session) { resumed in
             // Reuse existing resume pipeline for Codex/Claude as appropriate
             self.resume(resumed)
+        }
+    }
+
+    private func restoreFromArchive(_ session: Session) {
+        guard let path = unified.claudeArchiveSidecarPath(for: session) else { return }
+        do {
+            try ClaudeArchiveRestore.restore(sidecarPath: path) // reads the gate via isEnabled
+            // Optimistic overlay mutation: clear the archived flag in place.
+            if let key = session.codexInternalSessionIDHint, var rec = unified.claudeArchive[key] {
+                rec = ClaudeDesktopSidecarRecord(cliSessionID: rec.cliSessionID, title: rec.title,
+                                                 isArchived: false, autoArchiveExempt: true,
+                                                 sidecarPath: rec.sidecarPath, modifiedAt: rec.modifiedAt)
+                unified.applyOptimisticClaudeArchive(rec, for: key)
+            }
+        } catch {
+            NSLog("Claude archive restore failed: \(error)")
         }
     }
 

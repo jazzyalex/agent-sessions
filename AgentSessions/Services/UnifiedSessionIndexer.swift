@@ -524,6 +524,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         if records != claudeArchive { claudeArchive = records }
     }
 
+    func applyOptimisticClaudeArchive(_ record: ClaudeDesktopSidecarRecord, for key: String) {
+        claudeArchive[key] = record
+    }
+
     // Source filters (persisted with @Published for Combine compatibility)
     @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
         didSet {
