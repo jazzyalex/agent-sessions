@@ -400,6 +400,8 @@ struct Filters: Equatable {
     var repoName: String? = nil
     var pathContains: String? = nil
     var archivedCodexDesktopOnly: Bool = false
+    var archivedClaudeDesktopOnly: Bool = false
+    var archivedClaudeSessionIDs: Set<String> = []
     var sideChatsOnly: Bool = false
 }
 
@@ -431,6 +433,11 @@ enum FilterEngine {
         // Archive filter scopes only Codex sessions; side-chat searches use recovered log rows,
         // so an explicit #side query should not hide them behind archived-session metadata.
         if !sideChatsOnly, filters.archivedCodexDesktopOnly, session.source == .codex, !session.isArchivedCodexDesktopSession { return false }
+        if !sideChatsOnly, filters.archivedClaudeDesktopOnly, session.source == .claude {
+            let isArchived = session.codexInternalSessionIDHint
+                .map { filters.archivedClaudeSessionIDs.contains($0) } ?? false
+            if !isArchived { return false }
+        }
 
         if let repo = effectiveRepo, !repo.isEmpty {
             guard let r = session.repoName?.lowercased() else { return false }
