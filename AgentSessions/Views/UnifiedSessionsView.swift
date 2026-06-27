@@ -350,6 +350,7 @@ struct UnifiedSessionsView: View {
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     @State private var restoreCandidate: Session? = nil
+    @State private var showRestoredRelaunch = false
     private var rows: [Session] {
         let baseRows: [Session]
         let q = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1017,14 +1018,20 @@ struct UnifiedSessionsView: View {
             }
         }
         .confirmationDialog(
-            "Restore this session in Claude Desktop?",
+            "Restore from Archive?",
             isPresented: Binding(get: { restoreCandidate != nil }, set: { if !$0 { restoreCandidate = nil } }),
             presenting: restoreCandidate
         ) { session in
-            Button("Restore") { restoreFromArchive(session); restoreCandidate = nil }
+            // Defer so the dialog dismisses before the relaunch alert presents.
+            Button("Restore") { restoreCandidate = nil; DispatchQueue.main.async { restoreFromArchive(session) } }
             Button("Cancel", role: .cancel) { restoreCandidate = nil }
         } message: { _ in
-            Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude to see it back in the list. Your transcript is not modified.")
+            Text("Quit Claude Desktop first, or it may overwrite this. Your transcript isn’t changed.")
+        }
+        .alert("Restored", isPresented: $showRestoredRelaunch) {
+            Button("OK") {}
+        } message: {
+            Text("Relaunch Claude Desktop to see it.")
         }
         .onChange(of: sortOrder) { _, newValue in
             if let first = newValue.first {
@@ -1202,6 +1209,7 @@ struct UnifiedSessionsView: View {
         guard let path = unified.claudeArchiveSidecarPath(for: session) else { return }
         do {
             try ClaudeArchiveRestore.restore(sidecarPath: path) // reads the gate via isEnabled
+            showRestoredRelaunch = true
             // Optimistic overlay mutation: clear the archived flag in place.
             if let key = session.codexInternalSessionIDHint, var rec = unified.claudeArchive[key] {
                 rec = ClaudeDesktopSidecarRecord(cliSessionID: rec.cliSessionID, title: rec.title,

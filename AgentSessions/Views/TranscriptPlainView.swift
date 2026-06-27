@@ -3940,14 +3940,14 @@ private struct ClaudeArchiveRestoreStripControl: View {
         }
         var title: String {
             switch self {
-            case .restored: return "Session restored"
+            case .restored: return "Restored"
             case .failed: return "Couldn’t restore session"
             }
         }
         var message: String {
             switch self {
             case .restored:
-                return "Quit and reopen Claude Desktop to see this session back in your list. Your transcript was not changed."
+                return "Relaunch Claude Desktop to see it."
             case .failed(let message):
                 return message
             }
@@ -3989,7 +3989,7 @@ private struct ClaudeArchiveRestoreStripControl: View {
         }
         // Presentation modifiers live on the stable Group host (not the Button) so the alert
         // still appears after a successful restore flips the view to the "Restored" label.
-        .confirmationDialog("Restore this session in Claude Desktop?",
+        .confirmationDialog("Restore from Archive?",
                             isPresented: $showConfirm,
                             presenting: archivedSidecarPath) { path in
             // Defer to the next runloop so the dialog finishes dismissing before the
@@ -3997,7 +3997,7 @@ private struct ClaudeArchiveRestoreStripControl: View {
             Button("Restore") { DispatchQueue.main.async { performRestore(sidecarPath: path) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude Desktop to see it back in your list. Your transcript is not modified.")
+            Text("Quit Claude Desktop first, or it may overwrite this. Your transcript isn’t changed.")
         }
         .alert(outcome?.title ?? "",
                isPresented: Binding(get: { outcome != nil }, set: { if !$0 { outcome = nil } }),
@@ -4009,8 +4009,17 @@ private struct ClaudeArchiveRestoreStripControl: View {
         .task(id: session.id) { await loadArchiveState() }
     }
 
+    // cliSessionId used to join the sidecar reader. For Claude Code-tab transcripts this is the
+    // filename UUID (~/.claude/projects/.../<UUID>.jsonl), which equals the sidecar's cliSessionId.
+    // codexInternalSessionIDHint can be nil on hydrated sessions, so prefer the filename.
+    private static func archiveJoinKey(for session: Session) -> String? {
+        let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
+        if base.count >= 8 { return base }
+        return session.codexInternalSessionIDHint
+    }
+
     private func loadArchiveState() async {
-        let key: String? = (session.source == .claude) ? session.codexInternalSessionIDHint : nil
+        let key: String? = (session.source == .claude) ? Self.archiveJoinKey(for: session) : nil
         guard let key else {
             await MainActor.run { archivedSidecarPath = nil; didRestore = false }
             return
