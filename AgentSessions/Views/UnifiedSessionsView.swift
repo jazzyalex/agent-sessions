@@ -2348,7 +2348,7 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
         let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
-        let surfacePills = Self.surfacePills(for: session)
+        let surfacePills = Self.surfacePills(for: session, isClaudeArchived: unified.isArchivedClaudeDesktop(session))
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -2398,11 +2398,11 @@ struct UnifiedSessionsView: View {
         .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
     }
 
-    static func surfacePills(for session: Session) -> [CodexSurfacePill] {
+    static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [CodexSurfacePill] {
         if session.isSideChat {
             return [.standard(label: "desk", accessibilityLabel: "Desktop")]
         }
-        if let claudeDesktopPill = claudeDesktopSurfacePill(for: session) {
+        if let claudeDesktopPill = claudeDesktopSurfacePill(for: session, isArchived: isClaudeArchived) {
             return [claudeDesktopPill]
         }
 
@@ -2431,12 +2431,12 @@ struct UnifiedSessionsView: View {
         session.source == .codex || session.source == .claude
     }
 
-    private static func claudeDesktopSurfacePill(for session: Session) -> CodexSurfacePill? {
+    private static func claudeDesktopSurfacePill(for session: Session, isArchived: Bool) -> CodexSurfacePill? {
         guard session.source == .claude else { return nil }
         let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let originSource = session.originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if originator == "claude desktop" || originSource == "local-agent-mode" || isClaudeDesktopLocalAgentPath(session.filePath) {
-            return .desktop()
+            return .desktop(isArchived: isArchived)
         }
         return nil
     }
