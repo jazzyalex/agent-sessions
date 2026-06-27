@@ -195,7 +195,7 @@ extension PreferencesView {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .help("Choose when Quota Meter shows the Codex session runway drawer.")
+                    .help("Choose when Quota Meter shows the session runway drawer.")
                 }
             }
 

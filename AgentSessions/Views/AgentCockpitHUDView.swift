@@ -1266,7 +1266,7 @@ struct AgentCockpitHUDView: View {
             }
         }
         .buttonStyle(HUDIconButtonStyle(isOn: isForced, tint: nil))
-        .help("Runway drawer: choose when the Codex session runway appears.")
+        .help("Runway drawer: choose when the session runway appears.")
         .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
             HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
         }
@@ -4556,14 +4556,19 @@ private enum QuotaMeterTextMetrics {
 private enum HUDLimitsColumnLayout {
     static let compactSpacing: CGFloat = 3
     static let compactFiveHourPercentWidth: CGFloat = 52
-    static let compactFiveHourProjectionWidth: CGFloat = 44
+    // Wide enough for the worst-case hour-format projection (" ▸4h 59m" ≈ 59pt at
+    // the Standard provider font); columnScale handles the Enlarged size. Sized to
+    // match the reserve placeholder ("▸4h 59m") — a narrower value clips "▸Xh Ym".
+    static let compactFiveHourProjectionWidth: CGFloat = 62
     static let compactFiveHourResetWidth: CGFloat = 54
     static let compactSeparatorWidth: CGFloat = 5
     static let compactWeekPercentWidth: CGFloat = 48
     static let compactWeekResetWidth: CGFloat = 92
 
     static let detailFiveHourPercentWidth: CGFloat = 58
-    static let detailFiveHourProjectionWidth: CGFloat = 58
+    // Parity with the compact column: fits hour-format "▸Xh Ym" (this row has no
+    // minimumScaleFactor, so an undersized width clips outright).
+    static let detailFiveHourProjectionWidth: CGFloat = 60
     static let detailFiveHourResetWidth: CGFloat = 60
     static let detailSeparatorWidth: CGFloat = 7
     static let detailWeekPercentWidth: CGFloat = 58
