@@ -3992,7 +3992,9 @@ private struct ClaudeArchiveRestoreStripControl: View {
         .confirmationDialog("Restore this session in Claude Desktop?",
                             isPresented: $showConfirm,
                             presenting: archivedSidecarPath) { path in
-            Button("Restore") { performRestore(sidecarPath: path) }
+            // Defer to the next runloop so the dialog finishes dismissing before the
+            // result alert presents — presenting both in one tick can drop the alert.
+            Button("Restore") { DispatchQueue.main.async { performRestore(sidecarPath: path) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude Desktop to see it back in your list. Your transcript is not modified.")
