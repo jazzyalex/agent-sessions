@@ -45,6 +45,7 @@
   - `enum RunwayBaselineMath`
   - `static func averageBurnRunout(remainingPercent: Double, resetAt: Date, windowLength: TimeInterval, now: Date) -> Date?`
   - `static let fiveHourWindow: TimeInterval` (= `5 * 3600`)
+  - `static let minimumElapsed: TimeInterval` (= `10 * 60`)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -110,6 +111,20 @@ Add to `ClaudeRunwayParserTests.swift` (inside the `final class ClaudeRunwayPars
             windowLength: RunwayBaselineMath.fiveHourWindow,
             now: now))
     }
+
+    /// Symmetric guard: a burst 30 s after reset (2% used) must be damped by the
+    /// elapsed floor (2%/600s → ~36 m/h), not divided by 30 s (2%/30s → ~720 m/h).
+    func testAverageBurnRunoutFloorsEarlyWindowElapsed() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let resetAt = now.addingTimeInterval(RunwayBaselineMath.fiveHourWindow - 30)
+        let runout = try XCTUnwrap(RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 98,
+            resetAt: resetAt,
+            windowLength: RunwayBaselineMath.fiveHourWindow,
+            now: now))
+        let mPerHour = 98.0 / runout.timeIntervalSince(now) * 3 * 3600
+        XCTAssertEqual(mPerHour, 36.0, accuracy: 2.0)
+    }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -127,6 +142,13 @@ enum RunwayBaselineMath {
     /// The 5-hour rolling window length used by the "5h" limit.
     static let fiveHourWindow: TimeInterval = 5 * 3600
 
+    /// Floor for elapsed time. A heavy burst in the first minutes after a reset
+    /// (e.g. a workflow fanning out many agents) could otherwise divide by a
+    /// tiny elapsed and re-introduce small-denominator inflation on the
+    /// early-window side — the symmetric twin of the near-reset bug this fix
+    /// removes. 10 min over a 5h window is light smoothing that only binds early.
+    static let minimumElapsed: TimeInterval = 10 * 60
+
     /// Even-burn run-out derived from *average usage so far this window*, for
     /// providers that lack a fresh per-account projection (Claude).
     ///
@@ -135,6 +157,8 @@ enum RunwayBaselineMath {
     /// approaches (denominator → 0), producing absurd per-session "m/h".
     /// Anchoring run-out to the measured average instead (`used% / elapsed`)
     /// gives `providerRate == averageRate`, which never blows up near reset.
+    /// `elapsed` is floored by `minimumElapsed` so the early-window side can't
+    /// inflate the same way.
     ///
     /// Returns `nil` when no burn is measurable yet (`used <= 0`) or the
     /// window start is in the future; callers fall back to the reset time.
@@ -145,8 +169,9 @@ enum RunwayBaselineMath {
         let usedPercent = 100 - remainingPercent
         guard usedPercent > 0, remainingPercent > 0 else { return nil }
         let windowStart = resetAt.addingTimeInterval(-windowLength)
-        let elapsed = now.timeIntervalSince(windowStart)
-        guard elapsed > 0 else { return nil }
+        let rawElapsed = now.timeIntervalSince(windowStart)
+        guard rawElapsed > 0 else { return nil }
+        let elapsed = max(rawElapsed, minimumElapsed)
         let averageRatePerSecond = usedPercent / elapsed
         guard averageRatePerSecond > 0, averageRatePerSecond.isFinite else { return nil }
         let secondsToRunout = remainingPercent / averageRatePerSecond
@@ -263,7 +288,7 @@ Expected: PASS.
 - [ ] **Step 5: Run the full runway suite (regression)**
 
 Run: `./scripts/xcode_test_stable.sh -only-testing:AgentSessionsTests/ClaudeRunwayParserTests`
-Expected: PASS — all existing tests plus the five new ones.
+Expected: PASS — all existing tests plus the six new ones (five `averageBurnRunout` unit tests + one `claudeRequest` integration test).
 
 - [ ] **Step 6: Commit** (only on explicit user request)
 
@@ -295,4 +320,7 @@ Why: Claude session showed 2600-5000 m/h near reset on the \$100 plan"
 - **Spec coverage:** Root cause (reset-pinned `runoutAt`) → Task 2 wiring; the stable-rate invariant → Task 1 helper + tests. Both symptoms (explosive m/h; the same fallback) trace to the one `runoutAt` line, which Task 2 changes. ✓
 - **Placeholder scan:** every step has concrete code, exact paths, exact run commands, and expected output. ✓
 - **Type consistency:** `averageBurnRunout(remainingPercent:resetAt:windowLength:now:) -> Date?` and `fiveHourWindow` are defined in Task 1 and consumed verbatim in Task 2 and all tests. `claudeRequest` parameters match `AgentCockpitHUDView.swift:3503-3513`. ✓
-- **Numbers:** near reset (40% remaining, 120 s to reset, 5h window): elapsed 17880 s, avg 0.003356 %/s ⇒ ~36 m/h; reset-pinned would be 40/120 = 0.333 %/s ⇒ 3600 m/h. Assertions (`≈36 ±1`, `<100`) hold. ✓
+- **Numbers (near reset):** 40% remaining, 120 s to reset, 5h window: elapsed 17880 s, avg 0.003356 %/s ⇒ ~36 m/h; reset-pinned would be 40/120 = 0.333 %/s ⇒ 3600 m/h. Assertions (`≈36 ±1`, `<100`) hold. ✓
+- **Numbers (early window):** 98% remaining, 30 s after reset: rawElapsed 30 s floored to 600 s ⇒ 2%/600 = 0.00333 %/s ⇒ ~36 m/h; unfloored would be 2%/30 = 0.0667 %/s ⇒ ~720 m/h. Floor test (`≈36 ±2`) holds. ✓
+- **Symmetric safety:** the fix removes the small-`timeToReset` denominator and the `minimumElapsed` floor removes the small-`elapsed` denominator, so neither end of the window can inflate the rate. ✓
+- **Column width:** realistic avg-burn values are 0–~300 m/h (3-digit); 4-digit overflow needs burning a large fraction of the 5h quota within the 10-min floor — not physically realistic — so the existing 3-digit rate column stays adequate. ✓
