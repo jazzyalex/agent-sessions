@@ -303,6 +303,115 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertGreaterThan(withProjection, withoutProjection, "rate sharpens to measured velocity once a projection lands")
     }
 
+    // MARK: - RunwayBaselineMath.averageBurnRunout
+
+    /// The whole point of the fix: near reset, the derived rate reflects the
+    /// measured average (~36 m/h for 60% used over ~5h), NOT the reset-pinned
+    /// fallback (~3600 m/h) that exploded as the denominator shrank.
+    func testAverageBurnRunoutDoesNotExplodeNearReset() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let resetAt = now.addingTimeInterval(120) // 2 min to reset
+        let runout = try XCTUnwrap(RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 40,
+            resetAt: resetAt,
+            windowLength: RunwayBaselineMath.fiveHourWindow,
+            now: now))
+        let providerRate = 40.0 / runout.timeIntervalSince(now) // %/s
+        let mPerHour = providerRate * 3 * 3600
+        XCTAssertEqual(mPerHour, 36.2, accuracy: 1.0)
+        XCTAssertLessThan(mPerHour, 100)
+    }
+
+    /// The rate must stay stable as the reset approaches (it depends on
+    /// elapsed, not time-to-reset). The old fallback produced ~3600 then
+    /// ~21600 m/h for these two inputs.
+    func testAverageBurnRunoutRateStableAsResetApproaches() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        func mPerHour(secondsToReset: TimeInterval, remaining: Double) throws -> Double {
+            let resetAt = now.addingTimeInterval(secondsToReset)
+            let runout = try XCTUnwrap(RunwayBaselineMath.averageBurnRunout(
+                remainingPercent: remaining,
+                resetAt: resetAt,
+                windowLength: RunwayBaselineMath.fiveHourWindow,
+                now: now))
+            return remaining / runout.timeIntervalSince(now) * 3 * 3600
+        }
+        let near = try mPerHour(secondsToReset: 120, remaining: 40)
+        let nearer = try mPerHour(secondsToReset: 20, remaining: 40)
+        XCTAssertEqual(near, nearer, accuracy: 1.0)
+        XCTAssertLessThan(nearer, 100)
+    }
+
+    /// Nothing used yet ⇒ no measurable burn ⇒ nil (caller keeps resetAt).
+    func testAverageBurnRunoutNilWhenNothingUsed() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertNil(RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 100,
+            resetAt: now.addingTimeInterval(3600),
+            windowLength: RunwayBaselineMath.fiveHourWindow,
+            now: now))
+    }
+
+    /// Defensive: a reset farther out than the window length puts the window
+    /// start in the future ⇒ nil rather than a negative elapsed.
+    func testAverageBurnRunoutNilWhenWindowStartInFuture() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertNil(RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 40,
+            resetAt: now.addingTimeInterval(6 * 3600),
+            windowLength: RunwayBaselineMath.fiveHourWindow,
+            now: now))
+    }
+
+    /// Symmetric guard: a burst 30 s after reset (2% used) must be damped by the
+    /// elapsed floor (2%/600s → ~36 m/h), not divided by 30 s (2%/30s → ~720 m/h).
+    func testAverageBurnRunoutFloorsEarlyWindowElapsed() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let resetAt = now.addingTimeInterval(RunwayBaselineMath.fiveHourWindow - 30)
+        let runout = try XCTUnwrap(RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 98,
+            resetAt: resetAt,
+            windowLength: RunwayBaselineMath.fiveHourWindow,
+            now: now))
+        let mPerHour = 98.0 / runout.timeIntervalSince(now) * 3 * 3600
+        XCTAssertEqual(mPerHour, 36.0, accuracy: 2.0)
+    }
+
+    // MARK: - claudeRequest baseline
+
+    /// End-to-end: with no projection and ~2 min to reset, the baseline the
+    /// builder produces must imply a sane burn rate (< 100 m/h), not the
+    /// ~3600 m/h the reset-pinned fallback produced.
+    func testClaudeRequestDerivesSaneBurnRateNearReset() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let resetAt = now.addingTimeInterval(120)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let resetText = iso.string(from: resetAt)
+
+        let request = try XCTUnwrap(HUDRunwayRequestBuilder.claudeRequest(
+            activeRows: [],
+            projectedRunoutEnabled: true,
+            claudeAgentEnabled: true,
+            claudeUsageEnabled: true,
+            fiveHourRemainingPercent: 40,
+            fiveHourResetText: resetText,
+            fiveHourProjectedRunoutAt: nil,
+            fiveHourProjectionObservedAt: nil,
+            now: now,
+            maxRows: 4,
+            forceVisible: true))
+
+        let baseline = request.baseline
+        let providerRate = baseline.remainingPercent
+            / baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
+        let mPerHour = providerRate * 3 * 3600
+        XCTAssertGreaterThan(mPerHour, 0)
+        XCTAssertLessThan(mPerHour, 100)
+        // Sanity: run-out is pushed well past the imminent reset.
+        XCTAssertGreaterThan(baseline.currentRunoutAt, resetAt)
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,

@@ -37,6 +37,49 @@ struct RunwayProviderBaseline: Equatable, Sendable {
     }
 }
 
+/// Baseline math shared by the runway request builders.
+enum RunwayBaselineMath {
+    /// The 5-hour rolling window length used by the "5h" limit.
+    static let fiveHourWindow: TimeInterval = 5 * 3600
+
+    /// Floor for elapsed time. A heavy burst in the first minutes after a reset
+    /// (e.g. a workflow fanning out many agents) could otherwise divide by a
+    /// tiny elapsed and re-introduce small-denominator inflation on the
+    /// early-window side — the symmetric twin of the near-reset bug this fix
+    /// removes. 10 min over a 5h window is light smoothing that only binds early.
+    static let minimumElapsed: TimeInterval = 10 * 60
+
+    /// Even-burn run-out derived from *average usage so far this window*, for
+    /// providers that lack a fresh per-account projection (Claude).
+    ///
+    /// The naive fallback — pinning run-out to the reset time — makes the
+    /// implied burn rate `remaining / timeToReset` explode as the reset
+    /// approaches (denominator → 0), producing absurd per-session "m/h".
+    /// Anchoring run-out to the measured average instead (`used% / elapsed`)
+    /// gives `providerRate == averageRate`, which never blows up near reset.
+    /// `elapsed` is floored by `minimumElapsed` so the early-window side can't
+    /// inflate the same way.
+    ///
+    /// Returns `nil` when no burn is measurable yet (`used <= 0`) or the
+    /// window start is in the future; callers fall back to the reset time.
+    static func averageBurnRunout(remainingPercent: Double,
+                                  resetAt: Date,
+                                  windowLength: TimeInterval,
+                                  now: Date) -> Date? {
+        let usedPercent = 100 - remainingPercent
+        guard usedPercent > 0, remainingPercent > 0 else { return nil }
+        let windowStart = resetAt.addingTimeInterval(-windowLength)
+        let rawElapsed = now.timeIntervalSince(windowStart)
+        guard rawElapsed > 0 else { return nil }
+        let elapsed = max(rawElapsed, minimumElapsed)
+        let averageRatePerSecond = usedPercent / elapsed
+        guard averageRatePerSecond > 0, averageRatePerSecond.isFinite else { return nil }
+        let secondsToRunout = remainingPercent / averageRatePerSecond
+        guard secondsToRunout.isFinite, secondsToRunout > 0 else { return nil }
+        return now.addingTimeInterval(secondsToRunout)
+    }
+}
+
 struct RunwaySessionIdentity: Equatable, Identifiable, Sendable {
     let id: String
     let displayName: String

@@ -3563,7 +3563,16 @@ enum HUDRunwayRequestBuilder {
             return observedAt
         }()
         let observedAt = freshProjectionObservedAt ?? now
-        let runoutAt = freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt } ?? resetAt
+        // No fresh projection: derive run-out from average usage so far this
+        // window instead of pinning to resetAt, which makes the implied
+        // per-session burn rate explode as the reset approaches.
+        let runoutAt = (freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt })
+            ?? RunwayBaselineMath.averageBurnRunout(
+                remainingPercent: Double(fiveHourRemainingPercent),
+                resetAt: resetAt,
+                windowLength: RunwayBaselineMath.fiveHourWindow,
+                now: now)
+            ?? resetAt
         guard resetAt > observedAt,
               runoutAt > observedAt else {
             return nil
