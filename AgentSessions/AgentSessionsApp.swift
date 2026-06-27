@@ -4,6 +4,7 @@ import Combine
 import UniformTypeIdentifiers
 
 extension Notification.Name {
+    static let claudeArchiveDidChange = Notification.Name("AgentSessionsClaudeArchiveDidChange")
     static let openSessionsSearchFromMenu = Notification.Name("AgentSessionsOpenSessionsSearchFromMenu")
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")

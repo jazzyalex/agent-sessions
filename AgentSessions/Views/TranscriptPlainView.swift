@@ -3928,14 +3928,14 @@ private struct WholeSessionRawPrettySheet: View {
 private struct ClaudeArchiveRestoreStripControl: View {
     let session: Session
 
-    @State private var record: ClaudeDesktopSidecarRecord?
+    // Sidecar path of this session iff it is an archived Claude Desktop session; nil otherwise.
+    @State private var archivedSidecarPath: String?
     @State private var didRestore = false
     @State private var showConfirm = false
     @State private var showRestoredAlert = false
-
-    private var gateOn: Bool {
-        UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.allowClaudeArchiveRestore)
-    }
+    @State private var restoreError: String?
+    // Reactive read of the Advanced gate so the control enables/disables live when toggled.
+    @AppStorage(PreferencesKey.Advanced.allowClaudeArchiveRestore) private var restoreEnabled = false
 
     var body: some View {
         Group {
@@ -3944,19 +3944,23 @@ private struct ClaudeArchiveRestoreStripControl: View {
                     Label("Restored — relaunch Claude Desktop", systemImage: "checkmark.circle")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                } else if let rec = record, rec.isArchived {
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                } else if let path = archivedSidecarPath {
                     Button { showConfirm = true } label: {
                         Label("Restore from Archive", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 10, weight: .semibold))
+                            .lineLimit(1)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(gateOn ? Color.accentColor : .secondary)
-                    .disabled(!gateOn)
-                    .help(gateOn
+                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(restoreEnabled ? Color.accentColor : .secondary)
+                    .disabled(!restoreEnabled)
+                    .help(restoreEnabled
                           ? "Set this Claude session back to active in Claude Desktop"
                           : "Enable “Allow restoring archived Claude sessions” in Preferences → Advanced")
                     .confirmationDialog("Restore this session in Claude Desktop?", isPresented: $showConfirm) {
-                        Button("Restore") { performRestore(rec) }
+                        Button("Restore") { performRestore(sidecarPath: path) }
                         Button("Cancel", role: .cancel) {}
                     } message: {
                         Text("If the session is open in Claude it may overwrite this change immediately; otherwise quit and reopen Claude Desktop to see it back in your list. Your transcript is not modified.")
@@ -3966,28 +3970,46 @@ private struct ClaudeArchiveRestoreStripControl: View {
                     } message: {
                         Text("Quit and reopen Claude Desktop to see this session back in your list. Your transcript was not changed.")
                     }
+                    .alert("Couldn’t restore session", isPresented: Binding(
+                        get: { restoreError != nil },
+                        set: { if !$0 { restoreError = nil } }
+                    )) {
+                        Button("OK") {}
+                    } message: {
+                        Text(restoreError ?? "")
+                    }
                 }
             }
         }
-        .task(id: session.id) { loadRecord() }
+        .task(id: session.id) { await loadArchiveState() }
     }
 
-    private func loadRecord() {
-        didRestore = false
-        guard session.source == .claude, let key = session.codexInternalSessionIDHint else {
-            record = nil
+    private func loadArchiveState() async {
+        let key: String? = (session.source == .claude) ? session.codexInternalSessionIDHint : nil
+        guard let key else {
+            await MainActor.run { archivedSidecarPath = nil; didRestore = false }
             return
         }
-        record = ClaudeDesktopSessionTitles.records()[key]
+        // Scan off the main thread: records() enumerates and parses the sidecar tree.
+        let path = await Task.detached(priority: .utility) { () -> String? in
+            guard let rec = ClaudeDesktopSessionTitles.records()[key], rec.isArchived else { return nil }
+            return rec.sidecarPath
+        }.value
+        await MainActor.run {
+            archivedSidecarPath = path
+            didRestore = false
+        }
     }
 
-    private func performRestore(_ rec: ClaudeDesktopSidecarRecord) {
+    private func performRestore(sidecarPath: String) {
         do {
-            try ClaudeArchiveRestore.restore(sidecarPath: rec.sidecarPath) // gate re-checked inside
+            try ClaudeArchiveRestore.restore(sidecarPath: sidecarPath) // gate re-checked inside the service
             didRestore = true
             showRestoredAlert = true
+            // Let the indexer refresh its overlay so the list pill/filter reflect the change.
+            NotificationCenter.default.post(name: .claudeArchiveDidChange, object: nil)
         } catch {
-            NSLog("Claude archive restore (strip) failed: \(error)")
+            restoreError = "Agent Sessions couldn’t update Claude’s session metadata.\n\n\(error.localizedDescription)"
         }
     }
 }

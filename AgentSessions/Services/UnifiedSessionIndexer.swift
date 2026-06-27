@@ -1087,6 +1087,11 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.analyticsLastBuiltAt != nil { self.analyticsIsStale = true }
             }
         })
+        // A restore performed elsewhere (e.g. the transcript strip control) edits the
+        // sidecar directly; refresh the overlay so the archived pill/filter reflect it.
+        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: .claudeArchiveDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.rebuildClaudeArchiveOverlay()
+        })
         rebuildClaudeArchiveOverlay()
     }
 
