@@ -498,6 +498,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var showArchivedClaudeDesktopOnly: Bool = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedClaudeDesktopOnly) {
         didSet {
             UserDefaults.standard.set(showArchivedClaudeDesktopOnly, forKey: PreferencesKey.Unified.showArchivedClaudeDesktopOnly)
+            recomputeNow()
         }
     }
 
