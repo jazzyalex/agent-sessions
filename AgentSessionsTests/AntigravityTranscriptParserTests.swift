@@ -70,4 +70,27 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         let disco = AntigravitySessionDiscovery(cliRoot: cliRoot.path)
         XCTAssertTrue(disco.discoverSessionFiles().contains { $0.lastPathComponent == "transcript.jsonl" })
     }
+
+    func testEventIDsAreUniqueInLongSessionWithToolCalls() throws {
+        // Regression: tool-call ids must not collide with a later line's id. A tool call
+        // on line 1 previously got id "<sid>-0100" (1*100+0), colliding with line 100.
+        var lines: [String] = [
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-26T21:16:16Z","content":"<USER_REQUEST>\ngo\n</USER_REQUEST>"}"#,
+            #"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-06-26T21:16:17Z","thinking":"t","tool_calls":[{"name":"list_dir","args":{"DirectoryPath":"\"/tmp\""}}]}"#,
+        ]
+        for i in 2..<160 {
+            lines.append("{\"step_index\":\(i),\"source\":\"MODEL\",\"type\":\"RUN_COMMAND\",\"status\":\"DONE\",\"created_at\":\"2026-06-26T21:16:18Z\",\"content\":\"out\"}")
+        }
+        let url = writeTranscript(lines)
+        guard let full = AntigravityTranscriptParser.parse(at: url, forcedID: "conv-x", includeEvents: true) else {
+            return XCTFail("parse returned nil")
+        }
+        let ids = full.events.map(\.id)
+        XCTAssertEqual(ids.count, Set(ids).count, "event IDs must be unique across line events and tool calls")
+    }
+
+    func testModelNameCapturesChangeNotJustInitialSelection() throws {
+        let content = "<USER_REQUEST>\nhi\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 3.5 Flash to Gemini 4.0 Pro.\n</USER_SETTINGS_CHANGE>"
+        XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content), "Gemini 4.0 Pro")
+    }
 }

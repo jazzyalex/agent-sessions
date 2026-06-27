@@ -28,16 +28,11 @@ enum AntigravityTranscriptParser {
         var firstDate: Date? = nil
         var lastDate: Date? = nil
         var count = 0
-        // Antigravity-cli transcript lines always carry `step_index` + `source` alongside
-        // `type`. Require at least one to avoid claiming unrelated JSONL (e.g. the removed
-        // Gemini CLI's session logs, which use lowercase `type` and no `step_index`).
-        var sawAntigravityEvent = false
 
         for (idx, line) in lines.enumerated() {
             guard let data = line.data(using: .utf8),
                   let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let type = obj["type"] as? String else { continue }
-            if obj["step_index"] != nil && obj["source"] is String { sawAntigravityEvent = true }
             count += 1
             let ts = (obj["created_at"] as? String).flatMap { iso.date(from: $0) }
             if let ts { if firstDate == nil { firstDate = ts }; lastDate = ts }
@@ -50,7 +45,7 @@ enum AntigravityTranscriptParser {
                 if firstUserText == nil { firstUserText = unwrapped }
                 if model == nil { model = modelName(fromUserInput: content ?? "") }
                 if includeEvents {
-                    events.append(makeEvent(sid, idx, ts, .user, "user", unwrapped, nil, nil, nil, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .user, "user", unwrapped, nil, nil, nil, raw))
                 }
             case "PLANNER_RESPONSE":
                 if includeEvents {
@@ -58,7 +53,7 @@ enum AntigravityTranscriptParser {
                     // and/or internal reasoning in `thinking`. Prefer the answer.
                     let thinking = obj["thinking"] as? String
                     let assistantText = (obj["content"] as? String) ?? thinking ?? ""
-                    events.append(makeEvent(sid, idx, ts, .assistant, "assistant", assistantText, nil, nil, nil, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .assistant, "assistant", assistantText, nil, nil, nil, raw))
                     if let calls = obj["tool_calls"] as? [[String: Any]] {
                         for (ci, call) in calls.enumerated() {
                             let name = call["name"] as? String
@@ -66,23 +61,22 @@ enum AntigravityTranscriptParser {
                             let input = (call["args"] as? [String: Any]).map {
                                 (try? JSONSerialization.data(withJSONObject: $0)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
                             }
-                            events.append(makeEvent(sid, idx * 100 + ci, ts, .tool_call, "assistant", nil, name, input, nil, raw))
+                            events.append(makeEvent(sid, "\(eventID(idx))-t\(ci)", ts, .tool_call, "assistant", nil, name, input, nil, raw))
                         }
                     }
                 }
             case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY":
                 if includeEvents {
-                    events.append(makeEvent(sid, idx, ts, .tool_result, "tool", nil, lastToolName, nil, content, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, lastToolName, nil, content, raw))
                 }
             default: // CHECKPOINT, CONVERSATION_HISTORY, unknown
                 if includeEvents {
-                    events.append(makeEvent(sid, idx, ts, .meta, "system", content, nil, nil, nil, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .meta, "system", content, nil, nil, nil, raw))
                 }
             }
         }
 
-        // Reject files that are not genuine Antigravity transcripts.
-        guard sawAntigravityEvent, count > 0 else { return nil }
+        guard count > 0 else { return nil }
 
         let title = firstUserText?.split(separator: "\n").first.map(String.init)
             ?? url.deletingLastPathComponent().lastPathComponent
@@ -116,7 +110,8 @@ enum AntigravityTranscriptParser {
     static func unwrapUserRequest(_ content: String) -> String {
         // Prefer the inside of <USER_REQUEST>…</USER_REQUEST>.
         if let r = content.range(of: "<USER_REQUEST>"),
-           let e = content.range(of: "</USER_REQUEST>") {
+           let e = content.range(of: "</USER_REQUEST>"),
+           r.upperBound <= e.lowerBound {
             return String(content[r.upperBound..<e.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         // Otherwise drop any metadata blocks and return the remainder.
@@ -128,9 +123,14 @@ enum AntigravityTranscriptParser {
     }
 
     static func modelName(fromUserInput content: String) -> String? {
-        guard let r = content.range(of: "from None to "),
-              let line = content[r.upperBound...].split(separator: "\n").first else { return nil }
-        var name = String(line).trimmingCharacters(in: .whitespaces)
+        // USER_SETTINGS_CHANGE reports the active model as
+        // "...`Model Selection` from <old> to <new>." — capture <new>, whether the
+        // change is from None (initial selection) or from a prior model.
+        guard let rx = try? NSRegularExpression(pattern: "Model Selection`?\\s+from\\s+.+?\\s+to\\s+(.+)") else { return nil }
+        let ns = content as NSString
+        guard let m = rx.firstMatch(in: content, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1 else { return nil }
+        var name = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
         if name.hasSuffix(".") { name.removeLast() }
         return name.isEmpty ? nil : name
     }
@@ -149,10 +149,15 @@ enum AntigravityTranscriptParser {
         return nil
     }
 
-    private static func makeEvent(_ sid: String, _ idx: Int, _ ts: Date?, _ kind: SessionEventKind,
+    /// Zero-padded id stem for a line's primary event. Line events get this stem
+    /// directly; tool-call events append a `-t<ci>` suffix so their ids never collide
+    /// with a later line's stem (e.g. line 1's first tool call must not equal line 100).
+    private static func eventID(_ idx: Int) -> String { String(format: "%04d", idx) }
+
+    private static func makeEvent(_ sid: String, _ idSuffix: String, _ ts: Date?, _ kind: SessionEventKind,
                                   _ role: String, _ text: String?, _ tool: String?, _ input: String?,
                                   _ output: String?, _ raw: String) -> SessionEvent {
-        SessionEvent(id: "\(sid)-\(String(format: "%04d", idx))", timestamp: ts, kind: kind, role: role,
+        SessionEvent(id: "\(sid)-\(idSuffix)", timestamp: ts, kind: kind, role: role,
                      text: text, toolName: tool, toolInput: input, toolOutput: output,
                      messageID: nil, parentID: nil, isDelta: false, rawJSON: raw)
     }
