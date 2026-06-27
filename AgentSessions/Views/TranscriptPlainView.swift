@@ -3964,6 +3964,9 @@ private struct ClaudeArchiveRestoreStripControl: View {
 
     var body: some View {
         Group {
+            // Keep the Group non-empty so `.task` fires and state changes render even before
+            // archivedSidecarPath resolves — an empty SwiftUI view can drop its `.task`.
+            Color.clear.frame(width: 0, height: 0)
             if session.source == .claude {
                 if didRestore {
                     Label("Restored — relaunch Claude Desktop", systemImage: "checkmark.circle")

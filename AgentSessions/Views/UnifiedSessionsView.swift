@@ -844,6 +844,7 @@ struct UnifiedSessionsView: View {
             TableColumn("Session", value: \Session.listTitle) { s in
                 SessionTitleCell(
                     session: s,
+                    displayTitleOverride: unified.claudeDesktopTitle(for: s),
                     antigravityIndexer: antigravityIndexer,
                     rowMeta: hierarchyRowMeta[s.id],
                     sideChatParentContext: sideChatParentContextByID[s.id],
@@ -3520,6 +3521,7 @@ private struct TranscriptHostView: View {
 // Session title cell with inline Antigravity refresh affordance (hover-only)
 private struct SessionTitleCell: View {
     let session: Session
+    let displayTitleOverride: String?
     @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
     let rowMeta: SubagentRowMeta?
     let sideChatParentContext: String?
@@ -3610,7 +3612,7 @@ private struct SessionTitleCell: View {
             }
 
             HStack(spacing: 6) {
-                Text(session.listTitle)
+                Text(displayTitleOverride ?? session.listTitle)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.tail)

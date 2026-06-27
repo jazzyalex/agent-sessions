@@ -516,6 +516,14 @@ final class UnifiedSessionIndexer: ObservableObject {
         return claudeArchive[key]?.sidecarPath
     }
 
+    /// The name Claude Desktop shows for this session (sidecar `title`), if any. AS otherwise
+    /// derives the list title from the first user prompt, which differs from the Desktop name.
+    func claudeDesktopTitle(for session: Session) -> String? {
+        guard session.source == .claude, let key = session.claudeArchiveJoinKey else { return nil }
+        guard let title = claudeArchive[key]?.title, !title.isEmpty else { return nil }
+        return title
+    }
+
     var archivedClaudeSessionIDs: Set<String> {
         Set(claudeArchive.compactMap { $0.value.isArchived ? $0.key : nil })
     }

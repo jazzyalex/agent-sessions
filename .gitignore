@@ -88,3 +88,4 @@ __pycache__/
 .deriveddata-manual-test/
 .deriveddata-cpu-*/
 .deriveddata-review/
+.deriveddata-claudefix/
