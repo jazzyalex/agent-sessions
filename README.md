@@ -9,7 +9,7 @@
 </td>
 <td>
 
-**Session management for [Codex](docs/guides/codex-local-history.html), [Claude](docs/guides/claude-code-jsonl-history.html), [OpenCode](docs/guides/opencode-sqlite-history.html), [Cursor](docs/guides/cursor-agent-local-history.html), GitHub Copilot CLI, Pi, Gemini CLI, [Hermes](docs/guides/hermes-agent-state-db-history.html), and [OpenClaw](docs/guides/openclaw-local-agent-history.html) on macOS.**
+**Session management for [Codex](docs/guides/codex-local-history.html), [Claude](docs/guides/claude-code-jsonl-history.html), [OpenCode](docs/guides/opencode-sqlite-history.html), [Cursor](docs/guides/cursor-agent-local-history.html), GitHub Copilot CLI, Pi, Antigravity, [Hermes](docs/guides/hermes-agent-state-db-history.html), and [OpenClaw](docs/guides/openclaw-local-agent-history.html) on macOS.**
 Search, inspect, save, and resume local AI-coding sessions from CLI tools, desktop apps, and IDE agent surfaces.
 
 </td>
@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.3/AgentSessions-3.9.3.dmg"><b>Download Agent Sessions 3.9.3 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.0/AgentSessions-4.0.dmg"><b>Download Agent Sessions 4.0 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -34,7 +34,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 
 ## Overview
 
-Agent Sessions is a local-first Mac app for finding useful work that coding agents already wrote to disk. It brings Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Gemini CLI, GitHub Copilot CLI, and Pi histories into one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
+Agent Sessions is a local-first Mac app for finding useful work that coding agents already wrote to disk. It brings Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, and Pi histories into one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
@@ -67,22 +67,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 3.9
+## What's New in 4.0
 
-**TL;DR** - Quota Meter now adds freshness-aware run-out predictions and Limit Alerts.
+**TL;DR** - Session Runway shows which sessions are burning your quota in real time, Codex Side Chats are recoverable and searchable, and the new Antigravity provider replaces Gemini CLI.
 
-**Highlights:** MacBook users can pin a tiny always-on limits window instead of opening the full Agent Cockpit or relying on a crowded menu bar item. It shows Codex and Claude 5h/weekly usage, keeps visible usage sources fresh, surfaces projected 5h run-out ETAs before the final warning window, and adds a dedicated Limit Alerts pane with separate controls for predicted exhaustion and threshold warnings.
+**Highlights:** The Quota Meter now includes **Session Runway** — per-session burn bars that show, at a glance, which active Codex sessions are eating your plan and how long until reset. Nested subagent and worktree burn rolls up under its root session instead of duplicating, and runway rows prefer the session names you recognize from the app.
 
-Also new in 3.9:
-- Update tours now introduce Quota Meter prediction markers and Limit Alerts.
-- The Dock tile right-click menu now includes Hide Dock Icon.
-- Turning off the menu bar item now persists across relaunches by restoring the Dock path instead of re-enabling the menu bar item.
-- Unified Window controls to collapse or expand visible session hierarchy groups.
-- A persistent Transcript Window toggle for list-focused browsing.
-- Saved-only session counts when the saved filter is active.
-- A fix for live-session refreshes jumping the session list back to the top.
-- A fix that keeps Collapse All and Expand All scoped to visible hierarchy groups.
-- Refreshed agent-format support for current Codex, Claude, Gemini, Copilot, OpenCode, Hermes, OpenClaw, Cursor, and Pi builds, including stronger real-session verification and Cursor Desktop metadata monitoring.
+Also new in 4.0:
+- **Codex Side Chats** — recover Codex Desktop side chats as searchable session rows with their own `side` badge and parent context; filter with `#side` (and `#side phrase` to search within them).
+- **Antigravity provider** — replaces Gemini CLI support; discovers Antigravity markdown artifacts, resumes with `agy --conversation <id>`, tracks live sessions, and surfaces local screenshots in the transcript and image browser.
+- **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the list loses focus.
+- **Unified Sessions performance** — fixed several hangs on large histories (full-payload SwiftUI diffing, Project-column JSON re-parsing, foreground-return rebuilds) and backgrounded side-chat discovery so big Codex logs no longer block refresh.
+- **Claude usage accuracy** — OAuth/Web refreshes preserve recent hard-probe 5h limit/reset data, projected-exhaustion alerts use fractional usage, and Claude Code 2.x `/usage` gaps are treated as unavailable rather than false 0% readings.
+- Refreshed agent-format support for current Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, and Pi builds.
 
 ## Core Features
 
@@ -104,8 +101,8 @@ Also new in 3.9:
 Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Quota Meter with 5h burn predictions</em></p>
-  <img src="docs/assets/quota-meter-light.png" alt="Small Quota Meter showing Codex and Claude 5h burn predictions, reset timing, and weekly pressure" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
+  <p style="margin:0 0 0px 0;"><em>Quota Meter with Session Runway per-session burn</em></p>
+  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude 5h/weekly limits with Session Runway per-session burn-rate bars" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
 
   <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
@@ -136,7 +133,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-3.9.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v3.9.3/AgentSessions-3.9.3.dmg)
+1. [Download AgentSessions-4.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.0/AgentSessions-4.0.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
@@ -182,7 +179,7 @@ open "/Applications/Agent Sessions.app"
 - Reads agent session directories in read-only mode:
   - `~/.codex/sessions`
   - `~/.claude/projects`
-  - `~/.gemini/tmp`
+  - `~/.gemini/antigravity/brain`
   - `~/.copilot/session-state`
   - `~/.cursor/projects` and `~/.cursor/chats`
   - `~/.factory/sessions` and `~/.factory/projects`
