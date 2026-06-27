@@ -4543,31 +4543,33 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
 
 /// Quota Meter type scale. Standard keeps the established sizes; Enlarged raises
 /// every Quota Meter font by one point (provider rows and Session Runway alike),
-/// preserving the runway-one-below-provider relationship, and scales the fixed
-/// provider columns by the same ratio so the larger text isn't clamped.
+/// preserving the runway-one-below-provider relationship. The limit columns keep
+/// fixed widths across both modes (see HUDLimitsColumnLayout), so the window does
+/// not change size when Enlarged is toggled — the larger font just fills more of
+/// each column instead of widening it.
 private enum QuotaMeterTextMetrics {
     static func providerFontSize(enlarged: Bool) -> CGFloat { enlarged ? 13 : 12 }
     static func runwayFontSize(enlarged: Bool) -> CGFloat { enlarged ? 12 : 11 }
     static func providerRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 32 : 30 }
     static func runwayRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 15 : 14 }
-    static func columnScale(enlarged: Bool) -> CGFloat { enlarged ? 13.0 / 12.0 : 1.0 }
 }
 
 private enum HUDLimitsColumnLayout {
     static let compactSpacing: CGFloat = 3
-    // Each column is sized to its worst-case NORMAL content at the Standard
-    // provider font (columnScale handles Enlarged), so minimumScaleFactor never
-    // shrinks one column relative to its neighbours — the row keeps one uniform
-    // size and never trims times/percents. The four value columns all top out at
-    // an 8-char string (~59pt: "5h: 100%", " ▸4h 59m", "↻ 4h 59m", "Wk: 100%"),
-    // so they share width 62; the weekly reset ("↻ Wed 12:00 PM" ≈ 104pt) needs 106.
-    // (Long stale/unavailable reset copy still falls back to minimumScaleFactor.)
-    static let compactFiveHourPercentWidth: CGFloat = 62
-    static let compactFiveHourProjectionWidth: CGFloat = 62
-    static let compactFiveHourResetWidth: CGFloat = 62
+    // Fixed widths, identical in Standard and Enlarged (no per-mode scaling), so the
+    // window keeps one size when Enlarged is toggled. Each is sized to its worst-case
+    // content at the Enlarged provider font (13pt), so nothing shrinks at full font:
+    //   • value/reset columns hold an 8-char hour string ("▸4h 59m"/"↻ 4h 59m" ≈ 64pt) → 66
+    //   • percents hold a 2-digit "Wk: 89%" (≈ 56pt) → 58; the transient "100%" right
+    //     after a reset shaves slightly via minimumScaleFactor, by design
+    //   • the weekly reset holds a 2-digit-hour "↻ Wed 12:00 PM" (≈ 112pt) → 114
+    // Long stale/unavailable reset copy still falls back to minimumScaleFactor.
+    static let compactFiveHourPercentWidth: CGFloat = 58
+    static let compactFiveHourProjectionWidth: CGFloat = 66
+    static let compactFiveHourResetWidth: CGFloat = 66
     static let compactSeparatorWidth: CGFloat = 5
-    static let compactWeekPercentWidth: CGFloat = 62
-    static let compactWeekResetWidth: CGFloat = 106
+    static let compactWeekPercentWidth: CGFloat = 58
+    static let compactWeekResetWidth: CGFloat = 114
 
     static let detailFiveHourPercentWidth: CGFloat = 58
     // Parity with the compact column: fits hour-format "▸Xh Ym" (this row has no
@@ -4713,39 +4715,42 @@ private struct HUDLimitsProviderText: View {
 
     @ViewBuilder
     private var alignedContent: some View {
-        let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
-        HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
+        // Fixed column widths in both font modes (see HUDLimitsColumnLayout), so the
+        // window stays one size when Enlarged is toggled; the larger font just fills
+        // more of each column. minimumScaleFactor (applied by the caller) remains the
+        // fallback for the rare over-long content (transient "100%", stale copy).
+        HStack(spacing: HUDLimitsColumnLayout.compactSpacing) {
             HStack(spacing: 0) {
                 Text("5h: ")
                 Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth, alignment: .leading)
 
             if reserveProjectionSlot || fiveHourProjectionLabel != nil {
                 HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, reserve: reserveProjectionSlot)
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth, alignment: .leading)
             }
 
             if showResets, let r = fiveHourResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth, alignment: .leading)
             }
 
             Text("|")
                 .foregroundStyle(Color.primary.opacity(0.25))
-                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth * scale, alignment: .center)
+                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth, alignment: .center)
 
             HStack(spacing: 0) {
                 Text("Wk: ")
                 Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
                     .foregroundStyle(hudPctColor(entry.weekLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth * scale, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth, alignment: .leading)
 
             if showResets, let r = weekResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth * scale, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth, alignment: .leading)
             }
         }
     }
