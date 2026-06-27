@@ -7,6 +7,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isCompact: Bool
     let isLimitsOnly: Bool
     let limitsContentHeight: CGFloat
+    let limitsContentWidth: CGFloat
     let activeEnabled: Bool
     let compactToolbarVisible: Bool
     let groupByProject: Bool
@@ -20,6 +21,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             isCompact: isCompact,
             isLimitsOnly: isLimitsOnly,
             limitsContentHeight: limitsContentHeight,
+            limitsContentWidth: limitsContentWidth,
             activeEnabled: activeEnabled,
             compactToolbarVisible: compactToolbarVisible,
             groupByProject: groupByProject,
@@ -95,6 +97,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             let isCompact: Bool
             let isLimitsOnly: Bool
             let limitsContentHeight: CGFloat
+            let limitsContentWidth: CGFloat
             let activeEnabled: Bool
             let compactToolbarVisible: Bool
             let groupByProject: Bool
@@ -176,6 +179,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 isCompact: inputs.isCompact,
                 isLimitsOnly: inputs.isLimitsOnly,
                 limitsContentHeight: inputs.limitsContentHeight,
+                limitsContentWidth: inputs.limitsContentWidth,
                 activeEnabled: inputs.activeEnabled,
                 compactToolbarVisible: inputs.compactToolbarVisible,
                 groupByProject: inputs.groupByProject,
@@ -190,6 +194,7 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         isCompact: Bool,
                         isLimitsOnly: Bool,
                         limitsContentHeight: CGFloat,
+                        limitsContentWidth: CGFloat,
                         activeEnabled: Bool,
                         compactToolbarVisible: Bool,
                         groupByProject: Bool,
@@ -231,11 +236,15 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         includesDisabledCallout: !activeEnabled,
                         includesToolbar: includesToolbarForStableSizing
                     )
+                    // Hug the content width: fix the window to the compact limits row's
+                    // natural width so it never tucks wider than its content (no dead
+                    // space on the right). Resizes once when the Enlarged font toggles.
+                    let limitsWidth = max(limitsMinimumWidth, limitsContentWidth)
                     window.minSize = NSSize(
-                        width: limitsMinimumWidth,
+                        width: limitsWidth,
                         height: targetHeight
                     )
-                    window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: targetHeight)
+                    window.maxSize = NSSize(width: limitsWidth, height: targetHeight)
                 } else {
                     window.maxSize = baselineMaxSize
                     window.minSize = NSSize(
@@ -663,9 +672,12 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                                             includesToolbar: Bool,
                                             appliesDefaultWidth: Bool,
                                             animated: Bool) {
-            let targetWidth = appliesDefaultWidth
+            // Clamp to maxSize.width so the window snaps to the hugged content width
+            // even when its saved/previous frame was wider than the content.
+            let unclampedWidth = appliesDefaultWidth
                 ? max(window.minSize.width, limitsDefaultFrameWidth)
                 : max(window.minSize.width, window.frame.width)
+            let targetWidth = min(window.maxSize.width, unclampedWidth)
             let targetHeight = max(
                 window.minSize.height,
                 self.limitsWindowHeight(

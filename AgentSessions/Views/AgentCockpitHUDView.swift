@@ -651,11 +651,19 @@ struct AgentCockpitHUDView: View {
         return max(30, limitsContentHeight)
     }
 
+    /// Natural width of the compact limits row at the active font size. Drives the
+    /// limits-only window's fixed width so it hugs its content (no right-edge dead
+    /// space) and resizes once when the Enlarged font is toggled.
+    private var measuredLimitsContentWidth: CGFloat {
+        HUDLimitsColumnLayout.compactContentWidth(enlarged: quotaMeterEnlargedForLimits)
+    }
+
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabledForLimits: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabledForLimits: Bool = false
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlargedForLimits = false
     @State private var showRunwayPopover = false
     @State private var showModePopover = false
 
@@ -867,6 +875,7 @@ struct AgentCockpitHUDView: View {
                 isCompact: isCompact,
                 isLimitsOnly: isLimitsOnly,
                 limitsContentHeight: measuredLimitsContentHeight,
+                limitsContentWidth: measuredLimitsContentWidth,
                 activeEnabled: activeEnabled,
                 compactToolbarVisible: showsCompactToolbar,
                 groupByProject: groupByProject,
@@ -4543,33 +4552,48 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
 
 /// Quota Meter type scale. Standard keeps the established sizes; Enlarged raises
 /// every Quota Meter font by one point (provider rows and Session Runway alike),
-/// preserving the runway-one-below-provider relationship. The limit columns keep
-/// fixed widths across both modes (see HUDLimitsColumnLayout), so the window does
-/// not change size when Enlarged is toggled — the larger font just fills more of
-/// each column instead of widening it.
+/// preserving the runway-one-below-provider relationship, and scales the compact
+/// limit columns by the same ratio so Standard stays tight while Enlarged grows the
+/// columns to match the larger text. The compact window then hugs whichever width
+/// results (see HUDLimitsColumnLayout.compactContentWidth).
 private enum QuotaMeterTextMetrics {
     static func providerFontSize(enlarged: Bool) -> CGFloat { enlarged ? 13 : 12 }
     static func runwayFontSize(enlarged: Bool) -> CGFloat { enlarged ? 12 : 11 }
     static func providerRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 32 : 30 }
     static func runwayRowHeight(enlarged: Bool) -> CGFloat { enlarged ? 15 : 14 }
+    static func columnScale(enlarged: Bool) -> CGFloat { enlarged ? 13.0 / 12.0 : 1.0 }
 }
 
 private enum HUDLimitsColumnLayout {
     static let compactSpacing: CGFloat = 3
-    // Fixed widths, identical in Standard and Enlarged (no per-mode scaling), so the
-    // window keeps one size when Enlarged is toggled. Each is sized to its worst-case
-    // content at the Enlarged provider font (13pt), so nothing shrinks at full font:
-    //   • value/reset columns hold an 8-char hour string ("▸4h 59m"/"↻ 4h 59m" ≈ 64pt) → 66
-    //   • percents hold a 2-digit "Wk: 89%" (≈ 56pt) → 58; the transient "100%" right
-    //     after a reset shaves slightly via minimumScaleFactor, by design
-    //   • the weekly reset holds a 2-digit-hour "↻ Wed 12:00 PM" (≈ 112pt) → 114
+    // Base widths are sized for the Standard provider font (12pt) and scaled up for
+    // Enlarged via QuotaMeterTextMetrics.columnScale, so Standard stays compact and
+    // Enlarged grows ~8%. Each fits its worst-case normal content without shrinking:
+    //   • 5h%/Wk%: "Wk: 89%" (≈ 52pt) → 53 (transient "100%" shaves via minimumScaleFactor)
+    //   • run-out slot: " ▸4h 59m" (≈ 59pt) → 60   ·   5h reset: "↻ 4h 59m" (≈ 59pt) → 60
+    //   • weekly reset: "↻ Wed 12:00 PM" (2-digit hour, ≈ 104pt) → 104
     // Long stale/unavailable reset copy still falls back to minimumScaleFactor.
-    static let compactFiveHourPercentWidth: CGFloat = 58
-    static let compactFiveHourProjectionWidth: CGFloat = 66
-    static let compactFiveHourResetWidth: CGFloat = 66
+    static let compactFiveHourPercentWidth: CGFloat = 53
+    static let compactFiveHourProjectionWidth: CGFloat = 60
+    static let compactFiveHourResetWidth: CGFloat = 60
     static let compactSeparatorWidth: CGFloat = 5
-    static let compactWeekPercentWidth: CGFloat = 58
-    static let compactWeekResetWidth: CGFloat = 114
+    static let compactWeekPercentWidth: CGFloat = 53
+    static let compactWeekResetWidth: CGFloat = 104
+
+    /// Natural width of the compact limits row (icon + scaled columns + padding),
+    /// used to size the Quota Meter window so it hugs its content. The icon and
+    /// padding are fixed; only the columns and inter-column gaps scale with the font.
+    /// Chrome constants mirror HUDLimitsProviderText (14pt icon, 8pt icon→columns
+    /// spacing) and the row's 14pt horizontal padding.
+    static func compactContentWidth(enlarged: Bool) -> CGFloat {
+        let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
+        let columns = compactFiveHourPercentWidth + compactFiveHourProjectionWidth
+            + compactFiveHourResetWidth + compactSeparatorWidth
+            + compactWeekPercentWidth + compactWeekResetWidth
+        let interColumnGaps = compactSpacing * 5 // six columns → five gaps
+        let chrome: CGFloat = 14 + 8 + (14 * 2)
+        return (columns + interColumnGaps) * scale + chrome + 2 // +2 epsilon to avoid edge compression
+    }
 
     static let detailFiveHourPercentWidth: CGFloat = 58
     // Parity with the compact column: fits hour-format "▸Xh Ym" (this row has no
@@ -4583,7 +4607,11 @@ private enum HUDLimitsColumnLayout {
 
 private struct HUDLimitsProjectionToken: View {
     let projection: String?
-    let reserve: Bool
+    var reserve: Bool = false
+    /// Compact limits row: render a muted "·" centered in the slot when there is no
+    /// fresh projection, so the run-out column is never blank and the width never
+    /// reflows as burn starts/stops. The detail panel leaves this off (unchanged).
+    var idleMarker: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -4592,6 +4620,11 @@ private struct HUDLimitsProjectionToken: View {
                 Text(" \(projection)")
                     .fontWeight(.bold)
                     .foregroundStyle(hudProjectionColor(colorScheme))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if idleMarker {
+                Text("·")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else if reserve {
                 Text(" ▸4h 59m")
                     .fontWeight(.bold)
@@ -4715,42 +4748,42 @@ private struct HUDLimitsProviderText: View {
 
     @ViewBuilder
     private var alignedContent: some View {
-        // Fixed column widths in both font modes (see HUDLimitsColumnLayout), so the
-        // window stays one size when Enlarged is toggled; the larger font just fills
-        // more of each column. minimumScaleFactor (applied by the caller) remains the
-        // fallback for the rare over-long content (transient "100%", stale copy).
-        HStack(spacing: HUDLimitsColumnLayout.compactSpacing) {
+        // Per-mode column widths: base sizes (Standard) scaled up for Enlarged so the
+        // Standard layout stays compact. The run-out slot is always rendered (it shows
+        // a muted "·" when there is no fresh projection) so the row width never reflows
+        // as burn starts/stops. minimumScaleFactor (applied by the caller) remains the
+        // fallback for rare over-long content (transient "100%", stale copy).
+        let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
+        HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
             HStack(spacing: 0) {
                 Text("5h: ")
                 Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
                     .foregroundStyle(hudPctColor(entry.fiveHourLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
 
-            if reserveProjectionSlot || fiveHourProjectionLabel != nil {
-                HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, reserve: reserveProjectionSlot)
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth, alignment: .leading)
-            }
+            HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true)
+                .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale)
 
             if showResets, let r = fiveHourResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
             }
 
             Text("|")
                 .foregroundStyle(Color.primary.opacity(0.25))
-                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth, alignment: .center)
+                .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth * scale, alignment: .center)
 
             HStack(spacing: 0) {
                 Text("Wk: ")
                 Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
                     .foregroundStyle(hudPctColor(entry.weekLeft))
             }
-            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth, alignment: .leading)
+            .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth * scale, alignment: .leading)
 
             if showResets, let r = weekResetLabel() {
                 Text("↻ \(r)")
-                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth, alignment: .leading)
+                    .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth * scale, alignment: .leading)
             }
         }
     }
