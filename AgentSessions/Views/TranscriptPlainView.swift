@@ -3997,7 +3997,7 @@ private struct ClaudeArchiveRestoreStripControl: View {
             Button("Restore") { DispatchQueue.main.async { performRestore(sidecarPath: path) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Quit Claude Desktop first, or it may overwrite this. Your transcript isn’t changed.")
+            Text("Quit Claude Desktop, then reopen it to see this session. Your transcript isn’t changed.")
         }
         .alert(outcome?.title ?? "",
                isPresented: Binding(get: { outcome != nil }, set: { if !$0 { outcome = nil } }),
