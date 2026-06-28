@@ -69,17 +69,19 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 4.0
 
-**TL;DR** - Session Runway shows which sessions are burning your quota in real time, Codex Side Chats are recoverable and searchable, and the new Antigravity provider replaces Gemini CLI.
+**TL;DR** - The Quota Meter takes center stage with **Session Runway** — see in real time which sessions are burning your Codex and Claude quota. Plus recoverable Codex Side Chats, the new Antigravity provider replacing Gemini CLI, and visibility + restore for archived Claude sessions.
 
-**Highlights:** The Quota Meter now includes **Session Runway** — per-session burn bars that show, at a glance, which active Codex sessions are eating your plan and how long until reset. Nested subagent and worktree burn rolls up under its root session instead of duplicating, and runway rows prefer the session names you recognize from the app.
+**Highlights:** The **Quota Meter** shows at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. Its marquee 4.0 addition, **Session Runway**, adds live per-session burn-rate bars so you can spot which active session is eating your quota fastest before it costs you the window.
 
 Also new in 4.0:
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable session rows with their own `side` badge and parent context; filter with `#side` (and `#side phrase` to search within them).
-- **Antigravity provider** — replaces Gemini CLI support; discovers Antigravity markdown artifacts, resumes with `agy --conversation <id>`, tracks live sessions, and surfaces local screenshots in the transcript and image browser.
+- **Antigravity provider** — replaces Gemini CLI support; discovers Antigravity CLI session transcripts, resumes with `agy --conversation <id>`, tracks live sessions, and surfaces local screenshots in the transcript and image browser.
+- **Claude Archived Sessions** — archived Claude Desktop sessions are now visible with an `archived` pill and an archived-only filter, and can be restored in place via a gated Restore from Archive action (off by default) in the transcript strip.
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the list loses focus.
+- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
 - **Unified Sessions performance** — fixed several hangs on large histories (full-payload SwiftUI diffing, Project-column JSON re-parsing, foreground-return rebuilds) and backgrounded side-chat discovery so big Codex logs no longer block refresh.
 - **Claude usage accuracy** — OAuth/Web refreshes preserve recent hard-probe 5h limit/reset data, projected-exhaustion alerts use fractional usage, and Claude Code 2.x `/usage` gaps are treated as unavailable rather than false 0% readings.
-- Refreshed agent-format support for current Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, and Pi builds.
+- Maintenance: re-verified agent-format support across all supported CLIs (Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, Pi), updating parsers where formats changed.
 
 ## Core Features
 

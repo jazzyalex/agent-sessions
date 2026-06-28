@@ -4,15 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Highlights
-- **Session Runway** — live per-session burn-rate bars in the Quota Meter showing which active Codex and Claude sessions are eating your plan and how long until reset; nested subagent/worktree burn rolls up under its root session, and rows carry the names you recognize.
+- **Quota Meter — now with Session Runway.** See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, **Session Runway** adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly "Limits Cockpit.")
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
-- **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity markdown brain artifacts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
-- **Quota Meter** — the always-on limits surface, renamed from "Limits Cockpit," with toolbar Runway/view controls and a Standard / Enlarged size option.
+- **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
+- **Claude Archived Sessions** — archived Claude Desktop sessions are now visible with an `archived` pill and an archived-only filter, and can be restored in place via a gated Restore from Archive action (off by default) in the transcript identity strip.
 
 ### Features
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
-- **Agent-format support** — refreshed verified coverage for current CLI builds, including Claude 2.1.193 and OpenCode 1.17.11.
-- **Workflow subagent nesting** — Claude Code "Workflow" runs now nest their spawned subagents under the parent session with a `workflow` badge and a fan-out marker, instead of appearing as orphan top-level rows; the workflow's `journal.jsonl`/sidecar files are no longer indexed as junk sessions.
+- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge, the parent row shows a fan-out marker, and Resume on a workflow child resolves to the parent. Workflow `journal.jsonl`/sidecar files are no longer indexed as junk sessions.
 
 ### Bug Fixes
 - Unified Window: fixed hangs on large Codex histories — the session list no longer stalls diffing full transcript payloads, the Project column no longer re-parses raw transcript JSON during layout, and returning to the app caches hierarchy state instead of rebuilding it.
@@ -24,8 +23,11 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 - Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.
 - Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.
+- Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option, and now shows Codex reset credits in the meter and menu bar.
+- Session list: the Claude agent filter is now a segmented pill matching Codex, and Claude Desktop rows show their Desktop session name.
 - Unified Window: collapsed hierarchy state now persists across relaunches.
 - Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).
+- Agent-format maintenance: re-verified all supported session formats against current CLI builds (Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, Pi) and updated parser/format coverage where formats changed.
 
 ## [3.9.3] - 2026-06-12
 - Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.
