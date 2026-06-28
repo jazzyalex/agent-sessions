@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 - **Quota Meter — now with Session Runway.** See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, **Session Runway** adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly "Limits Cockpit.")
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
 - **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
-- **Claude Archived Sessions** — archived Claude Desktop sessions are now visible with an `archived` pill and an archived-only filter, and can be restored in place via a gated Restore from Archive action (off by default) in the transcript identity strip.
+- **Restore archived Claude sessions** — Claude Code can archive Desktop sessions but gives you no way to bring them back. Agent Sessions surfaces archived sessions (an `archived` pill and an archived-only filter) and restores them in place. Because the app is otherwise read-only, restore is an explicit opt-in that's off by default — Agent Sessions only writes to Claude's files once you enable it.
 
 ### Features
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
