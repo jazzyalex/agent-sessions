@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [4.0] - 2026-06-28
 ### Highlights
 - **Quota Meter — now with Session Runway.** See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, **Session Runway** adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly "Limits Cockpit.")
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
