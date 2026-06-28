@@ -89,3 +89,5 @@ __pycache__/
 .deriveddata-cpu-*/
 .deriveddata-review/
 .deriveddata-claudefix/
+.deriveddata-audit/
+.deriveddata-run/
