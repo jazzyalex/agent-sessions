@@ -5,7 +5,8 @@ import Foundation
 /// limits), then hands the burns to the shared, provider-agnostic
 /// `CodexRunwayCalculator` and `RunwaySnapshotAssembly`.
 enum ClaudeRunwaySnapshotLoader {
-    static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
+    static func snapshot(for request: CodexRunwaySnapshotRequest,
+                         desktopTitlesRoot: URL? = nil) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let scannerIdentities = ClaudeRunwayRecentSessionScanner.identities(
@@ -13,18 +14,26 @@ enum ClaudeRunwaySnapshotLoader {
                     now: request.now
                 )
                 let merged = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
-                // Prefer the title the user sees in Claude Desktop (keyed by the
-                // transcript session id) over any transcript-derived name. This
-                // wins regardless of whether the name came from a HUD row or the
-                // recent-session scanner.
-                let desktopTitles = ClaudeDesktopSessionTitles.map()
-                let identities = merged.map { identity -> RunwaySessionIdentity in
-                    guard let title = desktopTitles[identity.id] else { return identity }
+                // The Claude Desktop sidecar carries both the user-facing title
+                // and the archived flag (keyed by transcript session id). Prefer
+                // that title over any transcript-derived name — regardless of
+                // whether the name came from a HUD row or the recent-session
+                // scanner — and drop sessions the user has archived in Desktop:
+                // an archived conversation should not burn a runway row.
+                let desktopRecords = ClaudeDesktopSessionTitles.records(root: desktopTitlesRoot)
+                let identities = merged.compactMap { identity -> RunwaySessionIdentity? in
+                    let record = desktopRecords[identity.id]
+                    if record?.isArchived == true { return nil }
+                    guard let title = record?.title, !title.isEmpty else { return identity }
                     return RunwaySessionIdentity(
                         id: identity.id,
                         displayName: ClaudeRunwayLog.compact(title),
                         isGoal: identity.isGoal,
-                        logPaths: identity.logPaths
+                        logPaths: identity.logPaths,
+                        // Preserve the scanner's idle classification — without it a
+                        // finished, Desktop-titled session would render as working
+                        // ("0m/h") instead of the calm idle "—".
+                        isIdle: identity.isIdle
                     )
                 }
                 // Token attribution is Claude's only burn signal, so — unlike

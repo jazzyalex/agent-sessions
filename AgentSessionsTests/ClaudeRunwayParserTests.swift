@@ -513,7 +513,128 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertEqual(row?.confidence, .idle, "an idle (end_turn) session with no fresh burn should render as idle, not a spinner")
     }
 
+    // MARK: - Provisional rate must not dominate the cross-session split (F1)
+
+    func testBurnsCapProvisionalRateToMeasuredBurst() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = Date()
+        // Session A: a measured two-sample burst (1000 tokens over 20s = 50 tok/s).
+        let logA = dir.appendingPathComponent("a.jsonl")
+        try """
+        \(assistantLine(id: "a1", at: now.addingTimeInterval(-25), inputTokens: 1000, sessionID: "A"))
+        \(assistantLine(id: "a2", at: now.addingTimeInterval(-5), inputTokens: 1000, sessionID: "A"))
+        """.write(to: logA, atomically: true, encoding: .utf8)
+        // Session B: a single steep cache-heavy turn over the 2s clamp floor → a
+        // provisional ~50,000 tok/s that, uncapped, would claim ~99% of the split.
+        let logB = dir.appendingPathComponent("b.jsonl")
+        try """
+        \(userLine(sessionID: "B", cwd: "/tmp", text: "go", at: now.addingTimeInterval(-3)))
+        \(assistantLine(id: "b1", at: now.addingTimeInterval(-1), inputTokens: 100000, sessionID: "B"))
+        """.write(to: logB, atomically: true, encoding: .utf8)
+
+        let identityA = RunwaySessionIdentity(id: "A", displayName: "A", isGoal: false, logPaths: [logA.path])
+        let identityB = RunwaySessionIdentity(id: "B", displayName: "B", isGoal: false, logPaths: [logB.path])
+        let baseline = RunwayProviderBaseline(
+            source: .claude, remainingPercent: 50,
+            resetAt: now.addingTimeInterval(2 * 3600),
+            currentRunoutAt: now.addingTimeInterval(2 * 3600),
+            observedAt: now, hasProjectedRunout: false
+        )
+        let burns = ClaudeRunwayTokenActivityParser.burns(identities: [identityA, identityB], baseline: baseline, now: now)
+        let aBurn = try XCTUnwrap(burns.first { $0.identity.id == "A" })
+        let bBurn = try XCTUnwrap(burns.first { $0.identity.id == "B" })
+        // B is provisional and capped at A's measured burst, so it claims at most
+        // an equal share — never more than the busiest verified session.
+        XCTAssertEqual(bBurn.percentPerSecond, aBurn.percentPerSecond, accuracy: aBurn.percentPerSecond * 0.02,
+                       "a provisional rate must be capped at the measured peer burst, not dominate the split")
+    }
+
+    // MARK: - Desktop-titled idle session keeps idle confidence (F2)
+
+    func testLoaderPreservesIdleForDesktopTitledSession() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-idletitle-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let desktopRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-desktop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: desktopRoot) }
+
+        let now = Date()
+        // Finished its turn 40s ago: within the 45s idle grace, past the 30s burn
+        // window → an idle pending row.
+        let log = projectDir.appendingPathComponent("sess-idle.jsonl")
+        try """
+        \(userLine(sessionID: "sess-titled-idle", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-50)))
+        \(assistantLine(id: "i1", at: now.addingTimeInterval(-40), inputTokens: 900, sessionID: "sess-titled-idle", cwd: "/tmp/proj", stopReason: "end_turn"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try writeDesktopSidecar(root: desktopRoot, cliSessionID: "sess-titled-idle", title: "Renamed In Desktop", isArchived: false)
+
+        let baseline = RunwayProviderBaseline(
+            source: .claude, remainingPercent: 50,
+            resetAt: now.addingTimeInterval(2 * 3600),
+            currentRunoutAt: now.addingTimeInterval(2 * 3600),
+            observedAt: now, hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [], now: now, maxRows: 4, recentSessionsRoot: root
+        )
+        let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request, desktopTitlesRoot: desktopRoot)
+        let row = snapshot?.rows.first { $0.id == "sess-titled-idle" }
+        XCTAssertEqual(row?.displayName, "Renamed In Desktop", "Desktop title should win")
+        XCTAssertEqual(row?.confidence, .idle,
+                       "a Desktop-titled idle session must stay idle ('—'), not become a spinner")
+    }
+
+    // MARK: - Archived Desktop sessions are excluded from the runway (F5)
+
+    func testLoaderExcludesArchivedDesktopSession() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-archived-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let desktopRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-desktop-arch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: desktopRoot) }
+
+        let now = Date()
+        // A working session 5s ago that WOULD show a row — but it is archived.
+        let log = projectDir.appendingPathComponent("sess-archived.jsonl")
+        try """
+        \(userLine(sessionID: "sess-archived", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-15)))
+        \(assistantLine(id: "w1", at: now.addingTimeInterval(-5), inputTokens: 1000, sessionID: "sess-archived", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try writeDesktopSidecar(root: desktopRoot, cliSessionID: "sess-archived", title: "Archived Convo", isArchived: true)
+
+        let baseline = RunwayProviderBaseline(
+            source: .claude, remainingPercent: 50,
+            resetAt: now.addingTimeInterval(2 * 3600),
+            currentRunoutAt: now.addingTimeInterval(2 * 3600),
+            observedAt: now, hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [], now: now, maxRows: 4, recentSessionsRoot: root
+        )
+        let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request, desktopTitlesRoot: desktopRoot)
+        XCTAssertNil(snapshot?.rows.first { $0.id == "sess-archived" },
+                     "an archived Desktop session should not burn a runway row")
+    }
+
     // MARK: - Helpers
+
+    private func writeDesktopSidecar(root: URL, cliSessionID: String, title: String, isArchived: Bool) throws {
+        let dir = root.appendingPathComponent("convo/\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let obj: [String: Any] = ["cliSessionId": cliSessionID, "title": title, "isArchived": isArchived]
+        let data = try JSONSerialization.data(withJSONObject: obj, options: [])
+        try data.write(to: dir.appendingPathComponent("local_\(UUID().uuidString).json"))
+    }
 
     private func assistantLine(id: String,
                                at date: Date,

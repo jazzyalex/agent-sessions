@@ -68,19 +68,32 @@ enum ClaudeRunwayTokenActivityParser {
 
     static func activity(identity: RunwaySessionIdentity,
                          now: Date = Date()) -> RunwaySessionActivity? {
-        let pathActivities = identity.logPaths.compactMap { path -> RunwaySessionActivity? in
+        scoredActivity(identity: identity, now: now)?.activity
+    }
+
+    /// Session token-rate plus whether it rests *only* on a provisional
+    /// single-turn estimate (no contributing path has formed a real two-sample
+    /// burst yet). `burns` uses the flag to keep an unverified provisional rate
+    /// from dominating the cross-session split.
+    static func scoredActivity(identity: RunwaySessionIdentity,
+                               now: Date = Date()) -> (activity: RunwaySessionActivity, provisional: Bool)? {
+        let pathActivities = identity.logPaths.compactMap { path -> (activity: RunwaySessionActivity, provisional: Bool)? in
             let samples = recentSamples(fromLogPath: path, now: now)
-            return activity(identity: identity, samples: samples, now: now)
+            return pathActivity(identity: identity, samples: samples, now: now)
         }
         guard !pathActivities.isEmpty else { return nil }
-        let tokensPerSecond = pathActivities.reduce(0) { $0 + $1.tokensPerSecond }
+        let tokensPerSecond = pathActivities.reduce(0) { $0 + $1.activity.tokensPerSecond }
         guard tokensPerSecond > 0, tokensPerSecond.isFinite else { return nil }
-        return RunwaySessionActivity(
+        // Provisional only if NO contributing path produced a measured burst — a
+        // real two-sample burst on any path makes the session's rate verified.
+        let provisional = !pathActivities.contains { !$0.provisional }
+        let activity = RunwaySessionActivity(
             identity: identity,
             tokensPerSecond: tokensPerSecond,
-            sampleStart: pathActivities.map(\.sampleStart).min() ?? now,
-            sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now
+            sampleStart: pathActivities.map(\.activity.sampleStart).min() ?? now,
+            sampleEnd: pathActivities.map(\.activity.sampleEnd).max() ?? now
         )
+        return (activity, provisional)
     }
 
     /// Distribute the provider's account-wide burn across active sessions in
@@ -94,7 +107,29 @@ enum ClaudeRunwayTokenActivityParser {
         let providerRate = baseline.remainingPercent / currentSeconds
         guard providerRate > 0, providerRate.isFinite else { return [] }
 
-        let activities = identities.compactMap { activity(identity: $0, now: now) }
+        let scored = identities.compactMap { scoredActivity(identity: $0, now: now) }
+        // A provisional single-turn rate is an unverified guess: a steep
+        // cache-heavy first turn can read tens of thousands of tok/s and, via the
+        // proportional split below, transiently starve every other session. Cap
+        // any provisional session at the largest *measured* burst among peers so
+        // it can never claim more than the busiest verified session. With no
+        // measured burst yet (every session just started) leave them as-is.
+        let maxBurst = scored.filter { !$0.provisional }
+            .map { $0.activity.tokensPerSecond }
+            .max()
+        let activities = scored.map { entry -> RunwaySessionActivity in
+            guard entry.provisional,
+                  let maxBurst,
+                  entry.activity.tokensPerSecond > maxBurst else {
+                return entry.activity
+            }
+            return RunwaySessionActivity(
+                identity: entry.activity.identity,
+                tokensPerSecond: maxBurst,
+                sampleStart: entry.activity.sampleStart,
+                sampleEnd: entry.activity.sampleEnd
+            )
+        }
         let totalTokenRate = activities.reduce(0) { $0 + $1.tokensPerSecond }
         guard totalTokenRate > 0, totalTokenRate.isFinite else { return [] }
 
@@ -109,9 +144,9 @@ enum ClaudeRunwayTokenActivityParser {
         }
     }
 
-    private static func activity(identity: RunwaySessionIdentity,
-                                 samples: [ClaudeRunwayTokenActivitySample],
-                                 now: Date) -> RunwaySessionActivity? {
+    private static func pathActivity(identity: RunwaySessionIdentity,
+                                     samples: [ClaudeRunwayTokenActivitySample],
+                                     now: Date) -> (activity: RunwaySessionActivity, provisional: Bool)? {
         guard let last = samples.last else { return nil }
         guard now.timeIntervalSince(last.capturedAt) <= maximumSampleAge else { return nil }
 
@@ -131,12 +166,12 @@ enum ClaudeRunwayTokenActivityParser {
 
         let span = last.capturedAt.timeIntervalSince(windowStart)
         if span >= minimumPairInterval, consumed > 0 {
-            return RunwaySessionActivity(
+            return (RunwaySessionActivity(
                 identity: identity,
                 tokensPerSecond: consumed / span,
                 sampleStart: windowStart,
                 sampleEnd: last.capturedAt
-            )
+            ), false)
         }
 
         // Not enough spread for a true diff yet (just started / first turn).
@@ -149,12 +184,12 @@ enum ClaudeRunwayTokenActivityParser {
             if turnDuration >= provisionalMinTurnDuration,
                turnDuration <= provisionalMaxTurnDuration,
                last.tokens > 0 {
-                return RunwaySessionActivity(
+                return (RunwaySessionActivity(
                     identity: identity,
                     tokensPerSecond: last.tokens / turnDuration,
                     sampleStart: started,
                     sampleEnd: last.capturedAt
-                )
+                ), true)
             }
         }
         return nil

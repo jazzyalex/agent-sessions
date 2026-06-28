@@ -4410,17 +4410,14 @@ private struct HUDRunwayPanel: View {
         }
     }
 
-    /// Burn-rate cell: a small spinner while the rate is still being measured
-    /// (waiting), otherwise the quota-rate text.
+    /// Burn-rate cell. A finished session shows a calm dash; everything else
+    /// shows the quota-rate text — which reads "0m/h" (dim) for a session that is
+    /// alive but not currently burning (e.g. awaiting a long tool/script), so it
+    /// stays informative instead of spinning.
     @ViewBuilder
     private func rateCell(quota: Double, confidence: RunwayAttributionConfidence) -> some View {
-        if confidence == .waiting {
-            ProgressView()
-                .controlSize(.small)
-                .scaleEffect(0.62)
-                .frame(width: 22, height: 12, alignment: .trailing)
-        } else if confidence == .idle {
-            // Finished its turn, winding down — calm dash, not a "calculating" spinner.
+        if confidence == .idle {
+            // Finished its turn, winding down — calm dash.
             Text("—")
                 .foregroundStyle(.secondary)
         } else {
@@ -4582,7 +4579,9 @@ private enum HUDRunwayLayout {
 
 private enum RunwayTimeFormatting {
     static func quotaRate(_ minutesPerHour: Double, confidence: RunwayAttributionConfidence = .mixed) -> String {
-        guard confidence != .waiting else { return "calc" }
+        // Alive but not currently burning (just appeared / awaiting a long tool):
+        // a calm, honest "0m/h" rather than a spinner.
+        guard confidence != .waiting else { return "0m/h" }
         guard confidence != .idle else { return "idle" }
         guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "flat" }
         let rounded = Int(ceil(minutesPerHour))
