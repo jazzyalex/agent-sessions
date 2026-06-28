@@ -10,10 +10,10 @@ All notable changes to this project will be documented in this file.
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
 - **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
 - **Restore archived Claude sessions** — Claude Code can archive Desktop sessions but gives you no way to bring them back. Agent Sessions surfaces archived sessions (an `archived` pill and an archived-only filter) and restores them in place. Because the app is otherwise read-only, restore is an explicit opt-in that's off by default — Agent Sessions only writes to Claude's files once you enable it.
+- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
 
 ### Features
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
-- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge, the parent row shows a fan-out marker, and Resume on a workflow child resolves to the parent. Workflow `journal.jsonl`/sidecar files are no longer indexed as junk sessions.
 
 ### Bug Fixes
 - Unified Window: fixed hangs on large Codex histories — the session list no longer stalls diffing full transcript payloads, the Project column no longer re-parses raw transcript JSON during layout, and returning to the app caches hierarchy state instead of rebuilding it.

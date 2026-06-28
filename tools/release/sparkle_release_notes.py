@@ -283,16 +283,27 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
         raise SystemExit(f"ERROR: CHANGELOG missing section for [{version}]")
 
     current_items = _items_with_fallback(sections[version])
-    features, improvements, bug_fixes = _structured_sections(current_items)
-    highlights = _pick_highlights(current_items, max_items=6)
-    other = _other_changes(current_items, highlights, max_items=10)
 
-    # Prefer user-facing grouped sections when we have meaningful content.
-    if features or improvements or bug_fixes:
+    # An explicit "### Highlights" section always leads and is never dropped.
+    explicit_highlights: List[str] = []
+    for heading, bullets in current_items.items():
+        if _normalized_heading(heading) in {"highlights", "highlight"}:
+            explicit_highlights.extend(bullets)
+
+    features, improvements, bug_fixes = _structured_sections(current_items)
+
+    if explicit_highlights:
+        highlights = _dedupe_keep_order(explicit_highlights)
+        other = []
+    elif features or improvements or bug_fixes:
+        # Grouped sections carry the content; no separate heuristic highlights.
         highlights = []
         other = []
+    else:
+        highlights = _pick_highlights(current_items, max_items=6)
+        other = _other_changes(current_items, highlights, max_items=10)
 
-    if not highlights and not other:
+    if not highlights and not other and not (features or improvements or bug_fixes):
         highlights = ["Small bug fixes and stability improvements."]
 
     baseline_version = _baseline_version_for(version, sections)
@@ -315,15 +326,54 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
     )
 
 
-def _render_list(items: List[str]) -> str:
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_CODE_RE = re.compile(r"`([^`]+?)`")
+
+
+def _md_inline_html(text: str) -> str:
+    """Escape, then render inline markdown (**bold**, `code`) to HTML."""
+    t = html.escape(text)
+    t = _BOLD_RE.sub(r"<strong>\1</strong>", t)
+    t = _CODE_RE.sub(r"<code>\1</code>", t)
+    return t
+
+
+def _render_list(items: List[str], cls: str = "") -> str:
     if not items:
         return ""
-    li = "\n".join(f"<li>{html.escape(x)}</li>" for x in items)
-    return f"<ul>\n{li}\n</ul>"
+    li = "\n".join(f"<li>{_md_inline_html(x)}</li>" for x in items)
+    cls_attr = f' class="{cls}"' if cls else ""
+    return f"<ul{cls_attr}>\n{li}\n</ul>"
+
+
+_NOTES_STYLE = """<style>
+.rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
+.rn h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 2px; }
+.rn h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #86868b; margin: 18px 0 6px; }
+.rn h3.hl { color: #0071e3; }
+.rn ul { margin: 0; padding-left: 18px; }
+.rn li { margin: 5px 0; }
+.rn ul.highlights li { margin: 9px 0; }
+.rn strong { font-weight: 650; }
+.rn code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 5px; }
+.rn a { color: #0071e3; text-decoration: none; }
+.rn .more { color: #86868b; font-size: 12px; margin-top: 16px; }
+@media (prefers-color-scheme: dark) {
+  .rn { color: #f5f5f7; }
+  .rn h3 { color: #98989d; }
+  .rn h3.hl { color: #2997ff; }
+  .rn code { background: rgba(255,255,255,0.13); }
+  .rn a { color: #2997ff; }
+}
+</style>"""
 
 
 def render_html(bundle: NotesBundle) -> str:
-    parts: List[str] = [f"<h2>{html.escape(bundle.title)}</h2>"]
+    parts: List[str] = [_NOTES_STYLE, '<div class="rn">', f"<h2>{html.escape(bundle.title)}</h2>"]
+
+    if bundle.highlights:
+        parts.append('<h3 class="hl">Highlights</h3>')
+        parts.append(_render_list(bundle.highlights, cls="highlights"))
 
     if bundle.features:
         parts.append("<h3>Features</h3>")
@@ -337,26 +387,28 @@ def render_html(bundle: NotesBundle) -> str:
         parts.append("<h3>Bug Fixes</h3>")
         parts.append(_render_list(bundle.bug_fixes))
 
-    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
-        parts.append("<h3>Highlights</h3>")
-        parts.append(_render_list(bundle.highlights))
-
-    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.other:
+    if bundle.other:
         parts.append("<h3>Other Changes</h3>")
         parts.append(_render_list(bundle.other))
 
     if bundle.baseline_version and bundle.baseline_items:
-        parts.append(f"<h3>Reminder: What You Got in {html.escape(bundle.baseline_version)}</h3>")
+        parts.append(f'<h3>Reminder: What You Got in {html.escape(bundle.baseline_version)}</h3>')
         parts.append(_render_list(bundle.baseline_items))
 
     if bundle.github_url:
-        parts.append(f'<p>Full release notes: <a href="{html.escape(bundle.github_url)}">{html.escape(bundle.github_url)}</a></p>')
+        parts.append(f'<p class="more">Full release notes: <a href="{html.escape(bundle.github_url)}">{html.escape(bundle.github_url)}</a></p>')
 
+    parts.append("</div>")
     return "\n".join(parts).strip() + "\n"
 
 
 def render_plaintext(bundle: NotesBundle) -> str:
     out: List[str] = [bundle.title, ""]
+
+    if bundle.highlights:
+        out.append("Highlights:")
+        out.extend([f"- {x}" for x in bundle.highlights])
+        out.append("")
 
     if bundle.features:
         out.append("Features:")
@@ -373,12 +425,7 @@ def render_plaintext(bundle: NotesBundle) -> str:
         out.extend([f"- {x}" for x in bundle.bug_fixes])
         out.append("")
 
-    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.highlights:
-        out.append("Highlights:")
-        out.extend([f"- {x}" for x in bundle.highlights])
-        out.append("")
-
-    if not (bundle.features or bundle.improvements or bundle.bug_fixes) and bundle.other:
+    if bundle.other:
         out.append("Other Changes:")
         out.extend([f"- {x}" for x in bundle.other])
         out.append("")
