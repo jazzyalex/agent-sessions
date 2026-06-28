@@ -38,13 +38,14 @@
 </ul>
 <h3>Features</h3>
 <ul>
+<li><strong>Codex reset credits</strong> — when Codex grants a free &quot;reset your usage now&quot; credit, the Quota Meter and menu bar now surface it and show when it expires, so you can see how many resets you have banked and how long they last.</li>
 <li><strong>Transcript identity strip</strong> — a compact strip showing session identity, <code>side</code>/<code>sub</code> labels, and parent context, so the transcript stays identifiable even when the session list loses focus.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
 <li>Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.</li>
 <li>Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.</li>
-<li>Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option, and now shows Codex reset credits in the meter and menu bar.</li>
+<li>Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option.</li>
 <li>Session list: the Claude agent filter is now a segmented pill matching Codex, and Claude Desktop rows show their Desktop session name.</li>
 <li>Unified Window: collapsed hierarchy state now persists across relaunches.</li>
 <li>Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).</li>

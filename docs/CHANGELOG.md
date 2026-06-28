@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
 
 ### Features
+- **Codex reset credits** — when Codex grants a free "reset your usage now" credit, the Quota Meter and menu bar now surface it and show when it expires, so you can see how many resets you have banked and how long they last.
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
 
 ### Bug Fixes
@@ -25,7 +26,7 @@ All notable changes to this project will be documented in this file.
 ### Improvements
 - Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.
 - Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.
-- Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option, and now shows Codex reset credits in the meter and menu bar.
+- Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option.
 - Session list: the Claude agent filter is now a segmented pill matching Codex, and Claude Desktop rows show their Desktop session name.
 - Unified Window: collapsed hierarchy state now persists across relaunches.
 - Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).
