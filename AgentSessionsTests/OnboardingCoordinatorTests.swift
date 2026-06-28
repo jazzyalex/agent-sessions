@@ -170,7 +170,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         let tour = OnboardingContent.powerTipsTour(for: "3.0")
 
         XCTAssertEqual(tour.kind, .powerTips)
-        XCTAssertEqual(tour.screens.count, 13)
+        XCTAssertEqual(tour.screens.count, 16)
         XCTAssertEqual(tour.screens.first?.title, "Power Tips")
         XCTAssertEqual(tour.screens.last?.title, "Quick Navigation")
         XCTAssertTrue(tour.screens.allSatisfy { $0.bullets.count == 2 })

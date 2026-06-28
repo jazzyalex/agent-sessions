@@ -75,7 +75,7 @@ struct OnboardingSheetView: View {
         case .fullTour:
             return [.sessionsFound, .connectAgents, .quotaMeter, .powerTips(0), .analyticsUsage, .feedbackSupport]
         case .updateTour:
-            return [.powerTips(0), .quotaMeter, .feedbackSupport]
+            return [.powerTips(0), .quotaMeter, .newIn40, .feedbackSupport]
         case .powerTips:
             return powerTipScreens.indices.map { .powerTips($0) }
         }
@@ -165,6 +165,8 @@ struct OnboardingSheetView: View {
                 connectAgentsSlide
             case .quotaMeter:
                 quotaMeterSlide
+            case .newIn40:
+                newIn40Slide
             case .powerTips(let index):
                 powerTipsSlide(index: index)
             case .workWithSessions:
@@ -327,13 +329,13 @@ struct OnboardingSheetView: View {
                 iconGradient: palette.iconGradientBlue,
                 title: "Quota Meter",
                 subtitle: isUpdateTour
-                    ? "See Codex and Claude limits, predictions, and alerts without opening Settings."
-                    : "Keep Codex and Claude limits visible while Agent Sessions watches for fresh prediction data."
+                    ? "See how much of your Codex and Claude limits is left, when they reset — and which active session is burning your window fastest."
+                    : "Keep your Codex and Claude limits in view: how much is left, when it resets, and which active session burns fastest."
             )
 
             CockpitScreenshotCard(
                 palette: palette,
-                imageName: "OnboardingQuotaMeterPredictionMarkers",
+                imageName: "OnboardingQuotaMeterRunway",
                 preferredHeight: 132
             )
             .frame(maxWidth: 560)
@@ -342,36 +344,77 @@ struct OnboardingSheetView: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 CockpitQuickRow(
                     palette: palette,
-                    icon: "clock.badge.exclamationmark",
+                    icon: "speedometer",
                     iconColor: palette.accentOrange,
-                    title: "5h Prediction Marker",
-                    description: "When fresh velocity data projects a run-out before reset, Cockpit shows the remaining time."
+                    title: "Session Runway",
+                    description: "Live per-session burn-rate bars show which active session is eating your quota fastest, before it costs you the window."
+                )
+                CockpitQuickRow(
+                    palette: palette,
+                    icon: "clock.badge.exclamationmark",
+                    iconColor: palette.accentGreen,
+                    title: "Fresh 5h Predictions",
+                    description: "When live velocity projects a run-out before reset, the meter shows the time left — using fresh snapshots, never stale data."
                 )
                 CockpitQuickRow(
                     palette: palette,
                     icon: "chart.line.uptrend.xyaxis",
-                    iconColor: palette.accentGreen,
+                    iconColor: palette.accentBlue,
                     title: "Weekly Context",
                     description: "The compact strip keeps 5h and weekly limit pressure visible together."
                 )
                 CockpitQuickRow(
                     palette: palette,
                     icon: "bell.badge.fill",
-                    iconColor: palette.accentBlue,
+                    iconColor: palette.accentPurple,
                     title: "Limit Alerts",
                     description: "Settings separate predicted run-out alerts from low-threshold warnings."
-                )
-                CockpitQuickRow(
-                    palette: palette,
-                    icon: "checkmark.shield.fill",
-                    iconColor: palette.accentPurple,
-                    title: "Freshness Gated",
-                    description: "Prediction alerts use fresh usage snapshots and ignore stale limit data."
                 )
             }
 
             TipBox(
-                text: "Open View → Agent Cockpit, then choose Quota Meter mode. Tune alerts in Settings → Limit Alerts.",
+                text: "Turn on Session Runway from the Agent Cockpit toolbar (View → Agent Cockpit → Quota Meter). Tune alerts in Settings → Limit Alerts.",
+                palette: palette
+            )
+        }
+    }
+
+    private var newIn40Slide: some View {
+        VStack(spacing: 18) {
+            SlideHeader(
+                palette: palette,
+                icon: .symbol("sparkles"),
+                iconGradient: palette.iconGradientPurple,
+                title: "New in 4.0",
+                subtitle: "Recover and search history that used to be out of reach."
+            )
+
+            VStack(spacing: 12) {
+                FeatureRow(
+                    palette: palette,
+                    icon: "bubble.left.and.bubble.right.fill",
+                    iconColor: palette.accentBlue,
+                    title: "Codex Side Chats",
+                    description: "Recover Codex Desktop side chats as searchable rows. Filter with #side, or #side phrase."
+                )
+                FeatureRow(
+                    palette: palette,
+                    icon: "archivebox.fill",
+                    iconColor: palette.accentGreen,
+                    title: "Codex Archived — Now Findable",
+                    description: "Search archived Codex Desktop sessions — something the Desktop archive can't do. Click the archive icon on the Codex filter (⌘1)."
+                )
+                FeatureRow(
+                    palette: palette,
+                    icon: "tray.and.arrow.up.fill",
+                    iconColor: palette.accentOrange,
+                    title: "Claude Archived Sessions",
+                    description: "Archived Claude sessions now show an archived pill, an archive-icon filter (⌘2), and in-place restore."
+                )
+            }
+
+            TipBox(
+                text: "The archive icon lives on each agent's filter pill — the fastest way to dig up old Desktop sessions.",
                 palette: palette
             )
         }
@@ -897,6 +940,7 @@ private enum OnboardingSlide {
     case sessionsFound
     case connectAgents
     case quotaMeter
+    case newIn40
     case powerTips(Int)
     case workWithSessions
     case analyticsUsage
@@ -1093,7 +1137,7 @@ private struct AgentBadge: View {
         switch source {
         case .claude: return "CC"
         case .codex: return "CX"
-        case .antigravity: return "G"
+        case .antigravity: return "AG"
         case .opencode: return "OC"
         case .hermes: return "HM"
         case .copilot: return "CP"

@@ -344,6 +344,33 @@ extension OnboardingContent {
                 ]
             ),
             Screen(
+                symbolName: "bubble.left.and.bubble.right",
+                title: "Side Chats",
+                body: "Codex Desktop side chats are recoverable.",
+                bullets: [
+                    "Filter to side chats: Use #side, or #side phrase to search within them.",
+                    "Find the parent thread: Copy Session ID on a side chat copies its parent thread ID."
+                ]
+            ),
+            Screen(
+                symbolName: "archivebox",
+                title: "Archived Sessions",
+                body: "Old Desktop sessions stay reachable.",
+                bullets: [
+                    "Search Codex archives: Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions.",
+                    "Restore Claude archives: Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript."
+                ]
+            ),
+            Screen(
+                symbolName: "point.3.connected.trianglepath.dotted",
+                title: "Workflow Subagents",
+                body: "Claude Code workflows stay readable.",
+                bullets: [
+                    "Spot fan-out: Workflow subagents nest under the session that launched them with a workflow badge.",
+                    "Resume the parent: Resuming a workflow child resolves to its parent session."
+                ]
+            ),
+            Screen(
                 symbolName: "cursorarrow.click.2",
                 title: "Quick Navigation",
                 body: "Small shortcuts help when scanning lots of history.",
