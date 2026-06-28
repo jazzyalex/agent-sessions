@@ -73,9 +73,19 @@ struct OnboardingSheetView: View {
 
         switch content.kind {
         case .fullTour:
-            return [.sessionsFound, .connectAgents, .quotaMeter, .powerTips(0), .analyticsUsage, .feedbackSupport]
+            var result: [OnboardingSlide] = [.sessionsFound, .connectAgents, .quotaMeter, .powerTips(0), .analyticsUsage, .feedbackSupport]
+            if claudeAgentEnabled {
+                // Surface Claude archive restore right after the Quota Meter slide.
+                result.insert(.restoreArchivedClaude, at: 3)
+            }
+            return result
         case .updateTour:
-            return [.powerTips(0), .quotaMeter, .newIn40, .feedbackSupport]
+            var result: [OnboardingSlide] = [.powerTips(0), .quotaMeter, .newIn40, .feedbackSupport]
+            if claudeAgentEnabled {
+                // Follow the "New in 4.0" headline with the dedicated restore walkthrough.
+                result.insert(.restoreArchivedClaude, at: 3)
+            }
+            return result
         case .powerTips:
             return powerTipScreens.indices.map { .powerTips($0) }
         }
@@ -167,6 +177,8 @@ struct OnboardingSheetView: View {
                 quotaMeterSlide
             case .newIn40:
                 newIn40Slide
+            case .restoreArchivedClaude:
+                restoreArchivedClaudeSlide
             case .powerTips(let index):
                 powerTipsSlide(index: index)
             case .workWithSessions:
@@ -415,6 +427,47 @@ struct OnboardingSheetView: View {
 
             TipBox(
                 text: "The archive icon lives on each agent's filter pill — the fastest way to dig up old Desktop sessions.",
+                palette: palette
+            )
+        }
+    }
+
+    private var restoreArchivedClaudeSlide: some View {
+        VStack(spacing: 18) {
+            SlideHeader(
+                palette: palette,
+                icon: .symbol("arrow.uturn.backward"),
+                iconGradient: palette.iconGradientGreen,
+                title: "Restore Archived Claude Sessions",
+                subtitle: "Claude Desktop can archive sessions but not bring them back. Agent Sessions can."
+            )
+
+            VStack(spacing: 12) {
+                FeatureRow(
+                    palette: palette,
+                    icon: "archivebox.fill",
+                    iconColor: palette.accentBlue,
+                    title: "Find Archived Sessions",
+                    description: "Archived Claude Desktop sessions appear with an archived pill, and the archive icon on the Claude filter (⌘2) narrows to them."
+                )
+                FeatureRow(
+                    palette: palette,
+                    icon: "arrow.uturn.backward",
+                    iconColor: palette.accentGreen,
+                    title: "Restore In Place",
+                    description: "Open an archived session and restore it from the transcript — it returns to Claude's active list."
+                )
+                FeatureRow(
+                    palette: palette,
+                    icon: "lock.shield.fill",
+                    iconColor: palette.accentOrange,
+                    title: "Off Until You Opt In",
+                    description: "Agent Sessions is otherwise read-only. Turn on “Allow restoring archived Claude sessions” in Settings → Advanced — the one place it writes to Claude's files."
+                )
+            }
+
+            TipBox(
+                text: "Restore is best done while Claude Desktop is quit, since Claude may overwrite the change. Your transcripts are never altered.",
                 palette: palette
             )
         }
@@ -941,6 +994,7 @@ private enum OnboardingSlide {
     case connectAgents
     case quotaMeter
     case newIn40
+    case restoreArchivedClaude
     case powerTips(Int)
     case workWithSessions
     case analyticsUsage
