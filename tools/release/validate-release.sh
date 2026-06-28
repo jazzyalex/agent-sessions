@@ -55,7 +55,7 @@ for agent in data.get("agents", []):
         print(name)
 PYEOF
   else
-    printf '%s\n' "Codex" "Claude" "OpenCode" "Cursor" "GitHub Copilot CLI" "Pi" "Gemini CLI" "Hermes" "OpenClaw"
+    printf '%s\n' "Codex" "Claude" "OpenCode" "Cursor" "GitHub Copilot CLI" "Pi" "Antigravity CLI" "Hermes" "OpenClaw"
   fi
 }
 
@@ -100,8 +100,8 @@ echo ""
 # =============================================================================
 echo "==> Checking version format..."
 
-if [[ "$VERSION" =~ \.0$ ]]; then
-  error "Version '$VERSION' ends with .0 - minor/major releases must use two-part format (e.g., '2.9', not '2.9.0')"
+if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.0$ ]]; then
+  error "Version '$VERSION' is three-part ending in .0 - minor/major releases must use two-part format (e.g., '2.9', not '2.9.0'; '4.0' is fine)"
 else
   pass "Version format OK: $VERSION"
 fi
@@ -211,7 +211,7 @@ else
   # Check <title> tag for agents
   TITLE_LINE=$(grep -i "<title>" "$INDEX" || echo "")
   TITLE_AGENTS_MISSING=0
-  for agent in "Codex" "Claude" "Gemini" "Copilot"; do
+  for agent in "Codex" "Claude" "Antigravity" "Copilot"; do
     if ! echo "$TITLE_LINE" | grep -qi "$agent"; then
       warn "index.html <title> may be missing: $agent"
       ((TITLE_AGENTS_MISSING++)) || true
@@ -225,7 +225,7 @@ else
   if grep -q 'name="twitter:title"' "$INDEX"; then
     TWITTER_TITLE=$(grep 'name="twitter:title"' "$INDEX")
     TWITTER_MISSING=0
-    for agent in "Codex" "Claude" "Gemini" "Copilot"; do
+    for agent in "Codex" "Claude" "Antigravity" "Copilot"; do
       if ! echo "$TWITTER_TITLE" | grep -qi "$agent"; then
         ((TWITTER_MISSING++)) || true
       fi
