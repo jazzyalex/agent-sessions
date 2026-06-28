@@ -3956,6 +3956,20 @@ private struct HUDLimitsRowsPanel: View {
                                 .frame(height: 1)
                         }
                         row(entry: entry)
+                        if entry.source == .codex,
+                           isHovering,
+                           let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: clockNow) {
+                            HStack(spacing: 0) {
+                                Text(creditsLine)
+                                    .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: quotaMeterEnlarged), weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.top, 1)
+                            .transition(.opacity)
+                        }
                         runwayBlock(for: entry.source)
                     }
                 }
@@ -4201,6 +4215,7 @@ private struct HUDLimitsDetailPanel: View {
     var codexRunwaySnapshot: CodexRunwaySnapshot? = nil
     var claudeRunwaySnapshot: CodexRunwaySnapshot? = nil
     var forceEmptyDrawer: Bool = false
+    @EnvironmentObject private var codexUsageModel: CodexUsageModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
 
@@ -4234,6 +4249,18 @@ private struct HUDLimitsDetailPanel: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity)
+                if entry.source == .codex,
+                   let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: now) {
+                    HStack(spacing: 0) {
+                        Text(creditsLine)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 1)
+                }
                 runwayBlock(for: entry.source)
             }
         }

@@ -213,6 +213,17 @@ final class StatusItemController: NSObject {
                 menu.addItem(makeTitleItem("Codex"))
                 menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openUsagePreferences)))
+                // Reset credits (free "reset your usage now" grants), shown only when present.
+                if let creditsSummary = CodexResetCredits.menuSummaryLine(codexStatus.resetCredits, now: Date()) {
+                    menu.addItem(makeTitleItem("Reset credits"))
+                    menu.addItem(makeActionItem(title: creditsSummary, action: #selector(openUsagePreferences)))
+                    let expiryLines = CodexResetCredits.menuExpiryLines(codexStatus.resetCredits, now: Date())
+                    if expiryLines.count > 1 {
+                        for line in expiryLines {
+                            menu.addItem(makeTitleItem(line))
+                        }
+                    }
+                }
             }
             if source == .both && codexTrackingEnabled && claudeTrackingEnabled { menu.addItem(NSMenuItem.separator()) }
             if claudeTrackingEnabled && (source == .claude || source == .both) {

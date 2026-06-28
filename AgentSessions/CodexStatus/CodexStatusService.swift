@@ -161,6 +161,10 @@ final class CodexUsageModel: ObservableObject {
     @Published var lastSuccessAt: Date? = nil
     @Published var fiveHourProjectedRunoutAt: Date? = nil
     @Published var fiveHourProjectionObservedAt: Date? = nil
+    // Reset credits (free "reset your usage now" grants). Display-only.
+    @Published var resetCreditsAvailable: Int = 0
+    @Published var resetCredits: [CodexResetCredit] = []
+    @Published var resetCreditsLastFetch: Date? = nil
 
     private var service: CodexStatusService?
     private let limitNotifier = UsageLimitNotifier.shared
@@ -246,6 +250,7 @@ final class CodexUsageModel: ObservableObject {
     func refreshNow() {
         guard !AppRuntime.isRunningTests else { return }
         guard isEnabled else { return }
+        refreshResetCredits()
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
@@ -275,12 +280,37 @@ final class CodexUsageModel: ObservableObject {
         }
     }
 
+    // MARK: - Reset credits
+
+    private let resetCreditsFetcher = CodexResetCreditsFetcher(credentials: CodexOAuthCredentials())
+
+    /// Applies a fetched credits snapshot to the published state.
+    func applyResetCredits(_ snapshot: CodexResetCreditsSnapshot) {
+        resetCreditsAvailable = snapshot.available
+        resetCredits = snapshot.credits
+        resetCreditsLastFetch = Date()
+    }
+
+    /// Kicks a reset-credits fetch if Codex usage tracking is enabled. The
+    /// fetcher's own long cooldown gates how often the network is actually hit,
+    /// so this is safe to call from every refresh path.
+    func refreshResetCredits() {
+        guard !AppRuntime.isRunningTests else { return }
+        guard UserDefaults.standard.bool(forKey: PreferencesKey.codexUsageEnabled) else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard let snapshot = await self.resetCreditsFetcher.fetch() else { return }
+            await MainActor.run { self.applyResetCredits(snapshot) }
+        }
+    }
+
     // Hard-probe from Preferences pane: forces a /status tmux probe, shows result via callback
     func hardProbeNow(completion: @escaping (Bool) -> Void) {
         guard isEnabled else {
             completion(false)
             return
         }
+        refreshResetCredits()
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
@@ -452,6 +482,10 @@ final class CodexUsageModel: ObservableObject {
         ))
         // Any snapshot means we received data; clear updating if set
         if isUpdating { isUpdating = false }
+        // Steady-state trigger for reset credits: apply() is the canonical
+        // "usage updated" hook and runs on every poll. The fetcher's own long
+        // cooldown gates the network, so calling it here is cheap.
+        refreshResetCredits()
     }
 
     private static func alertFreshness(source: CodexLimitsSource?, eventTimestamp: Date?, now: Date = Date()) -> UsageLimitAlertFreshness {
