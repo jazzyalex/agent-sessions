@@ -3,45 +3,29 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- Agent Cockpit: The compact session HUD and Quota Meter now wait ~0.35s of hover before revealing their toolbar (so a quick pass over the pinned window no longer expands it), collapse ~0.7s after the pointer leaves instead of after 3s, and animate the window resize in step with the toolbar reveal/hide instead of snapping.
-- Quota Meter: Each agent now reads as one block — a faint rule between a provider row and its own runway, with whitespace plus a stronger rule between different agents, and the Session Runway aligned to the provider's left gridline so it no longer hangs further left than the agent icon.
-- Quota Meter: Session Runway now gives session names the full available row width before truncating, widens the burn-rate column so 3-digit rates like `137m/h` are no longer clipped, separates different agents with a stronger full-bleed rule, rebalances the Quota Meter toolbar with the open-cockpit button as a leading action, and drops the per-row hover tooltips.
-- Agent Cockpit: Moved the Quota Meter cockpit-display settings (5h run-out projection token, Session Runway text size) from the Limit Alerts pane to the Agent Cockpit Settings tab.
-- Quota Meter: Session Runway now prefers the conversation title shown in Claude Desktop (from the `claude-code-sessions` metadata, keyed by `cliSessionId`) over transcript-derived names, so runway rows match the names users recognize from the app.
-- Quota Meter: Removed the active/idle session color dots and counters from the Quota Meter header; the session filter pills (All/active/idle) remain in the Full and Compact cockpit views.
-- Quota Meter: Added a Standard / Enlarged size control (Agent Cockpit settings); Enlarged raises every Quota Meter font by one point — provider rows and Session Runway alike — and scales the provider columns to match, preserving the relative scale. Standard remains the default.
-- Quota Meter: Aligned the 5h projection/reset columns across Codex and Claude rows without changing the provider row styling, and made the Session Runway drawer quieter with wider middle-truncated titles.
-- Quota Meter: Session Runway now keeps real active-session titles while still falling back to tab titles for synthesized "Active Codex session" placeholders, and Claude subagent transcript volume no longer crowds other active sessions out of Runway discovery.
-- Quota Meter: Session Runway now trims the drawer to the measured session-row height and no longer paints a separate darker bottom band below the last visible session.
-- Quota Meter: Session Runway now surfaces active Codex sessions before token burn samples arrive, keeps just-finished sessions visible briefly, and preserves measured low-impact burn rows instead of hiding them as pending calculation.
-- Quota Meter: Session Runway horizontal bars now use relative, lightly animated scaling, so the highest-burn row no longer renders as a static full-width bar.
-- Quota Meter: Replaced the in-meter Session Runway controls with a toolbar Runway selector pill (Auto/On/Off) that opens a popover, converted the cockpit view switcher (Full/Compact/Quota Meter) to a matching popover pill to free toolbar space, made "On" surface a real active-session row when one exists (and a "No active Codex burn" placeholder otherwise), removed the separate EQ strip, and kept the animated burn visualization inline with each runway row.
-- Agent Cockpit: Renamed the always-on limits surface to Quota Meter across onboarding, Settings, marketing copy, docs, and assets.
-- Website: Replaced the GitHub Pages landing page with the redesigned product page from the preview, including updated Antigravity positioning, Quota Meter copy, and production download metadata.
-- Providers: Antigravity markdown artifacts in the same conversation now keep distinct session rows while resume/copy actions still use the parent conversation ID, stay visible when low-message filtering is enabled, infer projects from local file links, and local screenshots linked from Antigravity markdown now appear in transcript image handling and the image browser.
-- Providers: Replaced Gemini CLI support with Antigravity CLI support using `agy`, hiding old Gemini session logs and discovering Antigravity markdown artifacts under `~/.gemini/antigravity/brain`.
-- Resume: Antigravity sessions now copy and launch `agy --conversation <id>`, fall back to `agy --continue` when needed, and appear in live-session tracking.
-- Transcript: The transcript pane now shows a compact session identity strip with `side`/`sub` labels and side-chat parent context, so the displayed transcript stays identifiable even when the session list loses focus.
-- Unified Window: Side-chat rows now use synthetic side-chat paths and labels, so they show parent context and keep their own small size/date instead of looking like ordinary Codex sessions backed by the full SQLite log database.
-- Usage Probes: Claude OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota data.
-- Limit Alerts: Claude projected-exhaustion alerts now use fractional OAuth/Web usage when available, so small real burns can trigger burn-rate projections before the rounded percent changes.
-- Usage Probes: Claude hard refresh now finds Homebrew `tmux` from GUI launches, reports Claude Code 2.x `/usage` quota removal and rate-limit responses as unavailable data, avoids replacing stale Claude quota values with false 0% readings, and points stale Claude Code CLI credentials to `claude /login`.
-- Preferences: Claude Code installs that use the built-in `~/.local` updater are now recognized by the per-agent update action, which can run `claude update` after confirmation.
-- Unified Window: Side-chat rows now expose Copy Session ID when Codex metadata provides the parent thread id, and the action copies the main session id instead of the synthetic side-chat id.
-- Unified Window: Side-chat discovery now preserves already found side chats across partial SQLite refreshes and cache writes, preventing recovered rows from collapsing back to a single root-log result while large Codex logs are still being scanned.
-- Unified Window: Fixed a Sessions-window hang by making SwiftUI session diffing avoid full transcript payload comparisons on large Codex histories.
-- Unified Window: Fixed a Project-column hang where returning to the app could repeatedly parse raw transcript JSON for branch/repo metadata during table layout.
-- Unified Window: Fixed a foreground-return hang by caching row-derived hierarchy state during table rebuilds and deferring monitor-triggered focused transcript reloads while the app is inactive.
-- Unified Window: Added visible toolbar buttons to collapse or expand all hierarchy groups, with collapsed hierarchy state persisted across relaunches.
-- Unified Window: Side-chat recovery now publishes the main session refresh first, then fills side-chat rows from a cache-backed background pass with bounded SQLite discovery, historical backfill, and nested `~/.codex/sqlite` log discovery so large Codex logs do not stall the final refresh.
-- Unified Window: Search now treats `#side` as a side-chat filter tag, so `#side` shows only side chats without a slow transcript scan and `#side phrase` searches within side chats.
-- Unified Window: `#side` searches now ignore the archived-only Codex toggle so recovered side-chat rows stay visible even when archive filtering is enabled.
-- Unified Window: Side-chat recovery now preserves request-only side prompts as searchable titles and refreshes active `#side` search results when side-chat rows arrive later in indexing.
-- Unified Window: Codex side chats can now be recovered from Codex Desktop logs as searchable side-chat rows with readable transcripts and a distinct `side` badge, without labeling them as subagents.
-- Agent Cockpit: Added a compact Runway detail below the Quota Meter, showing the top active Codex sessions by recent quota burn without changing the existing Quota Meter rows; Runway now stays available during reset-first 5h windows when active session burn exists.
-- Agent Cockpit: Tightened Runway refresh behavior so observed limit movement wins over inferred token allocation and fallback reset clocks no longer produce synthetic burn rates.
-- Agent Cockpit: Runway session labels now prefer Codex app/indexed titles and CLI `/rename` names before falling back to the first prompt, tab title, or project directory, and recent Codex subagent logs now roll up under their parent session instead of appearing as duplicate Runway consumers.
-- Agent Cockpit: Runway now keeps the current worktree session identity when Codex logs embed source-session metadata, and nested subagent burn rolls into the worktree parent instead of creating duplicate rows.
+### Highlights
+- **Session Runway** — live per-session burn-rate bars in the Quota Meter showing which active Codex and Claude sessions are eating your plan and how long until reset; nested subagent/worktree burn rolls up under its root session, and rows carry the names you recognize.
+- **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
+- **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity markdown brain artifacts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
+- **Quota Meter** — the always-on limits surface, renamed from "Limits Cockpit," with toolbar Runway/view controls and a Standard / Enlarged size option.
+
+### Features
+- **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
+- **Agent-format support** — refreshed verified coverage for current CLI builds, including Claude 2.1.193 and OpenCode 1.17.11.
+- **Workflow subagent nesting** — Claude Code "Workflow" runs now nest their spawned subagents under the parent session with a `workflow` badge and a fan-out marker, instead of appearing as orphan top-level rows; the workflow's `journal.jsonl`/sidecar files are no longer indexed as junk sessions.
+
+### Bug Fixes
+- Unified Window: fixed hangs on large Codex histories — the session list no longer stalls diffing full transcript payloads, the Project column no longer re-parses raw transcript JSON during layout, and returning to the app caches hierarchy state instead of rebuilding it.
+- Claude usage: OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota.
+- Claude usage: projected-exhaustion alerts now use fractional usage, so small real burns are not missed.
+- Claude usage: Claude Code 2.x `/usage` quota gaps and rate-limit responses are treated as unavailable data instead of false 0% readings.
+- Claude usage: hard refresh now finds Homebrew `tmux` from GUI launches, stale credentials point to `claude /login`, and built-in `~/.local` updater installs are recognized by the per-agent update action.
+
+### Improvements
+- Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.
+- Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.
+- Unified Window: collapsed hierarchy state now persists across relaunches.
+- Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).
 
 ## [3.9.3] - 2026-06-12
 - Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.
