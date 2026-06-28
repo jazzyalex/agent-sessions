@@ -412,15 +412,118 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertGreaterThan(baseline.currentRunoutAt, resetAt)
     }
 
+    // MARK: - Track 1: provisional first-burn + idle drop-fast
+
+    func testTokenActivityParserProvisionalRateFromSingleTurn() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-prov-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let turnStart = Date(timeIntervalSince1970: 2_000_000)
+        let turnEnd = turnStart.addingTimeInterval(20)   // 20s turn
+        // One usage sample preceded by the turn-start (user) line. No second
+        // sample yet → the provisional single-turn rate should fire.
+        try """
+        \(userLine(sessionID: "s", cwd: "/tmp", text: "do it", at: turnStart))
+        \(assistantLine(id: "a1", at: turnEnd, inputTokens: 4000, sessionID: "s", cwd: "/tmp"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "s", displayName: "s", isGoal: false, logPaths: [log.path])
+        let activity = ClaudeRunwayTokenActivityParser.activity(identity: identity, now: turnEnd.addingTimeInterval(1))
+        XCTAssertEqual(activity?.tokensPerSecond ?? 0, 4000.0 / 20.0, accuracy: 0.001,
+                       "single-turn provisional rate = tokens / turn duration")
+    }
+
+    func testTokenActivityParserSkipsProvisionalAcrossResumeGap() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-prov-gap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let oldLine = Date(timeIntervalSince1970: 2_000_000)
+        let usageAt = oldLine.addingTimeInterval(3600)   // 1h gap → resume boundary
+        try """
+        \(userLine(sessionID: "s", cwd: "/tmp", text: "earlier", at: oldLine))
+        \(assistantLine(id: "a1", at: usageAt, inputTokens: 4000, sessionID: "s", cwd: "/tmp"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "s", displayName: "s", isGoal: false, logPaths: [log.path])
+        let activity = ClaudeRunwayTokenActivityParser.activity(identity: identity, now: usageAt.addingTimeInterval(1))
+        XCTAssertNil(activity, "a turn after a long idle gap must not yield a fake near-zero provisional rate")
+    }
+
+    func testRecentSessionScannerDropsIdleSessionsSoonerThanWorking() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-idle-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        // Both last wrote 60s ago: past the 45s idle grace, within the 75s working window.
+        let idleLog = projectDir.appendingPathComponent("idle.jsonl")
+        try """
+        \(userLine(sessionID: "sess-idle", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-90)))
+        \(assistantLine(id: "i1", at: now.addingTimeInterval(-60), inputTokens: 800, sessionID: "sess-idle", cwd: "/tmp/proj", stopReason: "end_turn"))
+        """.write(to: idleLog, atomically: true, encoding: .utf8)
+
+        let workingLog = projectDir.appendingPathComponent("working.jsonl")
+        try """
+        \(userLine(sessionID: "sess-working", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-90)))
+        \(assistantLine(id: "w1", at: now.addingTimeInterval(-60), inputTokens: 800, sessionID: "sess-working", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: workingLog, atomically: true, encoding: .utf8)
+
+        let ids = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now).map(\.id)
+        XCTAssertFalse(ids.contains("sess-idle"), "idle (end_turn) session past the idle grace should drop")
+        XCTAssertTrue(ids.contains("sess-working"), "working (tool_use) session within 75s should remain")
+    }
+
+    func testLoaderMarksIdleSessionRow() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-idlerow-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        // Finished its turn 40s ago: within the 45s idle grace (present), but past
+        // the 30s burn window (no rate) → a pending row marked idle ("—").
+        let log = projectDir.appendingPathComponent("sess-idle.jsonl")
+        try """
+        \(userLine(sessionID: "sess-idle", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-50)))
+        \(assistantLine(id: "i1", at: now.addingTimeInterval(-40), inputTokens: 900, sessionID: "sess-idle", cwd: "/tmp/proj", stopReason: "end_turn"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let baseline = RunwayProviderBaseline(
+            source: .claude,
+            remainingPercent: 50,
+            resetAt: now.addingTimeInterval(2 * 3600),
+            currentRunoutAt: now.addingTimeInterval(2 * 3600),
+            observedAt: now,
+            hasProjectedRunout: false
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [], now: now, maxRows: 4, recentSessionsRoot: root
+        )
+        let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
+        let row = snapshot?.rows.first { $0.id == "sess-idle" }
+        XCTAssertEqual(row?.confidence, .idle, "an idle (end_turn) session with no fresh burn should render as idle, not a spinner")
+    }
+
     // MARK: - Helpers
 
     private func assistantLine(id: String,
                                at date: Date,
                                inputTokens: Int,
                                sessionID: String = "session",
-                               cwd: String? = nil) -> String {
+                               cwd: String? = nil,
+                               stopReason: String? = nil) -> String {
         let cwdField = cwd.map { "\"cwd\":\"\($0)\"," } ?? ""
-        return "{\"type\":\"assistant\",\"sessionId\":\"\(sessionID)\",\(cwdField)\"timestamp\":\"\(iso(date))\",\"message\":{\"id\":\"\(id)\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":\(inputTokens),\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}"
+        let stopField = stopReason.map { "\"stop_reason\":\"\($0)\"," } ?? ""
+        return "{\"type\":\"assistant\",\"sessionId\":\"\(sessionID)\",\(cwdField)\"timestamp\":\"\(iso(date))\",\"message\":{\"id\":\"\(id)\",\"role\":\"assistant\",\(stopField)\"usage\":{\"input_tokens\":\(inputTokens),\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}"
     }
 
     private func userLine(sessionID: String, cwd: String, text: String, at date: Date) -> String {

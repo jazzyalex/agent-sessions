@@ -3,7 +3,8 @@ import Foundation
 enum RunwayAttributionConfidence: Equatable, Sendable {
     case direct
     case mixed
-    case waiting
+    case waiting       // active/working but no burn measured yet → spinner
+    case idle          // finished its turn (handed back to user) → calm "—"
     case unsupported
 }
 
@@ -85,6 +86,9 @@ struct RunwaySessionIdentity: Equatable, Identifiable, Sendable {
     let displayName: String
     let isGoal: Bool
     let logPaths: [String]
+    /// The session finished its turn and handed back to the user (not working).
+    /// Default false = "working/unknown" so non-Claude sources keep prior behavior.
+    var isIdle: Bool = false
 }
 
 struct CodexRunwayRateLimitSample: Equatable, Sendable {
@@ -248,7 +252,10 @@ enum RunwaySnapshotAssembly {
                     id: existing.id,
                     displayName: existing.displayName,
                     isGoal: existing.isGoal || identity.isGoal,
-                    logPaths: Array(Set(existing.logPaths).union(identity.logPaths)).sorted()
+                    logPaths: Array(Set(existing.logPaths).union(identity.logPaths)).sorted(),
+                    // Idle only if every contributor is idle: any working file
+                    // (a live subagent, a HUD presence row) keeps it working.
+                    isIdle: existing.isIdle && identity.isIdle
                 )
             } else {
                 byID[identity.id] = identity
@@ -263,6 +270,7 @@ enum RunwaySnapshotAssembly {
                 displayName: identity.displayName,
                 isGoal: identity.isGoal,
                 logPaths: Set(identity.logPaths),
+                isIdle: identity.isIdle,
                 order: order.firstIndex(of: id) ?? 0
             )
         }
@@ -291,7 +299,8 @@ enum RunwaySnapshotAssembly {
                     id: $0.id,
                     displayName: $0.displayName,
                     isGoal: $0.isGoal,
-                    logPaths: Array($0.logPaths).sorted()
+                    logPaths: Array($0.logPaths).sorted(),
+                    isIdle: $0.isIdle
                 )
             }
     }
@@ -315,7 +324,8 @@ enum RunwaySnapshotAssembly {
                 deadline: .unavailable,
                 gainedSeconds: 0,
                 quotaMinutesPerHour: 0,
-                confidence: .waiting
+                // Idle sessions show a calm "—"; still-working ones show a spinner.
+                confidence: identity.isIdle ? .idle : .waiting
             )
         }
         let hiddenPendingCount = max(0, pendingIdentities.count - pendingRows.count)
@@ -340,6 +350,7 @@ enum RunwaySnapshotAssembly {
         let displayName: String
         let isGoal: Bool
         let logPaths: Set<String>
+        let isIdle: Bool
         let order: Int
 
         static func merged(_ lhs: IdentityMergeGroup, _ rhs: IdentityMergeGroup) -> IdentityMergeGroup {
@@ -354,6 +365,7 @@ enum RunwaySnapshotAssembly {
                 displayName: winner.displayName,
                 isGoal: lhs.isGoal || rhs.isGoal,
                 logPaths: lhs.logPaths.union(rhs.logPaths),
+                isIdle: lhs.isIdle && rhs.isIdle,
                 order: min(lhs.order, rhs.order)
             )
         }

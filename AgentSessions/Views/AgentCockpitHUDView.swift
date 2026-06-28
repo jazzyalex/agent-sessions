@@ -4392,6 +4392,10 @@ private struct HUDRunwayPanel: View {
                 .controlSize(.small)
                 .scaleEffect(0.62)
                 .frame(width: 22, height: 12, alignment: .trailing)
+        } else if confidence == .idle {
+            // Finished its turn, winding down — calm dash, not a "calculating" spinner.
+            Text("—")
+                .foregroundStyle(.secondary)
         } else {
             Text(RunwayTimeFormatting.quotaRate(quota, confidence: confidence))
                 .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
@@ -4504,8 +4508,8 @@ private struct HUDRunwayLoadBar: View {
 
     private var fillOpacity: Double {
         switch confidence {
-        case .waiting:
-            return 0.38
+        case .waiting, .idle:
+            return 0
         case .unsupported:
             return 0
         case .direct, .mixed:
@@ -4518,9 +4522,9 @@ private struct HUDRunwayLoadBar: View {
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.08))
-                // While waiting the spinner carries the "working" cue, so the
-                // bar stays an empty track until a real rate arrives.
-                if confidence != .waiting {
+                // Waiting (spinner) and idle ("—") rows keep an empty track —
+                // the rate cell carries the cue. Only a real rate fills the bar.
+                if confidence != .waiting, confidence != .idle {
                     Capsule()
                         .fill(hudProjectionColor(colorScheme).opacity(fillOpacity))
                         .frame(width: max(0, proxy.size.width * fillFraction))
@@ -4552,6 +4556,7 @@ private enum HUDRunwayLayout {
 private enum RunwayTimeFormatting {
     static func quotaRate(_ minutesPerHour: Double, confidence: RunwayAttributionConfidence = .mixed) -> String {
         guard confidence != .waiting else { return "calc" }
+        guard confidence != .idle else { return "idle" }
         guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "flat" }
         let rounded = Int(ceil(minutesPerHour))
         return "\(rounded)m/h"

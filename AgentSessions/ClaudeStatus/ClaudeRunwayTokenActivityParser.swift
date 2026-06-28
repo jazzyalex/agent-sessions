@@ -17,6 +17,10 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
     let logPath: String
     let capturedAt: Date
     let tokens: Double
+    /// Timestamp of the transcript line immediately preceding this usage line —
+    /// i.e. when this turn started. Used for a provisional single-sample rate
+    /// before a two-sample diff is available. nil when unknown.
+    var turnStartedAt: Date?
 }
 
 enum ClaudeRunwayTokenActivityParser {
@@ -31,6 +35,12 @@ enum ClaudeRunwayTokenActivityParser {
     /// Cache reads are billed at a steep discount; down-weight them so a session
     /// re-reading a huge context doesn't dominate attribution.
     static let cacheReadWeight: Double = 0.10
+    /// Bounds for the provisional single-turn rate (used until a real two-sample
+    /// diff exists). The max doubles as a resume-gap guard: if the latest turn's
+    /// duration exceeds it, the preceding line is across an idle boundary, so we
+    /// skip the provisional rather than emit a fake near-zero rate.
+    static let provisionalMinTurnDuration: TimeInterval = 2
+    static let provisionalMaxTurnDuration: TimeInterval = 120
 
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 1024 * 1024,
@@ -41,14 +51,17 @@ enum ClaudeRunwayTokenActivityParser {
         }
         var seenMessageIDs = Set<String>()
         var samples: [ClaudeRunwayTokenActivitySample] = []
+        // Transcript lines are appended chronologically, so the previously seen
+        // timestamp is the start of the current turn.
+        var previousTimestamp: Date?
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let sample = parseLine(String(line),
-                                         logPath: path,
-                                         now: now,
-                                         seenMessageIDs: &seenMessageIDs) else {
-                continue
-            }
-            samples.append(sample)
+            let (lineTimestamp, sample) = parseLine(String(line),
+                                                    logPath: path,
+                                                    now: now,
+                                                    turnStartedAt: previousTimestamp,
+                                                    seenMessageIDs: &seenMessageIDs)
+            if let sample { samples.append(sample) }
+            if let lineTimestamp { previousTimestamp = lineTimestamp }
         }
         return samples.sorted { $0.capturedAt < $1.capturedAt }
     }
@@ -117,40 +130,69 @@ enum ClaudeRunwayTokenActivityParser {
         }
 
         let span = last.capturedAt.timeIntervalSince(windowStart)
-        guard span >= minimumPairInterval, consumed > 0 else { return nil }
-        return RunwaySessionActivity(
-            identity: identity,
-            tokensPerSecond: consumed / span,
-            sampleStart: windowStart,
-            sampleEnd: last.capturedAt
-        )
+        if span >= minimumPairInterval, consumed > 0 {
+            return RunwaySessionActivity(
+                identity: identity,
+                tokensPerSecond: consumed / span,
+                sampleStart: windowStart,
+                sampleEnd: last.capturedAt
+            )
+        }
+
+        // Not enough spread for a true diff yet (just started / first turn).
+        // Show a provisional rate from the latest turn's own duration so a number
+        // appears at the first completed turn, then converges to the burst rate
+        // above once a second sample lands. The duration clamp rejects turns that
+        // follow an idle/resume gap (which would otherwise read as a fake ~0).
+        if let started = last.turnStartedAt {
+            let turnDuration = last.capturedAt.timeIntervalSince(started)
+            if turnDuration >= provisionalMinTurnDuration,
+               turnDuration <= provisionalMaxTurnDuration,
+               last.tokens > 0 {
+                return RunwaySessionActivity(
+                    identity: identity,
+                    tokensPerSecond: last.tokens / turnDuration,
+                    sampleStart: started,
+                    sampleEnd: last.capturedAt
+                )
+            }
+        }
+        return nil
     }
 
+    /// Returns this line's timestamp (for turn-start tracking, regardless of
+    /// type) and, when the line is a fresh non-duplicate usage record, the
+    /// parsed sample.
     private static func parseLine(_ line: String,
                                   logPath: String,
                                   now: Date,
-                                  seenMessageIDs: inout Set<String>) -> ClaudeRunwayTokenActivitySample? {
+                                  turnStartedAt: Date?,
+                                  seenMessageIDs: inout Set<String>) -> (timestamp: Date?, sample: ClaudeRunwayTokenActivitySample?) {
         guard let data = line.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let message = obj["message"] as? [String: Any],
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (nil, nil)
+        }
+        let timestamp = ClaudeRunwayLog.date(obj["timestamp"])
+        guard let message = obj["message"] as? [String: Any],
               let usage = message["usage"] as? [String: Any] else {
-            return nil
+            return (timestamp, nil)
         }
         if let messageID = message["id"] as? String {
-            if seenMessageIDs.contains(messageID) { return nil }
+            if seenMessageIDs.contains(messageID) { return (timestamp, nil) }
             seenMessageIDs.insert(messageID)
         }
-        guard let capturedAt = ClaudeRunwayLog.date(obj["timestamp"]),
+        guard let capturedAt = timestamp,
               capturedAt <= now.addingTimeInterval(5) else {
-            return nil
+            return (timestamp, nil)
         }
         let tokens = weightedTokens(usage)
-        guard tokens > 0 else { return nil }
-        return ClaudeRunwayTokenActivitySample(
+        guard tokens > 0 else { return (timestamp, nil) }
+        return (timestamp, ClaudeRunwayTokenActivitySample(
             logPath: logPath,
             capturedAt: capturedAt,
-            tokens: tokens
-        )
+            tokens: tokens,
+            turnStartedAt: turnStartedAt
+        ))
     }
 
     private static func weightedTokens(_ usage: [String: Any]) -> Double {

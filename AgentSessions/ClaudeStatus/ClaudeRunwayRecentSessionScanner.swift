@@ -16,6 +16,13 @@ enum ClaudeRunwayRecentSessionScanner {
     /// row presence; burn-rate freshness is handled separately by the token
     /// parser's much shorter window.
     static let maximumActiveSampleAge: TimeInterval = 75
+    /// Presence window for a session that has handed back to the user — its last
+    /// assistant turn ended with `end_turn`/`stop_sequence`. Such a session is
+    /// idle (not burning, and won't be until the user acts), so it leaves the
+    /// runway well before a working session would. Kept above the parser's burn
+    /// window so the brief present-but-not-burning tail can render as a calm "—"
+    /// (Track 2) instead of a misleading spinner; until then that tail is short.
+    static let idleSessionGrace: TimeInterval = 45
     static let maximumFiles = 12
     static func defaultRoot() -> URL {
         URL(fileURLWithPath: NSHomeDirectory())
@@ -49,7 +56,7 @@ enum ClaudeRunwayRecentSessionScanner {
             candidates.append((url, modifiedAt))
         }
 
-        var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool)] = [:]
+        var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool, isIdle: Bool)] = [:]
         var order: [String] = []
         // Scan recent files, then group by session id so a session's subagent
         // transcripts (which live in <sessionId>/subagents/ and carry the parent
@@ -67,11 +74,14 @@ enum ClaudeRunwayRecentSessionScanner {
                     existing.displayName = candidate.displayName
                     existing.hasPrimaryName = true
                 }
+                // Idle only if every contributing file is idle (a working
+                // subagent keeps the session working).
+                existing.isIdle = existing.isIdle && candidate.isIdle
                 byID[candidate.id] = existing
             } else {
                 guard order.count < maximumFiles else { continue }
                 order.append(candidate.id)
-                byID[candidate.id] = (candidate.displayName, [candidate.logPath], !candidate.isSubagent)
+                byID[candidate.id] = (candidate.displayName, [candidate.logPath], !candidate.isSubagent, candidate.isIdle)
             }
         }
 
@@ -81,7 +91,8 @@ enum ClaudeRunwayRecentSessionScanner {
                 id: id,
                 displayName: group.displayName,
                 isGoal: false,
-                logPaths: group.logPaths.sorted()
+                logPaths: group.logPaths.sorted(),
+                isIdle: group.isIdle
             )
         }
     }
@@ -91,7 +102,8 @@ enum ClaudeRunwayRecentSessionScanner {
         if ClaudeProbeConfig.isProbeWorkingDirectory(metadata.cwd) {
             return nil
         }
-        guard hasActiveTail(url: url, now: now) else { return nil }
+        let state = activeState(url: url, now: now)
+        guard state.active else { return nil }
         let fallbackID = url.deletingPathExtension().lastPathComponent
         let isSubagent = url.pathComponents.contains("subagents")
         // Subagents fold into the parent session for cumulative burn, but never
@@ -104,7 +116,8 @@ enum ClaudeRunwayRecentSessionScanner {
             id: metadata.sessionID ?? fallbackID,
             displayName: name,
             logPath: url.path,
-            isSubagent: isSubagent
+            isSubagent: isSubagent,
+            isIdle: state.isIdle
         )
     }
 
@@ -120,12 +133,16 @@ enum ClaudeRunwayRecentSessionScanner {
         let displayName: String
         let logPath: String
         let isSubagent: Bool
+        let isIdle: Bool
     }
 
-    private static func hasActiveTail(url: URL, now: Date) -> Bool {
+    /// Whether the session is still on the runway, and whether its latest line
+    /// shows it idle (finished its turn). Idle sessions use a shorter presence
+    /// window and render a calm "—" instead of a spinner.
+    private static func activeState(url: URL, now: Date) -> (active: Bool, isIdle: Bool) {
         guard let data = ClaudeRunwayLog.tailData(path: url.path, maxBytes: 256 * 1024),
               let text = String(data: data, encoding: .utf8) else {
-            return false
+            return (false, false)
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(200)
         for line in lines.reversed() {
@@ -136,9 +153,26 @@ enum ClaudeRunwayRecentSessionScanner {
             // Skip lines with implausible future timestamps (clock skew / bad
             // data) rather than treating them as live activity.
             guard capturedAt <= now.addingTimeInterval(5) else { continue }
-            return now.timeIntervalSince(capturedAt) <= maximumActiveSampleAge
+            // An idle session (finished its turn) drops sooner than a working
+            // one so it doesn't linger as a stale row.
+            let idle = isIdleMarker(obj)
+            let threshold = idle ? idleSessionGrace : maximumActiveSampleAge
+            return (now.timeIntervalSince(capturedAt) <= threshold, idle)
         }
-        return false
+        return (false, false)
+    }
+
+    /// True when the newest line shows the session handed back to the user: an
+    /// assistant message whose turn ended with `end_turn`/`stop_sequence`.
+    /// Anything else (`tool_use`, `max_tokens`, `null`, or a non-assistant last
+    /// line such as a tool result) means it is still working → not idle.
+    private static func isIdleMarker(_ obj: [String: Any]) -> Bool {
+        guard (obj["type"] as? String) == "assistant",
+              let message = obj["message"] as? [String: Any],
+              let stop = message["stop_reason"] as? String else {
+            return false
+        }
+        return stop == "end_turn" || stop == "stop_sequence"
     }
 
     private static func metadata(from url: URL) -> SessionMetadata {
