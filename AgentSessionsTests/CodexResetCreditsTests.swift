@@ -146,7 +146,6 @@ final class CodexResetCreditsTests: XCTestCase {
             ]
         )
         model.applyResetCredits(snap)
-        XCTAssertEqual(model.resetCreditsAvailable, 2)
         XCTAssertEqual(model.resetCredits.count, 2)
         XCTAssertNotNil(model.resetCreditsLastFetch)
     }

@@ -162,7 +162,8 @@ final class CodexUsageModel: ObservableObject {
     @Published var fiveHourProjectedRunoutAt: Date? = nil
     @Published var fiveHourProjectionObservedAt: Date? = nil
     // Reset credits (free "reset your usage now" grants). Display-only.
-    @Published var resetCreditsAvailable: Int = 0
+    // Count + expiry are derived from `resetCredits` by CodexResetCredits.*,
+    // so the raw available_count is intentionally not mirrored here.
     @Published var resetCredits: [CodexResetCredit] = []
     @Published var resetCreditsLastFetch: Date? = nil
 
@@ -286,7 +287,6 @@ final class CodexUsageModel: ObservableObject {
 
     /// Applies a fetched credits snapshot to the published state.
     func applyResetCredits(_ snapshot: CodexResetCreditsSnapshot) {
-        resetCreditsAvailable = snapshot.available
         resetCredits = snapshot.credits
         resetCreditsLastFetch = Date()
     }

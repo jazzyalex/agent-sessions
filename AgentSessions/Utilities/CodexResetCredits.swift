@@ -52,8 +52,8 @@ enum CodexResetCredits {
         date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
     }
 
-    /// Quota Meter hover line, e.g. "↑ 1 reset credit · expires Jul 17"
-    /// or "↑ 3 reset credits · next expires Jul 17". nil when nothing renderable.
+    /// Quota Meter hover line, e.g. "↑ 1 reset credit · expires Jul 17, 5:45 PM"
+    /// or "↑ 3 reset credits · next expires Jul 17, 5:45 PM". nil when nothing renderable.
     static func quotaMeterLine(_ credits: [CodexResetCredit], now: Date) -> String? {
         let items = renderable(credits, now: now)
         guard !items.isEmpty else { return nil }
@@ -68,8 +68,8 @@ enum CodexResetCredits {
         }
     }
 
-    /// Menu-bar summary line, e.g. "1 available · expires Jul 17, 2026"
-    /// or "3 available · next expires Jul 17, 2026". nil when nothing renderable.
+    /// Menu-bar summary line, e.g. "1 available · expires Jul 17, 2026, 5:45 PM"
+    /// or "3 available · next expires Jul 17, 2026, 5:45 PM". nil when nothing renderable.
     static func menuSummaryLine(_ credits: [CodexResetCredit], now: Date) -> String? {
         let items = renderable(credits, now: now)
         guard !items.isEmpty else { return nil }
@@ -85,7 +85,7 @@ enum CodexResetCredits {
     }
 
     /// Per-credit expiry lines for the menu bar when more than one credit exists,
-    /// e.g. ["expires Jul 17, 2026", "expires Aug 1, 2026"].
+    /// e.g. ["expires Jul 17, 2026, 5:45 PM", "expires Aug 1, 2026, 9:00 AM"].
     static func menuExpiryLines(_ credits: [CodexResetCredit], now: Date) -> [String] {
         renderable(credits, now: now).compactMap { credit in
             credit.expiresAt.map { "expires \(fullExpiry($0))" }
