@@ -53,7 +53,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         )
 
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q,
@@ -102,7 +102,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
         hasEmptyDirectory = false
 
         let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
+        let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : requestedPriority
         Task.detached(priority: prio) { [weak self, token, executionProfile] in
             guard let self else { return }
 
@@ -208,7 +208,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             return session
         }()
 
-        let ioQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let ioQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         ioQueue.async {
             defer {
                 self.reloadLock.lock()

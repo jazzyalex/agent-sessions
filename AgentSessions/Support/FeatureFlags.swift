@@ -4,7 +4,10 @@ enum FeatureFlags {
     // When true, search only uses prebuilt transcript cache; when false, it can
     // generate transcripts on demand to preserve correctness before cache warms.
     static let filterUsesCachedTranscriptOnly = false
-    static let lowerQoSForHeavyWork = true
+    // Background indexing/ingest stays at .utility to remain a good system citizen.
+    static let lowerQoSForBackgroundIngest = true
+    // Interactive search runs at .userInitiated with no inter-batch sleep so typing stays responsive.
+    static let lowerQoSForInteractiveSearch = false
     static let throttleIndexingUIUpdates = true
     static let gatePrewarmWhileTyping = true
     static let increaseFilterDebounce = true

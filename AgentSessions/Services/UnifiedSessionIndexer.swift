@@ -968,7 +968,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags)),
             $sortDescriptor.removeDuplicates()
         )
-            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] combined, sortDesc -> [Session] in
                 guard let self else { return [] }
                 let (input, kinds, all, combinedFlags) = combined
@@ -2299,7 +2299,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+            let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
             bgQueue.async {
                 let results = self.applyFiltersAndSort(to: self.allSessions)
                 DispatchQueue.main.async {

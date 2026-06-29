@@ -53,7 +53,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
@@ -97,7 +97,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
         hasEmptyDirectory = false
 
 	        let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
-	        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : requestedPriority
+	        let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : requestedPriority
 		        Task.detached(priority: prio) { [weak self, token, executionProfile] in
 		            guard let self else { return }
 
@@ -203,7 +203,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
 	                        self.progressText = "Ready"
 	                        self.launchPhase = .ready
 	                    }
-	                    Task.detached(priority: FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
+	                    Task.detached(priority: FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated) { [delta, cache, finishPrewarm] in
 	                        LaunchProfiler.log("Antigravity.refresh: transcript prewarm start (delta=\(delta.count))")
 	                        await cache.generateAndCache(sessions: delta)
 	                        await finishPrewarm()
@@ -271,7 +271,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             return session
         }()
 
-        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
         bgQueue.async {
             defer {
                 self.reloadLock.lock()
@@ -386,7 +386,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     func refreshPreview(id: String) {
         guard let existing = allSessions.first(where: { $0.id == id }) else { return }
 	        let url = URL(fileURLWithPath: existing.filePath)
-	        let bgQueue = FeatureFlags.lowerQoSForHeavyWork ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+	        let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
 	        bgQueue.async {
 	            if let light = AntigravitySessionParser.parseFile(at: url, forcedID: id) {
 	                Task { @MainActor [weak self] in

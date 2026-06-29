@@ -250,7 +250,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
             let hasMetaFilters = (filters.model != nil) || (filters.dateFrom != nil) || (filters.dateTo != nil) || (effectiveRepo != nil) || (effectivePath != nil) || effectiveSideChatsOnly
             let includeSystemProbes = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
 
-            let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+            let prio: TaskPriority = FeatureFlags.lowerQoSForInteractiveSearch ? .utility : .userInitiated
             currentTask = Task.detached(priority: prio) { [weak self, newRunID] in
                 guard let self else { return }
                 let hasData = (try? await db.hasSearchData(sources: allowedRaw)) ?? false
@@ -454,7 +454,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                    allowed: Set<SessionSource>,
                                    all: [Session],
                                    allowDeepScan: Bool) async {
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        let prio: TaskPriority = FeatureFlags.lowerQoSForInteractiveSearch ? .utility : .userInitiated
         currentTask = Task.detached(priority: prio) { [weak self, runID] in
             guard let self else { return }
             // Restore pre-index candidate building: all allowed sessions, no DB/hybrid tiers
@@ -512,7 +512,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
                     }
                 }
-                if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+                if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
             }
 
             if Task.isCancelled { await self.finishCanceled(runID: runID); return }
@@ -587,7 +587,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     let currentIdx = idx
                     await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
                 }
-                if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+                if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
                 idx += 1
             }
             // Final flush of any staged results
@@ -832,7 +832,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     self.progress.scannedSmall = min(self.progress.totalSmall, self.progress.scannedSmall + batch.count)
                 }
             }
-            if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+            if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
         }
 
         if Task.isCancelled { await self.finishCanceled(runID: runID); return }
@@ -931,7 +931,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 let currentIdx = idx
                 await MainActor.run { if self.runID == runID { self.progress.scannedLarge = currentIdx + 1 } }
             }
-            if FeatureFlags.lowerQoSForHeavyWork { try? await Task.sleep(nanoseconds: 10_000_000) }
+            if FeatureFlags.lowerQoSForInteractiveSearch { try? await Task.sleep(nanoseconds: 10_000_000) }
             idx += 1
         }
 

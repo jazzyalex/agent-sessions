@@ -1506,7 +1506,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 }
 
                 // Build off-main to avoid UI stalls
-                let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+                let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated
                 let shouldColorize = self.shouldColorize
                 let sessionSnapshot = session
                 rebuildTask = Task.detached(priority: prio) { [filters] in
@@ -1614,7 +1614,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
 
             // Build off-main to avoid UI stalls on heavy sessions (e.g., Chrome MCP screenshots).
-            let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+            let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated
             let shouldColorizeSnapshot = shouldColorize
             let modeSnapshot = mode
             let keySnapshot = buildKey
@@ -2390,7 +2390,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                    renderedAppendConfigKey: String? = nil,
                                    cachedText: String? = nil,
                                    generation: Int) {
-        let prio: TaskPriority = FeatureFlags.lowerQoSForHeavyWork ? .utility : .userInitiated
+        let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated
         jsonBuildTask?.cancel()
         let sessionSnapshot = session
         isBuildingJSON = true
