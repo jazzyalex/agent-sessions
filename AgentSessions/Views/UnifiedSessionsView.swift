@@ -3957,6 +3957,11 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                // Clear the field editor directly so Escape visibly empties the field even
+                // though it stays first responder (updateNSView won't overwrite an
+                // actively-edited field).
+                textView.string = ""
+                if parent.text != "" { parent.text = "" }
                 parent.onEscape()
                 return true
             }
@@ -3981,7 +3986,13 @@ private struct ToolbarSearchTextField: NSViewRepresentable {
 
     func updateNSView(_ tf: NSTextField, context: Context) {
         context.coordinator.parent = self
-        if tf.stringValue != text { tf.stringValue = text }
+        // Only push the binding's value into the field when it is NOT being actively
+        // edited. While the user types, the NSTextField is authoritative; a lagging
+        // SwiftUI binding (`text`) arriving here mid-edit would overwrite the field and
+        // erase the characters typed since (the dropped-character bug). Programmatic
+        // clears either resign focus (✕ button) or clear the field editor directly
+        // (Escape, handled in the coordinator), so they still take effect.
+        if tf.currentEditor() == nil, tf.stringValue != text { tf.stringValue = text }
         if tf.placeholderString != placeholder { tf.placeholderString = placeholder }
         if focusRequestToken != context.coordinator.lastFocusRequestToken {
             context.coordinator.lastFocusRequestToken = focusRequestToken
