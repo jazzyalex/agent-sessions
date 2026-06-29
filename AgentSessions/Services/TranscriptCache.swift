@@ -3,17 +3,31 @@ import Foundation
 /// Thread-safe cache for generated transcripts used in search filtering.
 /// The cache is bounded so long-running indexing sessions do not grow memory
 /// without limit.
+///
+/// Eviction is least-recently-used and O(1): entries live in an intrusive
+/// doubly-linked list (most-recently-used at `head`, least at `tail`), so a
+/// `set` that overflows a cap drops the tail without scanning the whole map.
+/// `prev` is weak so the list holds no retain cycles.
 final class TranscriptCache: @unchecked Sendable {
-    private struct Entry {
-        let transcript: String
-        let cost: Int
-        var lastAccess: UInt64
+    private final class Node {
+        let key: String
+        var transcript: String
+        var cost: Int
+        var next: Node?
+        weak var prev: Node?
+
+        init(key: String, transcript: String, cost: Int) {
+            self.key = key
+            self.transcript = transcript
+            self.cost = cost
+        }
     }
 
     private let lock = NSLock()
-    private var entries: [String: Entry] = [:]
+    private var nodes: [String: Node] = [:]
+    private var head: Node?              // most recently used
+    private var tail: Node?              // least recently used
     private var totalCost: Int = 0
-    private var accessSerial: UInt64 = 0
     private var indexingInProgress = false
 
     private let maxEntries = 512
@@ -25,29 +39,52 @@ final class TranscriptCache: @unchecked Sendable {
         return body()
     }
 
-    private func nextAccessSerial() -> UInt64 {
-        accessSerial &+= 1
-        return accessSerial
+    // MARK: - Intrusive LRU list (all callers must hold `lock`)
+
+    private func addToFront(_ node: Node) {
+        node.prev = nil
+        node.next = head
+        head?.prev = node
+        head = node
+        if tail == nil { tail = node }
+    }
+
+    private func detach(_ node: Node) {
+        let p = node.prev
+        let n = node.next
+        p?.next = n
+        n?.prev = p
+        if head === node { head = n }
+        if tail === node { tail = p }
+        node.prev = nil
+        node.next = nil
+    }
+
+    private func moveToFront(_ node: Node) {
+        guard head !== node else { return }
+        detach(node)
+        addToFront(node)
+    }
+
+    private func removeNode(_ node: Node) {
+        detach(node)
+        nodes.removeValue(forKey: node.key)
+        totalCost = max(0, totalCost - node.cost)
     }
 
     private func evictIfNeeded() {
-        while entries.count > maxEntries || totalCost > maxTotalCost {
-            guard let oldestKey = entries.min(by: { $0.value.lastAccess < $1.value.lastAccess })?.key else {
-                break
-            }
-            if let removed = entries.removeValue(forKey: oldestKey) {
-                totalCost = max(0, totalCost - removed.cost)
-            }
+        while nodes.count > maxEntries || totalCost > maxTotalCost {
+            guard let lru = tail else { break }
+            removeNode(lru)
         }
     }
 
     /// Retrieve cached transcript for a session (thread-safe)
     func getCached(_ sessionID: String) -> String? {
         withLock {
-            guard var entry = entries[sessionID] else { return nil }
-            entry.lastAccess = nextAccessSerial()
-            entries[sessionID] = entry
-            return entry.transcript
+            guard let node = nodes[sessionID] else { return nil }
+            moveToFront(node)
+            return node.transcript
         }
     }
 
@@ -55,15 +92,18 @@ final class TranscriptCache: @unchecked Sendable {
     func set(_ sessionID: String, transcript: String) {
         withLock {
             let cost = max(1, transcript.utf8.count)
-            if let existing = entries[sessionID] {
+            if let existing = nodes[sessionID] {
                 totalCost = max(0, totalCost - existing.cost)
+                existing.transcript = transcript
+                existing.cost = cost
+                totalCost += cost
+                moveToFront(existing)
+            } else {
+                let node = Node(key: sessionID, transcript: transcript, cost: cost)
+                nodes[sessionID] = node
+                addToFront(node)
+                totalCost += cost
             }
-            entries[sessionID] = Entry(
-                transcript: transcript,
-                cost: cost,
-                lastAccess: nextAccessSerial()
-            )
-            totalCost += cost
             evictIfNeeded()
         }
     }
@@ -71,8 +111,8 @@ final class TranscriptCache: @unchecked Sendable {
     /// Remove a single cached transcript (thread-safe)
     func remove(_ sessionID: String) {
         withLock {
-            guard let removed = entries.removeValue(forKey: sessionID) else { return }
-            totalCost = max(0, totalCost - removed.cost)
+            guard let node = nodes[sessionID] else { return }
+            removeNode(node)
         }
     }
 
@@ -99,7 +139,7 @@ final class TranscriptCache: @unchecked Sendable {
                 if Task.isCancelled { break }
                 continue
             }
-            let alreadyCached = withLock { entries[session.id] != nil }
+            let alreadyCached = withLock { nodes[session.id] != nil }
 
             // Skip if already cached or lightweight (no events)
             guard !alreadyCached, !session.events.isEmpty else { continue }
@@ -125,7 +165,7 @@ final class TranscriptCache: @unchecked Sendable {
             }
         }
 
-        let totalCount = withLock { entries.count }
+        let totalCount = withLock { nodes.count }
 
         #if DEBUG
         print("TRANSCRIPT CACHE: Indexed \(indexed) sessions (total cached: \(totalCount))")
@@ -135,14 +175,16 @@ final class TranscriptCache: @unchecked Sendable {
     /// Clear all cached transcripts (thread-safe)
     func clear() {
         withLock {
-            entries.removeAll()
+            nodes.removeAll()
+            head = nil
+            tail = nil
             totalCost = 0
         }
     }
 
     /// Get current cache size (thread-safe)
     func count() -> Int {
-        withLock { entries.count }
+        withLock { nodes.count }
     }
 
     /// Check if indexing is currently in progress (thread-safe)
