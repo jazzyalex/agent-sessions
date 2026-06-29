@@ -79,6 +79,15 @@ enum SearchTextMatcher {
         let isPrefix: Bool
     }
 
+    /// Identity + content version for memoizing the tokenization of large per-session
+    /// text (transcripts). `sizeBytes`/`eventCount` change on reparse, so a stale
+    /// tokenization is never served for changed content.
+    struct TokenCacheKey: Hashable {
+        let id: String
+        let sizeBytes: Int
+        let eventCount: Int
+    }
+
     static func hasExplicitFTSSyntax(_ query: String) -> Bool {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return false }
@@ -92,9 +101,9 @@ enum SearchTextMatcher {
         return false
     }
 
-    static func hasMatch(in text: String, query: String) -> Bool {
+    static func hasMatch(in text: String, query: String, cacheKey: TokenCacheKey? = nil) -> Bool {
         guard let pattern = buildPattern(from: query) else { return false }
-        let tokens = tokenizeText(text)
+        let tokens = tokenize(text, cacheKey: cacheKey)
         switch pattern {
         case .phrase(let phrase):
             return phraseHasMatch(tokens: tokens, query: phrase)
@@ -187,6 +196,116 @@ enum SearchTextMatcher {
         let phraseTokens = tokenizeQueryTerm(trimmed, allowAutoPrefix: allowAutoPrefix)
         guard !phraseTokens.isEmpty else { return nil }
         return .phrase(phraseTokens)
+    }
+
+    // MARK: - Memoized transcript tokenization
+
+    /// Tokenizes `text`, memoizing the result by `cacheKey` when provided so a
+    /// transcript is tokenized once per content version instead of on every filter
+    /// pass. Small fields (title/repo/event text) pass no key and tokenize directly.
+    private static func tokenize(_ text: String, cacheKey: TokenCacheKey?) -> [TextToken] {
+        guard let key = cacheKey else { return tokenizeText(text) }
+        if let cached = tokenCache.get(key) { return cached }
+        let toks = tokenizeText(text)
+        tokenCache.set(key, tokens: toks)
+        return toks
+    }
+
+    private static let tokenCache = TokenizationCache()
+
+    /// Test instrumentation: number of transcript tokenizations actually computed
+    /// (cache misses). Lets tests assert memoization holds across repeated match calls.
+    static var memoizedTokenizationMisses: Int { tokenCache.missCount }
+    static func resetTokenizationCacheForTesting() { tokenCache.clear() }
+
+    /// Bounded, thread-safe LRU mapping a session's content version to its tokenized
+    /// transcript. O(1) get/set/evict (intrusive doubly-linked list + dict). The lock
+    /// guards only map mutations — tokenization itself runs outside it.
+    private final class TokenizationCache: @unchecked Sendable {
+        private final class Node {
+            let key: TokenCacheKey
+            var tokens: [TextToken]
+            var next: Node?
+            weak var prev: Node?
+            init(key: TokenCacheKey, tokens: [TextToken]) {
+                self.key = key
+                self.tokens = tokens
+            }
+        }
+
+        private let lock = NSLock()
+        private var nodes: [TokenCacheKey: Node] = [:]
+        private var head: Node?
+        private var tail: Node?
+        private let maxEntries = 512
+        private var misses = 0
+
+        var missCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return misses
+        }
+
+        func get(_ key: TokenCacheKey) -> [TextToken]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let node = nodes[key] else { return nil }
+            moveToFront(node)
+            return node.tokens
+        }
+
+        func set(_ key: TokenCacheKey, tokens: [TextToken]) {
+            lock.lock(); defer { lock.unlock() }
+            misses += 1
+            if let node = nodes[key] {
+                node.tokens = tokens
+                moveToFront(node)
+            } else {
+                let node = Node(key: key, tokens: tokens)
+                nodes[key] = node
+                addToFront(node)
+                evictIfNeeded()
+            }
+        }
+
+        func clear() {
+            lock.lock(); defer { lock.unlock() }
+            nodes.removeAll()
+            head = nil
+            tail = nil
+            misses = 0
+        }
+
+        // All helpers below require `lock` to be held.
+        private func addToFront(_ node: Node) {
+            node.prev = nil
+            node.next = head
+            head?.prev = node
+            head = node
+            if tail == nil { tail = node }
+        }
+
+        private func detach(_ node: Node) {
+            let p = node.prev
+            let n = node.next
+            p?.next = n
+            n?.prev = p
+            if head === node { head = n }
+            if tail === node { tail = p }
+            node.prev = nil
+            node.next = nil
+        }
+
+        private func moveToFront(_ node: Node) {
+            guard head !== node else { return }
+            detach(node)
+            addToFront(node)
+        }
+
+        private func evictIfNeeded() {
+            while nodes.count > maxEntries, let lru = tail {
+                detach(lru)
+                nodes.removeValue(forKey: lru.key)
+            }
+        }
     }
 
     private static func tokenizeText(_ text: String) -> [TextToken] {
@@ -468,14 +587,20 @@ enum FilterEngine {
 
         // Priority 1: Search transcript if available
         if let cache = transcriptCache {
+            // Memoize the transcript tokenization by session id + content version so
+            // repeated filter passes (e.g. while typing) don't re-tokenize the whole
+            // transcript every time.
+            let tokenKey = SearchTextMatcher.TokenCacheKey(id: session.id,
+                                                           sizeBytes: session.fileSizeBytes ?? 0,
+                                                           eventCount: session.events.count)
             if FeatureFlags.filterUsesCachedTranscriptOnly || !allowTranscriptGeneration {
                 if let t = cache.getCached(session.id) {
-                    if SearchTextMatcher.hasMatch(in: t, query: q) { return true }
+                    if SearchTextMatcher.hasMatch(in: t, query: q, cacheKey: tokenKey) { return true }
                 }
                 // Fall through to raw fields if no cached transcript is present
             } else {
                 let transcript = cache.getOrGenerate(session: session)
-                if SearchTextMatcher.hasMatch(in: transcript, query: q) { return true }
+                if SearchTextMatcher.hasMatch(in: transcript, query: q, cacheKey: tokenKey) { return true }
             }
         }
 
