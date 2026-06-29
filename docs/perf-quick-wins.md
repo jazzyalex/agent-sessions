@@ -23,6 +23,16 @@ A search that scans 1000 sessions in batches of 64 eats ~16 × 10 ms = 160 ms of
 
 ## QW-2 — Route Cursor sessions through FTS5
 
+> **Update (2026-06-28): not viable as written — the FTS corpus is empty for *all* sources.**
+> Commit `31f6a619` ("perf: derive analytics index from session_meta…") removed the per-session
+> `upsertSessionSearch` / `SessionSearchTextBuilder.build` ingest. Verified against the live
+> `index.db`: 3,460 sessions in `session_meta`, **0** rows in `session_search` / `session_search_fts`.
+> `hasSearchData()` is therefore always false, so SearchCoordinator's FTS fast path never runs and
+> **every** search already uses the legacy scan (the Cursor exclusion at `SearchCoordinator.swift:242`
+> is moot). Re-wiring FTS ingest for all sources (incl. Cursor) — text materialization at index time,
+> DB growth, a backfill migration, and the QW-8 `DELETE FROM session_search` interaction — is a
+> structural effort to plan separately, not a quick win.
+
 **Problem.** Cursor sessions are **excluded from FTS** and fall through to the slow legacy scan ([SearchCoordinator.swift:242](../AgentSessions/Search/SearchCoordinator.swift)). Any query touching Cursor data hits the linear path.
 
 **Fix.** Include Cursor in the FTS corpus build (`SessionSearchTextBuilder` / `session_search` ingest) so `searchSessionIDsFTS` covers it. Verify the Cursor transcript text is available at index time (it is — Cursor sessions are parsed from JSONL + `store.db`).
