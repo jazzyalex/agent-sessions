@@ -2503,15 +2503,10 @@ final class UnifiedSessionIndexer: ObservableObject {
                 descriptor.ascending ? lhs.messageCount < rhs.messageCount : lhs.messageCount > rhs.messageCount
             }
         case .repo:
-            return list.sorted { lhs, rhs in
-                let l = lhs.rowRepoDisplay.lowercased(); let r = rhs.rowRepoDisplay.lowercased()
-                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
-            }
+            return Self.sortedByStringKey(list, ascending: descriptor.ascending) { $0.rowRepoDisplay.lowercased() }
         case .title:
-            return list.sorted { lhs, rhs in
-                let l = lhs.title.lowercased(); let r = rhs.title.lowercased()
-                return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
-            }
+            // Sort by the same value the column shows (`listTitle`, the column's `value:` keypath).
+            return Self.sortedByStringKey(list, ascending: descriptor.ascending) { $0.listTitle.lowercased() }
         case .agent:
             return list.sorted { lhs, rhs in
                 let l = lhs.source.rawValue
@@ -2525,6 +2520,29 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return descriptor.ascending ? (l, lhs.id) < (r, rhs.id) : (l, lhs.id) > (r, rhs.id)
             }
         }
+    }
+
+    /// Sort by a derived `String` key, computing the key exactly once per element
+    /// (Schwartzian transform).
+    ///
+    /// The repo/title key getters (`rowRepoDisplay`, `listTitle`) are expensive
+    /// derived values — they run project classifiers / path normalization / event
+    /// scans. Calling them inside the comparator recomputes them O(n·log n) times,
+    /// which froze the list for ~8s on large datasets (~3k+ sessions) and let the
+    /// slow sort race past and overwrite faster sorts. Precomputing the key once
+    /// reduces that to O(n) getter calls and keeps the sort sub-second.
+    private static func sortedByStringKey(
+        _ list: [Session],
+        ascending: Bool,
+        key: (Session) -> String
+    ) -> [Session] {
+        let decorated: [(key: String, id: String, session: Session)] =
+            list.map { (key($0), $0.id, $0) }
+        let sorted = decorated.sorted { lhs, rhs in
+            ascending ? (lhs.key, lhs.id) < (rhs.key, rhs.id)
+                      : (lhs.key, lhs.id) > (rhs.key, rhs.id)
+        }
+        return sorted.map(\.session)
     }
 
     // MARK: - Favorites
