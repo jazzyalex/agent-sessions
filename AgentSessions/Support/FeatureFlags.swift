@@ -8,6 +8,13 @@ enum FeatureFlags {
     static let lowerQoSForBackgroundIngest = true
     // Interactive search runs at .userInitiated with no inter-batch sleep so typing stays responsive.
     static let lowerQoSForInteractiveSearch = false
+    // Building the transcript for the session you just clicked is interactive: run it at
+    // .userInitiated so it doesn't queue behind background indexing/prewarm (also .utility).
+    static let lowerQoSForInteractiveTranscript = false
+    // Large-session guardrail: above either limit, skip auto parse/build on selection and
+    // show a "Show full transcript" affordance, so a monster session can't hang the app.
+    static let largeSessionMessageThreshold: Int = 5_000
+    static let largeSessionByteThreshold: Int = 25 * 1024 * 1024
     static let throttleIndexingUIUpdates = true
     static let gatePrewarmWhileTyping = true
     static let increaseFilterDebounce = true

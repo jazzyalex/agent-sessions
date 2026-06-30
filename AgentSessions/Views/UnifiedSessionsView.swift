@@ -355,6 +355,7 @@ struct UnifiedSessionsView: View {
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
+    @ObservedObject private var hydrationGate = TranscriptHydrationGate.shared
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     @State private var restoreCandidate: Session? = nil
@@ -1461,6 +1462,8 @@ struct UnifiedSessionsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
+                } else if hydrationGate.needsManualHydration(s), s.events.isEmpty {
+                    largeSessionInterstitial(s)
                 }
             } else if selection == nil {
                 Text("Select a session to view transcript")
@@ -1958,41 +1961,12 @@ struct UnifiedSessionsView: View {
         if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
             searchCoordinator.promote(id: s.id)
         }
-        // Lazy load full session per source
-        var requestedSelectionReload = false
-        if s.source == .codex, let exist = codexIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            codexIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .claude, let exist = claudeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            claudeIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .antigravity, let exist = antigravityIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            antigravityIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .opencode, let exist = opencodeIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            opencodeIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .hermes, let exist = hermesIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            hermesIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .copilot, let exist = copilotIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            copilotIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .droid, let exist = droidIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            droidIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .openclaw, let exist = openclawIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            openclawIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .cursor, let exist = cursorIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(exist) {
-            cursorIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        } else if s.source == .pi, let exist = piIndexer.allSessions.first(where: { $0.id == id }), exist.events.isEmpty {
-            piIndexer.reloadSession(id: id)
-            requestedSelectionReload = true
-        }
-
-        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
+        // Lazy load full session per source — gated by the large-session guardrail so a
+        // monster session can't parseFileFull (and hang) on selection. The interstitial in
+        // transcriptPane offers an explicit "Show full transcript".
+        let allowHydrate = TranscriptHydrationGate.shared.shouldAutoHydrate(s)
+        let requestedSelectionReload = allowHydrate ? reloadSessionForSource(s) : false
+        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: allowHydrate && !requestedSelectionReload)
         updateFocusedSessionIfNeeded(s)
     }
 
@@ -2178,6 +2152,68 @@ struct UnifiedSessionsView: View {
     private func updateFocusedSessionIfNeeded(_ session: Session?) {
         guard isWindowKey else { return }
         unified.setFocusedSession(session)
+    }
+
+    /// Per-source lazy reload of a session's full content. Returns true if a reload was started.
+    @discardableResult
+    private func reloadSessionForSource(_ s: Session) -> Bool {
+        let id = s.id
+        switch s.source {
+        case .codex:
+            if let e = codexIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { codexIndexer.reloadSession(id: id); return true }
+        case .claude:
+            if let e = claudeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { claudeIndexer.reloadSession(id: id); return true }
+        case .antigravity:
+            if let e = antigravityIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { antigravityIndexer.reloadSession(id: id); return true }
+        case .opencode:
+            if let e = opencodeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { opencodeIndexer.reloadSession(id: id); return true }
+        case .hermes:
+            if let e = hermesIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { hermesIndexer.reloadSession(id: id); return true }
+        case .copilot:
+            if let e = copilotIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { copilotIndexer.reloadSession(id: id); return true }
+        case .droid:
+            if let e = droidIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { droidIndexer.reloadSession(id: id); return true }
+        case .openclaw:
+            if let e = openclawIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { openclawIndexer.reloadSession(id: id); return true }
+        case .cursor:
+            if let e = cursorIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(e) { cursorIndexer.reloadSession(id: id); return true }
+        case .pi:
+            if let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
+        }
+        return false
+    }
+
+    /// User opted into loading a large session's full transcript: allow hydration, then run it.
+    private func showFullTranscript(_ s: Session) {
+        hydrationGate.allowFullHydration(s.id)
+        let reloaded = reloadSessionForSource(s)
+        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !reloaded)
+        updateFocusedSessionIfNeeded(s)
+    }
+
+    @ViewBuilder
+    private func largeSessionInterstitial(_ s: Session) -> some View {
+        let sizeText = ByteCountFormatter.string(fromByteCount: Int64(s.fileSizeBytes ?? 0), countStyle: .file)
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 30, weight: .regular))
+                .foregroundStyle(.secondary)
+            Text("Large session")
+                .font(.headline)
+            Text("\(s.messageCount) messages · \(sizeText)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Text("Rendering the full transcript can take a while for a session this size.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Show full transcript") { showFullTranscript(s) }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 4)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
 		    @discardableResult

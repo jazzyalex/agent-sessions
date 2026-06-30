@@ -1344,6 +1344,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             return
         }
 
+        // Large-session guardrail: don't run the selection-triggered parse or start the
+        // live monitor for a monster session until the user opts in (Show full transcript).
+        if let session, !TranscriptHydrationGate.shared.shouldAutoHydrate(session) {
+            return
+        }
+
         let initialSignature = focusedFileSignature(for: context)
         updateFocusedSignatureBaseline(for: context.source, signature: initialSignature)
         refreshFocusedSession(context: context, trigger: .selection)

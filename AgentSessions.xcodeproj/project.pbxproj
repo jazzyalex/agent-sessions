@@ -292,6 +292,7 @@
 		C97AAF48EBE9ABE3D97AEF1F /* CursorSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05940D6EE3C7A76989CDAF7D /* CursorSettingsTests.swift */; };
 		CA0D8F5E7C5C485075B29DE1 /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
 		CAA423DA39D7CCF03BF0817E /* InternalPayloadFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96C1921B5ACCD5E3837178B7 /* InternalPayloadFormatter.swift */; };
+		CB95E1D61989EC38D74A90EA /* TranscriptHydrationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04247ED8C8F0C64EBF429E1 /* TranscriptHydrationGate.swift */; };
 		CC28FF5D0628EBAFFCC4CC8C /* PreferencesView+Droid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD090A12FD5A20691240A97 /* PreferencesView+Droid.swift */; };
 		CC825BE5C06481744A6A16D6 /* ClaudeUsageNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9894FB605C3046578ADD2EE /* ClaudeUsageNormalizerTests.swift */; };
 		CC9BA23F3F228FE47F3C2F0A /* HermesSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A71A6F3D66468A840DCEEE /* HermesSessionIndexer.swift */; };
@@ -728,6 +729,7 @@
 		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
+		D04247ED8C8F0C64EBF429E1 /* TranscriptHydrationGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TranscriptHydrationGate.swift; sourceTree = SOURCE_ROOT; };
 		D2A4B0DBEB6CE6812D3332F8 /* PiSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/PiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		D2BB94A3759137164517CC64 /* ProbeCleanupHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/ProbeCleanupHelpers.swift; sourceTree = SOURCE_ROOT; };
 		D3A22B30681A2A49CB452C34 /* CursorBackendDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Cursor/CursorBackendDetector.swift; sourceTree = SOURCE_ROOT; };
@@ -967,6 +969,7 @@
 			children = (
 				5A5C3395AC2B4F1F9896C8D8 /* AntigravityTranscriptParser.swift */,
 				4E67E757675247C63DD9E02B /* ClaudeArchiveRestore.swift */,
+				D04247ED8C8F0C64EBF429E1 /* TranscriptHydrationGate.swift */,
 			);
 			name = Services;
 			sourceTree = "<group>";
@@ -2261,6 +2264,7 @@
 				DE03CB33E26820E114BDB87E /* ClaudeArchiveRestore.swift in Sources */,
 				9DC4500913E0B79BC44F52CB /* CodexResetCredits.swift in Sources */,
 				7E723C4DDA820A45007F0F42 /* CodexResetCreditsFetcher.swift in Sources */,
+				CB95E1D61989EC38D74A90EA /* TranscriptHydrationGate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
