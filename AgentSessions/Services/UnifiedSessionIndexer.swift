@@ -964,12 +964,9 @@ final class UnifiedSessionIndexer: ObservableObject {
             )
         )
         .combineLatest($includePi)
-        Publishers.CombineLatest(
-            Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags)),
-            $sortDescriptor.removeDuplicates()
-        )
+        Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags))
             .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
-            .map { [weak self] combined, sortDesc -> [Session] in
+            .map { [weak self] combined -> [Session] in
                 guard let self else { return [] }
                 let (input, kinds, all, combinedFlags) = combined
                 let (q, from, to, model) = input
@@ -1030,8 +1027,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                 if self.hideLowMessageSessionsPref { results = results.filter { Self.passesLowMessageVisibilityFilter($0) } }
                 if !self.showHousekeepingSessionsPref { results = results.filter { !$0.isHousekeeping } }
 
-                // Apply sort descriptor (now included in pipeline so changes trigger background re-sort)
-                results = self.applySort(results, descriptor: sortDesc)
+                // Sort by the current descriptor; sort-only changes are handled by a separate
+                // subscription (below) so they don't re-run the whole filter pipeline.
+                results = self.applySort(results, descriptor: self.sortDescriptor)
                 return results
             }
             .receive(on: DispatchQueue.main)
@@ -1044,6 +1042,26 @@ final class UnifiedSessionIndexer: ObservableObject {
                     }
                     self.updateLaunchState()
                 }
+            }
+            .store(in: &cancellables)
+
+        // Sort-only changes: re-sort the already-filtered `sessions` off-main and republish,
+        // WITHOUT re-running filterSessions + the filter passes. Clicking a column header only
+        // reorders the same set; re-filtering thousands of sessions per click made sort lethargic.
+        $sortDescriptor
+            .dropFirst()
+            .removeDuplicates()
+            .map { [weak self] desc -> ([Session], SessionSortDescriptor) in
+                (self?.sessions ?? [], desc)
+            }
+            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .map { [weak self] pair -> [Session] in
+                self?.applySort(pair.0, descriptor: pair.1) ?? pair.0
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] sorted in
+                guard let self else { return }
+                self.publishAfterCurrentUpdate { self.sessions = sorted }
             }
             .store(in: &cancellables)
 
