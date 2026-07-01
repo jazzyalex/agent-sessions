@@ -240,6 +240,12 @@ struct AgentSessionsApp: App {
 
     init() {
         guard !AppRuntime.isRunningTests else { return }
+#if DEBUG
+        // Beachball watchdog for the "make every action instant" perf pass (lever #0).
+        DispatchQueue.main.async { MainThreadStallMonitor.shared.start() }
+        // Self-driving perf harness (no-op unless AS_PERF_BENCH env var is set).
+        DispatchQueue.main.async { PerfBench.startIfRequested() }
+#endif
         let defaults = UserDefaults.standard
         DockIconPreferenceController.reconcileReachability(defaults: defaults)
         let hideDockIcon = defaults.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false

@@ -71,8 +71,19 @@ enum UnifiedRowsStabilityPolicy {
 }
 
 enum UnifiedTableIdentityPolicy {
-    static func tableIdentity(columnLayoutID: UUID) -> String {
-        "unified-table-\(columnLayoutID.uuidString)"
+    static func tableIdentity(columnLayoutID: UUID, reorderGeneration: Int) -> String {
+        "unified-table-\(columnLayoutID.uuidString)-\(reorderGeneration)"
+    }
+
+    /// A wholesale reorder = same membership, different order. Diffing this in SwiftUI's
+    /// Table is O(n^2); rebuilding via a new identity is O(n). Adds/removes (membership
+    /// change) are NOT reorders — SwiftUI diffs those cheaply, so return false and let it.
+    static func isWholesaleReorder(old: [Session], new: [Session]) -> Bool {
+        guard old.count == new.count, old.count > 1 else { return false }
+        var positionChanged = false
+        for i in 0..<old.count where old[i].id != new[i].id { positionChanged = true; break }
+        guard positionChanged else { return false }
+        return Set(old.lazy.map(\.id)) == Set(new.lazy.map(\.id))
     }
 }
 
@@ -310,6 +321,12 @@ struct UnifiedSessionsView: View {
         @State private var sideChatParentContextByID: [String: String] = [:]
         @State private var cachedExpandableParentIDs: Set<String> = []
 	@State private var columnLayoutID: UUID = UUID()
+	// Bumped whenever cachedRows is reassigned as a *wholesale reorder* (same id-set,
+	// different order — i.e. a sort). Feeding this into the Table's .id() forces SwiftUI
+	// to REBUILD the table (O(n)) instead of DIFFING the reorder, whose move-computation
+	// (AppKitOutlineTableCoordinator -> remove(atOffsets:)/move(fromOffsets:toOffset:))
+	// is O(n^2) and beachballs for multiple seconds at ~3,300 rows. See docs/perf-master-plan.md W4.
+	@State private var tableReorderGeneration: Int = 0
 	@AppStorage("UnifiedShowSourceColumn") private var showSourceColumn: Bool = true
 	@AppStorage("UnifiedShowStarColumn") private var showStarColumn: Bool = true
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
@@ -715,11 +732,33 @@ struct UnifiedSessionsView: View {
 						}
 					}
                     .onReceive(activeCodexSessions.$activeMembershipVersion) { _ in
-                        // Always refresh cached rows so Agent live-state dots (active/open)
-                        // update promptly even when Active-only filtering is disabled.
-                        updateCachedRows()
-                        ensureDefaultSelectionIfNeeded()
-                        refreshSelectionSourceFromCachedRows()
+                        // A live-presence bump changes Agent live-state dots (active/open),
+                        // never the underlying session list — the visible row SET comes from
+                        // unified.sessions, not the presence poll. So when Active-only filtering
+                        // is OFF, the full updateCachedRows() rebuild (hierarchy + side-chat +
+                        // derived-state + cachedRows reassignment, ~5-6 O(n) passes over 3,300
+                        // rows) cannot change anything the user sees and is the dominant W1
+                        // beachball contributor. Take a cheap path that only refreshes the
+                        // fallback-presence map; direct dots refresh via the source-cell
+                        // .id(activeMembershipVersion) on the @Published bump, and cross-workspace
+                        // fallback dots read cachedFallbackPresenceBySessionKey (rebuilt here).
+                        // NOTE: reverted "C5" skipped this fallback rebuild too and broke
+                        // fallback dots — we must keep it.
+#if DEBUG
+                        let _memSpan = Perf.begin("membershipTick", thresholdMs: 8,
+                                                  showActiveSessionsOnly ? "activeOnly-full" : "cheap-dotsOnly")
+                        defer { Perf.end(_memSpan) }
+#endif
+                        if showActiveSessionsOnly {
+                            // Active-only: the visible SET depends on live membership, so a
+                            // structural rebuild is genuinely required.
+                            updateCachedRows()
+                            ensureDefaultSelectionIfNeeded()
+                            refreshSelectionSourceFromCachedRows()
+                        } else {
+                            // Cheap path: SET + order unchanged, only dots move.
+                            rebuildCachedFallbackPresences()
+                        }
                         updateFocusedSessionIfNeeded(selectedSession)
                     }
 
@@ -940,7 +979,7 @@ struct UnifiedSessionsView: View {
 
             // Removed separate Refresh column to avoid churn
 	        }
-	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID))
+	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID, reorderGeneration: tableReorderGeneration))
 	        .tableStyle(.inset(alternatesRowBackgrounds: true))
             .tint(UnifiedSessionsStyle.selectionAccent)
 	        .environment(\.defaultMinListRowHeight, 28)
@@ -1062,6 +1101,17 @@ struct UnifiedSessionsView: View {
             updateCachedRows()
             refreshSelectionSourceFromCachedRows()
         }
+#if DEBUG
+				.onReceive(NotificationCenter.default.publisher(for: PerfBench.toggleSortNotification)) { _ in
+					// Perf harness (AS_PERF_BENCH=sort): toggle the sort key to exercise the full
+					// real sort path — onChange(of: sortOrder) -> updateCachedRows -> Table reorder.
+					if sortOrder.first?.keyPath == \Session.messageCount {
+						sortOrder = [KeyPathComparator(\Session.modifiedAt, order: .reverse)]
+					} else {
+						sortOrder = [KeyPathComparator(\Session.messageCount, order: .reverse)]
+					}
+				}
+#endif
 				.onChange(of: unified.isIndexing) { wasIndexing, isIndexing in
 					// When indexing finishes, reconcile selection in case a deferred
 					// clear was skipped (the guard in updateCachedRows).
@@ -2224,8 +2274,14 @@ struct UnifiedSessionsView: View {
 
 		    @discardableResult
 		    private func updateCachedRows() -> Bool {
-	        rebuildCachedFallbackPresences()
 #if DEBUG
+        let _perfSpan = Perf.begin("updateCachedRows", thresholdMs: 8, "n=\(cachedRows.count) activeOnly=\(showActiveSessionsOnly)")
+        defer { Perf.end(_perfSpan) }
+        let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
+#endif
+        rebuildCachedFallbackPresences()
+#if DEBUG
+        Perf.end(_fpSpan)
         let startedAt = Date()
         defer {
             if showActiveSessionsOnly {
@@ -2283,12 +2339,25 @@ struct UnifiedSessionsView: View {
 
 	        if !(shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh) {
                 let searchActive = !query.isEmpty
+#if DEBUG
+                let _hbSpan = Perf.begin("hierarchyBuild", thresholdMs: 4, "rows=\(nextRows.count)")
+#endif
                 let hierarchyResult = SubagentHierarchyBuilder.build(
                     sessions: nextRows,
                     collapsedParents: collapsedParents,
                     hierarchyEnabled: showSubagentHierarchy && !searchActive
                 )
-                cachedRows = hierarchyResult.sessions
+#if DEBUG
+                Perf.end(_hbSpan)
+#endif
+                let newRows = hierarchyResult.sessions
+                // A wholesale reorder (sort) is O(n^2) for SwiftUI Table to diff; bump the
+                // table identity so it rebuilds (O(n)) instead. Membership changes fall
+                // through to SwiftUI's normal (cheap) diff.
+                if UnifiedTableIdentityPolicy.isWholesaleReorder(old: cachedRows, new: newRows) {
+                    tableReorderGeneration &+= 1
+                }
+                cachedRows = newRows
                 hierarchyRowMeta = hierarchyResult.rowMeta
                 sideChatParentContextByID = Self.sideChatParentContexts(
                     for: hierarchyResult.sessions,

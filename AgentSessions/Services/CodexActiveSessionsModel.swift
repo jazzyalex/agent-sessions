@@ -794,11 +794,17 @@ final class CodexActiveSessionsModel: ObservableObject {
         var itermTabTitleByTTY: [String: String] = [:]
         var itermTabTitleBySessionGuid: [String: String] = [:]
         let decoder = Self.makeDecoder()
+#if DEBUG
+        let _lpSpan = Perf.begin("loadPresences", thresholdMs: 4, "roots=\(rootPaths.count)")
+#endif
         for path in rootPaths {
             out.append(contentsOf: Self.filterSupportedPresences(
                 Self.loadPresences(from: URL(fileURLWithPath: path), decoder: decoder, now: now, ttl: ttl)
             ))
         }
+#if DEBUG
+        Perf.end(_lpSpan)
+#endif
 
         let registryHasPresences = !out.isEmpty
         let processProbeMinInterval = Self.processProbeMinIntervalSeconds(
@@ -1279,6 +1285,9 @@ final class CodexActiveSessionsModel: ObservableObject {
         }
 
         // Deduplicate and merge: keep freshest lastSeenAt, but preserve metadata from any source.
+#if DEBUG
+        let _mergeSpan = Perf.begin("refreshMerge", thresholdMs: 4, "presences=\(loaded.count)")
+#endif
         var sessionMap: [String: CodexActivePresence] = [:]
         var logMap: [String: CodexActivePresence] = [:]
         var fallbackMap: [String: CodexActivePresence] = [:]
@@ -1339,6 +1348,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             isCockpitVisible: isCockpitVisibleSnapshot,
             isPinnedCockpitVisible: isPinnedCockpitVisibleSnapshot
         )
+#if DEBUG
+        Perf.end(_mergeSpan)
+#endif
 
         let classification = await classifyLiveStatesAsync(
             for: ui,
@@ -1355,6 +1367,9 @@ final class CodexActiveSessionsModel: ObservableObject {
             markStaleRefreshDrop()
             return
         }
+#if DEBUG
+        let _pubSpan = Perf.begin("refreshPublish", thresholdMs: 4, "ui=\(ui.count)")
+#endif
         let nextLastActivityByPresenceKey = Self.lastActivityByPresenceKey(for: ui)
 
         lastRefreshAt = now
@@ -1437,6 +1452,7 @@ final class CodexActiveSessionsModel: ObservableObject {
             consecutiveStableCycles = min(consecutiveStableCycles + 1, 1_000_000)
         }
 #if DEBUG
+        Perf.end(_pubSpan)
         let refreshDurationMs = Date().timeIntervalSince(refreshStartedAt) * 1000.0
         debugMetrics.refreshCount &+= 1
         debugMetrics.refreshTotalDurationMs += refreshDurationMs

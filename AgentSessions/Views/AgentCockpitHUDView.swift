@@ -522,6 +522,10 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private func rebuildIfReady(activeCodex: CodexActiveSessionsModel? = nil) {
         let activeCodex = activeCodex ?? self.activeCodex
         guard let activeCodex else { return }
+#if DEBUG
+        let _hudSpan = Perf.begin("hudRebuild", thresholdMs: 4)
+        defer { Perf.end(_hudSpan) }
+#endif
         let now = Date()
         let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
         let activeSubagentCounts = CodexActiveSessionsModel.activeSubagentCounts(
