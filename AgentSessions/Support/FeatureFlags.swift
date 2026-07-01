@@ -52,4 +52,11 @@ enum FeatureFlags {
     // General Codex session deletion remains forbidden by the cleanup gate.
     static let allowCodexProbeDeletion = true
 
+    // Phase 2+ progressive windowed transcript build. When false, the line/block
+    // model uses today's local (slice-relative) identities — byte-for-byte
+    // unchanged. When true, lines/blocks derive stable GLOBAL identities so a
+    // later prepended window never renumbers existing lines. Default false until
+    // parity-gated.
+    static let transcriptWindowedBuild = false
+
 }
