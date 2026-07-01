@@ -32,11 +32,16 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
+> **New in 4.0** — Watch your Codex and Claude quota burn down per session with the new **Session Runway**, recover hidden Codex Desktop **side chats** (`#side`), and find & restore archived Claude Code sessions in one searchable local view. [See what's new ↓](#whats-new-in-40)
+
 ## Overview
 
 Agent Sessions is a local-first Mac app for finding useful work that coding agents already wrote to disk. It brings Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, and Pi histories into one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
+  <p style="margin:0 0 0px 0;"><em>New in 4.0 — Session Runway: live per-session quota burn-rate</em></p>
+  <img src="docs/assets/quota-meter-runway.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+
   <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/session-all-agents-dark.png">
@@ -76,7 +81,7 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 Also new in 4.0:
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable session rows with their own `side` badge and parent context; filter with `#side` (and `#side phrase` to search within them).
 - **Antigravity provider** — replaces Gemini CLI support; discovers Antigravity CLI session transcripts, resumes with `agy --conversation <id>`, tracks live sessions, and surfaces local screenshots in the transcript and image browser.
-- **Restore archived Claude sessions** — Claude Code can archive Desktop sessions but can't bring them back; Agent Sessions surfaces them (an `archived` pill and an archived-only filter) and restores them in place. Since the app is otherwise read-only, restore is an explicit opt-in, off by default — it only writes to Claude's files once you enable it.
+- **Restore archived Claude sessions** — Agent Sessions surfaces archived Claude Code sessions (an `archived` pill and an archived-only filter) and restores them in place, within its searchable local history. Since the app is otherwise read-only, restore is an explicit opt-in, off by default — it only writes to Claude's files once you enable it.
 - **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the list loses focus.
 - **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
 - **Codex reset credits** — when Codex grants a free "reset your usage now" credit, the Quota Meter and menu bar now show it and when it expires, so you can see how many resets you have banked.
