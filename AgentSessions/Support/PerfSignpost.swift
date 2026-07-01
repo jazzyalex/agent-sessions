@@ -31,6 +31,9 @@ enum Perf {
     /// Begin a timed span. Pair with `Perf.end(_:)`, ideally via `defer`. `detail` is kept
     /// as a closure and only evaluated in `end()` if the span exceeds its threshold, so
     /// under-threshold spans (the common case) never build the interpolated string.
+    /// IMPORTANT: `detail` is evaluated at end() time. If it reads mutable state that
+    /// changes during the span (e.g. a property reassigned mid-function), snapshot that
+    /// value into a `let` before calling begin() so the printed detail reflects begin-time.
     static func begin(_ name: StaticString,
                       thresholdMs: Double = 16,
                       _ detail: @escaping @autoclosure () -> String = "") -> Span {

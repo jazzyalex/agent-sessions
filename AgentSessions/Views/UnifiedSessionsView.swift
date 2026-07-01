@@ -75,9 +75,13 @@ enum UnifiedTableIdentityPolicy {
         "unified-table-\(columnLayoutID.uuidString)-\(reorderGeneration)"
     }
 
-    /// Above this many moved rows, SwiftUI Table's reorder-diff (O(n^2) in moves) becomes
-    /// a multi-second beachball, so we force an O(n) rebuild instead. Below it, SwiftUI's
-    /// diff is cheap AND preserves scroll position / in-flight state, so we let it run.
+    /// Above this many moved rows, force an O(n) Table rebuild rather than let SwiftUI
+    /// diff the reorder. Measured: a full ~3,300-row re-sort (moved≈n) diffs in ~6.5s.
+    /// Even under a pessimistic O(moved·n) cost model this bounds the diff-path worst case
+    /// to roughly a few-hundred ms for a sub-threshold (moved<128) reorder on a 3,300-row
+    /// list — a brief hitch, not a beachball — while preserving scroll position for those
+    /// small/incidental reorders. A genuine column-header sort re-keys ~all rows
+    /// (moved≈n ≫ 128), so it always takes the rebuild path.
     static let reorderRebuildThreshold = 128
 
     /// A *large* reorder = same membership, and enough rows moved that SwiftUI's move-diff
@@ -2284,7 +2288,10 @@ struct UnifiedSessionsView: View {
 		    @discardableResult
 		    private func updateCachedRows() -> Bool {
 #if DEBUG
-        let _perfSpan = Perf.begin("updateCachedRows", thresholdMs: 8, "n=\(cachedRows.count) activeOnly=\(showActiveSessionsOnly)")
+        // Snapshot the row count NOW: Perf detail closures are evaluated lazily in end()
+        // (after cachedRows is reassigned below), so capture the pre-update value in a let.
+        let _rowsBefore = cachedRows.count
+        let _perfSpan = Perf.begin("updateCachedRows", thresholdMs: 8, "n=\(_rowsBefore) activeOnly=\(showActiveSessionsOnly)")
         defer { Perf.end(_perfSpan) }
         let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
 #endif
