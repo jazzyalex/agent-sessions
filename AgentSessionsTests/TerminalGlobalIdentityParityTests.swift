@@ -173,4 +173,28 @@ final class TerminalGlobalIdentityParityTests: XCTestCase {
                            "mapper key for user block \(block.eventID) must equal its globalBlockIndex")
         }
     }
+
+    // MARK: Task 6 assertions
+
+    /// Mirror of buildRebuildResult's user-line join, using only public APIs, to
+    /// prove the global blockIndex keys resolve consistently. The key assertion:
+    /// every user block's globalBlockIndex appears as a line.blockIndex, so the
+    /// first-line-of-block lookup the view performs cannot miss.
+    func testEveryUserBlockHasAFirstLineUnderGlobalKeys() {
+        let session = makeSession(source: .codex, events: mixedEvents())
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let lines = TerminalBuilder.buildLines(from: blocks, source: .codex)
+
+        var firstLineForBlock: [Int: Int] = [:]
+        for line in lines {
+            guard let bi = line.blockIndex, bi >= 0 else { continue }
+            if firstLineForBlock[bi] == nil { firstLineForBlock[bi] = line.id }
+        }
+
+        for block in blocks where block.kind == .user {
+            let key = FeatureFlags.transcriptWindowedBuild ? block.globalBlockIndex : block.globalBlockIndex
+            XCTAssertNotNil(firstLineForBlock[key],
+                            "user block \(block.eventID) (key \(key)) must have a first line")
+        }
+    }
 }

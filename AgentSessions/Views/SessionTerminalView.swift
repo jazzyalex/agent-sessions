@@ -1000,14 +1000,17 @@ struct SessionTerminalView: View {
             }
 
             for (idx, block) in blocks.enumerated() {
-                let targetUserBlock: Int?
+                let targetUserBlockOffset: Int?
                 if block.kind == .user {
-                    targetUserBlock = idx
+                    targetUserBlockOffset = idx
                 } else {
-                    targetUserBlock = nearestUserBlockIndex(for: idx)
+                    targetUserBlockOffset = nearestUserBlockIndex(for: idx)
                 }
-                guard let targetUserBlock,
-                      let lineID = firstLineForBlock[targetUserBlock] else { continue }
+                guard let targetUserBlockOffset,
+                      blocks.indices.contains(targetUserBlockOffset) else { continue }
+                // firstLineForBlock is keyed by line.blockIndex == globalBlockIndex.
+                let lookupKey = blocks[targetUserBlockOffset].globalBlockIndex
+                guard let lineID = firstLineForBlock[lookupKey] else { continue }
                 eventIDToUserLineID[block.eventID] = lineID
             }
         }
@@ -1043,7 +1046,7 @@ struct SessionTerminalView: View {
                     derivedKey = "tool-block-\(idx)"
                 }
 
-                toolGroupKeyForBlock[idx] = derivedKey
+                toolGroupKeyForBlock[block.globalBlockIndex] = derivedKey
                 lastToolGroupKey = derivedKey
                 if let normalizedName { lastToolName = normalizedName }
             }
