@@ -81,9 +81,11 @@ struct TerminalBuilder {
         let useGlobalIDs = FeatureFlags.transcriptWindowedBuild
         var nextID = 0                       // local-id path (flag off)
         var syntheticBlockIndex = -1
-        var syntheticIDCounter = 0           // synthetic-id path (flag on)
-        // Per-(global)block ordinal so global ids stay unique within a block.
-        var ordinalByGlobalBlock: [Int: Int] = [:]
+        // Per-(global)block ordinals so global ids stay unique within a block AND
+        // stable across windowed slices (keyed by global block index, not a
+        // per-call counter, so a prepended window never collides with the tail).
+        var ordinalByGlobalBlock: [Int: Int] = [:]           // real lines
+        var syntheticOrdinalByGlobalBlock: [Int: Int] = [:]  // synthetic/meta lines
 
         for (blockIndex, block) in blocks.enumerated() {
             let baseRole: TerminalLineRole = {
@@ -144,8 +146,12 @@ struct TerminalBuilder {
                     let lineEventIndex: Int?
                     if useGlobalIDs {
                         if isSynthetic {
-                            lineID = TerminalLineID.makeSyntheticID(syntheticCounter: syntheticIDCounter)
-                            syntheticIDCounter += 1
+                            // Anchor synthetic ids to the owning block's global index +
+                            // a per-block synthetic ordinal so they are slice-stable.
+                            let gbi = segment.globalBlockIndex
+                            let sOrd = syntheticOrdinalByGlobalBlock[gbi, default: 0]
+                            syntheticOrdinalByGlobalBlock[gbi] = sOrd + 1
+                            lineID = TerminalLineID.makeSyntheticID(globalBlockIndex: gbi, syntheticOrdinal: sOrd)
                             lineBlockIndex = segment.blockIndex      // keep negative sentinel
                             lineEventIndex = segment.firstEventIndex >= 0 ? segment.firstEventIndex : nil
                         } else {

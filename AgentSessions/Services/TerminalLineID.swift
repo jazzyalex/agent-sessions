@@ -17,10 +17,6 @@ enum TerminalLineID {
     /// collide with the next block. Real blocks are at most a few thousand lines.
     static let stride = 1_000_000
 
-    /// Synthetic (meta) lines that have no real block index get negative ids in a
-    /// separate space so they never collide with real (`>= 0`) block ids.
-    static let syntheticIDBase = -1
-
     /// Encode the id for line `lineOrdinal` (0-based, reset per block) of block
     /// `globalBlockIndex` (0-based over the full coalesced-block stream).
     ///
@@ -39,10 +35,22 @@ enum TerminalLineID {
         return globalBlockIndex * stride + lineOrdinal
     }
 
-    /// Encode a synthetic (negative) id for a meta line with no real block index.
-    /// `syntheticCounter` increments per synthetic line within a single build.
-    static func makeSyntheticID(syntheticCounter: Int) -> Int {
-        syntheticIDBase - syntheticCounter
+    /// Encode a globally-stable synthetic (negative) id for a meta line that has no
+    /// real block (system-reminder / interrupt / local-command wrapper). Derived
+    /// from the OWNING block's global index plus a per-block synthetic ordinal, so
+    /// the id is stable across windowed slices (a prepended older window and the
+    /// current window never collide on `-1`) and never aliases a real (`>= 0`) id
+    /// or a synthetic id from another block.
+    ///
+    /// Encoding: `-(globalBlockIndex * stride + syntheticOrdinal) - 1` — always
+    /// `<= -1` (so `globalBlockIndex(from:)` still classifies it synthetic), and
+    /// bijective in `(globalBlockIndex, syntheticOrdinal)` for ordinals `< stride`.
+    static func makeSyntheticID(globalBlockIndex: Int, syntheticOrdinal: Int) -> Int {
+        assert(globalBlockIndex >= 0,
+               "TerminalLineID.makeSyntheticID: globalBlockIndex must be >= 0 (got \(globalBlockIndex))")
+        assert(syntheticOrdinal >= 0 && syntheticOrdinal < stride,
+               "TerminalLineID.makeSyntheticID: syntheticOrdinal \(syntheticOrdinal) out of 0..<\(stride)")
+        return -(globalBlockIndex * stride + syntheticOrdinal) - 1
     }
 
     /// Decode the global block index from an id, or nil if the id is synthetic
