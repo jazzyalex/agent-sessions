@@ -299,6 +299,12 @@ struct SessionTranscriptBuilder {
         var isErrorOutput: Bool
         var eventID: String
         var rawJSON: String
+        /// 0-based index over the FULL coalesced-block stream for this session.
+        /// Stable across slicing. -1 until assigned by `coalesce`.
+        var globalBlockIndex: Int = -1
+        /// Index of this block's FIRST originating event within `session.events`
+        /// (first event of a merge chain). -1 until assigned by `coalesce`.
+        var firstEventIndex: Int = -1
     }
 
     private static func block(from e: SessionEvent) -> LogicalBlock {
@@ -471,7 +477,7 @@ struct SessionTranscriptBuilder {
     private static func coalesce(events: [SessionEvent], source: SessionSource, includeMeta: Bool) -> [LogicalBlock] {
         var blocks: [LogicalBlock] = []
         blocks.reserveCapacity(events.count)
-        for e in events {
+        for (eventIndex, e) in events.enumerated() {
             if e.kind == .meta && !includeMeta { continue }
             let base = block(from: e)
             let expanded = expandUserEmbeddedNoticesIfNeeded(block: base)
@@ -487,12 +493,19 @@ struct SessionTranscriptBuilder {
                     if merged.toolName == nil { merged.toolName = b.toolName }
                     if merged.toolInput == nil { merged.toolInput = b.toolInput }
                     merged.isErrorOutput = merged.isErrorOutput || b.isErrorOutput
+                    // firstEventIndex stays the merge chain's FIRST event (already set).
                     blocks.removeLast()
                     blocks.append(merged)
                 } else {
+                    b.firstEventIndex = eventIndex
                     blocks.append(b)
                 }
             }
+        }
+        // Assign the stable global block index as the final stream offset. Done in
+        // a single pass after coalescing so merges don't leave gaps.
+        for i in blocks.indices {
+            blocks[i].globalBlockIndex = i
         }
         return blocks
     }
