@@ -76,4 +76,83 @@ final class TerminalGlobalIdentityParityTests: XCTestCase {
         XCTAssertEqual(merged.firstEventIndex, 1,
                        "merged block firstEventIndex must be the first event in the chain")
     }
+
+    // MARK: Task 4 assertions
+
+    /// Helper: temporarily can't flip a `static let`, so we assert the SHAPE the
+    /// builder must produce when the global scheme is active by reading the flag
+    /// directly. The flag is compile-time; these assertions branch on it so the
+    /// suite is correct whether the flag ships off (today) or on (Phase 4).
+    func testBuildLinesGlobalIDsEncodeBlockAndOrdinal() {
+        let session = makeSession(source: .codex, events: mixedEvents())
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let lines = TerminalBuilder.buildLines(from: blocks, source: .codex)
+
+        XCTAssertFalse(lines.isEmpty)
+
+        if FeatureFlags.transcriptWindowedBuild {
+            // Every non-synthetic line's id must decode to its blockIndex, and
+            // blockIndex must equal the originating block's globalBlockIndex.
+            for line in lines {
+                guard let bi = line.blockIndex, bi >= 0 else { continue } // skip synthetic
+                guard let decoded = TerminalLineID.globalBlockIndex(from: line.id) else {
+                    return XCTFail("real line id \(line.id) failed to decode")
+                }
+                XCTAssertEqual(decoded, bi,
+                               "line id \(line.id) must decode to its blockIndex \(bi)")
+            }
+            // eventIndex must be populated (non-nil) for every real-block line.
+            for line in lines where (line.blockIndex ?? -1) >= 0 {
+                XCTAssertNotNil(line.eventIndex, "real-block line must carry eventIndex")
+            }
+        } else {
+            // Today's behavior: ids are 0..N-1 contiguous, eventIndex is nil.
+            XCTAssertEqual(lines.map(\.id), Array(0..<lines.count),
+                           "with flag off, ids stay contiguous from 0")
+            XCTAssertTrue(lines.allSatisfy { $0.eventIndex == nil },
+                          "with flag off, eventIndex stays nil")
+        }
+    }
+
+    func testBuildLinesIDsAreUniqueAndMonotonicEitherWay() {
+        let session = makeSession(source: .codex, events: mixedEvents())
+        let lines = TerminalBuilder.buildLines(for: session, showMeta: false)
+        let ids = lines.map(\.id)
+        XCTAssertEqual(Set(ids).count, ids.count, "line ids must be unique")
+        // Real (non-synthetic) ids must be strictly increasing in render order.
+        let realIDs = lines.filter { ($0.blockIndex ?? -1) >= 0 }.map(\.id)
+        for (a, b) in zip(realIDs, realIDs.dropFirst()) {
+            XCTAssertLessThan(a, b, "real line ids must increase in render order")
+        }
+    }
+
+    /// A slice of the block stream must produce the SAME ids/blockIndex for those
+    /// blocks as the whole-session build — the core slice-stability property.
+    /// (Only meaningful with the flag on; asserted unconditionally as documentation.)
+    func testSliceBuildMatchesWholeSessionForSharedBlocks() {
+        let session = makeSession(source: .codex, events: mixedEvents())
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        guard blocks.count >= 4 else { return XCTFail("need >= 4 blocks") }
+
+        let whole = TerminalBuilder.buildLines(from: blocks, source: .codex)
+        let tailSlice = Array(blocks.suffix(2))
+        let tail = TerminalBuilder.buildLines(from: tailSlice, source: .codex)
+
+        if FeatureFlags.transcriptWindowedBuild {
+            // For the last two blocks, the slice build must reproduce the exact
+            // ids + blockIndex + text the whole build produced for those blocks.
+            let lastTwoBlockIndices = Set(tailSlice.map(\.globalBlockIndex))
+            let wholeTail = whole.filter { ($0.blockIndex).map(lastTwoBlockIndices.contains) ?? false }
+            XCTAssertEqual(tail.map(\.id), wholeTail.map(\.id),
+                           "slice build ids must match whole-session ids for shared blocks")
+            XCTAssertEqual(tail.map(\.text), wholeTail.map(\.text),
+                           "slice build text must match whole-session text for shared blocks")
+            XCTAssertEqual(tail.map(\.blockIndex), wholeTail.map(\.blockIndex),
+                           "slice build blockIndex must match whole-session for shared blocks")
+        } else {
+            // With the flag off, a slice build renumbers from 0 — this documents
+            // exactly why Phase 2 is needed. Assert the slice DOES start at 0.
+            XCTAssertEqual(tail.first?.id, 0, "flag-off slice build renumbers from 0")
+        }
+    }
 }

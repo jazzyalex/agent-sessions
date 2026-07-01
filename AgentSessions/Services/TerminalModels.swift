@@ -78,8 +78,12 @@ struct TerminalBuilder {
         var lines: [TerminalLine] = []
         lines.reserveCapacity(blocks.count * 2)
 
-        var nextID = 0
+        let useGlobalIDs = FeatureFlags.transcriptWindowedBuild
+        var nextID = 0                       // local-id path (flag off)
         var syntheticBlockIndex = -1
+        var syntheticIDCounter = 0           // synthetic-id path (flag on)
+        // Per-(global)block ordinal so global ids stay unique within a block.
+        var ordinalByGlobalBlock: [Int: Int] = [:]
 
         for (blockIndex, block) in blocks.enumerated() {
             let baseRole: TerminalLineRole = {
@@ -111,6 +115,8 @@ struct TerminalBuilder {
                                         baseRole: baseRole,
                                         rawText: rawText,
                                         blockIndex: blockIndex,
+                                        globalBlockIndex: block.globalBlockIndex,
+                                        firstEventIndex: block.firstEventIndex,
                                         source: source,
                                         enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
@@ -129,19 +135,43 @@ struct TerminalBuilder {
                     continue
                 }
 
+                let isSynthetic = (segment.blockIndex ?? 0) < 0
+
                 for fragment in splitLines {
                     let lineText = String(fragment)
+                    let lineID: Int
+                    let lineBlockIndex: Int?
+                    let lineEventIndex: Int?
+                    if useGlobalIDs {
+                        if isSynthetic {
+                            lineID = TerminalLineID.makeSyntheticID(syntheticCounter: syntheticIDCounter)
+                            syntheticIDCounter += 1
+                            lineBlockIndex = segment.blockIndex      // keep negative sentinel
+                            lineEventIndex = segment.firstEventIndex >= 0 ? segment.firstEventIndex : nil
+                        } else {
+                            let gbi = segment.globalBlockIndex
+                            let ordinal = ordinalByGlobalBlock[gbi, default: 0]
+                            ordinalByGlobalBlock[gbi] = ordinal + 1
+                            lineID = TerminalLineID.makeID(globalBlockIndex: gbi, lineOrdinal: ordinal)
+                            lineBlockIndex = gbi                      // GLOBAL block index
+                            lineEventIndex = segment.firstEventIndex >= 0 ? segment.firstEventIndex : nil
+                        }
+                    } else {
+                        lineID = nextID
+                        nextID += 1
+                        lineBlockIndex = segment.blockIndex          // local offset (unchanged)
+                        lineEventIndex = nil                          // unchanged
+                    }
                     let line = TerminalLine(
-                        id: nextID,
+                        id: lineID,
                         text: lineText,
                         role: segment.role,
-                        eventIndex: nil,
-                        blockIndex: segment.blockIndex,
+                        eventIndex: lineEventIndex,
+                        blockIndex: lineBlockIndex,
                         decorationGroupID: segment.decorationGroupID,
                         semanticKind: segment.semanticKind
                     )
                     lines.append(line)
-                    nextID += 1
                 }
             }
         }
@@ -199,6 +229,8 @@ struct TerminalBuilder {
                                         baseRole: baseRole,
                                         rawText: rawText,
                                         blockIndex: blockIndex,
+                                        globalBlockIndex: block.globalBlockIndex,
+                                        firstEventIndex: block.firstEventIndex,
                                         source: source,
                                         enableReviewCards: enableReviewCards,
                                         syntheticIndex: &syntheticBlockIndex)
@@ -257,6 +289,11 @@ struct TerminalBuilder {
         let blockIndex: Int?
         let decorationGroupID: Int
         let semanticKind: SemanticKind?
+        /// Stable global block index for this segment's owning block (real blocks
+        /// only; synthetic meta segments keep their negative `blockIndex`).
+        let globalBlockIndex: Int
+        /// Originating event index of the owning block (for `TerminalLine.eventIndex`).
+        let firstEventIndex: Int
     }
 
     private struct SegmentSeed {
@@ -270,6 +307,8 @@ struct TerminalBuilder {
                                      baseRole: TerminalLineRole,
                                      rawText: String,
                                      blockIndex: Int,
+                                     globalBlockIndex: Int,
+                                     firstEventIndex: Int,
                                      source: SessionSource,
                                      enableReviewCards: Bool,
                                      syntheticIndex: inout Int) -> [LineSegment] {
@@ -310,13 +349,17 @@ struct TerminalBuilder {
             seeds = [SegmentSeed(role: baseRole, text: rawText, blockIndex: blockIndex, semanticKind: nil)]
         }
 
+        let decoGroupBase = FeatureFlags.transcriptWindowedBuild ? globalBlockIndex : blockIndex
         return seeds.enumerated().map { idx, seed in
-            let effectiveBlockIndex = seed.blockIndex ?? blockIndex
+            // Negative synthetic seed.blockIndex must keep its own decoration grouping.
+            let effectiveBlockIndex = seed.blockIndex.map { $0 < 0 ? $0 : decoGroupBase } ?? decoGroupBase
             return LineSegment(role: seed.role,
                                text: seed.text,
                                blockIndex: seed.blockIndex,
                                decorationGroupID: decorationGroupID(blockIndex: effectiveBlockIndex, segmentOrdinal: idx),
-                               semanticKind: seed.semanticKind)
+                               semanticKind: seed.semanticKind,
+                               globalBlockIndex: globalBlockIndex,
+                               firstEventIndex: firstEventIndex)
         }
     }
 
