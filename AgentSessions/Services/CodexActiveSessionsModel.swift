@@ -1286,6 +1286,8 @@ final class CodexActiveSessionsModel: ObservableObject {
 
         // Deduplicate and merge: keep freshest lastSeenAt, but preserve metadata from any source.
 #if DEBUG
+        // NOTE: _mergeSpan/_pubSpan are paired manually (not via defer). Any early return
+        // added between a Perf.begin and its Perf.end would leak an open os_signpost interval.
         let _mergeSpan = Perf.begin("refreshMerge", thresholdMs: 4, "presences=\(loaded.count)")
 #endif
         var sessionMap: [String: CodexActivePresence] = [:]

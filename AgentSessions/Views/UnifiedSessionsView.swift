@@ -75,14 +75,23 @@ enum UnifiedTableIdentityPolicy {
         "unified-table-\(columnLayoutID.uuidString)-\(reorderGeneration)"
     }
 
-    /// A wholesale reorder = same membership, different order. Diffing this in SwiftUI's
-    /// Table is O(n^2); rebuilding via a new identity is O(n). Adds/removes (membership
-    /// change) are NOT reorders — SwiftUI diffs those cheaply, so return false and let it.
-    static func isWholesaleReorder(old: [Session], new: [Session]) -> Bool {
+    /// Above this many moved rows, SwiftUI Table's reorder-diff (O(n^2) in moves) becomes
+    /// a multi-second beachball, so we force an O(n) rebuild instead. Below it, SwiftUI's
+    /// diff is cheap AND preserves scroll position / in-flight state, so we let it run.
+    static let reorderRebuildThreshold = 128
+
+    /// A *large* reorder = same membership, and enough rows moved that SwiftUI's move-diff
+    /// (O(n^2)) would beachball. Only then is a full Table rebuild (new .id(), O(n)) worth
+    /// its cost (loses scroll position). Small reorders (a few rows, or an incidental
+    /// hierarchy regroup) and membership changes fall through to SwiftUI's cheap diff, which
+    /// preserves scroll. The expensive Set-equality membership check runs only once the
+    /// move count already crossed the threshold, so normal/idle updates pay just an O(n)
+    /// scan with no allocation.
+    static func isLargeReorder(old: [Session], new: [Session]) -> Bool {
         guard old.count == new.count, old.count > 1 else { return false }
-        var positionChanged = false
-        for i in 0..<old.count where old[i].id != new[i].id { positionChanged = true; break }
-        guard positionChanged else { return false }
+        var moved = 0
+        for i in 0..<old.count where old[i].id != new[i].id { moved += 1 }
+        guard moved >= reorderRebuildThreshold else { return false }
         return Set(old.lazy.map(\.id)) == Set(new.lazy.map(\.id))
     }
 }
@@ -2351,11 +2360,15 @@ struct UnifiedSessionsView: View {
                 Perf.end(_hbSpan)
 #endif
                 let newRows = hierarchyResult.sessions
-                // A wholesale reorder (sort) is O(n^2) for SwiftUI Table to diff; bump the
-                // table identity so it rebuilds (O(n)) instead. Membership changes fall
-                // through to SwiftUI's normal (cheap) diff.
-                if UnifiedTableIdentityPolicy.isWholesaleReorder(old: cachedRows, new: newRows) {
+                // A *large* reorder (e.g. a column sort moving most rows) is O(n^2) for
+                // SwiftUI Table to diff; bump the table identity so it rebuilds (O(n))
+                // instead. Small reorders and membership changes fall through to SwiftUI's
+                // cheap diff, which preserves scroll position.
+                if UnifiedTableIdentityPolicy.isLargeReorder(old: cachedRows, new: newRows) {
                     tableReorderGeneration &+= 1
+#if DEBUG
+                    Perf.event("reorderRebuild", "rows=\(newRows.count) gen=\(tableReorderGeneration)")
+#endif
                 }
                 cachedRows = newRows
                 hierarchyRowMeta = hierarchyResult.rowMeta

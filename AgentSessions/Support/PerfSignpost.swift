@@ -25,16 +25,18 @@ enum Perf {
         let id: OSSignpostID
         let start: DispatchTime
         let thresholdMs: Double
-        let detail: String
+        let detail: () -> String
     }
 
-    /// Begin a timed span. Pair with `Perf.end(_:)`, ideally via `defer`.
+    /// Begin a timed span. Pair with `Perf.end(_:)`, ideally via `defer`. `detail` is kept
+    /// as a closure and only evaluated in `end()` if the span exceeds its threshold, so
+    /// under-threshold spans (the common case) never build the interpolated string.
     static func begin(_ name: StaticString,
                       thresholdMs: Double = 16,
-                      _ detail: @autoclosure () -> String = "") -> Span {
+                      _ detail: @escaping @autoclosure () -> String = "") -> Span {
         let id = OSSignpostID(log: log)
         os_signpost(.begin, log: log, name: name, signpostID: id)
-        return Span(name: name, id: id, start: DispatchTime.now(), thresholdMs: thresholdMs, detail: detail())
+        return Span(name: name, id: id, start: DispatchTime.now(), thresholdMs: thresholdMs, detail: detail)
     }
 
     /// End a span. Prints `[perf] <name> <detail> <extra> N.Nms` when over threshold.
@@ -42,7 +44,8 @@ enum Perf {
         os_signpost(.end, log: log, name: span.name, signpostID: span.id)
         let ms = Double(DispatchTime.now().uptimeNanoseconds &- span.start.uptimeNanoseconds) / 1_000_000
         guard ms >= span.thresholdMs else { return }
-        let d = span.detail.isEmpty ? "" : " " + span.detail
+        let detailStr = span.detail()
+        let d = detailStr.isEmpty ? "" : " " + detailStr
         let extraStr = extra()
         let e = extraStr.isEmpty ? "" : " " + extraStr
         print(String(format: "[perf] %@%@%@ %.1fms", String(describing: span.name), d, e, ms))
@@ -71,6 +74,10 @@ final class MainThreadStallMonitor {
     private let stallThresholdMs: Double = 200
 
     func start() {
+        // Only run during an explicit perf investigation, not on every DEBUG launch:
+        // enabled when AS_PERF_MONITOR is set, or implicitly during an AS_PERF_BENCH run.
+        let env = ProcessInfo.processInfo.environment
+        guard env["AS_PERF_MONITOR"] != nil || (env["AS_PERF_BENCH"].map { !$0.isEmpty } ?? false) else { return }
         guard timer == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + .milliseconds(Int(intervalMs)),
