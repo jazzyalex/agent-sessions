@@ -23,8 +23,20 @@ enum TerminalLineID {
 
     /// Encode the id for line `lineOrdinal` (0-based, reset per block) of block
     /// `globalBlockIndex` (0-based over the full coalesced-block stream).
+    ///
+    /// Invariants (fail loud in DEBUG rather than silently corrupt an id):
+    /// - `globalBlockIndex >= 0` — real blocks only; synthetic/meta lines with no
+    ///   real block must use `makeSyntheticID` (a negative index here would produce
+    ///   a negative id that `globalBlockIndex(from:)` misreads as synthetic).
+    /// - `0 <= lineOrdinal < stride` — a block contributing `>= stride` lines would
+    ///   alias into the next block's id space. Real blocks are at most a few thousand
+    ///   lines; the assert catches any pathological session in testing.
     static func makeID(globalBlockIndex: Int, lineOrdinal: Int) -> Int {
-        globalBlockIndex * stride + lineOrdinal
+        assert(globalBlockIndex >= 0,
+               "TerminalLineID.makeID: globalBlockIndex must be >= 0 (got \(globalBlockIndex)); use makeSyntheticID for meta lines")
+        assert(lineOrdinal >= 0 && lineOrdinal < stride,
+               "TerminalLineID.makeID: lineOrdinal \(lineOrdinal) out of 0..<\(stride); block would alias into the next block's id space")
+        return globalBlockIndex * stride + lineOrdinal
     }
 
     /// Encode a synthetic (negative) id for a meta line with no real block index.
