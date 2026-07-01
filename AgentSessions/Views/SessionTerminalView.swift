@@ -1043,7 +1043,11 @@ struct SessionTerminalView: View {
                 }
 
                 if derivedKey == nil {
-                    derivedKey = "tool-block-\(idx)"
+                    // Use the GLOBAL block index so the fallback group key is stable
+                    // across windowed slices (idx is slice-relative; globalBlockIndex
+                    // is not). Matches the toolMessageIDs() reader, which keys by the
+                    // global line.blockIndex.
+                    derivedKey = "tool-block-\(block.globalBlockIndex)"
                 }
 
                 toolGroupKeyForBlock[block.globalBlockIndex] = derivedKey
