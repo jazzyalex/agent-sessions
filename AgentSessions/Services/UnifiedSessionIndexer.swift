@@ -691,6 +691,12 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     // Debouncing for expensive operations
     private var recomputeDebouncer: DispatchWorkItem? = nil
+
+    /// Bumped (main-only) on every authoritative filter publish to `sessions`.
+    /// The sort-only fast path captures this at snapshot time and skips its
+    /// republish if a fresher filter pass landed while it sorted off-main —
+    /// otherwise a stale re-sorted snapshot could clobber correct membership.
+    private var sessionsFilterGeneration: Int = 0
     
     init(codexIndexer: SessionIndexer,
          claudeIndexer: ClaudeSessionIndexer,
@@ -1037,6 +1043,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 guard let self else { return }
                 self.publishAfterCurrentUpdate {
                     self.sessions = results
+                    self.sessionsFilterGeneration &+= 1
                     if !self.hasPublishedInitialSessions {
                         self.hasPublishedInitialSessions = true
                     }
@@ -1051,17 +1058,25 @@ final class UnifiedSessionIndexer: ObservableObject {
         $sortDescriptor
             .dropFirst()
             .removeDuplicates()
-            .map { [weak self] desc -> ([Session], SessionSortDescriptor) in
-                (self?.sessions ?? [], desc)
+            .map { [weak self] desc -> ([Session], SessionSortDescriptor, Int) in
+                // Capture the current filtered set AND its generation together on main.
+                (self?.sessions ?? [], desc, self?.sessionsFilterGeneration ?? 0)
             }
             .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .map { [weak self] pair -> [Session] in
-                self?.applySort(pair.0, descriptor: pair.1) ?? pair.0
+            .map { [weak self] triple -> ([Session], Int) in
+                (self?.applySort(triple.0, descriptor: triple.1) ?? triple.0, triple.2)
             }
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] sorted in
+            .sink { [weak self] payload in
                 guard let self else { return }
-                self.publishAfterCurrentUpdate { self.sessions = sorted }
+                let (sorted, capturedGeneration) = payload
+                self.publishAfterCurrentUpdate {
+                    // A filter pass may have republished a fresher `sessions` while we
+                    // sorted off-main. That pass already applied the current sort
+                    // descriptor, so our snapshot is stale — skip to avoid clobbering it.
+                    guard self.sessionsFilterGeneration == capturedGeneration else { return }
+                    self.sessions = sorted
+                }
             }
             .store(in: &cancellables)
 
@@ -1340,6 +1355,18 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    /// Large-session guardrail check for a focused context that carries no size
+    /// info (monitor/refresh paths only have `FocusedSessionContext`). Resolves the
+    /// backing `Session` and consults the gate; if the session can't be resolved we
+    /// allow hydration (unknown size — don't block a legitimate refresh).
+    @MainActor
+    private func shouldAutoHydrateFocused(_ context: FocusedSessionContext) -> Bool {
+        guard let session = allSessions.first(where: {
+            $0.id == context.sessionID && $0.source == context.source
+        }) else { return true }
+        return TranscriptHydrationGate.shared.shouldAutoHydrate(session)
+    }
+
     @MainActor
     func setFocusedSession(_ session: Session?) {
         let newContext = session.map {
@@ -1399,7 +1426,10 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
 
             if let context = focusedSessionContext,
-               Self.supportsFocusedSessionMonitoring(source: context.source) {
+               Self.supportsFocusedSessionMonitoring(source: context.source),
+               // Large-session guardrail: don't restart the parsing monitor on
+               // foreground for a monster session the user hasn't opted into.
+               shouldAutoHydrateFocused(context) {
                 focusedSessionMonitorTask?.cancel()
                 focusedSessionMonitorTask = Task.detached(priority: .utility) { [weak self, context] in
                     await self?.runFocusedSessionMonitorLoop(context: context)
@@ -1880,6 +1910,9 @@ final class UnifiedSessionIndexer: ObservableObject {
                       context.source == source else {
                     return
                 }
+                // Large-session guardrail: a manual refresh must not force-parse a
+                // monster session the user declined via the interstitial.
+                guard self.shouldAutoHydrateFocused(context) else { return }
                 self.refreshFocusedSession(context: context, trigger: .manual)
             }
         }
@@ -2328,6 +2361,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let results = self.applyFiltersAndSort(to: self.allSessions)
                 DispatchQueue.main.async {
                     self.sessions = results
+                    self.sessionsFilterGeneration &+= 1
                 }
             }
         }

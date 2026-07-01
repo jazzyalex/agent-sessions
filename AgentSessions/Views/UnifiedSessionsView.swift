@@ -1053,8 +1053,11 @@ struct UnifiedSessionsView: View {
                 else if first.keyPath == \Session.sourceKey { key = .agent }
                 else if first.keyPath == \Session.listTitle { key = .title }
                 else { key = .title }
+                // Setting sortDescriptor drives the sort-only Combine fast path
+                // (re-sorts the already-filtered set off-main). Do NOT also call
+                // recomputeNow() here — a full filter+sort pass would run ~150ms
+                // later and overwrite the fast-path result, negating the optimization.
                 unified.sortDescriptor = .init(key: key, ascending: first.order == .forward)
-                unified.recomputeNow()
             }
             updateCachedRows()
             refreshSelectionSourceFromCachedRows()
@@ -2158,27 +2161,30 @@ struct UnifiedSessionsView: View {
     @discardableResult
     private func reloadSessionForSource(_ s: Session) -> Bool {
         let id = s.id
+        // Mirror the agent-enabled guards on the canonical focused-reload dispatch
+        // (UnifiedSessionIndexer.focusedMonitorCapabilityBySource): don't reload a
+        // source the user has disabled.
         switch s.source {
         case .codex:
-            if let e = codexIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { codexIndexer.reloadSession(id: id); return true }
+            if unified.codexAgentEnabled, let e = codexIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { codexIndexer.reloadSession(id: id); return true }
         case .claude:
-            if let e = claudeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { claudeIndexer.reloadSession(id: id); return true }
+            if unified.claudeAgentEnabled, let e = claudeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { claudeIndexer.reloadSession(id: id); return true }
         case .antigravity:
-            if let e = antigravityIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { antigravityIndexer.reloadSession(id: id); return true }
+            if unified.antigravityAgentEnabled, let e = antigravityIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { antigravityIndexer.reloadSession(id: id); return true }
         case .opencode:
-            if let e = opencodeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { opencodeIndexer.reloadSession(id: id); return true }
+            if unified.openCodeAgentEnabled, let e = opencodeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { opencodeIndexer.reloadSession(id: id); return true }
         case .hermes:
-            if let e = hermesIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { hermesIndexer.reloadSession(id: id); return true }
+            if unified.hermesAgentEnabled, let e = hermesIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { hermesIndexer.reloadSession(id: id); return true }
         case .copilot:
-            if let e = copilotIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { copilotIndexer.reloadSession(id: id); return true }
+            if unified.copilotAgentEnabled, let e = copilotIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { copilotIndexer.reloadSession(id: id); return true }
         case .droid:
-            if let e = droidIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { droidIndexer.reloadSession(id: id); return true }
+            if unified.droidAgentEnabled, let e = droidIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { droidIndexer.reloadSession(id: id); return true }
         case .openclaw:
-            if let e = openclawIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { openclawIndexer.reloadSession(id: id); return true }
+            if unified.openClawAgentEnabled, let e = openclawIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { openclawIndexer.reloadSession(id: id); return true }
         case .cursor:
-            if let e = cursorIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(e) { cursorIndexer.reloadSession(id: id); return true }
+            if unified.cursorAgentEnabled, let e = cursorIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(e) { cursorIndexer.reloadSession(id: id); return true }
         case .pi:
-            if let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
+            if unified.piAgentEnabled, let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
         }
         return false
     }

@@ -516,7 +516,7 @@ struct SessionTerminalView: View {
                     sessionSource: session.source,
                     inlineImagesEnabled: inlineSessionImageThumbnailsEnabled
                         && hasInlineImagesInSession
-                        && (session.source == .codex || session.source == .claude || session.source == .opencode || session.source == .openclaw)
+                        && (session.source == .codex || session.source == .claude || session.source == .opencode || session.source == .openclaw || session.source == .antigravity || session.source == .copilot)
                         && inlineImagesVisibleInSession,
                     inlineImagesByUserBlockIndex: inlineImagesByUserBlockIndex,
                     inlineImagesSignature: effectiveInlineImagesSignature,
@@ -4999,7 +4999,9 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
             let shouldAppendInlineImages: Bool = {
                 guard inlineImagesEnabled else { return false }
-                guard line.role == .user else { return false }
+                // Antigravity .md sessions produce a single assistant event for the whole document;
+                // images are mapped to that block, so allow any block role for that source.
+                guard line.role == .user || sessionSource == .antigravity else { return false }
                 guard isLastLineOfBlock, let blockIndex else { return false }
                 return !(inlineImagesByUserBlockIndex[blockIndex]?.isEmpty ?? true)
             }()

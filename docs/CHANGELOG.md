@@ -3,13 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Improvements
+- Session list: clicking a sort column header is now instant on large histories — sorting re-orders the current results in place instead of re-running the whole filter pipeline, and no longer freezes for several seconds after the first click.
+- Transcript: very large sessions now show a "Large session" screen with a "Show full transcript" opt-in, so opening a huge transcript no longer hangs the app; the opt-in is honored when returning to the app or pulling to refresh.
+
+### Bug Fixes
+- Transcript: Antigravity and GitHub Copilot sessions now render inline images that were previously detected but never displayed.
 
 ## [4.0] - 2026-06-28
 ### Highlights
 - **Quota Meter — now with Session Runway.** See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, **Session Runway** adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly "Limits Cockpit.")
 - **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
 - **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
-- **Restore archived Claude sessions** — Claude Code can archive Desktop sessions but gives you no way to bring them back. Agent Sessions surfaces archived sessions (an `archived` pill and an archived-only filter) and restores them in place. Because the app is otherwise read-only, restore is an explicit opt-in that's off by default — Agent Sessions only writes to Claude's files once you enable it.
+- **Restore archived Claude sessions** — Agent Sessions surfaces archived Claude Code sessions (an `archived` pill and an archived-only filter) and restores them in place, within its searchable local history. Because the app is otherwise read-only, restore is an explicit opt-in that's off by default — Agent Sessions only writes to Claude's files once you enable it.
 - **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
 
 ### Features

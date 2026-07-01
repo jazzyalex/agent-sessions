@@ -133,12 +133,14 @@ final class TranscriptCache: @unchecked Sendable {
 
         for session in sessions {
             if Task.isCancelled { break }
-            if FeatureFlags.gatePrewarmWhileTyping && TypingActivity.shared.isUserLikelyTyping {
-                // Back off while the user is actively typing to avoid contention
+            // Back off while the user is actively typing to avoid contention, but
+            // WAIT for idle rather than `continue` (which would drop this session
+            // from the batch entirely — it would never be indexed until the next run).
+            while FeatureFlags.gatePrewarmWhileTyping && TypingActivity.shared.isUserLikelyTyping {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 if Task.isCancelled { break }
-                continue
             }
+            if Task.isCancelled { break }
             let alreadyCached = withLock { nodes[session.id] != nil }
 
             // Skip if already cached or lightweight (no events)
