@@ -179,6 +179,29 @@ struct TerminalBuilder {
         return lines
     }
 
+    /// Build lines for only a contiguous range of **global** coalesced blocks.
+    ///
+    /// `allBlocks` is the full, already-coalesced block array (so boundaries are
+    /// merge-safe). `blockRange` is the inclusive range of global block indices to
+    /// build. Each produced `TerminalLine`'s `id` / `blockIndex` / `eventIndex` /
+    /// `decorationGroupID` are identical to what `buildLines(from: allBlocks, …)`
+    /// would assign to the same blocks — because every `LogicalBlock` carries its
+    /// stable `globalBlockIndex` (assigned once in `coalesce`), so building over a
+    /// sub-slice preserves global, stitchable ids with no offset needed. (This is
+    /// only meaningful when `FeatureFlags.transcriptWindowedBuild` is on; with the
+    /// flag off the whole/slice builds both use local contiguous ids.)
+    static func buildLines(from allBlocks: [SessionTranscriptBuilder.LogicalBlock],
+                           blockRange: ClosedRange<Int>,
+                           source: SessionSource,
+                           enableReviewCards: Bool = true) -> [TerminalLine] {
+        guard !allBlocks.isEmpty else { return [] }
+        let lower = max(0, blockRange.lowerBound)
+        let upper = min(allBlocks.count - 1, blockRange.upperBound)
+        guard lower <= upper else { return [] }
+        let slice = Array(allBlocks[lower...upper])
+        return buildLines(from: slice, source: source, enableReviewCards: enableReviewCards)
+    }
+
     /// Build both lines and coarse blocks in a single pass.
     ///
     /// This is currently unused by the UI but kept for future navigation
