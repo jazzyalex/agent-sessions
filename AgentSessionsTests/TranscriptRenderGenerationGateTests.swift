@@ -57,8 +57,8 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
     func testTableIdentityIgnoresActiveMembershipVersion() {
         let layoutID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
 
-        let beforeLivePoll = UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: layoutID)
-        let afterLivePoll = UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: layoutID)
+        let beforeLivePoll = UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: layoutID, reorderGeneration: 0)
+        let afterLivePoll = UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: layoutID, reorderGeneration: 0)
 
         XCTAssertEqual(beforeLivePoll, afterLivePoll)
         XCTAssertFalse(beforeLivePoll.contains("activeMembership"))
