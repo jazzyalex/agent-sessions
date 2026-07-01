@@ -56,7 +56,13 @@ enum FeatureFlags {
     // model uses today's local (slice-relative) identities — byte-for-byte
     // unchanged. When true, lines/blocks derive stable GLOBAL identities so a
     // later prepended window never renumbers existing lines. Default false until
-    // parity-gated.
+    // parity-gated. (Phase 3 also gates the windowed build-on-open on this flag.)
     static let transcriptWindowedBuild = false
+    // Target number of WHOLE coalesced blocks per window. The window is expanded
+    // outward to whole-block boundaries, so the realized line count varies with
+    // block sizes; this bounds the block count, not the line count.
+    static let transcriptWindowBlockTarget: Int = 400
+    // When true, scrolling near the transcript top loads the previous (older) window.
+    static let transcriptWindowNearTopLoadOlder = true
 
 }
