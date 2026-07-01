@@ -53,6 +53,19 @@ struct InlineSessionImage: Identifiable, Hashable, Sendable {
 }
 
 enum SessionInlineImageMapper {
+    /// Maps each user block's `eventID` to the block identity the terminal renderer
+    /// attaches inline images by (i.e. `line.blockIndex`). Keyed by the stable
+    /// `globalBlockIndex` so the key matches the renderer regardless of which
+    /// window is loaded.
+    static func userEventIDToBlockKey(blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [String: Int] {
+        var map: [String: Int] = [:]
+        map.reserveCapacity(64)
+        for block in blocks where block.kind == .user {
+            map[block.eventID] = block.globalBlockIndex
+        }
+        return map
+    }
+
     static func imagesByUserBlockIndex(for session: Session,
                                        maxMatches: Int = 400,
                                        shouldCancel: () -> Bool = { false }) -> [Int: [InlineSessionImage]] {
@@ -170,11 +183,7 @@ enum SessionInlineImageMapper {
         guard !filtered.isEmpty, !shouldCancel() else { return [:] }
 
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
-        var userEventIDToBlockIndex: [String: Int] = [:]
-        userEventIDToBlockIndex.reserveCapacity(64)
-        for (idx, block) in blocks.enumerated() where block.kind == .user {
-            userEventIDToBlockIndex[block.eventID] = idx
-        }
+        let userEventIDToBlockIndex: [String: Int] = userEventIDToBlockKey(blocks: blocks)
 
         let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
             ev.kind == .user ? idx : nil
@@ -248,8 +257,8 @@ enum SessionInlineImageMapper {
                     if let blockIndex = userEventIDToBlockIndex[targetEventID] {
                         return (targetEventID, nil, blockIndex)
                     }
-                    if let firstBlockIndex = blocks.indices.first {
-                        return (targetEventID, nil, firstBlockIndex)
+                    if let firstBlock = blocks.first {
+                        return (targetEventID, nil, firstBlock.globalBlockIndex)
                     }
                     return nil
                 }

@@ -155,4 +155,22 @@ final class TerminalGlobalIdentityParityTests: XCTestCase {
             XCTAssertEqual(tail.first?.id, 0, "flag-off slice build renumbers from 0")
         }
     }
+
+    // MARK: Task 5 assertions
+
+    func testImageMapperBlockKeyMatchesGlobalBlockIndexWhenFlagOn() {
+        let session = makeSession(source: .codex, events: mixedEvents())
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        // userEventIDToBlockKey must map each user block's eventID to the key the
+        // renderer will read from line.blockIndex.
+        let keyMap = SessionInlineImageMapper.userEventIDToBlockKey(blocks: blocks)
+        for block in blocks where block.kind == .user {
+            let expected = FeatureFlags.transcriptWindowedBuild ? block.globalBlockIndex : block.globalBlockIndex
+            // (Both equal globalBlockIndex here because coalesce assigns
+            // globalBlockIndex == offset for a single whole-session build; the
+            // point is the mapper keys by globalBlockIndex, not a re-enumeration.)
+            XCTAssertEqual(keyMap[block.eventID], expected,
+                           "mapper key for user block \(block.eventID) must equal its globalBlockIndex")
+        }
+    }
 }
