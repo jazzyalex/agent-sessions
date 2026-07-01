@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		004565A06D339C3DF6552A18 /* OnboardingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC926C8029B5DCC347228C98 /* OnboardingCoordinatorTests.swift */; };
+		00B0FEA3746DB0C5879FA859 /* TerminalLineIDTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D695A7C2910968F842CDFE /* TerminalLineIDTests.swift */; };
 		00B31D0F97BD4ADA6EF1F4D2 /* CursorChatMetaReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6866D81D00B9CBE719FEABE /* CursorChatMetaReader.swift */; };
 		021137CE9BE36C49B03A7B24 /* AntigravityResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB280BE020BB9F72E43A5F6E /* AntigravityResumeCoordinator.swift */; };
 		024C066F055A45C851B9AC82 /* OpenClawSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6805E3FC0FA8057A9B7BB0 /* OpenClawSessionParser.swift */; };
@@ -44,6 +45,7 @@
 		19B670E23F99ADFE64B1E91F /* ClaudeCredentialFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFCF251FDCACECB39D27901 /* ClaudeCredentialFingerprintTests.swift */; };
 		1A05D485575CB52DA078832A /* FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34627A0B9E81ED0AF4C56B67 /* FilterEngine.swift */; };
 		1A0C43BD559DF9822AF1242D /* PiSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272F49F814CE6F5E50E505A5 /* PiSessionParserTests.swift */; };
+		1A214409C4AE84B0BF3D9C08 /* TerminalLineID.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7FE5084C9A7F61DA06A6AB4 /* TerminalLineID.swift */; };
 		1AB05D2296DC475580CB52EF /* CodexResumeSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001A492F52304104BBBB1EC5 /* CodexResumeSettings.swift */; };
 		1B30030447BA4763866A260F /* CodexSideChatLogReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFA1DA683C6BB025DA89EA6E /* CodexSideChatLogReaderTests.swift */; };
 		1B537F76060E9F6BAE9BBF7E /* Stage0PerfHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 812D088A294DD367D06A8842 /* Stage0PerfHarnessTests.swift */; };
@@ -702,9 +704,11 @@
 		C311CBC276711A2955D27C8E /* Stage0GoldenFixturesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Stage0GoldenFixturesTests.swift; sourceTree = SOURCE_ROOT; };
 		C331372717FD62646BBF983D /* CrashReportEnvelope.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashReportEnvelope.swift; sourceTree = SOURCE_ROOT; };
 		C35D0B28960656D80B562067 /* CursorSessionParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CursorSessionParserTests.swift; sourceTree = SOURCE_ROOT; };
+		C4D695A7C2910968F842CDFE /* TerminalLineIDTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TerminalLineIDTests.swift; sourceTree = SOURCE_ROOT; };
 		C4E51A0ABB67AB9DE07F0F87 /* DroidSessionParserLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsLogicTests/DroidSessionParserLogicTests.swift; sourceTree = SOURCE_ROOT; };
 		C5981003758B9226E65BA31D /* NewProviderDiscoverabilityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/NewProviderDiscoverabilityTests.swift; sourceTree = SOURCE_ROOT; };
 		C6523776A36C69A0BA161B86 /* InlineSessionImageMappingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/InlineSessionImageMappingTests.swift; sourceTree = SOURCE_ROOT; };
+		C7FE5084C9A7F61DA06A6AB4 /* TerminalLineID.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/TerminalLineID.swift; sourceTree = SOURCE_ROOT; };
 		C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResumeHealthCheck.swift; path = AgentSessions/Resume/ResumeHealthCheck.swift; sourceTree = SOURCE_ROOT; };
 		CA6631A5EDD11CEF9D72312F /* SessionTerminalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SessionTerminalView.swift; path = AgentSessions/Views/SessionTerminalView.swift; sourceTree = SOURCE_ROOT; };
 		CA7C1756682652197ECE7DC2 /* PiResumeCommandBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PiResumeCommandBuilderTests.swift; sourceTree = SOURCE_ROOT; };
@@ -972,6 +976,7 @@
 				5A5C3395AC2B4F1F9896C8D8 /* AntigravityTranscriptParser.swift */,
 				4E67E757675247C63DD9E02B /* ClaudeArchiveRestore.swift */,
 				D04247ED8C8F0C64EBF429E1 /* TranscriptHydrationGate.swift */,
+				C7FE5084C9A7F61DA06A6AB4 /* TerminalLineID.swift */,
 			);
 			name = Services;
 			sourceTree = "<group>";
@@ -1354,6 +1359,7 @@
 				694A007FEA984B02D86FCCA8 /* CodexResetCreditsTests.swift */,
 				B7F14DCC022A2C17748842F5 /* TranscriptCacheTests.swift */,
 				4DDAD9E23BEFCF48EE10A173 /* SearchTextMatcherMemoTests.swift */,
+				C4D695A7C2910968F842CDFE /* TerminalLineIDTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2269,6 +2275,7 @@
 				7E723C4DDA820A45007F0F42 /* CodexResetCreditsFetcher.swift in Sources */,
 				CB95E1D61989EC38D74A90EA /* TranscriptHydrationGate.swift in Sources */,
 				21A2B7DC31A63FEB4C316C15 /* PerfSignpost.swift in Sources */,
+				1A214409C4AE84B0BF3D9C08 /* TerminalLineID.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2346,6 +2353,7 @@
 				11A72DAF8F6CAA11F11E8C54 /* CodexResetCreditsTests.swift in Sources */,
 				C75513529D32E46A100F6143 /* TranscriptCacheTests.swift in Sources */,
 				4962A769E93CA92892463295 /* SearchTextMatcherMemoTests.swift in Sources */,
+				00B0FEA3746DB0C5879FA859 /* TerminalLineIDTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
