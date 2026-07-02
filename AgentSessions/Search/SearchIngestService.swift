@@ -32,6 +32,15 @@ actor SearchIngestService {
 
     /// Ingest one source's files. `files` comes from the caller's discovery
     /// (path+mtime+size). Returns final Progress. Cancellable between files.
+    ///
+    /// Caller contract (QoS): this actor does NOT downgrade its own priority — it
+    /// inherits whatever priority the caller's `Task` runs at. Full parses here are
+    /// exactly as expensive as the ones on the interactive refresh path (parseFileFull
+    /// per file), so calling this from anything above `.utility` will contend with
+    /// interactive work. Every caller MUST wrap this call in `Task(priority: .utility)`
+    /// (or lower) — see `UnifiedSessionIndexer.kickSearchIngest(source:)` for the
+    /// reference wiring. Do not call `ingest` directly from a `.userInitiated` or
+    /// default-priority context.
     func ingest(source: SessionSource,
                 files: [FileRef],
                 toolIOEnabled: Bool,
@@ -185,5 +194,99 @@ actor SearchIngestService {
         case .pi:
             return PiSessionParser.parseFileFull(at: url)
         }
+    }
+}
+
+/// Pure per-source single-flight + coalesce state machine for search-ingest triggers.
+///
+/// Mirrors the in-flight/pending idiom of `UnifiedSessionIndexer.ProviderRefreshCoordinator`
+/// (same file, `request`/`finish` shape) but drops the coalesce-window delay: an ingest
+/// request for a source that is not currently running starts immediately; a request that
+/// arrives while that source's ingest is in flight is coalesced into a single pending
+/// re-run (not queued per-request — a burst of N requests during one ingest still yields
+/// exactly one follow-up run once the in-flight run finishes).
+///
+/// Deliberately free of `IndexDB`/`SearchIngestService`/actor isolation so the state
+/// transitions can be unit-tested in isolation from the database and file I/O.
+struct SearchIngestCoordinator {
+    enum RequestDecision: Equatable {
+        /// No ingest is running for this source: caller should start one now.
+        case startNow
+        /// An ingest is already running for this source: caller should do nothing:
+        /// the in-flight run's `finish()` will report a follow-up is needed.
+        case coalesced
+    }
+
+    private struct State {
+        var inFlight: Bool = false
+        var pending: Bool = false
+    }
+
+    private var states: [SessionSource: State] = [:]
+
+    init() {}
+
+    /// Call when a source's refresh completes and search-ingest should run for it.
+    mutating func request(source: SessionSource) -> RequestDecision {
+        var state = states[source] ?? State()
+        if state.inFlight {
+            state.pending = true
+            states[source] = state
+            return .coalesced
+        }
+        state.inFlight = true
+        state.pending = false
+        states[source] = state
+        return .startNow
+    }
+
+    /// Call when an in-flight ingest for `source` finishes (success, failure, or
+    /// cancellation). Returns `true` if a request coalesced while it was running,
+    /// meaning the caller should immediately start exactly one follow-up run.
+    mutating func finish(source: SessionSource) -> Bool {
+        var state = states[source] ?? State()
+        state.inFlight = false
+        let shouldRunAgain = state.pending
+        state.pending = false
+        states[source] = state
+        return shouldRunAgain
+    }
+
+    /// True if `source` currently has an ingest running (test/debug convenience).
+    func isInFlight(source: SessionSource) -> Bool {
+        states[source]?.inFlight ?? false
+    }
+}
+
+/// Actor wrapper giving `SearchIngestCoordinator`'s pure state machine safe concurrent
+/// access from any caller context (mirrors how `UnifiedSessionIndexer.ProviderRefreshCoordinator`
+/// is itself an actor). The state-transition logic lives in the wrapped struct so it can be
+/// unit-tested without actor isolation getting in the way.
+actor SearchIngestCoordinatorBox {
+    private var coordinator = SearchIngestCoordinator()
+    private var tasksBySource: [SessionSource: Task<Void, Never>] = [:]
+
+    func request(source: SessionSource) -> SearchIngestCoordinator.RequestDecision {
+        coordinator.request(source: source)
+    }
+
+    func finish(source: SessionSource) -> Bool {
+        let shouldRunAgain = coordinator.finish(source: source)
+        if !shouldRunAgain {
+            tasksBySource[source] = nil
+        }
+        return shouldRunAgain
+    }
+
+    /// Records the running task for `source` so `cancelAll()` can stop it on teardown.
+    func track(_ task: Task<Void, Never>, for source: SessionSource) {
+        tasksBySource[source] = task
+    }
+
+    /// Cancels every in-flight (and any not-yet-started coalesced) ingest task. Call from
+    /// the owning indexer's `deinit` / app-quit path for DB/process-teardown safety.
+    func cancelAll() {
+        for task in tasksBySource.values { task.cancel() }
+        tasksBySource.removeAll()
     }
 }

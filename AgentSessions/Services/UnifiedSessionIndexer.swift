@@ -672,6 +672,14 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
+    /// One `SearchIngestService` (and its `IndexDB` handle) for this indexer's lifetime,
+    /// shared across every source's search-ingest run — mirrors `AnalyticsIndexer`'s
+    /// DB-per-build pattern but held rather than reopened each time. Created eagerly in
+    /// `init` (not `lazy`) because `performProviderRefresh` runs on detached background
+    /// tasks for multiple sources concurrently; a `lazy var` first-access race there would
+    /// be undefined behavior. `nil` only if opening the DB failed at launch.
+    private let searchIngestService: SearchIngestService?
+    private let searchIngestCoordinator = SearchIngestCoordinatorBox()
     private let backgroundNewSessionMonitorIntervalSeconds: UInt64 = 60
     private let foregroundNewSessionMonitorIntervalSeconds: UInt64 = 5 * 60
     private let backgroundMonitorRefreshMinimumIntervalSeconds: TimeInterval = 3 * 60
@@ -719,6 +727,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.openclaw = openclawIndexer
         self.cursor = cursorIndexer
         self.pi = piIndexer
+        self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
         syncAgentEnablementFromDefaults()
@@ -1865,6 +1874,11 @@ final class UnifiedSessionIndexer: ObservableObject {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
 
+        // Source refresh has completed (core index + session_meta are current for this
+        // source). Kick the search-corpus backfill/incremental ingest for it now — strictly
+        // after, never blocking the refresh above. Single-flight + coalesced per source.
+        kickSearchIngest(source: source)
+
         await MainActor.run { [weak self] in
             guard let self else { return }
             if !self.isIndexing {
@@ -1902,6 +1916,89 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Search ingest wiring
+
+    /// Fires after a source's refresh completes (launch backfill or delta). Single-flight
+    /// per source via `searchIngestCoordinator`: if that source's ingest is already
+    /// running, this request coalesces into one pending re-run rather than starting a
+    /// second overlapping ingest or being dropped.
+    private func kickSearchIngest(source: SessionSource) {
+        guard searchIngestService != nil else { return }
+        let coordinator = searchIngestCoordinator
+        let task = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let decision = await coordinator.request(source: source)
+            guard decision == .startNow else { return }
+            await self.runSearchIngestLoop(source: source)
+        }
+        Task { await coordinator.track(task, for: source) }
+    }
+
+    /// Runs one ingest pass for `source`, then — if a request coalesced while it was
+    /// running — runs exactly one more pass before reporting the coordinator idle again.
+    /// `.utility` QoS is load-bearing here: `SearchIngestService.ingest` does not
+    /// downgrade its own priority (see its doc comment), so this wrapper is what keeps
+    /// full-parse work off higher QoS.
+    private func runSearchIngestLoop(source: SessionSource) async {
+        guard let service = searchIngestService else { return }
+        var runAgain = true
+        while runAgain {
+            if Task.isCancelled { break }
+            await performSearchIngestOnce(source: source, service: service)
+            runAgain = await searchIngestCoordinator.finish(source: source)
+        }
+    }
+
+    private func performSearchIngestOnce(source: SessionSource, service: SearchIngestService) async {
+        let files = await MainActor.run { [weak self] () -> [SearchIngestService.FileRef] in
+            guard let self else { return [] }
+            return self.currentSessions(for: source).compactMap { session -> SearchIngestService.FileRef? in
+                guard let stat = SessionFileStat.from(URL(fileURLWithPath: session.filePath)) else { return nil }
+                return SearchIngestService.FileRef(path: session.filePath, mtime: stat.mtime, size: stat.size)
+            }
+        }
+        guard !files.isEmpty else { return }
+
+        let toolIOEnabled = Self.recentToolIOIndexEnabled()
+        Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? start")
+        do {
+            let progress = try await service.ingest(source: source, files: files, toolIOEnabled: toolIOEnabled)
+            Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) end")
+        } catch is CancellationError {
+            Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? cancelled")
+        } catch {
+            Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? error=\(error)")
+        }
+    }
+
+    /// The current per-source session list, keyed the same way `isSourceIndexing` is —
+    /// each provider indexer's own `allSessions`, not the unified/filtered `self.allSessions`,
+    /// so search-ingest sees every discovered file for that source regardless of the
+    /// session-list filters (housekeeping, archived, etc.) applied to the UI-facing list.
+    @MainActor
+    private func currentSessions(for source: SessionSource) -> [Session] {
+        switch source {
+        case .codex: return codex.allSessions
+        case .claude: return claude.allSessions
+        case .antigravity: return antigravity.allSessions
+        case .opencode: return opencode.allSessions
+        case .hermes: return hermes.allSessions
+        case .copilot: return copilot.allSessions
+        case .droid: return droid.allSessions
+        case .openclaw: return openclaw.allSessions
+        case .cursor: return cursor.allSessions
+        case .pi: return pi.allSessions
+        }
+    }
+
+    private static func recentToolIOIndexEnabled() -> Bool {
+        // Default OFF unless the user explicitly opts in (matches SearchCoordinator.toolIOIndexEnabled).
+        if UserDefaults.standard.object(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex) == nil {
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableRecentToolIOIndex)
     }
 
     @MainActor
@@ -2611,6 +2708,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         analyticsBuildTask?.cancel()
         newSessionMonitorTask?.cancel()
         focusedSessionMonitorTask?.cancel()
+        let coordinator = searchIngestCoordinator
+        Task { await coordinator.cancelAll() }
         for token in notificationObserverTokens {
             NotificationCenter.default.removeObserver(token)
         }

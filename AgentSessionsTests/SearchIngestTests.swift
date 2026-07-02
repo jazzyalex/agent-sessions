@@ -213,4 +213,64 @@ final class SearchIngestTests: XCTestCase {
         )
         XCTAssertEqual(stableMatches.count, 1, "unchanged file b must remain findable across both runs")
     }
+
+    // MARK: - SearchIngestCoordinator (pure single-flight + coalesce state machine)
+
+    func testCoordinatorStartsImmediatelyWhenIdle() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+    }
+
+    func testCoordinatorCoalescesRequestWhileInFlight() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+
+        // A second request while the first is still running must coalesce, not start
+        // a second overlapping run.
+        XCTAssertEqual(coordinator.request(source: .codex), .coalesced)
+        XCTAssertTrue(coordinator.isInFlight(source: .codex))
+    }
+
+    func testCoordinatorBurstOfRequestsCoalescesToExactlyOneFollowUp() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+
+        // A burst of N requests while in flight must still yield exactly one follow-up,
+        // not N follow-ups.
+        for _ in 0..<5 {
+            XCTAssertEqual(coordinator.request(source: .codex), .coalesced)
+        }
+
+        XCTAssertTrue(coordinator.finish(source: .codex), "a coalesced request must trigger exactly one follow-up run")
+        XCTAssertFalse(coordinator.isInFlight(source: .codex), "finish() reports the follow-up is owed; it does not itself re-enter in-flight state")
+
+        // Simulate the caller starting that one follow-up run, then finishing with no
+        // further requests: no second follow-up should be reported.
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+        XCTAssertFalse(coordinator.finish(source: .codex), "no further requests arrived during the follow-up run")
+    }
+
+    func testCoordinatorFinishWithoutPendingReportsNoFollowUp() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+        XCTAssertFalse(coordinator.finish(source: .codex), "no coalesced request arrived, so no follow-up is owed")
+        XCTAssertFalse(coordinator.isInFlight(source: .codex))
+    }
+
+    func testCoordinatorTracksSourcesIndependently() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+        // A different source must not be affected by codex's in-flight state.
+        XCTAssertEqual(coordinator.request(source: .claude), .startNow)
+        XCTAssertTrue(coordinator.isInFlight(source: .codex))
+        XCTAssertTrue(coordinator.isInFlight(source: .claude))
+    }
+
+    func testCoordinatorAllowsRestartAfterCleanFinish() {
+        var coordinator = SearchIngestCoordinator()
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+        XCTAssertFalse(coordinator.finish(source: .codex))
+        // A brand-new request after a clean finish (no coalescing) starts immediately again.
+        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+    }
 }
