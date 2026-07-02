@@ -395,6 +395,8 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private var activeCancellable: AnyCancellable?
     private var subagentBadgeCancellable: AnyCancellable?
     private var rebuildScheduled: Bool = false
+    private var sessionsGeneration: UInt64 = 0
+    private var rebuildGate = HUDRebuildGate(staleReclassifyInterval: 5)
 #if DEBUG
     private struct DebugRebuildState {
         var rebuildCount: UInt64 = 0
@@ -441,6 +443,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             .sink { [weak self] sessions in
                 guard let self else { return }
                 codexSessions = sessions
+                sessionsGeneration &+= 1
                 rebuildLookupIndexes()
                 scheduleRebuild()
             }
@@ -450,6 +453,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             .sink { [weak self] sessions in
                 guard let self else { return }
                 claudeSessions = sessions
+                sessionsGeneration &+= 1
                 rebuildLookupIndexes()
                 scheduleRebuild()
             }
@@ -459,6 +463,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
             .sink { [weak self] sessions in
                 guard let self else { return }
                 opencodeSessions = sessions
+                sessionsGeneration &+= 1
                 rebuildLookupIndexes()
                 scheduleRebuild()
             }
@@ -478,6 +483,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     }
 
     func bind(activeCodex: CodexActiveSessionsModel) {
+        rebuildGate.forceNextRebuild()
         self.activeCodex = activeCodex
         presences = activeCodex.presences
         activeCancellable = activeCodex.$presences.sink { [weak self] presences in
@@ -522,12 +528,20 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private func rebuildIfReady(activeCodex: CodexActiveSessionsModel? = nil) {
         let activeCodex = activeCodex ?? self.activeCodex
         guard let activeCodex else { return }
+        let now = Date()
+        let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
+        let gateInputs = HUDRebuildGate.Inputs(
+            membershipVersion: activeCodex.activeMembershipVersion,
+            badgeVersion: activeCodex.subagentBadgeVersion,
+            sessionsGeneration: sessionsGeneration,
+            isCompact: isCompact,
+            showProbes: showProbes
+        )
+        guard rebuildGate.shouldRebuild(inputs: gateInputs, now: now) else { return }
 #if DEBUG
         let _hudSpan = Perf.begin("hudRebuild", thresholdMs: 4)
         defer { Perf.end(_hudSpan) }
 #endif
-        let now = Date()
-        let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
         let activeSubagentCounts = CodexActiveSessionsModel.activeSubagentCounts(
             presences: presences,
             sessionsByLogPath: lookupIndexes.byLogPath,

@@ -350,6 +350,7 @@
 		E04AA5C5FAC4C19032BAD3A6 /* ClaudeRunwayLogIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76B8E4F7C43F96D506B253AD /* ClaudeRunwayLogIO.swift */; };
 		E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188663773714C61A568F7AA /* LoadingAnimationView.swift */; };
 		E30E25DBB8A97DC728D7BB0D /* IDEOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B374DD7125FED89457B180 /* IDEOpener.swift */; };
+		E33734CE7DF001707B9D2652 /* HUDRebuildGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5835994D198D1EDF93CC7E47 /* HUDRebuildGateTests.swift */; };
 		E3DA26AE092940CC73B60E81 /* PiResumeCommandBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7C1756682652197ECE7DC2 /* PiResumeCommandBuilderTests.swift */; };
 		E433EE06957C7786AF61674B /* PreferencesView+Pi.swift in Sources */ = {isa = PBXBuildFile; fileRef = 877C439473252C9A12E66380 /* PreferencesView+Pi.swift */; };
 		E5022CFBD46E01CB4F97B2C2 /* ClaudeProbeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */; };
@@ -367,6 +368,7 @@
 		EA6B3DE2F27F8FECF6357AAF /* AgentCockpitHUDRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03802C5C096CB36BC86F824C /* AgentCockpitHUDRowView.swift */; };
 		EB107C462E1C34E94A9BE16E /* CrashEmailDraftBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F809F7DFDB78DC70A32C3E /* CrashEmailDraftBuilder.swift */; };
 		EC762372C84091AFA2F77ECD /* CursorSessionIndexer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE556B1D5555A64D3FE9C459 /* CursorSessionIndexer.swift */; };
+		EF6AD13056542B05168BCEAB /* HUDRebuildGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E101E0039767737C6AA50E6 /* HUDRebuildGate.swift */; };
 		EFB738C2A9060852B3E98D4A /* CodexSessionImagesGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */; };
 		F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */; };
 		F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Resources */ = {isa = PBXBuildFile; fileRef = B0E8FC80B896F4902702739B /* test-store.db */; };
@@ -553,6 +555,7 @@
 		558A02C67774ABC59CE8CC46 /* ClaudeStatusServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeStatusServiceTests.swift; sourceTree = SOURCE_ROOT; };
 		55F3DA1B53A2B4BEA17820FA /* ImageBrowserIndexCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ImageBrowserIndexCacheTests.swift; sourceTree = SOURCE_ROOT; };
 		5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeProject.swift; sourceTree = "<group>"; };
+		5835994D198D1EDF93CC7E47 /* HUDRebuildGateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/HUDRebuildGateTests.swift; sourceTree = SOURCE_ROOT; };
 		59F809F7DFDB78DC70A32C3E /* CrashEmailDraftBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashEmailDraftBuilder.swift; sourceTree = SOURCE_ROOT; };
 		5A5C3395AC2B4F1F9896C8D8 /* AntigravityTranscriptParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AntigravityTranscriptParser.swift; sourceTree = SOURCE_ROOT; };
 		5ABCAEC00B184A1F871509E5 /* CodexResumeCommandBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeCommandBuilder.swift; path = AgentSessions/Resume/CodexResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
@@ -588,6 +591,7 @@
 		7B7CAD45F87994CCC597F5A1 /* CodexResetCreditsFetcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexOAuth/CodexResetCreditsFetcher.swift; sourceTree = SOURCE_ROOT; };
 		7C018BA230F9D81E63EEB125 /* PiResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/PiResume/PiResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		7D60A57D33ADD8309F775C5A /* DroidSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
+		7E101E0039767737C6AA50E6 /* HUDRebuildGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/HUDRebuildGate.swift; sourceTree = SOURCE_ROOT; };
 		7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSheet.swift; path = AgentSessions/Resume/CodexResumeSheet.swift; sourceTree = SOURCE_ROOT; };
 		812D088A294DD367D06A8842 /* Stage0PerfHarnessTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Stage0PerfHarnessTests.swift; sourceTree = SOURCE_ROOT; };
 		815DCA7C60A7B56BC748C548 /* CopilotTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CopilotTranscriptView.swift; sourceTree = SOURCE_ROOT; };
@@ -1376,6 +1380,7 @@
 				5ADACF1B1E45C0ECAF1A0E98 /* TranscriptWindowTests.swift */,
 				40971B7A725DC8DFFF9F40B7 /* TranscriptWindowedBuildTests.swift */,
 				364AF61D9D3F6BB2B413B5D3 /* PerfQuickWinsTests.swift */,
+				5835994D198D1EDF93CC7E47 /* HUDRebuildGateTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -1783,6 +1788,7 @@
 				9533B667C3C0DEBC952BDDBF /* CrashReporting */,
 				D2BB94A3759137164517CC64 /* ProbeCleanupHelpers.swift */,
 				D5C68DFDDE07CC8C0EE7E6E6 /* PerfSignpost.swift */,
+				7E101E0039767737C6AA50E6 /* HUDRebuildGate.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -2296,6 +2302,7 @@
 				1A214409C4AE84B0BF3D9C08 /* TerminalLineID.swift in Sources */,
 				B4993E1282351FEBB469653A /* TranscriptWindow.swift in Sources */,
 				EA4BF05EC0403FD0BDF79751 /* TranscriptUserAnchors.swift in Sources */,
+				EF6AD13056542B05168BCEAB /* HUDRebuildGate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2378,6 +2385,7 @@
 				0A148B0CD773BCEE4D2C7310 /* TranscriptWindowTests.swift in Sources */,
 				9543A6F552ED09048233FB2C /* TranscriptWindowedBuildTests.swift in Sources */,
 				6BD7356B35E9D3E898A68349 /* PerfQuickWinsTests.swift in Sources */,
+				E33734CE7DF001707B9D2652 /* HUDRebuildGateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
