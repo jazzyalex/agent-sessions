@@ -2227,7 +2227,13 @@ struct UnifiedSessionsView: View {
         // source the user has disabled.
         switch s.source {
         case .codex:
-            if unified.codexAgentEnabled, let e = codexIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { codexIndexer.reloadSession(id: id); return true }
+            // isPartiallyHydrated (Task 9e stage 0 tail-first paint) must not look
+            // "already loaded" here — otherwise a second selection-change on the
+            // same still-hydrating session (re-fired list selection, etc.) would
+            // skip re-dispatching reloadSession. reloadSession's own
+            // reloadingSessionIDs guard already de-dupes a genuinely in-flight
+            // parse, so this is a safety net, not the primary de-dupe.
+            if unified.codexAgentEnabled, let e = codexIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty || e.isPartiallyHydrated { codexIndexer.reloadSession(id: id); return true }
         case .claude:
             if unified.claudeAgentEnabled, let e = claudeIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { claudeIndexer.reloadSession(id: id); return true }
         case .antigravity:

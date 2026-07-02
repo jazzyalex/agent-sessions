@@ -73,4 +73,18 @@ enum FeatureFlags {
     // transcriptSwapApply perf span.
     static let transcriptFullSwapMaxChars: Int = 800_000
 
+    // Task 9e stage 0: tail-first cold paint. On selecting an unhydrated Codex
+    // session whose file exceeds transcriptTailFirstPaintMinBytes, publish a
+    // disposable provisional session built from just the last window of the
+    // file (ReverseJSONLTailReader + parseFileTail) so something readable
+    // appears in well under a second, THEN run the normal full parse exactly
+    // as today. The provisional content is throwaway: when the full parse
+    // publishes, events.count changes and the existing two-stage rebuild
+    // (transcriptWindowedBuild's onChange(session.events.count) path) swaps
+    // it out wholesale. Requires transcriptWindowedBuild=true for that
+    // replacing swap to itself be windowed (cheap) rather than a full
+    // non-windowed rebuild of 49k+ lines on the main thread.
+    static let transcriptTailFirstPaint = false
+    static let transcriptTailFirstPaintMinBytes: Int = 8_000_000
+
 }

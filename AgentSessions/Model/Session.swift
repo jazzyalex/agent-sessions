@@ -83,6 +83,14 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // Runtime UI state (not persisted in session files)
     public var isFavorite: Bool = false
 
+    // Task 9e stage 0: true for a disposable tail-only provisional session
+    // (ReverseJSONLTailReader + SessionIndexer.parseFileTail) published to
+    // paint something readable before the full parse completes. Never
+    // persisted; always false for normally-parsed/hydrated sessions. Callers
+    // that gate "already hydrated" on `!events.isEmpty` must also check this
+    // so a partial publish never short-circuits the follow-up full parse.
+    public var isPartiallyHydrated: Bool = false
+
     // Soft-deletion support (OpenClaw auto-deletes after 30 days)
     public var isDeleted: Bool { deletedAt != nil }
     public let deletedAt: Date?
@@ -229,6 +237,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
         // isDeleted is a computed property (deletedAt != nil)
+        // isPartiallyHydrated intentionally excluded (runtime-only, never persisted)
     }
 
     public static func == (lhs: Session, rhs: Session) -> Bool {
@@ -261,6 +270,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             lhs.subagentType == rhs.subagentType &&
             lhs.relationshipKind == rhs.relationshipKind &&
             lhs.isFavorite == rhs.isFavorite &&
+            // isPartiallyHydrated intentionally excluded (runtime-only, disposable stage-0 marker)
             lhs.deletedAt == rhs.deletedAt
     }
 

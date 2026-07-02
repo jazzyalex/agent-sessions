@@ -374,7 +374,9 @@ final class SessionIndexer: ObservableObject {
                 return
             }
 
-            let hasLoadedEvents = !existing.events.isEmpty
+            // A tail-only provisional session (Task 9e stage 0) must never look
+            // "already loaded" here — the full parse must always follow it.
+            let hasLoadedEvents = !existing.events.isEmpty && !existing.isPartiallyHydrated
             if hasLoadedEvents && !force {
                 DBG("⏭️ Skip reload: session already loaded")
                 DispatchQueue.main.async {
@@ -420,6 +422,63 @@ final class SessionIndexer: ObservableObject {
                 DispatchQueue.main.async {
                     self.isLoadingSession = true
                     self.loadingSessionID = id
+                }
+            }
+
+            // Task 9e stage 0: tail-first cold paint. For a monster session that
+            // has no events loaded yet, publish a fast, disposable tail-only
+            // parse BEFORE running the (slow) full parse below, so the user sees
+            // the last screen of the transcript in well under a second. This is
+            // throwaway content: the full parse that follows always replaces it
+            // (events.count changes, which drives the existing two-stage
+            // rebuild in SessionTerminalView). Only the transcript-facing
+            // `events`/`eventCount`/timestamps are touched here — list metadata
+            // (cwd/repoName/lightweightTitle/lightweightCommands) is carried
+            // over from `existing` untouched, exactly as the final merge below
+            // already does for those fields.
+            if FeatureFlags.transcriptTailFirstPaint,
+               !hasLoadedEvents,
+               let existingSize = existing.fileSizeBytes,
+               existingSize >= FeatureFlags.transcriptTailFirstPaintMinBytes,
+               let tailSession = self.parseFileTail(at: url, forcedID: id) {
+                DispatchQueue.main.async {
+                    guard let idx = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
+                    let current = self.allSessions[idx]
+                    // Only publish the tail content if the real session still has
+                    // no events (avoid clobbering a full parse that raced ahead,
+                    // e.g. via a concurrent manual refresh).
+                    guard current.events.isEmpty else { return }
+                    var provisional = current
+                    provisional.isPartiallyHydrated = true
+                    let tailMerged = Session(
+                        id: current.id,
+                        source: current.source,
+                        startTime: tailSession.startTime ?? current.startTime,
+                        endTime: tailSession.endTime ?? current.endTime,
+                        model: current.model,
+                        filePath: current.filePath,
+                        fileSizeBytes: current.fileSizeBytes,
+                        eventCount: current.eventCount,
+                        events: tailSession.events,
+                        cwd: current.lightweightCwd,
+                        repoName: current.lightweightRepoName,
+                        lightweightTitle: current.lightweightTitle,
+                        lightweightCommands: current.lightweightCommands,
+                        parentSessionID: current.parentSessionID,
+                        subagentType: current.subagentType,
+                        relationshipKind: current.relationshipKind,
+                        customTitle: current.customTitle,
+                        codexOriginator: current.codexOriginator,
+                        codexSource: current.codexSource,
+                        codexSurface: current.codexSurface,
+                        reasoningEffort: current.reasoningEffort
+                    )
+                    var published = tailMerged
+                    published.isPartiallyHydrated = true
+                    var updated = self.allSessions
+                    updated[idx] = published
+                    self.allSessions = updated
+                    DBG("⚡ Tail-first paint published: \(filename) tailEvents=\(published.events.count)")
                 }
             }
 
@@ -2001,6 +2060,79 @@ final class SessionIndexer: ObservableObject {
         if size > 5_000_000 {  // Log full parse of files >5MB
             DBG("  ⚠️ FULL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB events=\(events.count) nonMeta=\(session.nonMetaCount)")
         }
+
+        return session
+    }
+
+    // Task 9e stage 0: disposable tail-only parse. Reads only the last window
+    // of the file (ReverseJSONLTailReader) and parses those lines with the
+    // same Self.parseLine used by parseFileFull, so a monster session can
+    // paint something readable in milliseconds instead of waiting ~10s for a
+    // full parse. The result is marked isPartiallyHydrated=true and is meant
+    // to be replaced wholesale when the real parseFileFull publishes — it
+    // does NOT attempt head-metadata extraction (model/parent/subagent),
+    // since that requires the file HEAD which this deliberately never reads.
+    func parseFileTail(at url: URL,
+                        forcedID: String? = nil,
+                        maxBytes: Int = 2_097_152,
+                        maxLines: Int = 400) -> Session? {
+        let _span = Perf.begin("transcriptParseTail", thresholdMs: 50, "path=\(url.lastPathComponent)")
+        defer { Perf.end(_span) }
+
+        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
+
+        let rawLines = ReverseJSONLTailReader.readLastLines(url: url, maxBytes: maxBytes, maxLines: maxLines)
+        guard !rawLines.isEmpty else { return nil }
+
+        // Provisional event IDs are seeded from a base far outside the range
+        // parseFileFull ever produces (idx starts at 1), so they never
+        // coexist with or collide against the full parse's event IDs.
+        let tailIndexBase = 5_000_000
+        let eventIDBase = Self.hash(path: url.path)
+        var events: [SessionEvent] = []
+        events.reserveCapacity(rawLines.count)
+        for (offset, rawLine) in rawLines.enumerated() {
+            let idx = tailIndexBase + offset
+            let safeLine = rawLine.utf8.count > 100_000 ? Self.sanitizeLargeLine(rawLine) : rawLine
+            let (event, _) = Self.parseLine(safeLine, eventID: Self.eventID(base: eventIDBase, index: idx))
+            events.append(event)
+        }
+
+        let times = events.compactMap { $0.timestamp }
+        var start = times.min()
+        var end = times.max()
+        if start == nil || end == nil {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path) {
+                if start == nil { start = (attrs[.creationDate] as? Date) ?? (attrs[.modificationDate] as? Date) }
+                if end == nil { end = (attrs[.modificationDate] as? Date) ?? start }
+            }
+        }
+
+        let id = forcedID ?? Self.hash(path: url.path)
+        let nonMetaCount = events.filter { $0.kind != .meta }.count
+        let isHousekeeping = Session.computeIsHousekeeping(source: .codex, events: events)
+
+        var session = Session(id: id,
+                               source: .codex,
+                               startTime: start,
+                               endTime: end,
+                               model: nil,
+                               filePath: url.path,
+                               fileSizeBytes: size >= 0 ? size : nil,
+                               eventCount: nonMetaCount,
+                               events: events,
+                               isHousekeeping: isHousekeeping,
+                               codexInternalSessionIDHint: nil,
+                               parentSessionID: nil,
+                               subagentType: nil,
+                               codexOriginator: nil,
+                               codexSource: nil,
+                               codexSurface: nil,
+                               reasoningEffort: nil)
+        session.isPartiallyHydrated = true
+
+        DBG("  ⚡ TAIL PARSE: \(url.lastPathComponent) size=\(size/1_000_000)MB tailEvents=\(events.count)")
 
         return session
     }
