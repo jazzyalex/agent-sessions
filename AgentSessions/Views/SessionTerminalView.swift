@@ -134,6 +134,27 @@ struct SessionTerminalView: View {
     @State private var visibleSnapshot: TextSnapshot = .empty
     @State private var rebuildTask: Task<Void, Never>?
 
+    /// Identifies the exact inputs a full `rebuildLines` dispatch was built
+    /// from. Several `.onAppear`/`.onChange` triggers can fire in quick
+    /// succession around a session open (session-id settling, event-count
+    /// updates from a lazy full load, etc.); when two triggers resolve to the
+    /// SAME inputs, the second is a pure duplicate of work already done or in
+    /// flight. A trigger with genuinely different inputs (e.g. live-tail
+    /// growing `session.events.count`) must still rebuild — this only guards
+    /// the same-input case.
+    private struct BuildSignature: Equatable {
+        let sessionID: String
+        let eventCount: Int
+        let fileSizeBytes: Int
+        let skipAgentsPreamble: Bool
+        let reviewCardsEnabled: Bool
+    }
+
+    /// Signature of the most recently APPLIED build's inputs.
+    @State private var lastCompletedBuildSignature: BuildSignature?
+    /// Signature of the build currently in flight (dispatching → applied/cancelled).
+    @State private var pendingBuildSignature: BuildSignature?
+
     enum RoleToggle: CaseIterable {
         case user
         case assistant
@@ -268,6 +289,7 @@ struct SessionTerminalView: View {
         .onDisappear {
             rebuildTask?.cancel()
             rebuildTask = nil
+            pendingBuildSignature = nil
             inlineImagesTask?.cancel()
             inlineImagesTask = nil
         }
@@ -828,25 +850,55 @@ struct SessionTerminalView: View {
     }
 
     private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0) {
-        rebuildTask?.cancel()
-
         let sessionSnapshot = session
         let skipAgentsPreamble = skipAgentsPreambleEnabled()
         let reviewCardsEnabled = transcriptReviewCardsEnabled
+
+        let signature = BuildSignature(sessionID: sessionSnapshot.id,
+                                       eventCount: sessionSnapshot.events.count,
+                                       fileSizeBytes: sessionSnapshot.fileSizeBytes ?? -1,
+                                       skipAgentsPreamble: skipAgentsPreamble,
+                                       reviewCardsEnabled: reviewCardsEnabled)
+
+        // A trigger that resolves to the exact same inputs as the build we
+        // already applied AND the build currently in flight is a pure
+        // duplicate — skip it rather than cancel-and-redispatch identical
+        // work. Any input difference (event count from a live-tail append or
+        // a lazy full load, preamble/review-card toggles, etc.) still
+        // rebuilds exactly as before.
+        if signature == lastCompletedBuildSignature, signature == pendingBuildSignature {
+            return
+        }
+
+        rebuildTask?.cancel()
+        pendingBuildSignature = signature
 
         rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, reviewCardsEnabled, debounceNanoseconds] in
             if debounceNanoseconds > 0 {
                 try? await Task.sleep(nanoseconds: debounceNanoseconds)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                }
+                return
+            }
 
             let result = Self.buildRebuildResult(session: sessionSnapshot,
                                                  skipAgentsPreamble: skipAgentsPreamble,
                                                  enableReviewCards: reviewCardsEnabled)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                }
+                return
+            }
 
             await MainActor.run {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                    return
+                }
 
                 let priorLines = lines
                 let appendOnlyUpdate: Bool = {
@@ -868,6 +920,9 @@ struct SessionTerminalView: View {
                 errorLineIndices = result.errorLineIndices
                 eventIDToUserLineID = result.eventIDToUserLineID
                 rebuildNavIndexCaches()
+
+                lastCompletedBuildSignature = signature
+                if pendingBuildSignature == signature { pendingBuildSignature = nil }
 
                 if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
                     pendingUserPromptIndex = nil
