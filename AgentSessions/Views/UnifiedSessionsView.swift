@@ -374,6 +374,12 @@ struct UnifiedSessionsView: View {
 	    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
 	    @State private var autoSelectEnabled: Bool = true
 	    @State private var isDatasetChurning: Bool = false
+	    // Set by updateCachedRows() exactly when the canonical selection id was
+	    // missing from the fresh rows AND UnifiedTableSelectionPolicy suppressed
+	    // replacement solely because isDatasetChurning was true at that moment.
+	    // Consulted by the post-churn onChange(of: unified.sessions) pass to know
+	    // whether a second updateCachedRows() call is actually needed (see there).
+	    @State private var selectionReplacementDeferredDuringChurn: Bool = false
 	    @State private var isAutoSelectingFromSearch: Bool = false
     @State private var hasEverHadSessions: Bool = false
     @State private var hasUserManuallySelected: Bool = false
@@ -1146,21 +1152,28 @@ struct UnifiedSessionsView: View {
 					selectionTrace("sessions changed begin selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
                     restartSearchForSideChatDatasetChangeIfNeeded()
 					isDatasetChurning = true
-					updateCachedRows()
+					let heldRows = updateCachedRows()
+					let deferredReplacement = selectionReplacementDeferredDuringChurn
 					ensureDefaultSelectionIfNeeded()
 					refreshSelectionSourceFromCachedRows()
 					updateFocusedSessionIfNeeded(selectedSession)
 					DispatchQueue.main.async {
 						isDatasetChurning = false
-						// Always reconcile once churn flag drops, not just when the first
-						// pass held stale rows: shouldReplaceMissingSelection() defers a
+						// Correctness: shouldReplaceMissingSelection() defers a
 						// missing-selection replacement while isDatasetChurning is true
-						// (Fix 2), so a genuinely-deleted session's selection is only
-						// cleaned up here, on this guaranteed post-churn pass.
-						updateCachedRows()
-						ensureDefaultSelectionIfNeeded()
-						refreshSelectionSourceFromCachedRows()
-						updateFocusedSessionIfNeeded(selectedSession)
+						// (Fix 2), so a genuinely-deleted session's selection can only be
+						// cleaned up once churn drops. Cost: re-running updateCachedRows()
+						// unconditionally on every republish reintroduced the double-call
+						// class Task 5 eliminated (~115ms at 3.3k rows on the ~2s live
+						// cadence). Only pay for the second pass when it can actually
+						// matter: rows were held stale, or this pass is the one that will
+						// finally apply a deferred selection replacement.
+						if heldRows || deferredReplacement {
+							updateCachedRows()
+							ensureDefaultSelectionIfNeeded()
+							refreshSelectionSourceFromCachedRows()
+							updateFocusedSessionIfNeeded(selectedSession)
+						}
 						selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
 					}
 				}
@@ -2239,6 +2252,9 @@ struct UnifiedSessionsView: View {
 
 		    @discardableResult
 		    private func updateCachedRows() -> Bool {
+        // Reset at the start of every call; set below only when this call's
+        // missing-selection check is actually suppressed by dataset churn.
+        selectionReplacementDeferredDuringChurn = false
 #if DEBUG
         // Snapshot the row count NOW: Perf detail closures are evaluated lazily in end()
         // (after cachedRows is reassigned below), so capture the pre-update value in a let.
@@ -2340,17 +2356,22 @@ struct UnifiedSessionsView: View {
 	        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
 
 	        if let selectedID = selection,
-	           !cachedRows.contains(where: { $0.id == selectedID }),
-               UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+	           !cachedRows.contains(where: { $0.id == selectedID }) {
+               if UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
                    hierarchyBrowsing: isHierarchyBrowsing,
                    refreshBusy: isRefreshBusyForSelection,
                    hasUserManuallySelected: hasUserManuallySelected,
                    datasetChurning: isDatasetChurning
                ) {
-            if let first = cachedRows.first {
-                setActiveSelection(first.id, source: first.source, userInitiated: false)
-            } else {
-                setActiveSelection(nil, userInitiated: false)
+                if let first = cachedRows.first {
+                    setActiveSelection(first.id, source: first.source, userInitiated: false)
+                } else {
+                    setActiveSelection(nil, userInitiated: false)
+                }
+            } else if isDatasetChurning {
+                // Replacement would have happened but was suppressed solely by the
+                // churn gate — flag it so the post-churn pass knows to retry.
+                selectionReplacementDeferredDuringChurn = true
             }
         }
 
