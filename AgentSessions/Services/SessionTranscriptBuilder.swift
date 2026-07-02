@@ -485,17 +485,22 @@ struct SessionTranscriptBuilder {
                 if source == .codex {
                     b.text = normalizeCodexInlineImageMarkers(b.text)
                 }
-                if let last = blocks.last, canMerge(last, b) {
-                    var merged = last
-                    merged.text += b.text
-                    merged.timestamp = merged.timestamp ?? b.timestamp
-                    merged.rawJSON = b.rawJSON
-                    if merged.toolName == nil { merged.toolName = b.toolName }
-                    if merged.toolInput == nil { merged.toolInput = b.toolInput }
-                    merged.isErrorOutput = merged.isErrorOutput || b.isErrorOutput
+                // Merge in place: taking a copy of `blocks.last` and appending to it
+                // makes the accumulated text buffer multiply-referenced, so every
+                // delta append triggers a full CoW copy (quadratic in chain length).
+                var mergeWithLast = false
+                if let last = blocks.last {
+                    mergeWithLast = canMerge(last, b)
+                }
+                if mergeWithLast {
+                    let i = blocks.count - 1
+                    blocks[i].text += b.text
+                    if blocks[i].timestamp == nil { blocks[i].timestamp = b.timestamp }
+                    blocks[i].rawJSON = b.rawJSON
+                    if blocks[i].toolName == nil { blocks[i].toolName = b.toolName }
+                    if blocks[i].toolInput == nil { blocks[i].toolInput = b.toolInput }
+                    blocks[i].isErrorOutput = blocks[i].isErrorOutput || b.isErrorOutput
                     // firstEventIndex stays the merge chain's FIRST event (already set).
-                    blocks.removeLast()
-                    blocks.append(merged)
                 } else {
                     b.firstEventIndex = eventIndex
                     blocks.append(b)
