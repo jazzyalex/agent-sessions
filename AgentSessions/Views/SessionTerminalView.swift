@@ -838,7 +838,7 @@ struct SessionTerminalView: View {
         }
     }
 
-    private struct RebuildResult: Sendable {
+    struct RebuildResult: Sendable {
         let lines: [TerminalLine]
         let conversationStartLineID: Int?
         let preambleUserBlockIndexes: Set<Int>
@@ -1055,13 +1055,36 @@ struct SessionTerminalView: View {
         }
     }
 
-    nonisolated private static func buildRebuildResult(session: Session,
-                                                       skipAgentsPreamble: Bool,
-                                                       enableReviewCards: Bool) -> RebuildResult {
-        let _span = Perf.begin("transcriptModelBuild", thresholdMs: 50, "events=\(session.events.count)")
-        defer { Perf.end(_span) }
+    nonisolated static func buildRebuildResult(session: Session,
+                                               skipAgentsPreamble: Bool,
+                                               enableReviewCards: Bool) -> RebuildResult {
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
-        let built = TerminalBuilder.buildLines(from: blocks, source: session.source, enableReviewCards: enableReviewCards)
+        return buildRebuildResult(session: session, blocks: blocks, blockRange: nil,
+                                  skipAgentsPreamble: skipAgentsPreamble,
+                                  enableReviewCards: enableReviewCards)
+    }
+
+    /// Slice-aware variant. `blocks` is the FULL coalesced array (anchor and
+    /// preamble semantics stay whole-session); `blockRange` limits which blocks
+    /// get lines built. Index maps that reference off-window blocks degrade to
+    /// a consistent subset (missing entries, never wrong ones) because
+    /// firstLineForBlock only contains windowed blocks.
+    nonisolated static func buildRebuildResult(session: Session,
+                                               blocks: [SessionTranscriptBuilder.LogicalBlock],
+                                               blockRange: ClosedRange<Int>?,
+                                               skipAgentsPreamble: Bool,
+                                               enableReviewCards: Bool) -> RebuildResult {
+        let _span = Perf.begin("transcriptModelBuild", thresholdMs: 50,
+                               "events=\(session.events.count) range=\(blockRange.map { "\($0)" } ?? "full")")
+        defer { Perf.end(_span) }
+        let built: [TerminalLine]
+        if let blockRange {
+            built = TerminalBuilder.buildLines(from: blocks, blockRange: blockRange,
+                                               source: session.source, enableReviewCards: enableReviewCards)
+        } else {
+            built = TerminalBuilder.buildLines(from: blocks, source: session.source,
+                                               enableReviewCards: enableReviewCards)
+        }
         let startLineID = conversationStartLineIDIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
         let preambleUserBlockIndexes = computePreambleUserBlockIndexes(session: session, blocks: blocks)
 

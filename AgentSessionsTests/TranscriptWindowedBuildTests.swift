@@ -122,4 +122,57 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         XCTAssertTrue(assistantBlocks[0].text.contains("chunk-1"))
         XCTAssertTrue(assistantBlocks[0].text.contains("chunk-2"))
     }
+
+    // MARK: - RebuildResult slice parity (two-stage open substrate)
+
+    func testSliceRebuildResultIsConsistentSubsetOfFullBuild() {
+        let session = deltaSession(pairs: 60)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let full = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                          blockRange: nil,
+                                                          skipAgentsPreamble: false,
+                                                          enableReviewCards: true)
+        let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count, blockTarget: 16)
+        let slice = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                           blockRange: window.lowerBlock...window.upperBlock,
+                                                           skipAgentsPreamble: false,
+                                                           enableReviewCards: true)
+        XCTAssertFalse(slice.lines.isEmpty)
+        XCTAssertLessThan(slice.lines.count, full.lines.count)
+
+        if FeatureFlags.transcriptWindowedBuild {
+            // Slice lines are exactly the suffix of the full build (global ids).
+            XCTAssertEqual(slice.lines.map(\.id),
+                           Array(full.lines.map(\.id).suffix(slice.lines.count)))
+            // Role nav indices are full-build entries restricted to windowed line ids.
+            let sliceIDs = Set(slice.lines.map(\.id))
+            XCTAssertEqual(slice.userLineIndices, full.userLineIndices.filter { sliceIDs.contains($0) })
+            XCTAssertEqual(slice.assistantLineIndices, full.assistantLineIndices.filter { sliceIDs.contains($0) })
+            XCTAssertEqual(slice.toolLineIndices, full.toolLineIndices.filter { sliceIDs.contains($0) })
+            XCTAssertEqual(slice.errorLineIndices, full.errorLineIndices.filter { sliceIDs.contains($0) })
+            // Every slice eventID→line entry agrees with the full map.
+            for (eventID, lineID) in slice.eventIDToUserLineID {
+                XCTAssertEqual(full.eventIDToUserLineID[eventID], lineID, "eventID \(eventID)")
+            }
+        } else {
+            // Flag off: local ids renumber; only structural sanity applies.
+            XCTAssertEqual(slice.lines.first?.id, 0)
+        }
+    }
+
+    func testNilBlockRangeMatchesLegacyEntryPoint() {
+        let session = deltaSession(pairs: 20)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let viaBlocks = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                               blockRange: nil,
+                                                               skipAgentsPreamble: false,
+                                                               enableReviewCards: true)
+        let legacy = SessionTerminalView.buildRebuildResult(session: session,
+                                                            skipAgentsPreamble: false,
+                                                            enableReviewCards: true)
+        XCTAssertEqual(viaBlocks.lines.map(\.id), legacy.lines.map(\.id))
+        XCTAssertEqual(viaBlocks.lines.map(\.text), legacy.lines.map(\.text))
+        XCTAssertEqual(viaBlocks.userLineIndices, legacy.userLineIndices)
+        XCTAssertEqual(viaBlocks.eventIDToUserLineID, legacy.eventIDToUserLineID)
+    }
 }
