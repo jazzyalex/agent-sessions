@@ -532,13 +532,18 @@ struct TerminalBuilder {
         return patterns.contains(where: { toolName.contains($0) })
     }
 
+    private static let lineNumberedDumpRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: "^\\d+\\s*(\\u{2192}|\\||:)\\s", options: [])
+
     private static func looksLikeLineNumberedSourceDump(_ text: String) -> Bool {
+        guard let regex = lineNumberedDumpRegex else { return false }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         var matches = 0
         for raw in lines {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
-            if line.range(of: "^\\d+\\s*(\\u{2192}|\\||:)\\s", options: .regularExpression) != nil {
+            let range = NSRange(line.startIndex..., in: line)
+            if regex.firstMatch(in: line, options: [], range: range) != nil {
                 matches += 1
                 if matches >= 2 { return true }
             }

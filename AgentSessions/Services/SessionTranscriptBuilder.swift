@@ -414,20 +414,22 @@ struct SessionTranscriptBuilder {
         let lower = firstLine.lowercased()
         if lower.hasPrefix("[error]") { return true }
         if lower.hasPrefix("error:") { return true }
-        if let code = parseExitValue(from: lower, pattern: "exit code[:\\s]*(-?\\d+)"), code != 0 {
+        if let code = parseExitValue(from: lower, regex: exitCodeRegex), code != 0 {
             return true
         }
-        if let status = parseExitValue(from: lower, pattern: "exit status[:\\s]*(-?\\d+)"), status != 0 {
+        if let status = parseExitValue(from: lower, regex: exitStatusRegex), status != 0 {
             return true
         }
         return false
     }
 
-    private static func parseExitValue(from text: String, pattern: String) -> Int? {
-        guard let regex = try? NSRegularExpression(pattern: pattern,
-                                                   options: [.caseInsensitive]) else {
-            return nil
-        }
+    private static let exitCodeRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: "exit code[:\\s]*(-?\\d+)", options: [.caseInsensitive])
+    private static let exitStatusRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: "exit status[:\\s]*(-?\\d+)", options: [.caseInsensitive])
+
+    private static func parseExitValue(from text: String, regex: NSRegularExpression?) -> Int? {
+        guard let regex else { return nil }
         let range = NSRange(text.startIndex..., in: text)
         guard let match = regex.firstMatch(in: text, options: [], range: range),
               match.numberOfRanges >= 2,

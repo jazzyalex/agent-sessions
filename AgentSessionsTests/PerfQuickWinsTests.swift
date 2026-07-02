@@ -52,4 +52,34 @@ final class PerfQuickWinsTests: XCTestCase {
         XCTAssertLessThan(elapsed, 2.0,
             "coalescing a long delta chain must be linear (CoW append was quadratic)")
     }
+
+    // MARK: - Task 2: error/code detection behavior pins (guard the regex hoist)
+
+    func testToolResultErrorClassificationByExitCodeAndPrefix() {
+        let cases: [(output: String, isError: Bool)] = [
+            ("exit code: 1\nboom", true),
+            ("Exit Code: 0\nfine", false),
+            ("exit status 2", true),
+            ("[error] failed to fetch", true),
+            ("error: no such file", true),
+            ("all good\nexit code: 1 mentioned later is ignored", false),
+            ("plain output", false)
+        ]
+        for (output, isError) in cases {
+            let s = session([toolResultEvent("t1", output: output)])
+            let blocks = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+            XCTAssertEqual(blocks.count, 1)
+            XCTAssertEqual(blocks[0].isErrorOutput, isError, "output: \(output)")
+        }
+    }
+
+    func testReadToolNumberedDumpClassifiedAsCode() {
+        let dump = "1\t| import Foundation\n2\t| struct Foo {}\n3\t| // done"
+        let s = session([toolResultEvent("t1", output: dump, toolName: "Read")])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+        let lines = TerminalBuilder.buildLines(from: blocks, source: .codex, enableReviewCards: true)
+        XCTAssertFalse(lines.isEmpty)
+        XCTAssertTrue(lines.contains { $0.semanticKind == .code },
+                      "line-numbered read-tool output must render as a code segment")
+    }
 }
