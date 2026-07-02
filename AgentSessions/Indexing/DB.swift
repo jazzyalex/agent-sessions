@@ -1929,10 +1929,37 @@ actor IndexDB {
 
     /// Purge session_meta rows for a source whose path no longer exists in the files table.
     /// This reconciles ghost sessions left by deleted/moved files before analytics derivation.
-    /// Returns the number of rows purged.
+    /// Also removes the corresponding session_search/session_tool_io rows (FTS shadow rows
+    /// cascade via the existing AFTER DELETE triggers) so stale entries don't keep matching
+    /// search once the file backing them is gone.
+    /// Returns the number of session_meta rows purged.
     @discardableResult
     func purgeOrphanedSessionMeta(for source: String) throws -> Int {
         guard let db = handle else { throw DBError.openFailed("db closed") }
+
+        let orphanSubquery = """
+        SELECT session_id FROM session_meta
+        WHERE source=? AND path NOT IN (
+            SELECT path FROM files WHERE source=?
+        )
+        """
+
+        let delSearchSQL = "DELETE FROM session_search WHERE source=? AND session_id IN (\(orphanSubquery));"
+        let delSearchStmt = try prepare(delSearchSQL)
+        defer { sqlite3_finalize(delSearchStmt) }
+        sqlite3_bind_text(delSearchStmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(delSearchStmt, 2, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(delSearchStmt, 3, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(delSearchStmt) != SQLITE_DONE { throw DBError.execFailed("purge orphaned session_search") }
+
+        let delToolSQL = "DELETE FROM session_tool_io WHERE source=? AND session_id IN (\(orphanSubquery));"
+        let delToolStmt = try prepare(delToolSQL)
+        defer { sqlite3_finalize(delToolStmt) }
+        sqlite3_bind_text(delToolStmt, 1, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(delToolStmt, 2, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(delToolStmt, 3, source, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(delToolStmt) != SQLITE_DONE { throw DBError.execFailed("purge orphaned session_tool_io") }
+
         let sql = """
         DELETE FROM session_meta WHERE source=? AND path NOT IN (
             SELECT path FROM files WHERE source=?
