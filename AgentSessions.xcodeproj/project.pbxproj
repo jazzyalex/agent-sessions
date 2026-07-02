@@ -229,6 +229,7 @@
 		A84DC21DD4029749BF8BBD57 /* PreferencesView+Copilot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19FAC728A9C11A666680AF44 /* PreferencesView+Copilot.swift */; };
 		A8891085C7123E3360E6513C /* OpenClawBase64ImageScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6505213F3D72B128BB972BA3 /* OpenClawBase64ImageScanner.swift */; };
 		A8B49E614242407C854A3463 /* CodexResumeLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD535A048F4C41ECA4435F9A /* CodexResumeLauncher.swift */; };
+		A8CFDE272E78DAC14CB5ACEB /* SearchIngestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3637ADBFD4A6E452C2DBD289 /* SearchIngestService.swift */; };
 		A9BAC4A46E953DF0B8B146C3 /* SessionIndexingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 654BD9FEF4DBAEA20EBC1254 /* SessionIndexingEngine.swift */; };
 		A9D49F2A967D8DD12C2FD3FE /* OpenCodeBackendDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */; };
 		AAD67C266F144F9C0EEC24CB /* TranscriptColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F13DE3D3808C990779216E4 /* TranscriptColorSystem.swift */; };
@@ -495,6 +496,7 @@
 		3461C92597A6EC663D5D67EB /* HermesSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/HermesSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		34627A0B9E81ED0AF4C56B67 /* FilterEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/FilterEngine.swift; sourceTree = SOURCE_ROOT; };
 		35186F4194824F3250DE3B8E /* AppRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppRuntime.swift; path = AgentSessions/Support/AppRuntime.swift; sourceTree = SOURCE_ROOT; };
+		3637ADBFD4A6E452C2DBD289 /* SearchIngestService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchIngestService.swift; sourceTree = SOURCE_ROOT; };
 		364AF61D9D3F6BB2B413B5D3 /* PerfQuickWinsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PerfQuickWinsTests.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
 		372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentEnablement.swift; sourceTree = SOURCE_ROOT; };
@@ -952,6 +954,7 @@
 				E17FB1E129787D35D02F800D /* SearchSessionStore.swift */,
 				1B2BFBE4B73D06DDE72A35FF /* SessionSearchTextBuilder.swift */,
 				C29E004E088B0110C36DAAAC /* UnifiedSearchState.swift */,
+				3637ADBFD4A6E452C2DBD289 /* SearchIngestService.swift */,
 			);
 			name = Search;
 			sourceTree = "<group>";
@@ -2217,6 +2220,7 @@
 				EF6AD13056542B05168BCEAB /* HUDRebuildGate.swift in Sources */,
 				196F6BD2FA9B53ED8E9E290D /* ReverseJSONLTailReader.swift in Sources */,
 				06C6B461DB45E4CA3AEE42F2 /* ColorHex.swift in Sources */,
+				A8CFDE272E78DAC14CB5ACEB /* SearchIngestService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
