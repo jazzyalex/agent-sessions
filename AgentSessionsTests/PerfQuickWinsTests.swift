@@ -300,4 +300,67 @@ final class PerfQuickWinsTests: XCTestCase {
         let result = TranscriptNavIndexBuilder.semanticNavIndices(kind: .code, source: lines)
         XCTAssertEqual(result, [1, 3], "only first line id per decorationGroupID should be kept, sorted")
     }
+
+    // MARK: - Task 4b (Fix 2): ToolTextBlockNormalizer regex hoist must not change classification
+
+    /// A realistic macOS accessibility-tree dump, as emitted by tools that
+    /// snapshot the UI hierarchy (App=/Window:/numbered role lines). This must
+    /// be detected and reformatted by `containsAccessibilityTreeLines` +
+    /// `readableToolOutputLines`, both before and after hoisting the regexes
+    /// to precompiled `NSRegularExpression` constants.
+    private func accessibilityTreeDump() -> String {
+        """
+        App=com.apple.finder
+        Window: "Finder"
+        1 standard window "Finder" Description: Finder window
+        2 button "Close" Description: Close button
+        3 text field Value: Documents
+        """
+    }
+
+    private func nonAccessibilityDump() -> String {
+        "plain stdout\nline two\nline three\nno special markers here"
+    }
+
+    private func makeToolTextBlock(id: String, text: String, toolName: String = "shell") -> SessionTranscriptBuilder.LogicalBlock {
+        SessionTranscriptBuilder.LogicalBlock(kind: .toolOut,
+                                              text: text,
+                                              timestamp: nil,
+                                              messageID: nil,
+                                              toolName: toolName,
+                                              isDelta: false,
+                                              toolInput: nil,
+                                              isErrorOutput: false,
+                                              eventID: id,
+                                              rawJSON: "{}")
+    }
+
+    func testAccessibilityTreeDumpIsReformattedByNormalize() {
+        let block = makeToolTextBlock(id: "ax1", text: accessibilityTreeDump())
+        let normalized = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        XCTAssertNotNil(normalized)
+        let displayText = ToolTextBlockNormalizer.displayText(for: normalized!)
+
+        // Pinned expected behavior derived from ACTUAL current (pre-hoist) output:
+        // accessibility lines are cleaned (App:/Window: rewritten, numbered role
+        // lines reformatted), not passed through verbatim.
+        XCTAssertTrue(displayText.contains("App: finder"), "App= line must be rewritten to a readable app name (bundle id, \"com.apple.\" stripped, lowercase preserved); got: \(displayText)")
+        XCTAssertTrue(displayText.contains("Window: Finder"), "Window: line must be rewritten with the extracted title; got: \(displayText)")
+        XCTAssertFalse(displayText.contains("1 standard window \"Finder\" Description: Finder window"),
+                       "raw numbered accessibility line must be cleaned, not passed through verbatim")
+    }
+
+    func testNonAccessibilityOutputPassesThroughUnchangedClassification() {
+        let block = makeToolTextBlock(id: "plain1", text: nonAccessibilityDump())
+        let normalized = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        XCTAssertNotNil(normalized)
+        let displayText = ToolTextBlockNormalizer.displayText(for: normalized!)
+
+        // Pinned: plain output must NOT trigger accessibility-tree reformatting.
+        XCTAssertTrue(displayText.contains("plain stdout"))
+        XCTAssertTrue(displayText.contains("line two"))
+        XCTAssertTrue(displayText.contains("line three"))
+        XCTAssertTrue(displayText.contains("no special markers here"))
+    }
+
 }

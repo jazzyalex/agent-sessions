@@ -1181,13 +1181,42 @@ enum ToolTextBlockNormalizer {
         return trimRepeatedEmptyLines(cleanedLines)
     }
 
+    /// Detection heuristic only — a real accessibility-tree dump signals itself
+    /// in its first few lines (App=/Window:/numbered role lines). Capping the
+    /// scan avoids an O(n) regex pass over every line of a monster tool block
+    /// that isn't an accessibility dump at all (the common case).
+    private static let accessibilityTreeDetectionScanCap = 200
+
+    private static let accessibilityElementLinePrefixRegex: NSRegularExpression? =
+        try? NSRegularExpression(
+            pattern: #"^\d+\s+(standard window|split group|tab group|scroll area|HTML content|link|button|pop up button|text field|heading|container|content list|text)\b"#,
+            options: [])
+
+    /// Per-line regexes used while cleaning an accessibility-tree dump
+    /// (`cleanAccessibilityTreeLine` / `parseAccessibilityElementLine` and
+    /// their helpers below). Hoisted to `static let` so a monster tool block
+    /// with thousands of accessibility lines doesn't recompile the same
+    /// pattern on every line.
+    private static let windowTitleRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #"Window:\s*"([^"]+)""#, options: [])
+    private static let appBundleRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #"App=([^\s]+)"#, options: [])
+    private static let numberedElementLineRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #"^(\d+)\s+(.+)$"#, options: [])
+    private static let descriptionRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #"Description:\s*([^,]+)"#, options: [])
+    private static let valueRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #", Value:\s*([^,]+)"#, options: [])
+
     private static func containsAccessibilityTreeLines(_ lines: [String]) -> Bool {
-        lines.contains { line in
+        lines.prefix(accessibilityTreeDetectionScanCap).contains { line in
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.hasPrefix("App=") ||
-                trimmed.hasPrefix("Window:") ||
-                trimmed.range(of: #"^\d+\s+(standard window|split group|tab group|scroll area|HTML content|link|button|pop up button|text field|heading|container|content list|text)\b"#,
-                              options: .regularExpression) != nil
+            if trimmed.hasPrefix("App=") || trimmed.hasPrefix("Window:") {
+                return true
+            }
+            guard let regex = accessibilityElementLinePrefixRegex else { return false }
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            return regex.firstMatch(in: trimmed, options: [], range: range) != nil
         }
     }
 
@@ -1210,7 +1239,7 @@ enum ToolTextBlockNormalizer {
         }
 
         if trimmed.hasPrefix("Window:") {
-            if let windowTitle = firstRegexCapture(in: trimmed, pattern: #"Window:\s*"([^"]+)""#) {
+            if let windowTitle = firstRegexCapture(in: trimmed, regex: windowTitleRegex) {
                 return "Window: \(windowTitle)"
             }
             return trimmed.replacingOccurrences(of: ".", with: "")
@@ -1230,7 +1259,7 @@ enum ToolTextBlockNormalizer {
 
     private static func readableAppName(from line: String) -> String {
         if line.contains("Safari") { return "Safari" }
-        if let bundle = firstRegexCapture(in: line, pattern: #"App=([^\s]+)"#) {
+        if let bundle = firstRegexCapture(in: line, regex: appBundleRegex) {
             return bundle.replacingOccurrences(of: "com.apple.", with: "")
         }
         return line.replacingOccurrences(of: "App=", with: "")
@@ -1243,7 +1272,7 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func parseAccessibilityElementLine(_ line: String) -> AccessibilityElementLine? {
-        let match = regexMatch(in: line, pattern: #"^(\d+)\s+(.+)$"#)
+        let match = regexMatch(in: line, regex: numberedElementLineRegex)
         guard match.count >= 3 else {
             return nil
         }
@@ -1281,7 +1310,7 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func accessibilityLabel(from text: String) -> String {
-        if let description = firstRegexCapture(in: text, pattern: #"Description:\s*([^,]+)"#) {
+        if let description = firstRegexCapture(in: text, regex: descriptionRegex) {
             return description.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
@@ -1312,7 +1341,7 @@ enum ToolTextBlockNormalizer {
     }
 
     private static func accessibilityValue(from text: String) -> String? {
-        guard let value = firstRegexCapture(in: text, pattern: #", Value:\s*([^,]+)"#)?
+        guard let value = firstRegexCapture(in: text, regex: valueRegex)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
               !value.hasPrefix("github.com/") else {
@@ -1339,12 +1368,12 @@ enum ToolTextBlockNormalizer {
         return trimTrailingEmptyLines(output)
     }
 
-    private static func firstRegexCapture(in text: String, pattern: String) -> String? {
-        regexMatch(in: text, pattern: pattern).dropFirst().first
+    private static func firstRegexCapture(in text: String, regex: NSRegularExpression?) -> String? {
+        regexMatch(in: text, regex: regex).dropFirst().first
     }
 
-    private static func regexMatch(in text: String, pattern: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: pattern),
+    private static func regexMatch(in text: String, regex: NSRegularExpression?) -> [String] {
+        guard let regex,
               let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)) else {
             return []
         }
@@ -1442,16 +1471,20 @@ enum ToolTextBlockNormalizer {
         return nil
     }
 
+    /// Hoisted from `parseExitCode`'s old per-call `[String]` pattern list +
+    /// inline `try? NSRegularExpression(...)`. Runs once per tool-output
+    /// block, so a monster session with thousands of blocks was recompiling
+    /// all three patterns per block.
+    private static let exitCodePatternRegexes: [NSRegularExpression] = [
+        "exit code[:\\s]*(-?\\d+)",
+        "exit status[:\\s]*(-?\\d+)",
+        "exit[:\\s]*(-?\\d+)"
+    ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+
     private static func parseExitCode(from text: String?) -> Int? {
         guard let text else { return nil }
-        let patterns = [
-            "exit code[:\\s]*(-?\\d+)",
-            "exit status[:\\s]*(-?\\d+)",
-            "exit[:\\s]*(-?\\d+)"
-        ]
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-               let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)),
+        for regex in exitCodePatternRegexes {
+            if let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)),
                match.numberOfRanges >= 2,
                let range = Range(match.range(at: 1), in: text) {
                 return Int(text[range])
