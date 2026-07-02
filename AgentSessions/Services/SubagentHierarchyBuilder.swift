@@ -33,6 +33,22 @@ enum SubagentHierarchyBuilder {
         let rowMeta: [String: SubagentRowMeta]
     }
 
+    /// URL-free equivalent of URL(fileURLWithPath:).deletingPathExtension()
+    /// .lastPathComponent for plain file paths — build() calls this once per
+    /// top-level session per sort, where URL construction dominated.
+    static func fileBaseName(ofPath path: String) -> String {
+        let name: Substring
+        if let slash = path.lastIndex(of: "/") {
+            name = path[path.index(after: slash)...]
+        } else {
+            name = path[...]
+        }
+        if let dot = name.lastIndex(of: "."), dot != name.startIndex {
+            return String(name[..<dot])
+        }
+        return String(name)
+    }
+
     /// Build a hierarchical session list.
     ///
     /// - Parameters:
@@ -71,8 +87,7 @@ enum SubagentHierarchyBuilder {
                 // Derive UUID from file path for Claude sessions whose
                 // codexInternalSessionIDHint may not be persisted in the DB yet.
                 // Claude session files are named <UUID>.jsonl.
-                let fileName = URL(fileURLWithPath: s.filePath)
-                    .deletingPathExtension().lastPathComponent
+                let fileName = fileBaseName(ofPath: s.filePath)
                 if fileName.count == 36, fileName.contains("-"),
                    parentKeyToID[fileName] == nil {
                     parentKeyToID[fileName] = s.id

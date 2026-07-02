@@ -407,4 +407,22 @@ final class PerfQuickWinsTests: XCTestCase {
         XCTAssertNil(first)
         XCTAssertNil(second)
     }
+
+    // MARK: - Task 6: URL-free file base name derivation
+
+    func testFileBaseNameMatchesURLBehavior() {
+        let paths = [
+            "/Users/x/.claude/projects/p/0a1b2c3d-1111-2222-3333-444455556666.jsonl",
+            "/tmp/archive.tar.gz",          // only the LAST extension is dropped
+            "/tmp/noext",
+            "relative/dir/file.jsonl",
+            "justafile.jsonl",
+            "/tmp/.hiddenfile",             // leading dot is not an extension separator
+            "/tmp/dir.with.dots/name.jsonl"
+        ]
+        for path in paths {
+            let expected = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+            XCTAssertEqual(SubagentHierarchyBuilder.fileBaseName(ofPath: path), expected, "path: \(path)")
+        }
+    }
 }
