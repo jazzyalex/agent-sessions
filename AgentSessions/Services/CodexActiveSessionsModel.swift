@@ -1148,7 +1148,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             markStaleRefreshDrop()
             return LiveStateClassification(liveStates: previousLiveStates, idleReasons: [:])
         }
-        return Self.classifyLiveStates(
+        let _classifySpan = Perf.begin("refreshClassify", thresholdMs: 4)
+        let result = Self.classifyLiveStates(
             for: presences,
             now: now,
             probeITerm: probeITerm,
@@ -1156,6 +1157,8 @@ final class CodexActiveSessionsModel: ObservableObject {
             probedITermPresenceKeys: probedITermPresenceKeys,
             batchProbeResults: batchProbeResults
         )
+        Perf.end(_classifySpan)
+        return result
     }
 
     private func refreshOnce() async {
