@@ -39,6 +39,74 @@ final class UsageResetTextTests: XCTestCase {
         XCTAssertNotNil(date, "Should parse ISO 8601 without fractional seconds")
     }
 
+    // MARK: - ISO 8601 memoization parity
+    //
+    // `parseISO8601` is a pure function of its input text (no `now` parameter — the
+    // parsed instant does not depend on when parsing happens), which is exactly why
+    // it's safe to memoize by raw string. These tests prove repeated/varied calls
+    // through the memoized path return identical results to a fresh, uncached parse,
+    // including the nil (unparseable) case, and that `now`-variance still works
+    // correctly for other call sites that DO thread `now` through (this parse itself
+    // just doesn't use it).
+
+    func testParseISO8601MemoizationReturnsIdenticalResultOnRepeatedCalls() {
+        let raw = "2026-03-14T09:00:00.397911+00:00"
+        let first = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw)
+        let second = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw)
+        let third = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw)
+        XCTAssertNotNil(first)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(second, third)
+    }
+
+    func testParseISO8601MemoizationHandlesVariedInputsIndependently() {
+        let rawA = "2026-03-14T09:00:00Z"
+        let rawB = "2026-06-01T18:30:00.500000+02:00"
+
+        let a1 = UsageResetText.resetDate(kind: "5h", source: .claude, raw: rawA)
+        let b1 = UsageResetText.resetDate(kind: "5h", source: .claude, raw: rawB)
+        let a2 = UsageResetText.resetDate(kind: "5h", source: .claude, raw: rawA)
+        let b2 = UsageResetText.resetDate(kind: "5h", source: .claude, raw: rawB)
+
+        XCTAssertNotNil(a1)
+        XCTAssertNotNil(b1)
+        XCTAssertEqual(a1, a2, "cache must not conflate distinct raw strings")
+        XCTAssertEqual(b1, b2, "cache must not conflate distinct raw strings")
+        XCTAssertNotEqual(a1, b1, "sanity: the two fixtures represent different instants")
+    }
+
+    func testParseISO8601MemoizationCachesNilResultForUnparseableInput() {
+        // Contains "T" (passes the fast-reject) but is not valid ISO 8601, so it must
+        // fall through to nil both on a fresh parse and on a repeated (cached) call —
+        // a cached nil must not be mistaken for "not yet attempted" and re-attempted
+        // forever, but it also must not accidentally resolve to some other cached date.
+        let raw = "Totally not a date T but has one"
+        let first = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw)
+        let second = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw)
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+    }
+
+    func testParseISO8601MemoizationDoesNotAffectNowDependentRelativeParsing() {
+        // `resetDate` dispatches ISO8601 first, then falls through to other parse
+        // strategies (e.g. `parseRelativeReset`) that DO depend on `now`. Prove that
+        // varying `now` for a non-ISO8601 (relative) raw string still yields different,
+        // correct results — i.e. the ISO8601 memoization layer does not leak into or
+        // short-circuit the now-dependent paths.
+        let raw = "resets in 1h 30m"
+        let nowA = Date(timeIntervalSince1970: 1_800_000_000)
+        let nowB = nowA.addingTimeInterval(3600)
+
+        let dateA = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw, now: nowA)
+        let dateB = UsageResetText.resetDate(kind: "5h", source: .claude, raw: raw, now: nowB)
+
+        XCTAssertNotNil(dateA)
+        XCTAssertNotNil(dateB)
+        XCTAssertEqual(dateA, nowA.addingTimeInterval(90 * 60))
+        XCTAssertEqual(dateB, nowB.addingTimeInterval(90 * 60))
+        XCTAssertNotEqual(dateA, dateB, "now-dependent relative parsing must still vary with now despite ISO8601 memoization")
+    }
+
     // MARK: - Display text for ISO 8601
 
     func testDisplayText_iso8601FiveHour_returnsTimeFormat() {

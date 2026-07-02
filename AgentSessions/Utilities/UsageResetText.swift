@@ -63,9 +63,44 @@ enum UsageResetText {
         return nil
     }
 
+    /// Memoizes `parseISO8601` results keyed by the raw input string. This function is
+    /// pure (no `now` parameter — its result depends only on `text`), so caching by
+    /// input is exact: it never changes what callers observe. It exists because the
+    /// Cockpit HUD calls into `UsageResetText.resetDate`/`displayText` from inside a
+    /// SwiftUI view body (`HUDLimitsProviderText.alignedContent`/`fiveHourResetLabel`),
+    /// re-running full ISO8601Formatter parses on the same handful of raw strings on
+    /// every render tick. `nil` results (unparseable text) are cached too, so a
+    /// non-ISO8601 raw string doesn't keep re-attempting the (failing) formatter parse
+    /// every render either. Bounded by simply capping the cache size — the keyspace in
+    /// practice is a small, slowly-changing set of "reset" strings from a handful of
+    /// active usage entries, so unbounded growth is not a realistic concern, but the
+    /// cap is cheap insurance against a pathological caller.
+    private static var isoParseCache: [String: Date?] = [:]
+    private static let isoParseCacheLock = NSLock()
+    private static let isoParseCacheCap = 256
+
     private static func parseISO8601(_ text: String) -> Date? {
         // Fast reject: ISO 8601 datetime always contains 'T'.
         guard text.contains("T") else { return nil }
+
+        isoParseCacheLock.lock()
+        if let cached = isoParseCache[text] {
+            isoParseCacheLock.unlock()
+            return cached
+        }
+        isoParseCacheLock.unlock()
+
+        let result = parseISO8601Uncached(text)
+
+        isoParseCacheLock.lock()
+        if isoParseCache.count >= isoParseCacheCap { isoParseCache.removeAll(keepingCapacity: true) }
+        isoParseCache[text] = result
+        isoParseCacheLock.unlock()
+
+        return result
+    }
+
+    private static func parseISO8601Uncached(_ text: String) -> Date? {
         let frac = ISO8601DateFormatter()
         frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let d = frac.date(from: text) { return d }
