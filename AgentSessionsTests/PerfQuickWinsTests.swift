@@ -6,6 +6,7 @@ final class PerfQuickWinsTests: XCTestCase {
     override func setUp() {
         super.setUp()
         SessionTranscriptBuilder._testResetCoalesceCache()
+        ToolTextBlockNormalizer._testResetNormalizeCache()
     }
 
     // MARK: - Fixtures
@@ -363,4 +364,47 @@ final class PerfQuickWinsTests: XCTestCase {
         XCTAssertTrue(displayText.contains("no special markers here"))
     }
 
+    // MARK: - Task 4b (Fix 3): normalize(block:source:) memoization
+
+    func testNormalizeMemoizationReturnsEqualResultsForSameBlock() {
+        let block = makeToolTextBlock(id: "memo1", text: nonAccessibilityDump())
+        let first = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        let second = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        XCTAssertEqual(first, second, "normalizing the identical block twice must yield equal results")
+    }
+
+    func testNormalizeMemoizationDoesNotCollideOnSameEventIDDifferentTextLength() {
+        // Simulates a live-tail delta-append: same eventID, growing text. The
+        // memo key must include text length so the cache doesn't serve a stale
+        // (shorter) cached result for the grown block.
+        let shortBlock = makeToolTextBlock(id: "grow1", text: "short output")
+        let longBlock = makeToolTextBlock(id: "grow1", text: "short output plus a lot more appended tail content")
+
+        let shortResult = ToolTextBlockNormalizer.normalize(block: shortBlock, source: .codex)
+        let longResult = ToolTextBlockNormalizer.normalize(block: longBlock, source: .codex)
+
+        XCTAssertNotEqual(shortResult, longResult,
+                          "same eventID but different text length must not collide in the memo cache")
+        XCTAssertEqual(ToolTextBlockNormalizer.displayText(for: longResult!).contains("plus a lot more appended tail content"), true)
+    }
+
+    func testNormalizeMemoizationCachesNilResultsToo() {
+        // A `.user` block kind makes `normalize(block:source:)` return nil
+        // (early return in the kind switch). Calling twice must not crash or
+        // recompute incorrectly, and both calls must return nil.
+        let userBlock = SessionTranscriptBuilder.LogicalBlock(kind: .user,
+                                                               text: "hello",
+                                                               timestamp: nil,
+                                                               messageID: nil,
+                                                               toolName: nil,
+                                                               isDelta: false,
+                                                               toolInput: nil,
+                                                               isErrorOutput: false,
+                                                               eventID: "nilcase1",
+                                                               rawJSON: "{}")
+        let first = ToolTextBlockNormalizer.normalize(block: userBlock, source: .codex)
+        let second = ToolTextBlockNormalizer.normalize(block: userBlock, source: .codex)
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+    }
 }

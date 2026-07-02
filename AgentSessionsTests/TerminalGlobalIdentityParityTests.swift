@@ -10,6 +10,11 @@ final class TerminalGlobalIdentityParityTests: XCTestCase {
         // (keyed by session id + event count + includeMeta) can serve a stale hit
         // from a prior test when counts happen to collide.
         SessionTranscriptBuilder._testResetCoalesceCache()
+        // ToolTextBlockNormalizer.normalize(block:source:) is also memoized, keyed by
+        // (eventID, text byte length, kind, source) — a fixture that reuses the same
+        // eventID with content of the same length across test cases could otherwise
+        // collide on a stale normalized result.
+        ToolTextBlockNormalizer._testResetNormalizeCache()
     }
 
     // MARK: Fixtures
