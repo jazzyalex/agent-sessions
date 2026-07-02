@@ -446,7 +446,9 @@ struct SessionTranscriptBuilder {
     /// new views to render the underlying data differently.
     static func coalescedBlocks(for session: Session,
                                 includeMeta: Bool) -> [LogicalBlock] {
-        coalesce(session: session, includeMeta: includeMeta)
+        let _span = Perf.begin("transcriptCoalesce", thresholdMs: 20, "events=\(session.events.count)")
+        defer { Perf.end(_span) }
+        return coalesce(session: session, includeMeta: includeMeta)
     }
 
     static func displayLines(for block: LogicalBlock, source: SessionSource?) -> [String] {

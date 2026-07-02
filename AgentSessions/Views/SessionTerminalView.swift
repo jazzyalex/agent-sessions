@@ -963,6 +963,8 @@ struct SessionTerminalView: View {
     nonisolated private static func buildRebuildResult(session: Session,
                                                        skipAgentsPreamble: Bool,
                                                        enableReviewCards: Bool) -> RebuildResult {
+        let _span = Perf.begin("transcriptModelBuild", thresholdMs: 50, "events=\(session.events.count)")
+        defer { Perf.end(_span) }
         let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
         let built = TerminalBuilder.buildLines(from: blocks, source: session.source, enableReviewCards: enableReviewCards)
         let startLineID = conversationStartLineIDIfNeeded(session: session, lines: built, enabled: skipAgentsPreamble)
