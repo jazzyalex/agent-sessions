@@ -1355,18 +1355,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
-    /// Large-session guardrail check for a focused context that carries no size
-    /// info (monitor/refresh paths only have `FocusedSessionContext`). Resolves the
-    /// backing `Session` and consults the gate; if the session can't be resolved we
-    /// allow hydration (unknown size — don't block a legitimate refresh).
-    @MainActor
-    private func shouldAutoHydrateFocused(_ context: FocusedSessionContext) -> Bool {
-        guard let session = allSessions.first(where: {
-            $0.id == context.sessionID && $0.source == context.source
-        }) else { return true }
-        return TranscriptHydrationGate.shared.shouldAutoHydrate(session)
-    }
-
     @MainActor
     func setFocusedSession(_ session: Session?) {
         let newContext = session.map {
@@ -1386,12 +1374,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         guard Self.supportsFocusedSessionMonitoring(source: context.source) else {
             lastFocusedSignatureBySource.removeAll()
             consecutiveMissingFocusedSignatureCountBySource.removeAll()
-            return
-        }
-
-        // Large-session guardrail: don't run the selection-triggered parse or start the
-        // live monitor for a monster session until the user opts in (Show full transcript).
-        if let session, !TranscriptHydrationGate.shared.shouldAutoHydrate(session) {
             return
         }
 
@@ -1426,10 +1408,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
 
             if let context = focusedSessionContext,
-               Self.supportsFocusedSessionMonitoring(source: context.source),
-               // Large-session guardrail: don't restart the parsing monitor on
-               // foreground for a monster session the user hasn't opted into.
-               shouldAutoHydrateFocused(context) {
+               Self.supportsFocusedSessionMonitoring(source: context.source) {
                 focusedSessionMonitorTask?.cancel()
                 focusedSessionMonitorTask = Task.detached(priority: .utility) { [weak self, context] in
                     await self?.runFocusedSessionMonitorLoop(context: context)
@@ -1910,9 +1889,6 @@ final class UnifiedSessionIndexer: ObservableObject {
                       context.source == source else {
                     return
                 }
-                // Large-session guardrail: a manual refresh must not force-parse a
-                // monster session the user declined via the interstitial.
-                guard self.shouldAutoHydrateFocused(context) else { return }
                 self.refreshFocusedSession(context: context, trigger: .manual)
             }
         }

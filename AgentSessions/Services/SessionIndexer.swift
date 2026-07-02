@@ -1898,6 +1898,8 @@ final class SessionIndexer: ObservableObject {
 
     // Full parse (no lightweight check)
     func parseFileFull(at url: URL, forcedID: String? = nil) -> Session? {
+        let _span = Perf.begin("transcriptParseFull", thresholdMs: 100, "path=\(url.lastPathComponent)")
+        defer { Perf.end(_span) }
         DBG("    📖 parseFileFull: Getting file attrs...")
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1

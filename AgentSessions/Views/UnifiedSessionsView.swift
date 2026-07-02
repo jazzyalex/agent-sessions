@@ -385,7 +385,6 @@ struct UnifiedSessionsView: View {
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
-    @ObservedObject private var hydrationGate = TranscriptHydrationGate.shared
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     @State private var restoreCandidate: Session? = nil
@@ -1528,8 +1527,6 @@ struct UnifiedSessionsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(nsColor: .textBackgroundColor))
-                } else if hydrationGate.needsManualHydration(s), s.events.isEmpty {
-                    largeSessionInterstitial(s)
                 }
             } else if selection == nil {
                 Text("Select a session to view transcript")
@@ -2027,12 +2024,11 @@ struct UnifiedSessionsView: View {
         if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
             searchCoordinator.promote(id: s.id)
         }
-        // Lazy load full session per source — gated by the large-session guardrail so a
-        // monster session can't parseFileFull (and hang) on selection. The interstitial in
-        // transcriptPane offers an explicit "Show full transcript".
-        let allowHydrate = TranscriptHydrationGate.shared.shouldAutoHydrate(s)
-        let requestedSelectionReload = allowHydrate ? reloadSessionForSource(s) : false
-        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: allowHydrate && !requestedSelectionReload)
+        // Lazy load full session per source. Parse + model build run off-main and the
+        // windowed build paints only the tail window, so hydration always proceeds
+        // immediately on selection (no manual "Show full transcript" gate).
+        let requestedSelectionReload = reloadSessionForSource(s)
+        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
         updateFocusedSessionIfNeeded(s)
     }
 
@@ -2250,39 +2246,6 @@ struct UnifiedSessionsView: View {
             if unified.piAgentEnabled, let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
         }
         return false
-    }
-
-    /// User opted into loading a large session's full transcript: allow hydration, then run it.
-    private func showFullTranscript(_ s: Session) {
-        hydrationGate.allowFullHydration(s.id)
-        let reloaded = reloadSessionForSource(s)
-        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !reloaded)
-        updateFocusedSessionIfNeeded(s)
-    }
-
-    @ViewBuilder
-    private func largeSessionInterstitial(_ s: Session) -> some View {
-        let sizeText = ByteCountFormatter.string(fromByteCount: Int64(s.fileSizeBytes ?? 0), countStyle: .file)
-        VStack(spacing: 12) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 30, weight: .regular))
-                .foregroundStyle(.secondary)
-            Text("Large session")
-                .font(.headline)
-            Text("\(s.messageCount) messages · \(sizeText)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text("Rendering the full transcript can take a while for a session this size.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Button("Show full transcript") { showFullTranscript(s) }
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 4)
-        }
-        .padding(28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
     }
 
 		    @discardableResult

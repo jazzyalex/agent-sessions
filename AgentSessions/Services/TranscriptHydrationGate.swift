@@ -1,51 +1,28 @@
 import Foundation
 import Combine
 
-/// Central gate for the large-session guardrail.
+/// Former central gate for the large-session guardrail. No longer called anywhere
+/// (Task 9c removed all three call sites — UnifiedSessionsView's direct reload,
+/// SearchCoordinator's prewarm, and UnifiedSessionIndexer's focused-session reload —
+/// so sessions now auto-hydrate unconditionally on selection).
 ///
-/// Selecting a session can trigger a full parse (`parseFileFull`) from three paths —
-/// the direct provider reload, the search prewarm, and the focused-session reload.
-/// For sessions over a size/message threshold that whole-document parse + build can
-/// hang the app (profiled: 30 s / 1.3 GB on a 619k-line session), so we skip
-/// auto-hydration until the user opts in via "Show full transcript". All three paths
-/// must consult `shouldAutoHydrate`; gating only one leaves another able to parse.
+/// Selecting a session triggers a full parse (`parseFileFull`). This class used to
+/// gate that parse above a size/message threshold behind a manual "Show full
+/// transcript" affordance (profiled hang: 30 s / 1.3 GB on a 619k-line session).
+/// Parse + model build now run off-main and the windowed build paints only the tail
+/// window, so the guardrail is obsolete.
+///
+/// Kept as a dead, always-true stub rather than deleted outright: removing the file
+/// requires editing the Xcode project's pbxproj references, which is out of scope
+/// for this behavior change. Safe to delete (class + pbxproj entries) in a follow-up.
 final class TranscriptHydrationGate: ObservableObject {
     static let shared = TranscriptHydrationGate()
 
-    private let lock = NSLock()
-    private var overrides: Set<String> = []
-    /// Bumps whenever an override is added so SwiftUI views observing the gate refresh.
-    @Published private(set) var version: Int = 0
-
     private init() {}
 
-    /// True if the session exceeds the auto-hydration thresholds.
-    func isLarge(_ session: Session) -> Bool {
-        let bytes = session.fileSizeBytes ?? 0
-        return session.messageCount > FeatureFlags.largeSessionMessageThreshold
-            || bytes > FeatureFlags.largeSessionByteThreshold
-    }
-
-    /// True if this session may be parsed/built automatically on selection.
+    /// Always true. No longer called by any hydration path; retained only so this
+    /// stub compiles without hunting down zero call sites.
     func shouldAutoHydrate(_ session: Session) -> Bool {
-        guard isLarge(session) else { return true }
-        lock.lock(); defer { lock.unlock() }
-        return overrides.contains(session.id)
-    }
-
-    /// True if the guardrail interstitial should be offered for this session.
-    func needsManualHydration(_ session: Session) -> Bool {
-        guard isLarge(session) else { return false }
-        lock.lock(); defer { lock.unlock() }
-        return !overrides.contains(session.id)
-    }
-
-    /// User opted to load the full transcript for this session.
-    @MainActor
-    func allowFullHydration(_ sessionID: String) {
-        lock.lock()
-        let inserted = overrides.insert(sessionID).inserted
-        lock.unlock()
-        if inserted { version &+= 1 }
+        true
     }
 }
