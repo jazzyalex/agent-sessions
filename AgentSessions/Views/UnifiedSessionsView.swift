@@ -20,19 +20,28 @@ enum UnifiedTableSelectionPolicy {
         return visibleRowIDs.contains(currentSelectionID)
     }
 
+    /// The Table should mirror the canonical `selection` whenever that id is
+    /// actually present in the rows currently on screen. Busy/churn state must
+    /// NOT hide a selection that is genuinely still there — doing so caused the
+    /// native highlight to flicker off and on during every live-session
+    /// republish. Only hide it when the id is genuinely absent from the row
+    /// set (e.g. mid hierarchy-rebuild before `cachedRows` catches up), which
+    /// is what originally motivated this gate: avoid the Table trying to
+    /// scroll/highlight a row that doesn't exist yet.
     static func shouldExposeCanonicalSelectionToTable(
-        hierarchyBrowsing: Bool,
-        refreshBusy: Bool
+        selectionPresentInRows: Bool
     ) -> Bool {
-        !(hierarchyBrowsing && refreshBusy)
+        selectionPresentInRows
     }
 
     static func shouldReplaceMissingSelection(
         hierarchyBrowsing: Bool,
         refreshBusy: Bool,
-        hasUserManuallySelected: Bool
+        hasUserManuallySelected: Bool,
+        datasetChurning: Bool
     ) -> Bool {
-        !(hierarchyBrowsing && refreshBusy && hasUserManuallySelected)
+        guard !datasetChurning else { return false }
+        return !(hierarchyBrowsing && refreshBusy && hasUserManuallySelected)
     }
 }
 
@@ -751,8 +760,11 @@ struct UnifiedSessionsView: View {
                         // derived-state + cachedRows reassignment, ~5-6 O(n) passes over 3,300
                         // rows) cannot change anything the user sees and is the dominant W1
                         // beachball contributor. Take a cheap path that only refreshes the
-                        // fallback-presence map; direct dots refresh via the source-cell
-                        // .id(activeMembershipVersion) on the @Published bump, and cross-workspace
+                        // fallback-presence map; direct dots refresh because this onReceive
+                        // firing re-diffs the body, and each source-cell's .id(...) is keyed on
+                        // that row's own (liveState, lastSeenAt) signature (see
+                        // livePresenceSignature) so only rows whose visible dot actually changed
+                        // get a new cell identity — not every row on every tick. Cross-workspace
                         // fallback dots read cachedFallbackPresenceBySessionKey (rebuilt here).
                         // NOTE: reverted "C5" skipped this fallback rebuild too and broke
                         // fallback dots — we must keep it.
@@ -1140,19 +1152,21 @@ struct UnifiedSessionsView: View {
 					selectionTrace("sessions changed begin selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
                     restartSearchForSideChatDatasetChangeIfNeeded()
 					isDatasetChurning = true
-					let heldRows = updateCachedRows()
+					updateCachedRows()
 					ensureDefaultSelectionIfNeeded()
 					refreshSelectionSourceFromCachedRows()
 					updateFocusedSessionIfNeeded(selectedSession)
 					DispatchQueue.main.async {
 						isDatasetChurning = false
-						if heldRows {
-							// Reconcile once churn flag drops only when the first pass held stale rows.
-							updateCachedRows()
-							ensureDefaultSelectionIfNeeded()
-							refreshSelectionSourceFromCachedRows()
-							updateFocusedSessionIfNeeded(selectedSession)
-						}
+						// Always reconcile once churn flag drops, not just when the first
+						// pass held stale rows: shouldReplaceMissingSelection() defers a
+						// missing-selection replacement while isDatasetChurning is true
+						// (Fix 2), so a genuinely-deleted session's selection is only
+						// cleaned up here, on this guaranteed post-churn pass.
+						updateCachedRows()
+						ensureDefaultSelectionIfNeeded()
+						refreshSelectionSourceFromCachedRows()
+						updateFocusedSessionIfNeeded(selectedSession)
 						selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
 					}
 				}
@@ -1868,13 +1882,12 @@ struct UnifiedSessionsView: View {
 		    private var tableSingleSelection: Binding<String?> {
 	        Binding(
 	            get: {
+	                guard let id = selection else { return nil }
                     guard UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
-                        hierarchyBrowsing: isHierarchyBrowsing,
-                        refreshBusy: isRefreshBusyForSelection
+                        selectionPresentInRows: cachedVisibleRowIDs.contains(id)
                     ) else {
                         return nil
                     }
-		                guard let id = selection, cachedVisibleRowIDs.contains(id) else { return nil }
 	                return id
 	            },
 	            set: { newID in
@@ -2363,7 +2376,8 @@ struct UnifiedSessionsView: View {
                UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
                    hierarchyBrowsing: isHierarchyBrowsing,
                    refreshBusy: isRefreshBusyForSelection,
-                   hasUserManuallySelected: hasUserManuallySelected
+                   hasUserManuallySelected: hasUserManuallySelected,
+                   datasetChurning: isDatasetChurning
                ) {
             if let first = cachedRows.first {
                 setActiveSelection(first.id, source: first.source, userInitiated: false)
@@ -2559,7 +2573,22 @@ struct UnifiedSessionsView: View {
             Spacer(minLength: 4)
         }
         .opacity(liveOpacity)
-        .id("source-cell-\(session.id)-\(activeCodexSessions.activeMembershipVersion)")
+        .id("source-cell-\(session.id)-\(Self.livePresenceSignature(state: liveState, lastSeenAt: presence?.lastSeenAt))")
+    }
+
+    /// Compact signature of the row's own visible live-state, used to key the
+    /// Agent cell's `.id(...)`. Deliberately narrower than the global
+    /// `activeCodexSessions.activeMembershipVersion` counter: that counter
+    /// bumps on every live-presence poll tick regardless of whether *this*
+    /// row's dot/label actually changed, which was forcing every Agent cell
+    /// (and its gesture recognizers) to be torn down and recreated on every
+    /// tick — eating in-flight double-clicks. Keying on the row's own derived
+    /// (state, lastSeenAt) pair still forces re-identification exactly when
+    /// this row's visible presence changes, and leaves untouched rows alone.
+    private static func livePresenceSignature(state: CodexLiveState?, lastSeenAt: Date?) -> String {
+        let stateToken = state?.rawValue ?? "none"
+        let lastSeenToken = lastSeenAt.map { String($0.timeIntervalSince1970) } ?? "none"
+        return "\(stateToken)-\(lastSeenToken)"
     }
 
     static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [CodexSurfacePill] {

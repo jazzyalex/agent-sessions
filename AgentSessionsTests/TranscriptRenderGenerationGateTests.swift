@@ -142,20 +142,21 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
         )
     }
 
-    func testHidesTableSelectionDuringHierarchicalRefreshToAvoidScrollJump() {
+    func testHidesTableSelectionWhenIDAbsentFromCurrentRows() {
         XCTAssertFalse(
             UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
-                hierarchyBrowsing: true,
-                refreshBusy: true
+                selectionPresentInRows: false
             )
         )
     }
 
-    func testExposesTableSelectionWhenHierarchicalRefreshIsIdle() {
+    func testExposesTableSelectionWhenIDPresentInCurrentRowsEvenIfBusy() {
+        // Even mid-churn/indexing/search, if the id is genuinely still in the
+        // row set, the Table must keep showing the highlight — busy state
+        // alone must not hide a present selection.
         XCTAssertTrue(
             UnifiedTableSelectionPolicy.shouldExposeCanonicalSelectionToTable(
-                hierarchyBrowsing: true,
-                refreshBusy: false
+                selectionPresentInRows: true
             )
         )
     }
@@ -165,7 +166,8 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
             UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
                 hierarchyBrowsing: true,
                 refreshBusy: true,
-                hasUserManuallySelected: true
+                hasUserManuallySelected: true,
+                datasetChurning: false
             )
         )
     }
@@ -175,7 +177,30 @@ final class UnifiedTableSelectionPolicyTests: XCTestCase {
             UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
                 hierarchyBrowsing: true,
                 refreshBusy: false,
-                hasUserManuallySelected: true
+                hasUserManuallySelected: true,
+                datasetChurning: false
+            )
+        )
+    }
+
+    func testDefersMissingSelectionReplacementWhileDatasetIsChurning() {
+        XCTAssertFalse(
+            UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                hierarchyBrowsing: false,
+                refreshBusy: false,
+                hasUserManuallySelected: false,
+                datasetChurning: true
+            )
+        )
+    }
+
+    func testReplacesMissingSelectionAfterChurnClears() {
+        XCTAssertTrue(
+            UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                hierarchyBrowsing: false,
+                refreshBusy: false,
+                hasUserManuallySelected: false,
+                datasetChurning: false
             )
         )
     }
