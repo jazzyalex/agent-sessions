@@ -860,13 +860,15 @@ struct SessionTerminalView: View {
                                        skipAgentsPreamble: skipAgentsPreamble,
                                        reviewCardsEnabled: reviewCardsEnabled)
 
-        // A trigger that resolves to the exact same inputs as the build we
-        // already applied AND the build currently in flight is a pure
-        // duplicate — skip it rather than cancel-and-redispatch identical
-        // work. Any input difference (event count from a live-tail append or
-        // a lazy full load, preamble/review-card toggles, etc.) still
-        // rebuilds exactly as before.
-        if signature == lastCompletedBuildSignature, signature == pendingBuildSignature {
+        // Skip when an identical build already applied (lastCompleted) OR an
+        // identical build is in flight (pending) — cancelling an in-flight
+        // synchronous build cannot stop it; it runs to completion and only the
+        // apply is skipped, so re-dispatching the same inputs doubles the cost.
+        // The return happens before rebuildTask?.cancel() below so a skip never
+        // cancels the identical in-flight build. Any input difference (event
+        // count from a live-tail append or a lazy full load, preamble/review-card
+        // toggles, etc.) still rebuilds exactly as before.
+        if signature == lastCompletedBuildSignature || signature == pendingBuildSignature {
             return
         }
 
