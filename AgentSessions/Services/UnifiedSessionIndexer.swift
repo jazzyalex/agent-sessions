@@ -110,6 +110,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             },
             reloadFocusedSession: { indexer, context, trigger in
                 guard indexer.codexAgentEnabled else { return }
+                let force = (trigger != .selection)
                 let reason: SessionIndexer.ReloadReason
                 switch trigger {
                 case .selection:
@@ -119,7 +120,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 case .manual:
                     reason = .manualRefresh
                 }
-                indexer.codex.reloadSession(id: context.sessionID, force: true, reason: reason)
+                indexer.codex.reloadSession(id: context.sessionID, force: force, reason: reason)
             }
         ),
         .claude: FocusedMonitorCapability(
