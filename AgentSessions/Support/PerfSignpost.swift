@@ -155,4 +155,19 @@ enum PerfBench {
         }
     }
 }
+#else
+/// Release no-op shim. Perf spans are DEBUG-only instrumentation; this inert
+/// twin lets call sites stay unguarded (no #if DEBUG noise at every span).
+/// Keep signatures in lockstep with the DEBUG enum above.
+enum Perf {
+    struct Span {}
+    @inline(__always)
+    static func begin(_ name: StaticString,
+                      thresholdMs: Double = 16,
+                      _ detail: @escaping @autoclosure () -> String = "") -> Span { Span() }
+    @inline(__always)
+    static func end(_ span: Span, _ extra: @autoclosure () -> String = "") {}
+    @inline(__always)
+    static func event(_ name: StaticString, _ message: @autoclosure () -> String = "") {}
+}
 #endif
