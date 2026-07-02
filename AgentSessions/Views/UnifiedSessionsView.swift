@@ -1049,12 +1049,6 @@ struct UnifiedSessionsView: View {
                 Button("Copy Resume Command") { copyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID) }
                     .disabled(!canCopyResumeCommand(s, antigravityCLISessionID: antigravityCLISessionID))
                     .help("Copy a terminal-agnostic resume command to the clipboard")
-                // Git Context Inspector (Codex + Claude; feature-flagged)
-                if isGitInspectorEnabled, (s.source == .codex || s.source == .claude) {
-                    Divider()
-                    Button("Show Git Context") { showGitInspector(s) }
-                        .help("Show historical and current git context with safety analysis")
-                }
                 if let name = s.rowRepoName, !name.isEmpty {
                     Divider()
                     Button("Filter by Project: \(name)") { unified.projectFilter = name; unified.recomputeNow() }
@@ -1280,21 +1274,6 @@ struct UnifiedSessionsView: View {
 	        codexUsageModel.setStripVisible(codexAgentEnabled && codexUsageEnabled)
 	        claudeUsageModel.setStripVisible(claudeAgentEnabled && claudeUsageEnabled)
 	    }
-
-	    // MARK: - Git Inspector Integration (Unified View)
-	    private var isGitInspectorEnabled: Bool {
-	        let flagEnabled = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector)
-	        if flagEnabled { return true }
-        if let env = ProcessInfo.processInfo.environment["AGENTSESSIONS_FEATURES"], env.contains("gitInspector") { return true }
-        return false
-    }
-
-    private func showGitInspector(_ session: Session) {
-        GitInspectorWindowController.shared.show(for: session) { resumed in
-            // Reuse existing resume pipeline for Codex/Claude as appropriate
-            self.resume(resumed)
-        }
-    }
 
     private func restoreFromArchive(_ session: Session) {
         guard let path = unified.claudeArchiveSidecarPath(for: session) else { return }
@@ -1751,17 +1730,6 @@ struct UnifiedSessionsView: View {
             }
             .disabled(!liveSessionsFeatureEnabled)
             .accessibilityLabel(Text("Agent Cockpit"))
-
-            if isGitInspectorEnabled {
-                ToolbarIconButton(help: "Show historical and current git context with safety analysis (⌘⇧G)") { _ in
-                    ToolbarIcon(systemName: "clock.arrow.circlepath")
-                } action: {
-                    if let s = selectedSession { showGitInspector(s) }
-                }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
-                .disabled(selectedSession == nil)
-                .accessibilityLabel(Text("Git Context"))
-            }
 
             ToolbarGroupDivider()
 

@@ -1,3 +1,4 @@
+// Extracted from the removed GitInspector module — used by Cockpit and session-list views.
 import SwiftUI
 
 /// Extension to create SwiftUI Color from hex strings

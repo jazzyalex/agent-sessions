@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- Git Inspector (feature-flagged since v2.5, off by default) — unused in practice; recoverable from git history.
+
 ### Added
 - Documentation and website copy now position Agent Sessions as a local-history hub for CLI tools, desktop apps, and app-bundled agents, with dedicated full HTML SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
 - Local-history guide pages now reuse the main product-page header style and show unframed agent-specific marketing screenshots.

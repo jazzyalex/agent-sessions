@@ -289,12 +289,6 @@ extension PreferencesView {
             ))
             .help("Removes Agent Sessions from the Dock when the menu bar item or a pinned Cockpit keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.")
 
-            Toggle("Show Git Context button", isOn: Binding(
-                get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.enableGitInspector) },
-                set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.enableGitInspector) }
-            ))
-            .help("Show the Git Context toolbar button in Sessions (⌘⇧G)")
-
             sectionHeader("Claude Archived Sessions")
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Allow restoring archived Claude sessions", isOn: Binding(
