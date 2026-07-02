@@ -154,6 +154,35 @@ final class PerfQuickWinsTests: XCTestCase {
                        [0, 0, 0, 0])
     }
 
+    /// Pin: when EVERY user block is preamble, there is no non-preamble user
+    /// block to prefer, so the "last/first user block" fallback (`lastUser` /
+    /// `firstAfter`) takes over — the sole user block anchors every index.
+    func testUserAnchorsAllPreambleFallsBackToPlainUserBlock() {
+        XCTAssertEqual(TranscriptUserAnchors.anchors(userBlockIndices: [2],
+                                                     preambleUserBlockIndexes: [2],
+                                                     blockCount: 4),
+                       [2, 2, 2, 2])
+    }
+
+    /// Pin: two user blocks, both preamble. No non-preamble candidate exists
+    /// anywhere, so every index falls back to plain nearest-user-block
+    /// semantics. Expected values are derived from the verbatim legacy oracle
+    /// (`legacyNearestUserBlockIndex`), not hand-computed, so this test can't
+    /// silently encode a wrong assumption about the fallback order.
+    func testUserAnchorsTwoUserAllPreambleMatchesLegacyOracle() {
+        let userBlockIndices = [1, 3]
+        let preamble: Set<Int> = [1, 3]
+        let blockCount = 5
+
+        let fast = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
+                                                 preambleUserBlockIndexes: preamble,
+                                                 blockCount: blockCount)
+        let expected = (0..<blockCount).map {
+            legacyNearestUserBlockIndex(idx: $0, userBlockIndices: userBlockIndices, preamble: preamble)
+        }
+        XCTAssertEqual(fast, expected)
+    }
+
     // MARK: - Task 4c: toolbar nav index caching must be parity-identical with the old per-call scans
 
     /// Verbatim port of the old `indicesForRole` per-call scan, used as the oracle.
@@ -351,6 +380,55 @@ final class PerfQuickWinsTests: XCTestCase {
                        "raw numbered accessibility line must be cleaned, not passed through verbatim")
     }
 
+    /// `containsAccessibilityTreeLines` only scans the first
+    /// `accessibilityTreeDetectionScanCap` (200) lines as a perf guard against
+    /// an O(n) regex pass over monster tool blocks. Pin: markers appearing
+    /// ONLY after line 200 are NOT detected, so the block is classified as
+    /// plain output (passed through unchanged), not reformatted as an
+    /// accessibility-tree dump. This pins the cap's accepted behavior change,
+    /// not an aspirational "scan everything" semantics.
+    func testAccessibilityTreeMarkersAfterScanCapAreNotDetected() {
+        let plainPrefix = (0..<210).map { "plain line \($0)" }
+        let axSuffix = [
+            "App=com.apple.finder",
+            "Window: \"Finder\"",
+            "1 standard window \"Finder\" Description: Finder window",
+            "2 button \"Close\" Description: Close button",
+            "3 text field Value: Documents"
+        ]
+        let text = (plainPrefix + axSuffix).joined(separator: "\n")
+
+        let block = makeToolTextBlock(id: "ax-after-cap", text: text)
+        let normalized = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        XCTAssertNotNil(normalized)
+        let displayText = ToolTextBlockNormalizer.displayText(for: normalized!)
+
+        XCTAssertTrue(displayText.contains("App=com.apple.finder"),
+                      "markers past the 200-line scan cap must pass through verbatim, unreformatted; got: \(displayText)")
+        XCTAssertFalse(displayText.contains("App: finder"),
+                       "no App= rewrite should occur when detection never fires; got: \(displayText)")
+    }
+
+    /// Control for the cap test above: the same markers, but within the first
+    /// 200 lines, ARE detected and reformatted.
+    func testAccessibilityTreeMarkersBeforeScanCapAreDetected() {
+        let axPrefix = [
+            "App=com.apple.finder",
+            "Window: \"Finder\"",
+            "1 standard window \"Finder\" Description: Finder window"
+        ]
+        let plainSuffix = (0..<210).map { "plain line \($0)" }
+        let text = (axPrefix + plainSuffix).joined(separator: "\n")
+
+        let block = makeToolTextBlock(id: "ax-before-cap", text: text)
+        let normalized = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
+        XCTAssertNotNil(normalized)
+        let displayText = ToolTextBlockNormalizer.displayText(for: normalized!)
+
+        XCTAssertTrue(displayText.contains("App: finder"),
+                      "markers within the 200-line scan cap must be detected and reformatted; got: \(displayText)")
+    }
+
     func testNonAccessibilityOutputPassesThroughUnchangedClassification() {
         let block = makeToolTextBlock(id: "plain1", text: nonAccessibilityDump())
         let normalized = ToolTextBlockNormalizer.normalize(block: block, source: .codex)
@@ -406,6 +484,41 @@ final class PerfQuickWinsTests: XCTestCase {
         let second = ToolTextBlockNormalizer.normalize(block: userBlock, source: .codex)
         XCTAssertNil(first)
         XCTAssertNil(second)
+    }
+
+    /// ACCEPTED-AND-DOCUMENTED theoretical collision: the memo key is
+    /// `(eventID, textByteCount, kind, source)` — it does not hash text
+    /// content. Two distinct blocks that happen to share eventID, kind,
+    /// source, AND byte length (but differ in actual bytes) collide, and the
+    /// second lookup returns the FIRST block's cached result. This is a
+    /// known, accepted theoretical edge (same-length same-eventID content
+    /// substitution is not a real production pattern: eventIDs are unique per
+    /// event and live-tail growth changes length), pinned here so a future
+    /// change to the cache key can't silently alter this behavior without a
+    /// test failing to call it out.
+    func testNormalizeMemoizationCollidesOnSameEventIDSameByteLengthDifferentContent() {
+        ToolTextBlockNormalizer._testResetNormalizeCache()
+
+        // Same length (12 bytes each), same eventID/kind/source, different content.
+        let blockA = makeToolTextBlock(id: "collide1", text: "AAAAAAAAAAAA")
+        let blockB = makeToolTextBlock(id: "collide1", text: "BBBBBBBBBBBB")
+        XCTAssertEqual(blockA.text.utf8.count, blockB.text.utf8.count,
+                       "fixture must have identical byte length to exercise the collision")
+
+        let resultA = ToolTextBlockNormalizer.normalize(block: blockA, source: .codex)
+        let resultB = ToolTextBlockNormalizer.normalize(block: blockB, source: .codex)
+
+        // Pinned current behavior: resultB is served from the cache keyed by
+        // blockA's (eventID, byteCount, kind, source) tuple, so it equals
+        // resultA (content "AAAA...") rather than reflecting blockB's own
+        // "BBBB..." text. If this ever starts returning distinct per-block
+        // results (e.g. the cache key gains a content hash), this assertion
+        // should be updated to XCTAssertNotEqual with a comment explaining
+        // the fix.
+        XCTAssertEqual(resultA, resultB,
+                       "known collision: same (eventID, byteCount, kind, source) key serves the first block's cached result for the second")
+        XCTAssertEqual(ToolTextBlockNormalizer.displayText(for: resultB!).contains("AAAAAAAAAAAA"), true,
+                       "collided result reflects blockA's content, not blockB's, confirming the stale-cache-hit hypothesis")
     }
 
     // MARK: - Task 6: URL-free file base name derivation
