@@ -1803,7 +1803,7 @@ struct UnifiedSessionsView: View {
         }
     }
 
-            private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
+            private var selectedSession: Session? { selection.flatMap { id in cachedRowByID[id] } }
 
             static func sideChatParentContexts(for rows: [Session],
                                                        allSessions: [Session]) -> [String: String] {
@@ -2023,11 +2023,16 @@ struct UnifiedSessionsView: View {
     }
 
 	    private func handleSelectionChange(_ id: String?) {
-	        guard let id, let s = cachedRows.first(where: { $0.id == id }) else {
+	        guard let id, let s = cachedRowByID[id] else {
 	            cancelAutoJump()
 	            updateFocusedSessionIfNeeded(nil)
 	            return
 	        }
+        // Only the cheap, selection-visual-relevant work runs synchronously in
+        // this SwiftUI update turn: the row lookup, presence-probe deferral, and
+        // search auto-jump bookkeeping. This is what lets the native selection
+        // highlight paint on the NEXT runloop turn instead of waiting behind
+        // transcript-pane teardown/reload — see the deferred block below.
         activeCodexSessions.deferExpensiveProbesForSelectionOpen()
 	        selectionSource = s.source
 	        lastSelectedSource = s.source
@@ -2038,23 +2043,37 @@ struct UnifiedSessionsView: View {
         } else {
             cancelAutoJump()
         }
-        // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
-        if !isAutoSelectingFromSearch {
-            // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
-            focusCoordinator.perform(.selectSession(id: id))
-            NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
-        }
         // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
         let sizeBytes = s.fileSizeBytes ?? 0
         if searchCoordinator.isRunning, s.events.isEmpty, sizeBytes >= 10 * 1024 * 1024 {
             searchCoordinator.promote(id: s.id)
         }
-        // Lazy load full session per source. Parse + model build run off-main and the
-        // windowed build paints only the tail window, so hydration always proceeds
-        // immediately on selection (no manual "Show full transcript" gate).
-        let requestedSelectionReload = reloadSessionForSource(s)
-        searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
-        updateFocusedSessionIfNeeded(s)
+
+        // Everything below triggers transcript-pane work (focus transition,
+        // per-source reload/parse, transcript prewarm). Deferring it to the next
+        // main-runloop turn lets this turn finish and paint the selection
+        // highlight immediately — the highlight no longer waits for transcript
+        // teardown/reload to complete first. Staleness-guarded: if `selection`
+        // has moved on again by the time this runs (rapid clicks), skip —
+        // the newer selection's own deferred block will do this work, which
+        // also naturally coalesces a burst of clicks into loading only the
+        // final one (fewer wasted reload/parse dispatches, not just deferred
+        // ones).
+        Task { @MainActor in
+            guard selection == id else { return }
+            // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
+            if !isAutoSelectingFromSearch {
+                // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
+                focusCoordinator.perform(.selectSession(id: id))
+                NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
+            }
+            // Lazy load full session per source. Parse + model build run off-main and the
+            // windowed build paints only the tail window, so hydration always proceeds
+            // immediately on selection (no manual "Show full transcript" gate).
+            let requestedSelectionReload = reloadSessionForSource(s)
+            searchCoordinator.prewarmTranscriptIfNeeded(for: s, allowParsingLightweight: !requestedSelectionReload)
+            updateFocusedSessionIfNeeded(s)
+        }
     }
 
     private struct CockpitNavigationTarget {
