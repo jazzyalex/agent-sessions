@@ -986,26 +986,12 @@ struct SessionTerminalView: View {
         var eventIDToUserLineID: [String: Int] = [:]
         if !blocks.isEmpty {
             let userBlockIndices = blocks.enumerated().compactMap { $0.element.kind == .user ? $0.offset : nil }
-
-            func nearestUserBlockIndex(for idx: Int) -> Int? {
-                let prior = userBlockIndices.filter { $0 <= idx }
-                if let preferred = prior.last(where: { !preambleUserBlockIndexes.contains($0) }) ?? prior.last {
-                    return preferred
-                }
-                let after = userBlockIndices.filter { $0 > idx }
-                if let preferred = after.first(where: { !preambleUserBlockIndexes.contains($0) }) ?? after.first {
-                    return preferred
-                }
-                return nil
-            }
+            let anchors = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
+                                                        preambleUserBlockIndexes: preambleUserBlockIndexes,
+                                                        blockCount: blocks.count)
 
             for (idx, block) in blocks.enumerated() {
-                let targetUserBlockOffset: Int?
-                if block.kind == .user {
-                    targetUserBlockOffset = idx
-                } else {
-                    targetUserBlockOffset = nearestUserBlockIndex(for: idx)
-                }
+                let targetUserBlockOffset: Int? = block.kind == .user ? idx : anchors[idx]
                 guard let targetUserBlockOffset,
                       blocks.indices.contains(targetUserBlockOffset) else { continue }
                 // firstLineForBlock is keyed by line.blockIndex == globalBlockIndex.

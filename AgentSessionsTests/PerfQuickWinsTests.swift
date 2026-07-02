@@ -82,4 +82,59 @@ final class PerfQuickWinsTests: XCTestCase {
         XCTAssertTrue(lines.contains { $0.semanticKind == .code },
                       "line-numbered read-tool output must render as a code segment")
     }
+
+    // MARK: - Task 3: user-anchor sweep parity with the legacy quadratic scan
+
+    /// Verbatim port of the legacy nearestUserBlockIndex closure, used as the oracle.
+    private func legacyNearestUserBlockIndex(idx: Int,
+                                             userBlockIndices: [Int],
+                                             preamble: Set<Int>) -> Int? {
+        let prior = userBlockIndices.filter { $0 <= idx }
+        if let preferred = prior.last(where: { !preamble.contains($0) }) ?? prior.last {
+            return preferred
+        }
+        let after = userBlockIndices.filter { $0 > idx }
+        if let preferred = after.first(where: { !preamble.contains($0) }) ?? after.first {
+            return preferred
+        }
+        return nil
+    }
+
+    func testUserAnchorsMatchLegacySemanticsAcrossRandomizedConfigurations() {
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<50 {
+            let blockCount = Int.random(in: 1...80, using: &generator)
+            let userBlockIndices = (0..<blockCount).filter { _ in Bool.random(using: &generator) }
+            let preamble = Set(userBlockIndices.filter { _ in Bool.random(using: &generator) })
+
+            let fast = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
+                                                     preambleUserBlockIndexes: preamble,
+                                                     blockCount: blockCount)
+            XCTAssertEqual(fast.count, blockCount)
+            for idx in 0..<blockCount {
+                XCTAssertEqual(fast[idx],
+                               legacyNearestUserBlockIndex(idx: idx,
+                                                           userBlockIndices: userBlockIndices,
+                                                           preamble: preamble),
+                               "idx \(idx), users \(userBlockIndices), preamble \(preamble)")
+            }
+        }
+    }
+
+    func testUserAnchorsEdgeCases() {
+        XCTAssertEqual(TranscriptUserAnchors.anchors(userBlockIndices: [],
+                                                     preambleUserBlockIndexes: [],
+                                                     blockCount: 3),
+                       [nil, nil, nil])
+        // Block before the first user block anchors forward.
+        XCTAssertEqual(TranscriptUserAnchors.anchors(userBlockIndices: [2],
+                                                     preambleUserBlockIndexes: [],
+                                                     blockCount: 4),
+                       [2, 2, 2, 2])
+        // Non-preamble prior beats a later preamble prior.
+        XCTAssertEqual(TranscriptUserAnchors.anchors(userBlockIndices: [0, 2],
+                                                     preambleUserBlockIndexes: [2],
+                                                     blockCount: 4),
+                       [0, 0, 0, 0])
+    }
 }
