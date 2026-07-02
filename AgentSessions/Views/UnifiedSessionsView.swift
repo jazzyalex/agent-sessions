@@ -1110,8 +1110,10 @@ struct UnifiedSessionsView: View {
                 // later and overwrite the fast-path result, negating the optimization.
                 unified.sortDescriptor = .init(key: key, ascending: first.order == .forward)
             }
-            updateCachedRows()
-            refreshSelectionSourceFromCachedRows()
+            // No immediate updateCachedRows() here: the sortDescriptor fast path
+            // re-sorts off-main and republishes unified.sessions, whose onChange
+            // rebuilds rows + reconciles selection. An immediate rebuild here ran
+            // against the pre-sort array — pure waste (~115 ms) plus a Table diff.
         }
 #if DEBUG
 				.onReceive(NotificationCenter.default.publisher(for: PerfBench.toggleSortNotification)) { _ in
