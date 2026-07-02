@@ -57,7 +57,11 @@ enum FeatureFlags {
     // unchanged. When true, lines/blocks derive stable GLOBAL identities so a
     // later prepended window never renumbers existing lines. Default false until
     // parity-gated. (Phase 3 also gates the windowed build-on-open on this flag.)
-    static let transcriptWindowedBuild = false
+    // Default ON since 2026-07-02: parity-gated against the whole-session build
+    // (Terminal/Transcript/Golden suites green in both states) and QA'd on a
+    // 49k-event session (windowed first paint, char-gated swap, monsters never
+    // full-apply).
+    static let transcriptWindowedBuild = true
     // Target number of WHOLE coalesced blocks per window. The window is expanded
     // outward to whole-block boundaries, so the realized line count varies with
     // block sizes; this bounds the block count, not the line count.
@@ -84,7 +88,11 @@ enum FeatureFlags {
     // it out wholesale. Requires transcriptWindowedBuild=true for that
     // replacing swap to itself be windowed (cheap) rather than a full
     // non-windowed rebuild of 49k+ lines on the main thread.
-    static let transcriptTailFirstPaint = false
+    // Default ON since 2026-07-02: QA'd cold-open of a 200MB/49k-event session —
+    // tail content in ~200ms of pipeline work while the full parse (~11s)
+    // continues in the background and the two-stage swap replaces the
+    // provisional paint.
+    static let transcriptTailFirstPaint = true
     static let transcriptTailFirstPaintMinBytes: Int = 8_000_000
 
 }
