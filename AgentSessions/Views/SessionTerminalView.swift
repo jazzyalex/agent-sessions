@@ -874,6 +874,7 @@ struct SessionTerminalView: View {
 
         rebuildTask?.cancel()
         pendingBuildSignature = signature
+        Perf.event("transcriptRebuildDispatch", "id=\(sessionSnapshot.id.prefix(8)) events=\(sessionSnapshot.events.count)")
 
         rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, reviewCardsEnabled, debounceNanoseconds] in
             if debounceNanoseconds > 0 {
@@ -886,9 +887,64 @@ struct SessionTerminalView: View {
                 return
             }
 
-            let result = Self.buildRebuildResult(session: sessionSnapshot,
+            var fullBlocks: [SessionTranscriptBuilder.LogicalBlock]? = nil
+            var didApplyStage1Window = false
+            if FeatureFlags.transcriptWindowedBuild {
+                let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
+                fullBlocks = blocks
+                let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count,
+                                                         blockTarget: FeatureFlags.transcriptWindowBlockTarget)
+                if !window.isEmpty, !window.coversTop {
+                    // Stage 2 gate, computed up front (cheap: a reduce over
+                    // already-in-memory block text) so the stage-1 apply below
+                    // knows whether IT is the last apply for this signature —
+                    // swapping in the whole session costs main-thread apply time
+                    // proportional to characters, so above the threshold the
+                    // window remains the operating regime (loadOlder — Phase 3
+                    // Tasks 6-8 — is the path to older content) and the window
+                    // apply IS the final state for this build.
+                    let totalChars = blocks.reduce(0) { $0 + $1.text.utf8.count }
+                    let willSwapToFull = Self.shouldSwapToFullBuild(totalChars: totalChars)
+
+                    // Stage 1: last-window first paint.
+                    let windowResult = Self.buildRebuildResult(session: sessionSnapshot,
+                                                               blocks: blocks,
+                                                               blockRange: window.lowerBlock...window.upperBlock,
+                                                               skipAgentsPreamble: skipAgentsPreamble,
+                                                               enableReviewCards: reviewCardsEnabled)
+                    guard !Task.isCancelled else {
+                        await MainActor.run {
+                            if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                        }
+                        return
+                    }
+                    await MainActor.run {
+                        guard !Task.isCancelled else {
+                            if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                            return
+                        }
+                        applyRebuild(windowResult, sessionSnapshot: sessionSnapshot,
+                                    skipAgentsPreamble: skipAgentsPreamble, signature: signature,
+                                    isFinalApply: !willSwapToFull)
+                        if !willSwapToFull, pendingBuildSignature == signature { pendingBuildSignature = nil }
+                    }
+                    didApplyStage1Window = true
+
+                    guard willSwapToFull else { return }
+                }
+            }
+
+            let result: RebuildResult
+            if let fullBlocks {
+                result = Self.buildRebuildResult(session: sessionSnapshot, blocks: fullBlocks,
+                                                 blockRange: nil,
                                                  skipAgentsPreamble: skipAgentsPreamble,
                                                  enableReviewCards: reviewCardsEnabled)
+            } else {
+                result = Self.buildRebuildResult(session: sessionSnapshot,
+                                                 skipAgentsPreamble: skipAgentsPreamble,
+                                                 enableReviewCards: reviewCardsEnabled)
+            }
             guard !Task.isCancelled else {
                 await MainActor.run {
                     if pendingBuildSignature == signature { pendingBuildSignature = nil }
@@ -901,87 +957,121 @@ struct SessionTerminalView: View {
                     if pendingBuildSignature == signature { pendingBuildSignature = nil }
                     return
                 }
-
-                let priorLines = lines
-                let appendOnlyUpdate: Bool = {
-                    if case .append = Self.tailPatchStrategy(previous: priorLines, current: result.lines) {
-                        return true
-                    }
-                    return false
-                }()
-
-                lines = result.lines
-                visibleLines = applyLineFilters(result.lines)
-                visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
-                refreshSearchSnapshotsIfNeeded()
-                conversationStartLineID = result.conversationStartLineID
-                preambleUserBlockIndexes = result.preambleUserBlockIndexes
-                userLineIndices = result.userLineIndices
-                assistantLineIndices = result.assistantLineIndices
-                toolLineIndices = result.toolLineIndices
-                errorLineIndices = result.errorLineIndices
-                eventIDToUserLineID = result.eventIDToUserLineID
-                rebuildNavIndexCaches()
-
-                lastCompletedBuildSignature = signature
-                if pendingBuildSignature == signature { pendingBuildSignature = nil }
-
-                if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
-                    pendingUserPromptIndex = nil
-                }
-                if let pending = pendingEventJumpID, jumpToEventID(pending) {
-                    pendingEventJumpID = nil
-                }
-
-                if appendOnlyUpdate {
-                    if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        recomputeUnifiedMatches(resetIndex: false, preserveCurrentLine: true)
-                    } else {
-                        unifiedMatchOccurrences = []
-                        unifiedCurrentMatchLineID = nil
-                        unifiedExternalMatchCount = 0
-                        unifiedExternalTotalMatchCount = 0
-                        unifiedExternalCurrentMatchIndex = 0
-                    }
-
-                    if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        recomputeFindMatches(resetIndex: false, preserveCurrentLine: true)
-                    } else {
-                        findMatchOccurrences = []
-                        findCurrentMatchLineID = nil
-                        externalMatchCount = 0
-                        externalTotalMatchCount = 0
-                        externalCurrentMatchIndex = 0
-                    }
+                // Only the actual stage-2 swap (window already painted, now
+                // replaced by the full-session build) is measured here; the
+                // flag-off path and the small-session single build are not a
+                // "swap" and would just add noise to the span's tuning signal.
+                if didApplyStage1Window {
+                    let _s = Perf.begin("transcriptSwapApply", thresholdMs: 50)
+                    applyRebuild(result, sessionSnapshot: sessionSnapshot,
+                                skipAgentsPreamble: skipAgentsPreamble, signature: signature,
+                                isFinalApply: true)
+                    Perf.end(_s)
                 } else {
-                    // Reset Unified Search + Find state when rebuilding from a non-append change.
-                    unifiedMatchOccurrences = []
-                    unifiedCurrentMatchLineID = nil
-                    unifiedExternalMatchCount = 0
-                    unifiedExternalTotalMatchCount = 0
-                    unifiedExternalCurrentMatchIndex = 0
-
-                    findMatchOccurrences = []
-                    findCurrentMatchLineID = nil
-                    roleNavPositions = [:]
-                    semanticNavPositions = [:]
-                    externalMatchCount = 0
-                    externalTotalMatchCount = 0
-                    externalCurrentMatchIndex = 0
-
-                    if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        recomputeUnifiedMatches(resetIndex: true)
-                    }
-                    if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        recomputeFindMatches(resetIndex: true)
-                    }
+                    applyRebuild(result, sessionSnapshot: sessionSnapshot,
+                                skipAgentsPreamble: skipAgentsPreamble, signature: signature,
+                                isFinalApply: true)
                 }
-
-                if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                   findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    applyAutoScrollIfNeeded(sessionID: sessionSnapshot.id, skipAgentsPreamble: skipAgentsPreamble)
-                }
+                if pendingBuildSignature == signature { pendingBuildSignature = nil }
             }
+        }
+    }
+
+    /// Applies a `RebuildResult` to view state. Shared by the flag-off single
+    /// full build, the flag-on stage-1 windowed first paint, and the flag-on
+    /// stage-2 full-session swap.
+    ///
+    /// `isFinalApply` controls ONLY `lastCompletedBuildSignature`: it must be
+    /// set exactly once per dispatched build, at the LAST apply that build
+    /// performs (the full-swap apply when stage 2 runs, the window apply when
+    /// the char gate stops stage 2, or the single apply on the flag-off/
+    /// coversTop path). `pendingBuildSignature` clearing stays at the task
+    /// level (call sites above), not here, since a stage-1 apply must NOT
+    /// clear pending while stage 2 is still in flight for the same signature.
+    private func applyRebuild(_ result: RebuildResult,
+                              sessionSnapshot: Session,
+                              skipAgentsPreamble: Bool,
+                              signature: BuildSignature,
+                              isFinalApply: Bool) {
+        let priorLines = lines
+        let appendOnlyUpdate: Bool = {
+            if case .append = Self.tailPatchStrategy(previous: priorLines, current: result.lines) {
+                return true
+            }
+            return false
+        }()
+
+        lines = result.lines
+        visibleLines = applyLineFilters(result.lines)
+        visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
+        refreshSearchSnapshotsIfNeeded()
+        conversationStartLineID = result.conversationStartLineID
+        preambleUserBlockIndexes = result.preambleUserBlockIndexes
+        userLineIndices = result.userLineIndices
+        assistantLineIndices = result.assistantLineIndices
+        toolLineIndices = result.toolLineIndices
+        errorLineIndices = result.errorLineIndices
+        eventIDToUserLineID = result.eventIDToUserLineID
+        rebuildNavIndexCaches()
+
+        if isFinalApply {
+            lastCompletedBuildSignature = signature
+        }
+
+        if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
+            pendingUserPromptIndex = nil
+        }
+        if let pending = pendingEventJumpID, jumpToEventID(pending) {
+            pendingEventJumpID = nil
+        }
+
+        if appendOnlyUpdate {
+            if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeUnifiedMatches(resetIndex: false, preserveCurrentLine: true)
+            } else {
+                unifiedMatchOccurrences = []
+                unifiedCurrentMatchLineID = nil
+                unifiedExternalMatchCount = 0
+                unifiedExternalTotalMatchCount = 0
+                unifiedExternalCurrentMatchIndex = 0
+            }
+
+            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeFindMatches(resetIndex: false, preserveCurrentLine: true)
+            } else {
+                findMatchOccurrences = []
+                findCurrentMatchLineID = nil
+                externalMatchCount = 0
+                externalTotalMatchCount = 0
+                externalCurrentMatchIndex = 0
+            }
+        } else {
+            // Reset Unified Search + Find state when rebuilding from a non-append change.
+            unifiedMatchOccurrences = []
+            unifiedCurrentMatchLineID = nil
+            unifiedExternalMatchCount = 0
+            unifiedExternalTotalMatchCount = 0
+            unifiedExternalCurrentMatchIndex = 0
+
+            findMatchOccurrences = []
+            findCurrentMatchLineID = nil
+            roleNavPositions = [:]
+            semanticNavPositions = [:]
+            externalMatchCount = 0
+            externalTotalMatchCount = 0
+            externalCurrentMatchIndex = 0
+
+            if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeUnifiedMatches(resetIndex: true)
+            }
+            if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                recomputeFindMatches(resetIndex: true)
+            }
+        }
+
+        if unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applyAutoScrollIfNeeded(sessionID: sessionSnapshot.id, skipAgentsPreamble: skipAgentsPreamble)
         }
     }
 
@@ -1194,6 +1284,15 @@ struct SessionTerminalView: View {
             errorLineIndices: messageIDs { $0 == .error },
             eventIDToUserLineID: eventIDToUserLineID
         )
+    }
+
+    /// Stage-2 policy: swap the windowed first paint for the full-session build
+    /// only when the whole session is small enough that the main-thread apply
+    /// (attr build + setAttributedString + layout) stays cheap. Above the
+    /// threshold the window remains the operating regime; loadOlder (Phase 3
+    /// Tasks 6-8) is the path to older content instead of a full swap.
+    nonisolated static func shouldSwapToFullBuild(totalChars: Int) -> Bool {
+        totalChars <= FeatureFlags.transcriptFullSwapMaxChars
     }
 
     enum TailPatchStrategy: Equatable {
@@ -4455,9 +4554,33 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         let (attr, ranges) = buildAttributedString(containerWidth: width, coordinator: context.coordinator)
         context.coordinator.lineRanges = ranges
         context.coordinator.lineRoles = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.role) })
+
+        // Preserve the viewport when new content is prepended above the old first
+        // line (windowed first paint → full swap now; loadOlder prepend later).
+        var swapAnchor: (lineID: Int, offsetY: CGFloat)? = nil
+        if let scrollView = textView.enclosingScrollView,
+           let lm = textView.layoutManager, let tc = textView.textContainer,
+           let oldFirstID = context.coordinator.orderedLineIDs.first,
+           let newFirstID = lines.first?.id,
+           newFirstID != oldFirstID,
+           context.coordinator.lineRanges[oldFirstID] != nil,
+           lines.contains(where: { $0.id == oldFirstID }),
+           scrollView.contentView.bounds.origin.y > 0 {
+            let visibleY = scrollView.contentView.bounds.origin.y
+            let glyphIndex = lm.glyphIndex(for: CGPoint(x: 5, y: visibleY), in: tc)
+            let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
+            if let idx = context.coordinator.orderedLineRanges.lastIndex(where: { $0.location <= charIndex }),
+               context.coordinator.orderedLineIDs.indices.contains(idx) {
+                let anchorRange = context.coordinator.orderedLineRanges[idx]
+                let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: anchorRange, actualCharacterRange: nil), in: tc)
+                swapAnchor = (context.coordinator.orderedLineIDs[idx], visibleY - rect.minY)
+            }
+        }
+
         context.coordinator.lines = lines
         context.coordinator.orderedLineRanges = lines.compactMap { ranges[$0.id] }
         context.coordinator.orderedLineIDs = lines.map(\.id)
+
         context.coordinator.pruneLinkCache(keepingLineIDs: Set(lines.map(\.id)))
         context.coordinator.lastUnifiedMatchOccurrences = effectiveUnifiedMatchOccurrences
         context.coordinator.lastUnifiedCurrentMatchLineID = effectiveUnifiedCurrentMatchLineID
@@ -4465,6 +4588,19 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         context.coordinator.lastFindQuery = findQuery
         context.coordinator.lastFindCurrentMatchLineID = effectiveFindCurrentMatchLineID
         textView.textStorage?.setAttributedString(attr)
+
+        // Restore the captured anchor now that the new content is laid out —
+        // boundingRect against `ranges` is only valid once the new attributed
+        // string is the text view's actual storage.
+        if let swapAnchor,
+           let scrollView = textView.enclosingScrollView,
+           let lm = textView.layoutManager, let tc = textView.textContainer,
+           let newRange = ranges[swapAnchor.lineID] {
+            lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: newRange.location + newRange.length))
+            let rect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: newRange, actualCharacterRange: nil), in: tc)
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY + swapAnchor.offsetY)))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
 
         if let tv = textView as? TerminalTextView {
             context.coordinator.updateInlineImages(enabled: inlineImagesEnabled,

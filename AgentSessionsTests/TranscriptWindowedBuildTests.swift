@@ -175,4 +175,12 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         XCTAssertEqual(viaBlocks.userLineIndices, legacy.userLineIndices)
         XCTAssertEqual(viaBlocks.eventIDToUserLineID, legacy.eventIDToUserLineID)
     }
+
+    // MARK: - Stage-2 full-swap threshold policy
+
+    func testFullSwapThresholdPolicy() {
+        XCTAssertTrue(SessionTerminalView.shouldSwapToFullBuild(totalChars: 0))
+        XCTAssertTrue(SessionTerminalView.shouldSwapToFullBuild(totalChars: FeatureFlags.transcriptFullSwapMaxChars))
+        XCTAssertFalse(SessionTerminalView.shouldSwapToFullBuild(totalChars: FeatureFlags.transcriptFullSwapMaxChars + 1))
+    }
 }

@@ -65,4 +65,12 @@ enum FeatureFlags {
     // When true, scrolling near the transcript top loads the previous (older) window.
     static let transcriptWindowNearTopLoadOlder = true
 
+    // Two-stage open: after the windowed first paint, the full-session build is
+    // swapped in ONLY when total transcript characters are at or below this
+    // threshold. Applying content costs main-thread time proportional to
+    // characters (attr build + setAttributedString + layout), so an unbounded
+    // swap would reintroduce a beachball on monster sessions. Tune with the
+    // transcriptSwapApply perf span.
+    static let transcriptFullSwapMaxChars: Int = 800_000
+
 }
