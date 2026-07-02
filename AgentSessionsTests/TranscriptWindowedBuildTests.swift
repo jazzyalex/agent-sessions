@@ -32,6 +32,43 @@ final class TranscriptWindowedBuildTests: XCTestCase {
                        eventCount: events.count, events: events)
     }
 
+    /// No messageID/parentID and an empty-of-group-hints rawJSON, so
+    /// `ToolTextBlockNormalizer.normalize`'s `groupKey` resolves to nil for both
+    /// halves of the pair. That forces the toolOut to inherit its key from the
+    /// `lastToolGroupKey` chain (same-tool-name carry-forward from the preceding
+    /// toolCall) instead of resolving its own groupKey directly — the realistic
+    /// shape of the boundary-fallback case this task's fix can perturb.
+    private func toolCallEvent(_ id: String, toolName: String = "shell", input: String = "{\"command\":[\"ls\"]}") -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                     toolName: toolName, toolInput: input, toolOutput: nil,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+    }
+
+    private func toolResultEvent(_ id: String, output: String, toolName: String = "shell") -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .tool_result, role: "tool", text: nil,
+                     toolName: toolName, toolInput: nil, toolOutput: output,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+    }
+
+    /// Alternating user + toolCall + toolOut events, repeated `pairs` times. Each
+    /// tool pair carries distinct output text so `ToolTextBlockNormalizer.normalize`
+    /// does real (non-trivially-empty) work per block, matching the monster-session
+    /// hot spot: the tool-group-key pass paying the normalizer per block. See the
+    /// toolCallEvent/toolResultEvent doc comment for why groupKey resolution falls
+    /// through to the same-tool-name chain (exercising the boundary-fallback path).
+    private func toolHeavySession(pairs: Int, id: String = "s-tool-heavy") -> Session {
+        var events: [SessionEvent] = []
+        events.reserveCapacity(pairs * 3)
+        for p in 0..<pairs {
+            events.append(userEvent("u-\(p)", "Do thing \(p)"))
+            events.append(toolCallEvent("call-\(p)", input: "{\"command\":[\"echo\",\"\(p)\"]}"))
+            events.append(toolResultEvent("out-\(p)", output: "line \(p) of output\nexit code: 0"))
+        }
+        return Session(id: id, source: .codex, startTime: nil, endTime: nil,
+                       model: "test", filePath: "/tmp/toolheavy.jsonl", fileSizeBytes: nil,
+                       eventCount: events.count, events: events)
+    }
+
     // MARK: - Parity: a full window equals the matching slice of the whole-session build
     //
     // The global-id parity below only holds when the windowed-build flag is on (flag
@@ -174,6 +211,131 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         XCTAssertEqual(viaBlocks.lines.map(\.text), legacy.lines.map(\.text))
         XCTAssertEqual(viaBlocks.userLineIndices, legacy.userLineIndices)
         XCTAssertEqual(viaBlocks.eventIDToUserLineID, legacy.eventIDToUserLineID)
+    }
+
+    // MARK: - Task 9b: tool-group-key pass clamped to the window (cost fix)
+
+    /// Slice build's tool-group-key pass must only touch windowed blocks. Verifies
+    /// behavior stays the documented boundary case: when the window starts ON a
+    /// toolOut whose toolCall chain-head sits below the window, the FULL build
+    /// grouped that toolOut under the (off-window) toolCall's key — so the group's
+    /// chosen nav line lives on a block that isn't in the slice at all, and
+    /// filtering full's nav entries down to windowed-line-ids silently drops that
+    /// pair. The SLICE build, with fresh chain state at the window's lower bound,
+    /// can't see the off-window toolCall either, so the toolOut falls back to its
+    /// own stable "tool-block-N" key and gets an independent nav entry. Net effect:
+    /// slice has exactly one MORE tool nav entry than full-filtered-to-window — the
+    /// boundary toolOut, which full would have silently swallowed. This is the
+    /// "degrade to independent, never wrong" contract: the boundary block still
+    /// gets a correct, navigable entry; it just isn't merged with an off-window
+    /// sibling the slice literally cannot see.
+    func testSliceToolGroupKeysComputedOnlyForWindowedBlocks() {
+        let session = toolHeavySession(pairs: 60)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        XCTAssertEqual(blocks.count, 180, "3 blocks (user, toolCall, toolOut) per pair")
+
+        let full = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                           blockRange: nil,
+                                                           skipAgentsPreamble: false,
+                                                           enableReviewCards: true)
+
+        // A window that starts mid-pair, ON a toolOut block, so that toolOut's
+        // toolCall chain-head is below the window's lower bound — the exact
+        // boundary case the fix's degrade-to-independent semantics documents.
+        // Pair p occupies blocks [3p, 3p+1, 3p+2] = [user, toolCall, toolOut].
+        // Start the window at the toolOut of pair 40 (block index 3*40+2 = 122).
+        let lowerBlock = 122
+        let upperBlock = blocks.count - 1
+        XCTAssertEqual(blocks[lowerBlock].kind, .toolOut, "window must start ON a toolOut to hit the boundary case")
+
+        let slice = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                            blockRange: lowerBlock...upperBlock,
+                                                            skipAgentsPreamble: false,
+                                                            enableReviewCards: true)
+        XCTAssertFalse(slice.lines.isEmpty)
+
+        guard FeatureFlags.transcriptWindowedBuild else {
+            // Flag off: local ids renumber; the global-id subset comparison below
+            // doesn't apply. Structural sanity only.
+            XCTAssertEqual(slice.lines.first?.id, 0)
+            return
+        }
+
+        let sliceIDs = Set(slice.lines.map(\.id))
+        let fullToolFiltered = full.toolLineIndices.filter { sliceIDs.contains($0) }
+        let sliceTool = Set(slice.toolLineIndices)
+        let fullToolFilteredSet = Set(fullToolFiltered)
+
+        // Every windowed tool block still gets SOME nav entry in the slice build —
+        // the documented boundary case means slice has exactly one MORE entry than
+        // full-filtered (the boundary toolOut, which full silently merged into an
+        // off-window sibling's group and which therefore vanished on filtering).
+        let onlyInFull = fullToolFilteredSet.subtracting(sliceTool)
+        let onlyInSlice = sliceTool.subtracting(fullToolFilteredSet)
+        XCTAssertEqual(onlyInFull.count, 0,
+                       "full-filtered must not contain any entry slice is missing " +
+                       "(slice never drops a windowed block's nav entry)")
+        XCTAssertEqual(onlyInSlice.count, 1,
+                       "exactly the one documented boundary case (the window's lower-bound " +
+                       "toolOut) must gain an independent nav entry not present in full-filtered")
+
+        if let divergentSliceLineID = onlyInSlice.first {
+            // The extra entry must be the boundary block itself (window's lower
+            // bound), and must be its own first line (an independent, ungrouped key).
+            let sliceBlockIndex = TerminalLineID.globalBlockIndex(from: divergentSliceLineID)
+            XCTAssertEqual(sliceBlockIndex, lowerBlock,
+                           "the only block allowed to diverge is the window's lower-bound toolOut")
+            XCTAssertEqual(divergentSliceLineID, slice.lines.first?.id,
+                           "the boundary toolOut's independent key groups only itself, " +
+                           "so its nav line must be the first line of the slice")
+        }
+
+        // Sanity: the boundary block's line ID is present in full.lines (whole
+        // session) but its FULL-BUILD nav entry (grouped under the off-window
+        // toolCall's key) points at a line OUTSIDE the window — confirming why
+        // filtering full.toolLineIndices to sliceIDs drops the pair entirely,
+        // rather than the pair simply not existing in the full build.
+        let boundaryLineID = firstLineID(forGlobalBlockIndex: lowerBlock, in: full.lines)
+        XCTAssertNotNil(boundaryLineID, "the boundary block must still produce a line in the full build")
+        if let boundaryLineID {
+            XCTAssertFalse(full.toolLineIndices.contains(boundaryLineID),
+                           "full build must NOT have chosen the boundary toolOut's own line as " +
+                           "its group's nav entry (it chose the off-window toolCall's line instead)")
+        }
+    }
+
+    private func firstLineID(forGlobalBlockIndex blockIndex: Int, in lines: [TerminalLine]) -> Int? {
+        lines.first(where: { TerminalLineID.globalBlockIndex(from: $0.id) == blockIndex })?.id
+    }
+
+    /// Perf canary: on a large tool-heavy session, the slice build over a small
+    /// window must not pay the JSON-heavy normalizer for the whole session. Pre-fix,
+    /// the tool-group-key pass iterated ALL blocks; post-fix it's clamped to the
+    /// window. 20,000 tool-call/tool-out pairs (60,000 blocks incl. user turns,
+    /// close to the 49k-block session that measured 8.6s pre-fix in production)
+    /// with a 40-block window is what it takes to meaningfully discriminate on this
+    /// machine — at 4,000 pairs (12,000 blocks) the pre-fix pass still finished in
+    /// ~0.35s (memoized-normalize + no cache eviction pressure on a fresh, warm
+    /// NSCache keeps per-block cost low enough that the 1.0s bar didn't trip).
+    func testSliceToolGroupKeyPassIsWindowClampedPerfCanary() {
+        ToolTextBlockNormalizer._testResetNormalizeCache()
+        let session = toolHeavySession(pairs: 20_000, id: "s-tool-heavy-canary")
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        XCTAssertEqual(blocks.count, 60_000)
+
+        let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count, blockTarget: 40)
+
+        let start = Date()
+        let slice = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                            blockRange: window.lowerBlock...window.upperBlock,
+                                                            skipAgentsPreamble: false,
+                                                            enableReviewCards: true)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertFalse(slice.lines.isEmpty)
+        XCTAssertLessThan(elapsed, 1.0,
+                          "slice build over a 40-block window of a 60,000-block session took \(elapsed)s; " +
+                          "the tool-group-key pass must be clamped to the window, not iterate all blocks")
     }
 
     // MARK: - Stage-2 full-swap threshold policy

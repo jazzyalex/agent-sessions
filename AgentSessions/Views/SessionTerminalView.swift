@@ -1159,6 +1159,26 @@ struct SessionTerminalView: View {
     /// get lines built. Index maps that reference off-window blocks degrade to
     /// a consistent subset (missing entries, never wrong ones) because
     /// firstLineForBlock only contains windowed blocks.
+    ///
+    /// Tool-group-key computation (`ToolTextBlockNormalizer.normalize`, the
+    /// JSON-heavy pass) is ALSO clamped to the same window when `blockRange`
+    /// is set, using the identical `lower = max(0, range.lowerBound)` /
+    /// `upper = min(blocks.count-1, range.upperBound)` bounds as
+    /// `TerminalBuilder.buildLines(from:blockRange:)`. Its output is only
+    /// consumed via `toolMessageIDs()`, which reads `firstLineForBlock` —
+    /// populated ONLY for windowed blocks — so off-window keys were computed
+    /// and never read (paying the normalizer for up to 49k blocks to serve a
+    /// 400-block window). Consequence: the `lastToolGroupKey`/`lastToolName`
+    /// chain state now starts fresh at the window's lower bound instead of
+    /// wherever the tool-call/tool-out chain actually began. A windowed
+    /// `toolOut` whose chain-head `toolCall` sits below the window falls back
+    /// to its stable `"tool-block-\(globalBlockIndex)"` key instead of joining
+    /// the off-window chain — this is a boundary-only degrade-to-independent
+    /// case (that one tool block gets its own nav entry instead of being
+    /// grouped with an off-window sibling), consistent with this variant's
+    /// documented "off-window entries degrade to missing, never wrong"
+    /// contract. It only affects the first tool block(s) at the window's
+    /// lower edge when their group's head lies outside the window.
     nonisolated static func buildRebuildResult(session: Session,
                                                blocks: [SessionTranscriptBuilder.LogicalBlock],
                                                blockRange: ClosedRange<Int>?,
@@ -1212,43 +1232,59 @@ struct SessionTerminalView: View {
         }
 
         if !blocks.isEmpty {
-            for (idx, block) in blocks.enumerated() {
-                guard block.kind == .toolCall || block.kind == .toolOut else {
-                    lastToolGroupKey = nil
-                    lastToolName = nil
-                    continue
-                }
+            // Clamp to the same window TerminalBuilder.buildLines(from:blockRange:)
+            // uses, so this JSON-heavy normalizer pass only pays for blocks whose
+            // keys firstLineForBlock/toolMessageIDs() can actually read.
+            let toolGroupLower: Int
+            let toolGroupUpper: Int
+            if let blockRange {
+                toolGroupLower = max(0, blockRange.lowerBound)
+                toolGroupUpper = min(blocks.count - 1, blockRange.upperBound)
+            } else {
+                toolGroupLower = 0
+                toolGroupUpper = blocks.count - 1
+            }
 
-                let normalizedName = block.toolName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                var derivedKey: String? = nil
-
-                if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source),
-                   let groupKey = toolBlock.groupKey,
-                   !groupKey.isEmpty {
-                    derivedKey = groupKey
-                }
-
-                if derivedKey == nil,
-                   block.kind == .toolOut,
-                   let last = lastToolGroupKey {
-                    if let lastName = lastToolName, let normalizedName {
-                        if lastName == normalizedName { derivedKey = last }
-                    } else {
-                        derivedKey = last
+            if toolGroupLower <= toolGroupUpper {
+                for idx in toolGroupLower...toolGroupUpper {
+                    let block = blocks[idx]
+                    guard block.kind == .toolCall || block.kind == .toolOut else {
+                        lastToolGroupKey = nil
+                        lastToolName = nil
+                        continue
                     }
-                }
 
-                if derivedKey == nil {
-                    // Use the GLOBAL block index so the fallback group key is stable
-                    // across windowed slices (idx is slice-relative; globalBlockIndex
-                    // is not). Matches the toolMessageIDs() reader, which keys by the
-                    // global line.blockIndex.
-                    derivedKey = "tool-block-\(block.globalBlockIndex)"
-                }
+                    let normalizedName = block.toolName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    var derivedKey: String? = nil
 
-                toolGroupKeyForBlock[block.globalBlockIndex] = derivedKey
-                lastToolGroupKey = derivedKey
-                if let normalizedName { lastToolName = normalizedName }
+                    if let toolBlock = ToolTextBlockNormalizer.normalize(block: block, source: session.source),
+                       let groupKey = toolBlock.groupKey,
+                       !groupKey.isEmpty {
+                        derivedKey = groupKey
+                    }
+
+                    if derivedKey == nil,
+                       block.kind == .toolOut,
+                       let last = lastToolGroupKey {
+                        if let lastName = lastToolName, let normalizedName {
+                            if lastName == normalizedName { derivedKey = last }
+                        } else {
+                            derivedKey = last
+                        }
+                    }
+
+                    if derivedKey == nil {
+                        // Use the GLOBAL block index so the fallback group key is stable
+                        // across windowed slices (idx is slice-relative; globalBlockIndex
+                        // is not). Matches the toolMessageIDs() reader, which keys by the
+                        // global line.blockIndex.
+                        derivedKey = "tool-block-\(block.globalBlockIndex)"
+                    }
+
+                    toolGroupKeyForBlock[block.globalBlockIndex] = derivedKey
+                    lastToolGroupKey = derivedKey
+                    if let normalizedName { lastToolName = normalizedName }
+                }
             }
         }
 
