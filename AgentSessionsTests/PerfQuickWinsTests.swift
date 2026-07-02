@@ -262,6 +262,34 @@ final class PerfQuickWinsTests: XCTestCase {
         XCTAssertEqual(secondResult.last?.text, "a brand new message")
     }
 
+    func testCoalescedBlocksCacheInvalidatesOnFileSizeChange() {
+        let sessionID = "s-perf-samecounter-rewrite"
+        let eventsA: [SessionEvent] = [
+            userEvent("u1", "hello"),
+            assistantDelta("a1", "world", messageID: "m1")
+        ]
+        let sessionA = Session(id: sessionID, source: .codex, startTime: nil, endTime: nil,
+                                model: "test", filePath: "/tmp/perf.jsonl", fileSizeBytes: 100,
+                                eventCount: eventsA.count, events: eventsA)
+        let firstResult = SessionTranscriptBuilder.coalescedBlocks(for: sessionA, includeMeta: false)
+
+        // Same id, same event COUNT, but the file was rewritten in place (external edit /
+        // crash-recovery re-parse) with different content and a different byte size.
+        let eventsB: [SessionEvent] = [
+            userEvent("u1", "hello"),
+            assistantDelta("a1", "completely different text after rewrite", messageID: "m1")
+        ]
+        let sessionB = Session(id: sessionID, source: .codex, startTime: nil, endTime: nil,
+                                model: "test", filePath: "/tmp/perf.jsonl", fileSizeBytes: 999,
+                                eventCount: eventsB.count, events: eventsB)
+        let secondResult = SessionTranscriptBuilder.coalescedBlocks(for: sessionB, includeMeta: false)
+
+        XCTAssertNotEqual(firstResult, secondResult,
+                           "same id and event count but different fileSizeBytes must NOT reuse the stale cache entry")
+        XCTAssertEqual(secondResult.last?.text, "completely different text after rewrite",
+                        "must reflect the rewritten session's content, not the cached original")
+    }
+
     func testSemanticNavIndicesDedupesByDecorationGroupID() {
         let lines = [
             TerminalLine(id: 1, text: "a", role: .toolOutput, eventIndex: nil, blockIndex: nil, decorationGroupID: 7, semanticKind: .code),

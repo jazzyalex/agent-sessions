@@ -443,9 +443,13 @@ struct SessionTranscriptBuilder {
     /// Memo cache for coalesced blocks. Transcript opens re-derive the same
     /// coalesced stream from several call sites (rebuild, inline-image mapper,
     /// event-ID lookups) — at ~4.4 s per pass on a 49k-event session that
-    /// redundancy dominated opens. Keyed by (session id, event count, includeMeta):
-    /// event arrays only ever grow (live tail append) or get wholesale replaced
-    /// with a different count, so the count is a sufficient freshness token.
+    /// redundancy dominated opens. Keyed by (session id, event count, file size,
+    /// includeMeta). Event count alone isn't a sufficient freshness token: a
+    /// JSONL file rewritten in place to the same event count (external edit,
+    /// crash-recovery re-parse) would otherwise serve stale cached blocks under
+    /// the same key. `fileSizeBytes` is a free freshness signal that guards that
+    /// same-count-rewrite edge case; a false-positive mismatch is harmless and
+    /// only conservative — worst case it costs one extra recompute.
     /// countLimit 2 keeps at most one monster session's blocks resident.
     private static let coalesceCache: NSCache<NSString, CoalescedBlocksBox> = {
         let cache = NSCache<NSString, CoalescedBlocksBox>()
@@ -469,7 +473,7 @@ struct SessionTranscriptBuilder {
     /// new views to render the underlying data differently.
     static func coalescedBlocks(for session: Session,
                                 includeMeta: Bool) -> [LogicalBlock] {
-        let key = "\(session.id)|\(session.events.count)|\(includeMeta ? 1 : 0)" as NSString
+        let key = "\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)" as NSString
         if let hit = coalesceCache.object(forKey: key) {
             return hit.blocks
         }
