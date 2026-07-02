@@ -342,6 +342,16 @@ struct UnifiedSessionsView: View {
         @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
         @State private var sideChatParentContextByID: [String: String] = [:]
         @State private var cachedExpandableParentIDs: Set<String> = []
+        // O(1) id -> row lookup, rebuilt alongside cachedRows in the same apply
+        // step. Lets per-click paths (handleSelectionChange, selectedSession)
+        // avoid an O(n) `cachedRows.first(where:)` scan.
+        @State private var cachedRowByID: [String: Session] = [:]
+        // Bumped on every updateCachedRows() trigger (both the synchronous and
+        // the off-main async paths) BEFORE any async work starts. The async
+        // path's apply step checks its captured generation against the current
+        // value; a mismatch means a newer trigger has since started/finished and
+        // this stale result must be dropped (superseded, never interleaved).
+        @State private var rowsRebuildGeneration: Int = 0
 	@State private var columnLayoutID: UUID = UUID()
 	// Bumped whenever cachedRows is reassigned as a *wholesale reorder* (same id-set,
 	// different order — i.e. a sort). Feeding this into the Table's .id() forces SwiftUI
@@ -781,15 +791,21 @@ struct UnifiedSessionsView: View {
 #endif
                         if showActiveSessionsOnly {
                             // Active-only: the visible SET depends on live membership, so a
-                            // structural rebuild is genuinely required.
-                            updateCachedRows()
-                            ensureDefaultSelectionIfNeeded()
-                            refreshSelectionSourceFromCachedRows()
+                            // structural rebuild is genuinely required. This fires on the
+                            // same live-poll cadence as the unified.sessions republish, so
+                            // it gets the same off-main treatment (Task 2) — a user with
+                            // Active-only enabled shouldn't pay ~110ms on main every tick.
+                            updateCachedRowsAsync { _, applied in
+                                guard applied else { return }
+                                ensureDefaultSelectionIfNeeded()
+                                refreshSelectionSourceFromCachedRows()
+                                updateFocusedSessionIfNeeded(selectedSession)
+                            }
                         } else {
                             // Cheap path: SET + order unchanged, only dots move.
                             rebuildCachedFallbackPresences()
+                            updateFocusedSessionIfNeeded(selectedSession)
                         }
-                        updateFocusedSessionIfNeeded(selectedSession)
                     }
 
 				return AnyView(afterShowImagesForInlineImage)
@@ -1149,32 +1165,45 @@ struct UnifiedSessionsView: View {
 				}
 				.onChange(of: unified.sessions) { _, _ in
 					// Update cached rows first, then reconcile canonical selection with fresh data.
+					// The heavy hierarchy/derived-state computation runs off-main
+					// (SessionRowsBuilder via updateCachedRowsAsync) so this republish
+					// — which fires on the live ~2s poll cadence, not just user
+					// actions — never blocks the main thread for the full rebuild
+					// cost. The apply (and everything below that reads fresh
+					// cachedRows) runs in the completion, on main, in one turn.
 					selectionTrace("sessions changed begin selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
                     restartSearchForSideChatDatasetChangeIfNeeded()
 					isDatasetChurning = true
-					let heldRows = updateCachedRows()
-					let deferredReplacement = selectionReplacementDeferredDuringChurn
-					ensureDefaultSelectionIfNeeded()
-					refreshSelectionSourceFromCachedRows()
-					updateFocusedSessionIfNeeded(selectedSession)
-					DispatchQueue.main.async {
-						isDatasetChurning = false
-						// Correctness: shouldReplaceMissingSelection() defers a
-						// missing-selection replacement while isDatasetChurning is true
-						// (Fix 2), so a genuinely-deleted session's selection can only be
-						// cleaned up once churn drops. Cost: re-running updateCachedRows()
-						// unconditionally on every republish reintroduced the double-call
-						// class Task 5 eliminated (~115ms at 3.3k rows on the ~2s live
-						// cadence). Only pay for the second pass when it can actually
-						// matter: rows were held stale, or this pass is the one that will
-						// finally apply a deferred selection replacement.
-						if heldRows || deferredReplacement {
-							updateCachedRows()
-							ensureDefaultSelectionIfNeeded()
-							refreshSelectionSourceFromCachedRows()
-							updateFocusedSessionIfNeeded(selectedSession)
+					updateCachedRowsAsync { heldRows, applied in
+						guard applied else {
+							// Superseded by a newer trigger; that trigger's own
+							// completion carries the churn-flag reset and any
+							// needed second pass. Nothing to do here.
+							return
 						}
-						selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
+						let deferredReplacement = selectionReplacementDeferredDuringChurn
+						ensureDefaultSelectionIfNeeded()
+						refreshSelectionSourceFromCachedRows()
+						updateFocusedSessionIfNeeded(selectedSession)
+						DispatchQueue.main.async {
+							isDatasetChurning = false
+							// Correctness: shouldReplaceMissingSelection() defers a
+							// missing-selection replacement while isDatasetChurning is true
+							// (Fix 2), so a genuinely-deleted session's selection can only be
+							// cleaned up once churn drops. Cost: re-running updateCachedRows()
+							// unconditionally on every republish reintroduced the double-call
+							// class Task 5 eliminated (~115ms at 3.3k rows on the ~2s live
+							// cadence). Only pay for the second pass when it can actually
+							// matter: rows were held stale, or this pass is the one that will
+							// finally apply a deferred selection replacement.
+							if heldRows || deferredReplacement {
+								updateCachedRows()
+								ensureDefaultSelectionIfNeeded()
+								refreshSelectionSourceFromCachedRows()
+								updateFocusedSessionIfNeeded(selectedSession)
+							}
+							selectionTrace("sessions changed end selection=\(selection ?? "nil") cachedRows=\(cachedRows.count)")
+						}
 					}
 				}
         .onChange(of: columnVisibility.changeToken) { _, _ in refreshColumnLayout() }
@@ -1776,7 +1805,7 @@ struct UnifiedSessionsView: View {
 
             private var selectedSession: Session? { selection.flatMap { id in cachedRows.first(where: { $0.id == id }) } }
 
-            private static func sideChatParentContexts(for rows: [Session],
+            static func sideChatParentContexts(for rows: [Session],
                                                        allSessions: [Session]) -> [String: String] {
                 let candidates = rows + allSessions
                 var titleByParentKey: [String: String] = [:]
@@ -2250,22 +2279,125 @@ struct UnifiedSessionsView: View {
         return false
     }
 
-		    @discardableResult
-		    private func updateCachedRows() -> Bool {
-        // Reset at the start of every call; set below only when this call's
-        // missing-selection check is actually suppressed by dataset churn.
-        selectionReplacementDeferredDuringChurn = false
+        /// Phases 0-3 of a rows rebuild: cheap main-actor bookkeeping (fallback
+        /// presences, `nextRows` filter/sort, hold-rows-during-churn checks). Shared
+        /// by both the synchronous path (`updateCachedRows()`) and the off-main
+        /// path (`updateCachedRowsAsync()`) so the two never diverge on what
+        /// counts as "hold" vs "rebuild".
+        ///
+        /// Returns nil when the rebuild should be held (rows left exactly as-is);
+        /// otherwise the `SessionRowsBuilder.RowsInput` snapshot for the heavy
+        /// phase, ready to run sync or via `Task.detached`.
+        private func prepareRowsRebuild() -> SessionRowsBuilder.RowsInput? {
+            selectionReplacementDeferredDuringChurn = false
+#if DEBUG
+            let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
+#endif
+            rebuildCachedFallbackPresences()
+#if DEBUG
+            Perf.end(_fpSpan)
+#endif
+            let nextRows: [Session]
+            if FeatureFlags.coalesceListResort {
+                // unified.sessions is already sorted by the view model's descriptor
+                nextRows = rows
+            } else {
+                nextRows = rows.sorted(using: sortOrder)
+            }
+            cachedTotalSessionCount = unified.sessions.count
+            cachedLatestModifiedAt = latestModifiedAt(in: unified.sessions) ?? latestModifiedAt(in: nextRows)
+
+            let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
+                isSearchRunning: searchCoordinator.isRunning,
+                nextRowsEmpty: nextRows.isEmpty,
+                showActiveSessionsOnly: showActiveSessionsOnly,
+                cachedRowsEmpty: cachedRows.isEmpty
+            )
+            let shouldHoldRowsDuringTransientEmptyRefresh = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
+                query: query,
+                isSearchRunning: searchCoordinator.isRunning,
+                isDatasetChurning: isDatasetChurning,
+                isIndexing: unified.isIndexing,
+                nextRowsEmpty: nextRows.isEmpty,
+                showActiveSessionsOnly: showActiveSessionsOnly,
+                cachedRowsEmpty: cachedRows.isEmpty,
+                hasSelection: selection != nil
+            )
+            guard !(shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh) else {
+                return nil
+            }
+
+            return SessionRowsBuilder.RowsInput(
+                nextRows: nextRows,
+                allSessions: unified.allSessions,
+                previousCachedRows: cachedRows,
+                collapsedParents: collapsedParents,
+                showSubagentHierarchy: showSubagentHierarchy,
+                searchActive: !query.isEmpty,
+                isHierarchyBrowsing: isHierarchyBrowsing
+            )
+        }
+
+        /// Apply a `SessionRowsBuilder` result on the main actor: assign
+        /// cachedRows/hierarchy/derived state, bump `tableReorderGeneration` for a
+        /// large reorder, then run the UNCHANGED selection-reconciliation block.
+        /// `heldRows` reflects whether `prepareRowsRebuild()` held rows for this
+        /// trigger (output is nil in that case — nothing to assign).
+        @MainActor
+        private func applyRowsOutput(_ output: SessionRowsBuilder.RowsOutput?) {
+            if let output {
+                if output.isLargeReorder {
+                    tableReorderGeneration &+= 1
+#if DEBUG
+                    Perf.event("reorderRebuild", "rows=\(output.cachedRows.count) gen=\(tableReorderGeneration)")
+#endif
+                }
+                cachedRows = output.cachedRows
+                hierarchyRowMeta = output.hierarchyRowMeta
+                sideChatParentContextByID = output.sideChatParentContextByID
+                cachedRowIDs = output.cachedRowIDs
+                cachedVisibleRowIDs = output.cachedVisibleRowIDs
+                cachedExpandableParentIDs = output.cachedExpandableParentIDs
+                cachedRowByID = output.cachedRowByID
+            }
+
+            if let selectedID = selection,
+               !cachedRows.contains(where: { $0.id == selectedID }) {
+                if UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
+                    hierarchyBrowsing: isHierarchyBrowsing,
+                    refreshBusy: isRefreshBusyForSelection,
+                    hasUserManuallySelected: hasUserManuallySelected,
+                    datasetChurning: isDatasetChurning
+                ) {
+                    if let first = cachedRows.first {
+                        setActiveSelection(first.id, source: first.source, userInitiated: false)
+                    } else {
+                        setActiveSelection(nil, userInitiated: false)
+                    }
+                } else if isDatasetChurning {
+                    // Replacement would have happened but was suppressed solely by the
+                    // churn gate — flag it so the post-churn pass knows to retry.
+                    selectionReplacementDeferredDuringChurn = true
+                }
+            }
+
+            ensureDefaultSelectionIfNeeded()
+            refreshSelectionSourceFromCachedRows()
+        }
+
+        /// Synchronous rows rebuild — used by every call site except the heavy
+        /// `unified.sessions` republish path (see `updateCachedRowsAsync()`).
+        /// Returns `heldRows` (rows were intentionally left stale this call).
+	    @discardableResult
+	    private func updateCachedRows() -> Bool {
+        rowsRebuildGeneration &+= 1
 #if DEBUG
         // Snapshot the row count NOW: Perf detail closures are evaluated lazily in end()
         // (after cachedRows is reassigned below), so capture the pre-update value in a let.
         let _rowsBefore = cachedRows.count
         let _perfSpan = Perf.begin("updateCachedRows", thresholdMs: 8, "n=\(_rowsBefore) activeOnly=\(showActiveSessionsOnly)")
         defer { Perf.end(_perfSpan) }
-        let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
-#endif
-        rebuildCachedFallbackPresences()
-#if DEBUG
-        Perf.end(_fpSpan)
         let startedAt = Date()
         defer {
             if showActiveSessionsOnly {
@@ -2293,104 +2425,79 @@ struct UnifiedSessionsView: View {
             }
         }
 #endif
-			        let nextRows: [Session]
-		        if FeatureFlags.coalesceListResort {
-	            // unified.sessions is already sorted by the view model's descriptor
-	            nextRows = rows
-	        } else {
-	            nextRows = rows.sorted(using: sortOrder)
-	        }
-            cachedTotalSessionCount = unified.sessions.count
-            cachedLatestModifiedAt = latestModifiedAt(in: unified.sessions) ?? latestModifiedAt(in: nextRows)
-
-        let query = unified.queryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shouldHoldRowsDuringRunningSearch = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringRunningSearch(
-            isSearchRunning: searchCoordinator.isRunning,
-            nextRowsEmpty: nextRows.isEmpty,
-            showActiveSessionsOnly: showActiveSessionsOnly,
-            cachedRowsEmpty: cachedRows.isEmpty
-        )
-	        let shouldHoldRowsDuringTransientEmptyRefresh = UnifiedRowsStabilityPolicy.shouldHoldRowsDuringTransientEmptyRefresh(
-            query: query,
-            isSearchRunning: searchCoordinator.isRunning,
-            isDatasetChurning: isDatasetChurning,
-            isIndexing: unified.isIndexing,
-            nextRowsEmpty: nextRows.isEmpty,
-            showActiveSessionsOnly: showActiveSessionsOnly,
-            cachedRowsEmpty: cachedRows.isEmpty,
-            hasSelection: selection != nil
-        )
-
-	        if !(shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh) {
-                let searchActive = !query.isEmpty
+        guard let input = prepareRowsRebuild() else {
+            applyRowsOutput(nil)
+            return true
+        }
 #if DEBUG
-                let _hbSpan = Perf.begin("hierarchyBuild", thresholdMs: 4, "rows=\(nextRows.count)")
+        let _hbSpan = Perf.begin("hierarchyBuild", thresholdMs: 4, "rows=\(input.nextRows.count)")
 #endif
-                let hierarchyResult = SubagentHierarchyBuilder.build(
-                    sessions: nextRows,
-                    collapsedParents: collapsedParents,
-                    hierarchyEnabled: showSubagentHierarchy && !searchActive
-                )
+        let output = SessionRowsBuilder.build(input: input)
+#if DEBUG
+        Perf.end(_hbSpan)
+#endif
+        applyRowsOutput(output)
+        return false
+	    }
+
+        /// Off-main rows rebuild for the heavy `unified.sessions` republish path
+        /// (Task 2): computes `SessionRowsBuilder.build` on a detached task, then
+        /// applies the result on main IF this trigger's generation is still
+        /// current — a newer trigger (another republish, or a synchronous
+        /// `updateCachedRows()` call from a different onChange firing in between)
+        /// supersedes it and this result is dropped, never interleaved.
+        ///
+        /// The hold/no-hold decision itself is cheap and made on main before the
+        /// async hop, so callers needing `heldRows` get it via `completion`
+        /// rather than a return value — only the heavy hierarchy/derived-state
+        /// computation moves off-main.
+        /// - Parameter completion: invoked on the main actor exactly once, either
+        ///   synchronously before returning (rows held, nothing to compute) or
+        ///   after the off-main compute applies. `heldRows` matches the
+        ///   synchronous `updateCachedRows()` return value; `applied` is false
+        ///   when a newer trigger superseded this one (the completion still
+        ///   fires so callers can run their "did this pass finish" bookkeeping,
+        ///   but must not treat a superseded pass as having produced fresh rows).
+        private func updateCachedRowsAsync(completion: @escaping (_ heldRows: Bool, _ applied: Bool) -> Void) {
+            rowsRebuildGeneration &+= 1
+            let generation = rowsRebuildGeneration
+#if DEBUG
+            let _rowsBefore = cachedRows.count
+            let _perfSpan = Perf.begin("updateCachedRows", thresholdMs: 8, "n=\(_rowsBefore) activeOnly=\(showActiveSessionsOnly) async=1")
+            defer { Perf.end(_perfSpan) }
+#endif
+            guard let input = prepareRowsRebuild() else {
+                applyRowsOutput(nil)
+                completion(true, true)
+                return
+            }
+            Task.detached(priority: .userInitiated) {
+#if DEBUG
+                let _hbSpan = Perf.begin("hierarchyBuild", thresholdMs: 4, "rows=\(input.nextRows.count) offMain=1")
+#endif
+                let output = SessionRowsBuilder.build(input: input)
 #if DEBUG
                 Perf.end(_hbSpan)
 #endif
-                let newRows = hierarchyResult.sessions
-                // A *large* reorder (e.g. a column sort moving most rows) is O(n^2) for
-                // SwiftUI Table to diff; bump the table identity so it rebuilds (O(n))
-                // instead. Small reorders and membership changes fall through to SwiftUI's
-                // cheap diff, which preserves scroll position.
-                if UnifiedTableIdentityPolicy.isLargeReorder(old: cachedRows, new: newRows) {
-                    tableReorderGeneration &+= 1
+                await MainActor.run { [self] in
+                    // Staleness discipline: only apply if no newer trigger has
+                    // started since this one (a newer updateCachedRows()/
+                    // updateCachedRowsAsync() call bumps rowsRebuildGeneration
+                    // before this closure can run). A stale result is dropped
+                    // silently — the newer trigger's own apply (sync or async)
+                    // is authoritative and already reflects the latest input.
+                    guard self.rowsRebuildGeneration == generation else {
 #if DEBUG
-                    Perf.event("reorderRebuild", "rows=\(newRows.count) gen=\(tableReorderGeneration)")
+                        Perf.event("rowsRebuildSuperseded", "gen=\(generation) current=\(self.rowsRebuildGeneration)")
 #endif
+                        completion(false, false)
+                        return
+                    }
+                    self.applyRowsOutput(output)
+                    completion(false, true)
                 }
-                cachedRows = newRows
-                hierarchyRowMeta = hierarchyResult.rowMeta
-                sideChatParentContextByID = Self.sideChatParentContexts(
-                    for: hierarchyResult.sessions,
-                    allSessions: unified.allSessions
-                )
-                refreshCachedRowDerivedState()
-            }
-	        let heldRows = shouldHoldRowsDuringRunningSearch || shouldHoldRowsDuringTransientEmptyRefresh
-
-	        if let selectedID = selection,
-	           !cachedRows.contains(where: { $0.id == selectedID }) {
-               if UnifiedTableSelectionPolicy.shouldReplaceMissingSelection(
-                   hierarchyBrowsing: isHierarchyBrowsing,
-                   refreshBusy: isRefreshBusyForSelection,
-                   hasUserManuallySelected: hasUserManuallySelected,
-                   datasetChurning: isDatasetChurning
-               ) {
-                if let first = cachedRows.first {
-                    setActiveSelection(first.id, source: first.source, userInitiated: false)
-                } else {
-                    setActiveSelection(nil, userInitiated: false)
-                }
-            } else if isDatasetChurning {
-                // Replacement would have happened but was suppressed solely by the
-                // churn gate — flag it so the post-churn pass knows to retry.
-                selectionReplacementDeferredDuringChurn = true
             }
         }
-
-		        ensureDefaultSelectionIfNeeded()
-		        refreshSelectionSourceFromCachedRows()
-	        return heldRows
-		    }
-
-    private func refreshCachedRowDerivedState() {
-        cachedRowIDs = cachedRows.map(\.id)
-        cachedVisibleRowIDs = Set(cachedRowIDs)
-        guard isHierarchyBrowsing else {
-            cachedExpandableParentIDs = []
-            return
-        }
-        cachedExpandableParentIDs = Set(cachedRows.compactMap { session in
-            hierarchyRowMeta[session.id]?.hasChildren == true ? session.id : nil
-        })
-    }
 
     private func latestModifiedAt(in sessions: [Session]) -> Date? {
         var latest: Date?
