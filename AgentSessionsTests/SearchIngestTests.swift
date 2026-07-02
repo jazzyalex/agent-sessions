@@ -177,7 +177,12 @@ final class SearchIngestTests: XCTestCase {
 
         let refA1 = try fileRef(for: urlA)
         let refB = try fileRef(for: urlB)
-        _ = try await service.ingest(source: .codex, files: [refA1, refB], toolIOEnabled: false)
+        // quietSeconds: 0 — this test is exercising mtime/size change detection
+        // (indexedByPath vs. the caller's freshly-stat'd FileRef), independent of the
+        // quiet-period gate added for actively-appending files. See
+        // testIngestSkipsHotFileWithinQuietPeriod/testIngestReindexesQuietFileAfterQuietPeriodElapses
+        // for gate-specific coverage.
+        _ = try await service.ingest(source: .codex, files: [refA1, refB], toolIOEnabled: false, quietSeconds: 0)
 
         // Bump mtime+content on file A only.
         try (
@@ -190,7 +195,7 @@ final class SearchIngestTests: XCTestCase {
         let refA2 = try fileRef(for: urlA)
         XCTAssertNotEqual(refA2.mtime, refA1.mtime, "sanity: mtime must have changed")
 
-        let second = try await service.ingest(source: .codex, files: [refA2, refB], toolIOEnabled: false)
+        let second = try await service.ingest(source: .codex, files: [refA2, refB], toolIOEnabled: false, quietSeconds: 0)
         XCTAssertEqual(second.total, 2)
         XCTAssertEqual(second.skipped, 1, "only the unchanged file (b) should be skipped")
         XCTAssertEqual(second.processed, 1)
@@ -212,6 +217,95 @@ final class SearchIngestTests: XCTestCase {
             dateFrom: nil, dateTo: nil, query: "marmotcinder", includeSystemProbes: true, limit: 10
         )
         XCTAssertEqual(stableMatches.count, 1, "unchanged file b must remain findable across both runs")
+    }
+
+    // MARK: - SearchIngestService: quiet-period gate
+
+    func testIngestSkipsHotFileWithinQuietPeriod() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "hot.jsonl", userText: "first pass content lemursaffron", assistantText: "ack lemursaffron", in: ingestTempDir)
+        let service = SearchIngestService(db: db)
+        // Back-date the initial mtime by an hour so the follow-up "now" mtime (below)
+        // is guaranteed to differ, independent of how fast this test executes.
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: url.path)
+        let firstRef = try fileRef(for: url)
+
+        // Establish an existing row so the second call is a re-ingest, not first-time.
+        let first = try await service.ingest(source: .codex, files: [firstRef], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(first.processed, 1)
+
+        // Mutate the file and bump mtime to "now" so it looks actively-changing.
+        try "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"updated hot content ibexsulphur\"}]}}\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        let hotRef = try fileRef(for: url)
+        XCTAssertNotEqual(hotRef.mtime, firstRef.mtime, "sanity: mtime must have changed")
+
+        // Re-run with a long quiet period: the hot (recently-modified) file must be
+        // skipped, and its stale (pre-mutation) search row must be retained rather
+        // than rewritten with the new (as-yet-unstable) content.
+        let second = try await service.ingest(source: .codex, files: [hotRef], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(second.skipped, 1, "hot file within the quiet period must be skipped")
+        XCTAssertEqual(second.processed, 0)
+
+        let staleStillThere = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "lemursaffron", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(staleStillThere.count, 1, "stale row must be retained (not blown away) while the file is hot")
+    }
+
+    func testIngestReindexesQuietFileAfterQuietPeriodElapses() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "quiet.jsonl", userText: "first pass content tapirumber", assistantText: "ack tapirumber", in: ingestTempDir)
+        let service = SearchIngestService(db: db)
+        let firstRef = try fileRef(for: url)
+
+        let first = try await service.ingest(source: .codex, files: [firstRef], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(first.processed, 1)
+
+        // Mutate the file, but set its mtime 2 hours in the past — simulating a session
+        // that has gone quiet well beyond the quiet window.
+        try "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"settled content quokkabramble\"}]}}\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)], ofItemAtPath: url.path)
+        let quietRef = try fileRef(for: url)
+        XCTAssertNotEqual(quietRef.mtime, firstRef.mtime, "sanity: mtime must have changed")
+
+        let second = try await service.ingest(source: .codex, files: [quietRef], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(second.processed, 1, "file quiet well beyond the window must be re-ingested")
+        XCTAssertEqual(second.skipped, 0)
+
+        let newContentMatches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "quokkabramble", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(newContentMatches.count, 1, "new content must be findable after the quiet file is re-ingested")
+    }
+
+    func testIngestNeverIngestedHotFileIsIngestedImmediately() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        // Fresh file, mtime "now" (hot), and — critically — no prior row in the DB at
+        // all (simulating a fresh backfill). Even with a long quiet window, this must
+        // be ingested immediately: the exemption exists so first-time indexing is
+        // never delayed by the quiet gate.
+        let url = try makeCodexFixture(named: "fresh.jsonl", userText: "brand new content ocelotginger", assistantText: "ack ocelotginger", in: ingestTempDir)
+        let service = SearchIngestService(db: db)
+        let ref = try fileRef(for: url)
+
+        let progress = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(progress.processed, 1, "never-ingested file must be ingested regardless of quietness")
+        XCTAssertEqual(progress.skipped, 0)
+
+        let matches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "ocelotginger", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(matches.count, 1, "fresh hot file's content must be immediately findable")
     }
 
     // MARK: - SearchIngestService: tool-IO retention prune

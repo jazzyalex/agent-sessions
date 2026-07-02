@@ -41,11 +41,15 @@ actor SearchIngestService {
     /// (or lower) — see `UnifiedSessionIndexer.kickSearchIngest(source:)` for the
     /// reference wiring. Do not call `ingest` directly from a `.userInitiated` or
     /// default-priority context.
+    /// - Parameter quietSeconds: Re-ingest quiet-period gate (see `ingest` body comment
+    ///   at the skip-check for the tradeoff this encodes). Callers should keep the
+    ///   default unless a test needs a different window.
     func ingest(source: SessionSource,
                 files: [FileRef],
                 toolIOEnabled: Bool,
                 yieldNanoseconds: UInt64 = 40_000_000,
-                toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap) async throws -> Progress {
+                toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap,
+                quietSeconds: TimeInterval = 120) async throws -> Progress {
         let sourceRaw = source.rawValue
         // `fetchSearchReadyPaths`/`fetchToolIOReadyPaths` only tell us the path's row is
         // format-current relative to whatever mtime/size the DB already has on file — they
@@ -67,6 +71,7 @@ actor SearchIngestService {
         var processed = 0
         var skipped = 0
         let total = files.count
+        let nowTS = Date().timeIntervalSince1970
 
         for (idx, file) in files.enumerated() {
             try Task.checkCancellation()
@@ -74,6 +79,37 @@ actor SearchIngestService {
             let isCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
             if isCurrent, searchReadyPaths.contains(file.path) {
                 if !toolIOEnabled || toolIOReadyPaths.contains(file.path) {
+                    skipped += 1
+                    if idx < files.count - 1 {
+                        try? await Task.sleep(nanoseconds: yieldNanoseconds)
+                    }
+                    continue
+                }
+            }
+
+            // Quiet-period gate: actively-appending session files (an agent still
+            // running) get restat'd as "changed" on essentially every refresh cycle,
+            // which — pre-gate — meant a hot 100MB+ transcript got fully re-parsed
+            // (parseFileFull) and its search text rebuilt on every single kick, for as
+            // long as the session stayed open. That's the CPU burn this gate exists to
+            // stop. We only apply it to RE-ingest: a file that already has a
+            // current-or-stale row in `searchReadyPaths`/`indexedByPath` (i.e. it has
+            // been ingested at least once before). A file with NO existing row — first
+            // time we've ever seen this path, e.g. a fresh backfill — is exempt and
+            // ingests immediately regardless of how recently it was written, so initial
+            // indexing is never delayed.
+            //
+            // Tradeoff: content appended to an in-progress session reaches the FTS
+            // index within ~quietSeconds of the session going quiet (not instantly).
+            // The deep-scan search tier (which reads files directly, uninfluenced by
+            // this cache) covers that gap in the meantime.
+            let hasExistingRow = indexedByPath[file.path] != nil || searchReadyPaths.contains(file.path)
+            if hasExistingRow {
+                // Clamp to zero: a future mtime (clock skew, or a test/fixture that
+                // deliberately sets mtime slightly ahead of "now") is "as hot as it
+                // gets", not exempt from the gate via a spuriously-negative age.
+                let age = max(0, nowTS - Double(file.mtime))
+                if age < quietSeconds {
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
