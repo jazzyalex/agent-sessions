@@ -2,6 +2,16 @@ import XCTest
 @testable import AgentSessions
 
 final class TranscriptGoldenFixtureTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        // Every helper here builds a Session(id: "fixture-session", ..., eventCount: 1)
+        // with a single differently-worded event; without resetting, the
+        // coalescedBlocks memo cache (keyed by session id + event count + includeMeta)
+        // can serve a stale hit from a prior fixture since id and count never change.
+        SessionTranscriptBuilder._testResetCoalesceCache()
+    }
+
     func testPlanFixtureSemanticSnapshot() throws {
         let text = try loadFixture("plan_block.txt")
         let lines = buildAssistantLines(text: text)

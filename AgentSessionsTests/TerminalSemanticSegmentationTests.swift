@@ -2,6 +2,16 @@ import XCTest
 @testable import AgentSessions
 
 final class TerminalSemanticSegmentationTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        // Several tests in this file reuse the same session id ("s-semantic") with
+        // varying event content; without resetting, the coalescedBlocks memo cache
+        // (keyed by session id + event count + includeMeta) can serve a stale hit
+        // from a prior test when counts happen to collide.
+        SessionTranscriptBuilder._testResetCoalesceCache()
+    }
+
     func testAssistantPlanAndCodeBecomeSeparateSemanticGroups() {
         let text = """
         Intro text

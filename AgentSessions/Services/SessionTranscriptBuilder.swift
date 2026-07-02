@@ -440,15 +440,44 @@ struct SessionTranscriptBuilder {
         return Int(text[valueRange])
     }
 
+    /// Memo cache for coalesced blocks. Transcript opens re-derive the same
+    /// coalesced stream from several call sites (rebuild, inline-image mapper,
+    /// event-ID lookups) — at ~4.4 s per pass on a 49k-event session that
+    /// redundancy dominated opens. Keyed by (session id, event count, includeMeta):
+    /// event arrays only ever grow (live tail append) or get wholesale replaced
+    /// with a different count, so the count is a sufficient freshness token.
+    /// countLimit 2 keeps at most one monster session's blocks resident.
+    private static let coalesceCache: NSCache<NSString, CoalescedBlocksBox> = {
+        let cache = NSCache<NSString, CoalescedBlocksBox>()
+        cache.countLimit = 2
+        return cache
+    }()
+
+    final class CoalescedBlocksBox {
+        let blocks: [LogicalBlock]
+        init(blocks: [LogicalBlock]) { self.blocks = blocks }
+    }
+
+    /// Test-only hook to isolate cache state between tests.
+    static func _testResetCoalesceCache() {
+        coalesceCache.removeAllObjects()
+    }
+
     /// Expose coalesced logical blocks for reuse in terminal-specific builders.
     ///
     /// This keeps the structural grouping logic in one place while allowing
     /// new views to render the underlying data differently.
     static func coalescedBlocks(for session: Session,
                                 includeMeta: Bool) -> [LogicalBlock] {
+        let key = "\(session.id)|\(session.events.count)|\(includeMeta ? 1 : 0)" as NSString
+        if let hit = coalesceCache.object(forKey: key) {
+            return hit.blocks
+        }
         let _span = Perf.begin("transcriptCoalesce", thresholdMs: 20, "events=\(session.events.count)")
         defer { Perf.end(_span) }
-        return coalesce(session: session, includeMeta: includeMeta)
+        let blocks = coalesce(session: session, includeMeta: includeMeta)
+        coalesceCache.setObject(CoalescedBlocksBox(blocks: blocks), forKey: key)
+        return blocks
     }
 
     static func displayLines(for block: LogicalBlock, source: SessionSource?) -> [String] {

@@ -3,6 +3,15 @@ import XCTest
 
 final class TerminalGlobalIdentityParityTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        // Several tests in this file reuse the same session id ("s-global") with
+        // varying event content; without resetting, the coalescedBlocks memo cache
+        // (keyed by session id + event count + includeMeta) can serve a stale hit
+        // from a prior test when counts happen to collide.
+        SessionTranscriptBuilder._testResetCoalesceCache()
+    }
+
     // MARK: Fixtures
 
     private func makeEvent(id: String,

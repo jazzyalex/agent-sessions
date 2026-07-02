@@ -3,6 +3,11 @@ import XCTest
 
 final class PerfQuickWinsTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        SessionTranscriptBuilder._testResetCoalesceCache()
+    }
+
     // MARK: - Fixtures
 
     private func userEvent(_ id: String, _ text: String) -> SessionEvent {
@@ -23,10 +28,16 @@ final class PerfQuickWinsTests: XCTestCase {
                      messageID: "t-\(id)", parentID: nil, isDelta: false, rawJSON: "{}")
     }
 
-    private func session(_ events: [SessionEvent]) -> Session {
-        Session(id: "s-perf", source: .codex, startTime: nil, endTime: nil,
+    private func session(_ events: [SessionEvent], id: String = "s-perf") -> Session {
+        Session(id: id, source: .codex, startTime: nil, endTime: nil,
                 model: "test", filePath: "/tmp/perf.jsonl", fileSizeBytes: nil,
                 eventCount: events.count, events: events)
+    }
+
+    private func metaEvent(_ id: String, _ text: String) -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .meta, role: "system", text: text,
+                     toolName: nil, toolInput: nil, toolOutput: nil,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
     }
 
     // MARK: - Task 1: coalescer delta-merge must be linear, not CoW-quadratic
@@ -65,8 +76,12 @@ final class PerfQuickWinsTests: XCTestCase {
             ("all good\nexit code: 1 mentioned later is ignored", false),
             ("plain output", false)
         ]
-        for (output, isError) in cases {
-            let s = session([toolResultEvent("t1", output: output)])
+        for (index, testCase) in cases.enumerated() {
+            let (output, isError) = testCase
+            // Distinct session id per case: same event COUNT (1) across iterations would
+            // otherwise collide on the (session id, event count, includeMeta) memo cache key
+            // and return a stale block from a prior iteration.
+            let s = session([toolResultEvent("t1", output: output)], id: "s-perf-errclass-\(index)")
             let blocks = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
             XCTAssertEqual(blocks.count, 1)
             XCTAssertEqual(blocks[0].isErrorOutput, isError, "output: \(output)")
@@ -199,6 +214,52 @@ final class PerfQuickWinsTests: XCTestCase {
 
     func testSemanticNavIndicesEmptySourceReturnsEmpty() {
         XCTAssertEqual(TranscriptNavIndexBuilder.semanticNavIndices(kind: .code, source: []), [])
+    }
+
+    // MARK: - Task 4b: memo cache for coalesced blocks
+
+    func testCoalescedBlocksCacheReturnsIdenticalResults() {
+        let events: [SessionEvent] = [
+            userEvent("u1", "hello"),
+            assistantDelta("a1", "world", messageID: "m1"),
+            metaEvent("meta1", "some meta note")
+        ]
+        let s = session(events)
+
+        let firstNoMeta = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+        let secondNoMeta = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+        XCTAssertEqual(firstNoMeta, secondNoMeta, "repeated calls with identical args must return identical blocks")
+
+        let withMeta = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: true)
+        XCTAssertNotEqual(firstNoMeta, withMeta,
+                           "includeMeta:true and includeMeta:false must not collide on the same cache key")
+
+        // Calling back-to-back with alternating includeMeta must still be correct (no stale hit).
+        let noMetaAgain = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+        let withMetaAgain = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: true)
+        XCTAssertEqual(noMetaAgain, firstNoMeta)
+        XCTAssertEqual(withMetaAgain, withMeta)
+    }
+
+    func testCoalescedBlocksCacheInvalidatesOnEventCountChange() {
+        let baseEvents: [SessionEvent] = [
+            userEvent("u1", "hello"),
+            assistantDelta("a1", "world", messageID: "m1")
+        ]
+        let sessionID = "s-perf-growing"
+        let sessionA = session(baseEvents, id: sessionID)
+        let firstResult = SessionTranscriptBuilder.coalescedBlocks(for: sessionA, includeMeta: false)
+
+        var grownEvents = baseEvents
+        grownEvents.append(userEvent("u2", "a brand new message"))
+        let sessionB = session(grownEvents, id: sessionID)
+        let secondResult = SessionTranscriptBuilder.coalescedBlocks(for: sessionB, includeMeta: false)
+
+        XCTAssertNotEqual(firstResult, secondResult,
+                           "same session id but different event count must NOT reuse the stale cache entry")
+        XCTAssertEqual(secondResult.count, firstResult.count + 1,
+                       "appended user event must produce an additional block")
+        XCTAssertEqual(secondResult.last?.text, "a brand new message")
     }
 
     func testSemanticNavIndicesDedupesByDecorationGroupID() {
