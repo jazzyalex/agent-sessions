@@ -1927,13 +1927,20 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func kickSearchIngest(source: SessionSource) {
         guard searchIngestService != nil else { return }
         let coordinator = searchIngestCoordinator
-        let task = Task.detached(priority: .utility) { [weak self] in
+        var task: Task<Void, Never>!
+        task = Task.detached(priority: .utility) { [weak self] in
+            // Register with the coordinator as the very first statement, before any
+            // ingest work starts, so a `deinit`-time `cancelAll()` can never race ahead
+            // of tracking: there is no window where this task is running but absent
+            // from `tasksBySource`. (Previously `track` was posted from a second,
+            // unordered `Task { ... }` that could be scheduled after this task had
+            // already started — or finished — its ingest work.)
+            await coordinator.track(task, for: source)
             guard let self else { return }
             let decision = await coordinator.request(source: source)
             guard decision == .startNow else { return }
             await self.runSearchIngestLoop(source: source)
         }
-        Task { await coordinator.track(task, for: source) }
     }
 
     /// Runs one ingest pass for `source`, then — if a request coalesced while it was
@@ -1955,6 +1962,13 @@ final class UnifiedSessionIndexer: ObservableObject {
         let files = await MainActor.run { [weak self] () -> [SearchIngestService.FileRef] in
             guard let self else { return [] }
             return self.currentSessions(for: source).compactMap { session -> SearchIngestService.FileRef? in
+                // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
+                // transcript) have no content for CursorSessionParser.parseFileFull to
+                // read: JSONLReader silently yields zero events on a non-JSONL file, so
+                // the parser returns an empty-but-non-nil Session that would otherwise get
+                // upserted as search-ready and never revisited. Skip them here, same
+                // detection idiom as CursorSessionIndexer.isDBOnlySession.
+                if CursorSessionIndexer.isDBOnlySession(session) { return nil }
                 guard let stat = SessionFileStat.from(URL(fileURLWithPath: session.filePath)) else { return nil }
                 return SearchIngestService.FileRef(path: session.filePath, mtime: stat.mtime, size: stat.size)
             }
