@@ -41,6 +41,34 @@ private func renderedTranscriptLineText(_ line: TerminalLine,
     return (prefix + line.text, prefix.utf16.count)
 }
 
+/// Pure, testable helpers backing the toolbar legend/navigation index caches.
+///
+/// These are extracted so the O(n) scans that used to run per-call inside
+/// SwiftUI layout (`sizeThatFits` probes) can be precomputed once per data
+/// change instead of once per layout pass per toolbar item.
+enum TranscriptNavIndexBuilder {
+    /// Filters `allIndices` down to ids present in `visibleLineIDs`, sorted ascending.
+    /// Exact port of the old `indicesForRole` body (filter) plus the `sorted()`
+    /// that `navigationStatus`/`navigateRole` used to perform per call.
+    static func roleNavIndices(allIndices: [Int], visibleLineIDs: Set<Int>) -> [Int] {
+        allIndices.filter { visibleLineIDs.contains($0) }.sorted()
+    }
+
+    /// Exact port of the old `semanticLineIndices(_:in:)` body: first line id per
+    /// `decorationGroupID` for lines matching `kind`, sorted ascending.
+    static func semanticNavIndices(kind: SemanticKind, source: [TerminalLine]) -> [Int] {
+        var seenGroups: Set<Int> = []
+        var out: [Int] = []
+        for line in source {
+            guard line.semanticKind == kind else { continue }
+            if seenGroups.insert(line.decorationGroupID).inserted {
+                out.append(line.id)
+            }
+        }
+        return out.sorted()
+    }
+}
+
 private func isSyntheticSemanticHeader(_ text: String,
                                        semanticKind: SemanticKind,
                                        isFirstLineOfBlock: Bool) -> Bool {
@@ -145,6 +173,14 @@ struct SessionTerminalView: View {
     @State private var assistantLineIndices: [Int] = []
     @State private var toolLineIndices: [Int] = []
     @State private var errorLineIndices: [Int] = []
+
+    // Precomputed toolbar nav index caches. These replace O(all lines) scans
+    // that used to run per-call inside SwiftUI layout (sizeThatFits probes,
+    // which fire many times per pass per toolbar item). Recomputed only when
+    // `lines`/`visibleLines`/role-index arrays change; see rebuildNavIndexCaches().
+    @State private var roleNavIndicesCache: [RoleToggle: [Int]] = [:]
+    @State private var semanticNavIndicesCacheVisible: [SemanticKind: [Int]] = [:]
+    @State private var semanticNavIndicesCacheAll: [SemanticKind: [Int]] = [:]
     @State private var eventIDToUserLineID: [String: Int] = [:]
     @State private var pendingEventJumpID: String? = nil
     @State private var pendingUserPromptIndex: Int? = nil
@@ -831,6 +867,7 @@ struct SessionTerminalView: View {
                 toolLineIndices = result.toolLineIndices
                 errorLineIndices = result.errorLineIndices
                 eventIDToUserLineID = result.eventIDToUserLineID
+                rebuildNavIndexCaches()
 
                 if let pendingIndex = pendingUserPromptIndex, jumpToUserPromptIndex(pendingIndex) {
                     pendingUserPromptIndex = nil
@@ -895,6 +932,7 @@ struct SessionTerminalView: View {
         visibleLines = applyLineFilters(lines)
         visibleLinesSignature = Self.stableLineSignature(for: visibleLines)
         refreshSearchSnapshotsIfNeeded()
+        rebuildNavIndexCaches()
         roleNavPositions = [:]
         semanticNavPositions = [:]
         if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1413,10 +1451,10 @@ struct SessionTerminalView: View {
     }
 
     private func navigationStatus(for role: RoleToggle) -> (current: Int, total: Int) {
-        let ids = indicesForRole(role)
-        let total = ids.count
+        // indicesForRole is precomputed and already sorted by rebuildNavIndexCaches().
+        let sorted = indicesForRole(role)
+        let total = sorted.count
         guard total > 0 else { return (0, 0) }
-        let sorted = ids.sorted()
 
         if let stored = roleNavPositions[role], stored >= 0, stored < total {
             return (stored + 1, total)
@@ -1430,10 +1468,9 @@ struct SessionTerminalView: View {
     }
 
     private func semanticNavigationStatus(for kind: SemanticKind, in source: [TerminalLine]) -> (current: Int, total: Int) {
-        let ids = semanticLineIndices(kind, in: source)
-        let total = ids.count
+        let sorted = semanticLineIndices(kind, in: source)
+        let total = sorted.count
         guard total > 0 else { return (0, 0) }
-        let sorted = ids.sorted()
 
         if let stored = semanticNavPositions[kind], stored >= 0, stored < total {
             return (stored + 1, total)
@@ -1446,16 +1483,46 @@ struct SessionTerminalView: View {
         return (0, total)
     }
 
+    /// Returns the precomputed, pre-sorted semantic index cache for `visibleLines`.
+    /// Every call site of `semanticLineIndices`/`semanticNavigationStatus` passes
+    /// `visibleLines` except `hasSemanticItems`, which uses `semanticLineIndicesAll`
+    /// below (it passes `lines`). Kept as a `source`-taking shim so call sites are
+    /// unchanged; the parameter is intentionally unused since the cache is already
+    /// scoped to visibleLines and rebuilt whenever visibleLines changes.
     private func semanticLineIndices(_ kind: SemanticKind, in source: [TerminalLine]) -> [Int] {
-        var seenGroups: Set<Int> = []
-        var out: [Int] = []
-        for line in source {
-            guard line.semanticKind == kind else { continue }
-            if seenGroups.insert(line.decorationGroupID).inserted {
-                out.append(line.id)
-            }
+        semanticNavIndicesCacheVisible[kind] ?? []
+    }
+
+    /// Precomputed cache mirroring the old `semanticLineIndices(kind, in: lines)`
+    /// call used only by `hasSemanticItems`.
+    private func semanticLineIndicesAll(_ kind: SemanticKind) -> [Int] {
+        semanticNavIndicesCacheAll[kind] ?? []
+    }
+
+    /// Recomputes the toolbar nav index caches. Must be called whenever
+    /// `lines`, `visibleLines`, or the role-index arrays
+    /// (userLineIndices/assistantLineIndices/toolLineIndices/errorLineIndices)
+    /// change, otherwise legend counts/navigation go stale. Call sites:
+    ///  - rebuildLines(priority:debounceNanoseconds:) MainActor apply block
+    ///    (assigns lines/visibleLines/role-index arrays together)
+    ///  - refreshVisibleLinesAndMatches() (reassigns visibleLines from a filter change)
+    private func rebuildNavIndexCaches() {
+        let visibleLineIDs = Set(visibleLines.map(\.id))
+        var roleCache: [RoleToggle: [Int]] = [:]
+        for role in RoleToggle.allCases {
+            roleCache[role] = TranscriptNavIndexBuilder.roleNavIndices(allIndices: allIndicesForRole(role),
+                                                                       visibleLineIDs: visibleLineIDs)
         }
-        return out.sorted()
+        roleNavIndicesCache = roleCache
+
+        var semanticVisible: [SemanticKind: [Int]] = [:]
+        var semanticAll: [SemanticKind: [Int]] = [:]
+        for kind in Self.allSemanticKinds {
+            semanticVisible[kind] = TranscriptNavIndexBuilder.semanticNavIndices(kind: kind, source: visibleLines)
+            semanticAll[kind] = TranscriptNavIndexBuilder.semanticNavIndices(kind: kind, source: lines)
+        }
+        semanticNavIndicesCacheVisible = semanticVisible
+        semanticNavIndicesCacheAll = semanticAll
     }
 
     private func accentRole(for kind: SemanticKind) -> TranscriptColorSystem.SemanticRole {
@@ -1468,8 +1535,7 @@ struct SessionTerminalView: View {
     }
 
     private func indicesForRole(_ role: RoleToggle) -> [Int] {
-        let visibleLineIDs = Set(visibleLines.map(\.id))
-        return allIndicesForRole(role).filter { visibleLineIDs.contains($0) }
+        roleNavIndicesCache[role] ?? []
     }
 
     private func allIndicesForRole(_ role: RoleToggle) -> [Int] {
@@ -1486,7 +1552,7 @@ struct SessionTerminalView: View {
     }
 
     private func hasSemanticItems(_ kind: SemanticKind) -> Bool {
-        !semanticLineIndices(kind, in: lines).isEmpty
+        !semanticLineIndicesAll(kind).isEmpty
     }
 
     private func previousHelpText(for role: RoleToggle) -> String {

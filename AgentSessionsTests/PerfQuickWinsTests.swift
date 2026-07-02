@@ -137,4 +137,78 @@ final class PerfQuickWinsTests: XCTestCase {
                                                      blockCount: 4),
                        [0, 0, 0, 0])
     }
+
+    // MARK: - Task 4c: toolbar nav index caching must be parity-identical with the old per-call scans
+
+    /// Verbatim port of the old `indicesForRole` per-call scan, used as the oracle.
+    private func legacyRoleIndices(allIndices: [Int], visibleLineIDs: Set<Int>) -> [Int] {
+        allIndices.filter { visibleLineIDs.contains($0) }
+    }
+
+    /// Verbatim port of the old `semanticLineIndices` per-call scan, used as the oracle.
+    private func legacySemanticLineIndices(_ kind: SemanticKind, in source: [TerminalLine]) -> [Int] {
+        var seenGroups: Set<Int> = []
+        var out: [Int] = []
+        for line in source {
+            guard line.semanticKind == kind else { continue }
+            if seenGroups.insert(line.decorationGroupID).inserted {
+                out.append(line.id)
+            }
+        }
+        return out.sorted()
+    }
+
+    func testRoleNavIndicesFiltersToVisibleIDsAndSorts() {
+        let allIndices = [40, 10, 30, 20, 50]
+        let visibleIDs: Set<Int> = [10, 20, 40]
+
+        let result = TranscriptNavIndexBuilder.roleNavIndices(allIndices: allIndices, visibleLineIDs: visibleIDs)
+
+        XCTAssertEqual(result, [10, 20, 40], "must filter to visible ids and return sorted order")
+        XCTAssertEqual(result, legacyRoleIndices(allIndices: allIndices, visibleLineIDs: visibleIDs).sorted())
+    }
+
+    func testRoleNavIndicesEmptyVisibleSetReturnsEmpty() {
+        let allIndices = [1, 2, 3]
+        let result = TranscriptNavIndexBuilder.roleNavIndices(allIndices: allIndices, visibleLineIDs: [])
+        XCTAssertEqual(result, [])
+    }
+
+    func testRoleNavIndicesEmptyAllIndicesReturnsEmpty() {
+        let result = TranscriptNavIndexBuilder.roleNavIndices(allIndices: [], visibleLineIDs: [1, 2, 3])
+        XCTAssertEqual(result, [])
+    }
+
+    func testSemanticNavIndicesMatchesLegacyLoopOnCodeFencedToolOutput() {
+        // A line-numbered Read-tool dump renders as `.code` semantic lines grouped
+        // by decorationGroupID; verify the fast path returns exactly the legacy
+        // first-line-per-group, sorted result.
+        let dump = "1\t| import Foundation\n2\t| struct Foo {}\n3\t| // done"
+        let s = session([toolResultEvent("t1", output: dump, toolName: "Read")])
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: s, includeMeta: false)
+        let lines = TerminalBuilder.buildLines(from: blocks, source: .codex, enableReviewCards: true)
+
+        XCTAssertTrue(lines.contains { $0.semanticKind == .code }, "fixture must actually produce code lines")
+
+        for kind in [SemanticKind.code, .diff, .plan, .reviewSummary] {
+            let fast = TranscriptNavIndexBuilder.semanticNavIndices(kind: kind, source: lines)
+            let legacy = legacySemanticLineIndices(kind, in: lines)
+            XCTAssertEqual(fast, legacy, "kind \(kind) must match legacy per-call scan exactly")
+        }
+    }
+
+    func testSemanticNavIndicesEmptySourceReturnsEmpty() {
+        XCTAssertEqual(TranscriptNavIndexBuilder.semanticNavIndices(kind: .code, source: []), [])
+    }
+
+    func testSemanticNavIndicesDedupesByDecorationGroupID() {
+        let lines = [
+            TerminalLine(id: 1, text: "a", role: .toolOutput, eventIndex: nil, blockIndex: nil, decorationGroupID: 7, semanticKind: .code),
+            TerminalLine(id: 2, text: "b", role: .toolOutput, eventIndex: nil, blockIndex: nil, decorationGroupID: 7, semanticKind: .code),
+            TerminalLine(id: 3, text: "c", role: .toolOutput, eventIndex: nil, blockIndex: nil, decorationGroupID: 8, semanticKind: .code),
+            TerminalLine(id: 4, text: "d", role: .assistant, eventIndex: nil, blockIndex: nil, decorationGroupID: 9, semanticKind: nil)
+        ]
+        let result = TranscriptNavIndexBuilder.semanticNavIndices(kind: .code, source: lines)
+        XCTAssertEqual(result, [1, 3], "only first line id per decorationGroupID should be kept, sorted")
+    }
 }
