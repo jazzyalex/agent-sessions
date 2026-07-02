@@ -214,6 +214,82 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(stableMatches.count, 1, "unchanged file b must remain findable across both runs")
     }
 
+    // MARK: - SearchIngestService: tool-IO retention prune
+
+    func testIngestPrunesOldToolIORowsBeyondBytesCap() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let now = Int64(Date().timeIntervalSince1970)
+        let oldTS = now - Int64(FeatureFlags.toolIOIndexRecentDays + 5) * 24 * 60 * 60
+        let recentTS = now
+
+        // Seed two old tool-IO rows and one recent row directly (bypassing the
+        // ingest loop's own recency gate, which only writes tool-IO for sessions
+        // whose refTS is within the recent window). This isolates the prune step
+        // under test from the ingest recency gate.
+        try await db.begin()
+        try await db.upsertFile(path: "/tmp/old1.jsonl", mtime: 1, size: 10, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "old1", source: "codex", path: "/tmp/old1.jsonl", mtime: 1))
+        try await db.upsertSessionSearch(sessionID: "old1", source: "codex", mtime: 1, size: 10, text: "old one")
+        try await db.upsertSessionToolIO(sessionID: "old1", source: "codex", mtime: 1, size: 10, refTS: oldTS, text: String(repeating: "x", count: 5_000))
+
+        try await db.upsertFile(path: "/tmp/old2.jsonl", mtime: 1, size: 10, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "old2", source: "codex", path: "/tmp/old2.jsonl", mtime: 1))
+        try await db.upsertSessionSearch(sessionID: "old2", source: "codex", mtime: 1, size: 10, text: "old two")
+        try await db.upsertSessionToolIO(sessionID: "old2", source: "codex", mtime: 1, size: 10, refTS: oldTS, text: String(repeating: "y", count: 5_000))
+
+        try await db.upsertFile(path: "/tmp/recent.jsonl", mtime: 1, size: 10, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "recent", source: "codex", path: "/tmp/recent.jsonl", mtime: 1))
+        try await db.upsertSessionSearch(sessionID: "recent", source: "codex", mtime: 1, size: 10, text: "recent one")
+        try await db.upsertSessionToolIO(sessionID: "recent", source: "codex", mtime: 1, size: 10, refTS: recentTS, text: String(repeating: "z", count: 5_000))
+        try await db.commit()
+
+        let idsBefore = try await db.toolIOSessionIDs(sources: ["codex"])
+        XCTAssertEqual(Set(idsBefore), ["old1", "old2", "recent"], "sanity: all three seeded rows present before prune")
+
+        // A single empty-files ingest run with toolIOEnabled + a tiny cap should
+        // trigger the retention prune as its post-loop step, evicting old rows
+        // (oldest ref_ts first) until under cap, while leaving the recent row alone.
+        let service = SearchIngestService(db: db)
+        _ = try await service.ingest(
+            source: .codex,
+            files: [],
+            toolIOEnabled: true,
+            toolIOOldBytesCap: 1
+        )
+
+        let idsAfter = try await db.toolIOSessionIDs(sources: ["codex"])
+        XCTAssertFalse(idsAfter.contains("old1"), "old row must be pruned once old-bytes exceed the cap")
+        XCTAssertFalse(idsAfter.contains("old2"), "old row must be pruned once old-bytes exceed the cap")
+        XCTAssertTrue(idsAfter.contains("recent"), "recent row must survive the prune regardless of cap")
+    }
+
+    func testIngestSkipsPruneWhenToolIODisabled() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let oldTS = Int64(Date().timeIntervalSince1970) - Int64(FeatureFlags.toolIOIndexRecentDays + 5) * 24 * 60 * 60
+
+        try await db.begin()
+        try await db.upsertFile(path: "/tmp/old1.jsonl", mtime: 1, size: 10, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "old1", source: "codex", path: "/tmp/old1.jsonl", mtime: 1))
+        try await db.upsertSessionSearch(sessionID: "old1", source: "codex", mtime: 1, size: 10, text: "old one")
+        try await db.upsertSessionToolIO(sessionID: "old1", source: "codex", mtime: 1, size: 10, refTS: oldTS, text: String(repeating: "x", count: 5_000))
+        try await db.commit()
+
+        let service = SearchIngestService(db: db)
+        _ = try await service.ingest(
+            source: .codex,
+            files: [],
+            toolIOEnabled: false,
+            toolIOOldBytesCap: 1
+        )
+
+        let idsAfter = try await db.toolIOSessionIDs(sources: ["codex"])
+        XCTAssertTrue(idsAfter.contains("old1"), "prune must not run at all when tool-IO indexing is disabled")
+    }
+
     // MARK: - SearchIngestCoordinator (pure single-flight + coalesce state machine)
 
     func testCoordinatorStartsImmediatelyWhenIdle() {

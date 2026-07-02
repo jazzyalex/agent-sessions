@@ -1820,6 +1820,38 @@ actor IndexDB {
         }
     }
 
+    /// Session ids currently present in `session_tool_io`, optionally filtered by source.
+    /// Diagnostic/test convenience mirroring `indexedSessionIDs`.
+    func toolIOSessionIDs(sources: [String] = []) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
+        let sql = "SELECT session_id FROM session_tool_io\(whereSQL);"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
     func prefilterSessionIDs(
         sources: [String],
         model: String?,

@@ -44,7 +44,8 @@ actor SearchIngestService {
     func ingest(source: SessionSource,
                 files: [FileRef],
                 toolIOEnabled: Bool,
-                yieldNanoseconds: UInt64 = 40_000_000) async throws -> Progress {
+                yieldNanoseconds: UInt64 = 40_000_000,
+                toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap) async throws -> Progress {
         let sourceRaw = source.rawValue
         // `fetchSearchReadyPaths`/`fetchToolIOReadyPaths` only tell us the path's row is
         // format-current relative to whatever mtime/size the DB already has on file — they
@@ -93,6 +94,19 @@ actor SearchIngestService {
                 try Task.checkCancellation()
                 try? await Task.sleep(nanoseconds: yieldNanoseconds)
             }
+        }
+
+        // Retention housekeeping: mirrors the deleted `AnalyticsIndexer.refreshDelta`/
+        // `indexAll` prune calls (git show 31f6a619) — run once per completed ingest
+        // pass, not per file, and only when tool-IO indexing is on. `pruneOldToolIO`
+        // itself is a cheap no-op when the corpus is already under cap, so calling it
+        // unconditionally here (rather than only on `processed > 0`) is fine and also
+        // catches drift caused by the passage of time alone (the recent-days window
+        // sliding past previously-recent rows even with no new files).
+        if toolIOEnabled {
+            let _span = Perf.begin("searchIngestPrune", thresholdMs: 200, "source=\(sourceRaw)")
+            defer { Perf.end(_span) }
+            try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: toolIOOldBytesCap)
         }
 
         return Progress(processed: processed, total: total, skipped: skipped)
