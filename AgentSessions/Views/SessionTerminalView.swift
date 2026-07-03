@@ -940,6 +940,11 @@ struct SessionTerminalView: View {
                         }
                         return
                     }
+                    // Defer the stage-1 apply while the user is actively scrubbing the
+                    // session list: a build that finishes mid-scrub would otherwise land
+                    // on main for a row the user has already moved past. Returns
+                    // immediately when quiet — zero added latency for a settled selection.
+                    await ListScrubSignal.shared.waitUntilQuiet()
                     await MainActor.run {
                         guard !Task.isCancelled else {
                             if pendingBuildSignature == signature { pendingBuildSignature = nil }
@@ -974,6 +979,10 @@ struct SessionTerminalView: View {
                 return
             }
 
+            // Same scrub-quiet gate as the stage-1 apply above: covers the stage-2
+            // full-session swap AND the flag-off/small-session single apply that
+            // shares this MainActor.run block. Returns immediately when quiet.
+            await ListScrubSignal.shared.waitUntilQuiet()
             await MainActor.run {
                 guard !Task.isCancelled else {
                     if pendingBuildSignature == signature { pendingBuildSignature = nil }

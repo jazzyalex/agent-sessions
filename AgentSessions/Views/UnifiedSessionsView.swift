@@ -329,6 +329,11 @@ struct UnifiedSessionsView: View {
     let onToggleLayout: () -> Void
 
     @State private var selection: String?
+    // Advances only when the 150ms selectionPropagationTask fires (or on
+    // first population) — the transcript pane renders from THIS, not the raw
+    // `selection`, so key-repeat scrubbing never re-renders/rebuilds the pane.
+    // Row highlighting stays bound to `selection` directly (instant).
+    @State private var settledSelection: String?
     @State private var selectionSource: SessionSource? = nil
     @State private var lastSelectedSource: SessionSource = .codex
 		@State private var sortOrder: [KeyPathComparator<Session>] = []
@@ -575,6 +580,7 @@ struct UnifiedSessionsView: View {
                                     loadPersistedCollapsedParentsIfNeeded()
 				                    updateCachedRows()
 				                    ensureDefaultSelectionIfNeeded()
+				                    if settledSelection == nil, let selection { settledSelection = selection }
 				                    unified.setAppActive(NSApp.isActive)
 			                    updateFocusedSessionIfNeeded(selectedSession)
 			                    refreshSelectionSourceFromCachedRows()
@@ -1518,7 +1524,7 @@ struct UnifiedSessionsView: View {
 	        ZStack {
 	            // Base host is always mounted to keep a stable split subview identity
 	            TranscriptHostView(kind: selectionSource ?? lastSelectedSource,
-	                               selection: selection,
+	                               selection: settledSelection,
 	                               codexIndexer: codexIndexer,
                                claudeIndexer: claudeIndexer,
                                antigravityIndexer: antigravityIndexer,
@@ -2051,9 +2057,11 @@ struct UnifiedSessionsView: View {
 	            cancelAutoJump()
 	            selectionPropagationTask?.cancel()
 	            selectionPropagationTask = nil
+	            settledSelection = nil
 	            updateFocusedSessionIfNeeded(nil)
 	            return
 	        }
+	        ListScrubSignal.shared.noteSelectionChange()
         // Only the cheap, selection-visual-relevant work runs synchronously in
         // this SwiftUI update turn: the row lookup, presence-probe deferral, and
         // search auto-jump bookkeeping. This is what lets the native selection
@@ -2096,6 +2104,7 @@ struct UnifiedSessionsView: View {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled, selection == id else { return }
             Perf.event("selectionPropagate", "id=\(id.prefix(8))")
+            settledSelection = id
             // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
             if !wasAutoSelectingFromSearch {
                 // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
