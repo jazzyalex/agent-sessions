@@ -55,7 +55,7 @@ final class StatusItemController: NSObject {
             button.title = ""
             button.image = nil
             let labelView = UsageMenuBarLabel()
-                .environmentObject(activeSessions)
+                .environment(activeSessions)
                 .environmentObject(indexer)
                 .environmentObject(claudeIndexer)
                 .environmentObject(opencodeIndexer)
@@ -79,8 +79,29 @@ final class StatusItemController: NSObject {
         }
 
         // Keep width in sync with live-session and usage changes.
+        //
+        // `activeSessions` (an `@Observable` model, post-W6) no longer has a
+        // synthesized `objectWillChange` to subscribe to as a single
+        // catch-all. `scheduleLengthUpdate` -> `updateLength()` just
+        // re-measures `hv.fittingSize` and is cheap + coalesced
+        // (`lengthUpdateScheduled` debounce), so — unlike the SwiftUI view
+        // bodies this migration scopes down to only their actually-read
+        // properties — there is no payoff to narrowing this imperative,
+        // off-body Combine subscriber to only `membershipTicks` (the one
+        // that actually changes `LiveSessionMenuBarLabel`'s rendered
+        // content/width today). Subscribing all three explicit bridge
+        // subjects reproduces the old `objectWillChange`-catch-all trigger
+        // surface exactly, at negligible cost.
         cancellables.removeAll()
-        activeSessions.objectWillChange
+        activeSessions.membershipTicks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
+            .store(in: &cancellables)
+        activeSessions.badgeTicks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.scheduleLengthUpdate() }
+            .store(in: &cancellables)
+        activeSessions.presenceUpdates
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.scheduleLengthUpdate() }
             .store(in: &cancellables)

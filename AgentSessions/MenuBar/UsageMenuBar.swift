@@ -42,7 +42,7 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
         self.opencodeIndexer = opencodeIndexer
         cancellables.removeAll()
 
-        activeCodex.$activeMembershipVersion
+        activeCodex.membershipTicks
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
 
@@ -101,7 +101,7 @@ private final class UsageMenuBarLiveSummaryModel: ObservableObject {
 }
 
 struct UsageMenuBarLabel: View {
-    @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @Environment(CodexActiveSessionsModel.self) var activeCodex
     @EnvironmentObject var codexIndexer: SessionIndexer
     @EnvironmentObject var claudeIndexer: ClaudeSessionIndexer
     @EnvironmentObject var opencodeIndexer: OpenCodeSessionIndexer

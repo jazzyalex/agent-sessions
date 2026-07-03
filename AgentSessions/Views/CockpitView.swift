@@ -13,7 +13,7 @@ struct CockpitView: View {
     @ObservedObject var codexIndexer: SessionIndexer
     @ObservedObject var claudeIndexer: ClaudeSessionIndexer
     @ObservedObject var opencodeIndexer: OpenCodeSessionIndexer
-    @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @Environment(CodexActiveSessionsModel.self) var activeCodex
     @Environment(\.colorScheme) private var systemColorScheme
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true

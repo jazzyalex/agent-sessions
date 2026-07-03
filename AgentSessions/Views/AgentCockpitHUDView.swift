@@ -486,12 +486,12 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         rebuildGate.forceNextRebuild()
         self.activeCodex = activeCodex
         presences = activeCodex.presences
-        activeCancellable = activeCodex.$presences.sink { [weak self] presences in
+        activeCancellable = activeCodex.presenceUpdates.sink { [weak self] presences in
             guard let self else { return }
             self.presences = presences
             scheduleRebuild()
         }
-        subagentBadgeCancellable = activeCodex.$subagentBadgeVersion.sink { [weak self] _ in
+        subagentBadgeCancellable = activeCodex.badgeTicks.sink { [weak self] _ in
             self?.scheduleRebuild()
         }
         scheduleRebuild()
@@ -573,7 +573,7 @@ struct AgentCockpitHUDView: View {
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
     let opencodeIndexer: OpenCodeSessionIndexer
-    @EnvironmentObject var activeCodex: CodexActiveSessionsModel
+    @Environment(CodexActiveSessionsModel.self) var activeCodex
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
@@ -5182,6 +5182,6 @@ private struct HUDSearchTextField: NSViewRepresentable {
         claudeIndexer: ClaudeSessionIndexer(),
         opencodeIndexer: OpenCodeSessionIndexer()
     )
-    .environmentObject(CodexActiveSessionsModel())
+    .environment(CodexActiveSessionsModel())
     .frame(width: 760, height: 420)
 }

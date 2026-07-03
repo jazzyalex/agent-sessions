@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 import Darwin
 import SQLite3
+import Combine
+import Observation
 
 enum CodexLiveState: String, Sendable, CaseIterable {
     case activeWorking
@@ -120,8 +122,9 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
     }
 }
 
+@Observable
 @MainActor
-final class CodexActiveSessionsModel: ObservableObject {
+final class CodexActiveSessionsModel {
     nonisolated static let defaultPollInterval: TimeInterval = 2
     nonisolated static let defaultStaleTTL: TimeInterval = 10
     nonisolated static let backgroundPollInterval: TimeInterval = 15
@@ -150,38 +153,87 @@ final class CodexActiveSessionsModel: ObservableObject {
 
     /// Changes only when the active membership (or stable presence metadata) changes.
     /// Used by views that want to refresh the sessions list only when active state changes,
-    /// not on every heartbeat.
-    @Published private(set) var activeMembershipVersion: UInt64 = 0
-    @Published private(set) var subagentBadgeVersion: UInt64 = 0
+    /// not on every heartbeat. Plain `@Observable`-tracked properties: reading one of
+    /// these inside a SwiftUI `body` scopes that view's invalidation to just this
+    /// property, instead of the whole-object `objectWillChange` re-evaluation the
+    /// prior `ObservableObject`/`@Published` pair forced on every observer.
+    private(set) var activeMembershipVersion: UInt64 = 0
+    private(set) var subagentBadgeVersion: UInt64 = 0
 
-    @Published private(set) var presences: [CodexActivePresence] = []
+    private(set) var presences: [CodexActivePresence] = []
     private(set) var lastRefreshAt: Date? = nil
+
+    /// Explicit Combine bridges for the (few) consumers that need a push-style
+    /// signal rather than a tracked property read — `@Observable` intentionally
+    /// removes the synthesized `$presences`/`$activeMembershipVersion`/
+    /// `$subagentBadgeVersion` publishers and `objectWillChange`, so these `let`
+    /// subjects replace them one-for-one at the exact points the corresponding
+    /// property changes in `apply(_:)` below (never on a no-op emission).
+    /// `@ObservationIgnored` because Combine subjects are reference-type value
+    /// holders with their own internal storage — they must not participate in
+    /// Observation's property-change tracking (and the macro would reject
+    /// tracking a `let` anyway).
+    @ObservationIgnored let membershipTicks = PassthroughSubject<UInt64, Never>()
+    @ObservationIgnored let badgeTicks = PassthroughSubject<UInt64, Never>()
+    @ObservationIgnored let presenceUpdates = PassthroughSubject<[CodexActivePresence], Never>()
 
     /// The engine that now owns poll loop, probe launches, merge/classify,
     /// and the publish decision. This facade consumes `engine.stream` on the
     /// main actor and applies each emission as `latestSnapshot`.
     private let engine = PresenceEngine()
     private var latestSnapshot: PresenceSnapshot = .empty
-    private var consumeTask: Task<Void, Never>? = nil
+    // `nonisolated(unsafe)`: under `@Observable`, the compiler infers `deinit`
+    // as `nonisolated` (the Observation macro's generated registrar teardown
+    // runs there), so `deinit` can no longer touch `@MainActor`-isolated
+    // storage directly — this compiled fine pre-migration because plain
+    // `ObservableObject` classes still inferred a `@MainActor`-isolated
+    // `deinit` from the class-level `@MainActor` annotation. `Task.cancel()`
+    // is documented safe to call from any isolation context (it just flips
+    // an atomic flag), so marking the property itself `nonisolated(unsafe)`
+    // — rather than every read site — is the narrowest fix; every other
+    // access to `consumeTask` remains on the main actor (only ever written
+    // in `init`, only ever read in `deinit`).
+    private nonisolated(unsafe) var consumeTask: Task<Void, Never>? = nil
 
-    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled)
-    private var enabled: Bool = true {
-        didSet { pushEnvironment(refreshSoon: false) }
+    // `@Observable`'s macro-synthesized storage rejects property wrappers on
+    // stored properties (it needs sole control of the backing storage to
+    // instrument access), so `@AppStorage` cannot stay as-is. These four were
+    // audited: nothing inside this class ever assigns to them (grep confirms
+    // zero internal writers), so their `didSet { pushEnvironment(...) } `
+    // closures never fired in the pre-@Observable code either — `@AppStorage`
+    // on a plain (non-`View`) object is a read/write pass-through to
+    // `UserDefaults` with a default value; its `didSet` only fires on a local
+    // Swift-level assignment (which never happened here), NOT on an external
+    // `UserDefaults` write from elsewhere (e.g. `AgentCockpitHUDView` sets
+    // `hudOpen` directly via `UserDefaults.standard.set`, alongside an
+    // explicit `setCockpitWindowVisible` call that already triggers
+    // `pushEnvironment` through its own path). So a get-only computed
+    // property over `UserDefaults` — the same pattern already used
+    // elsewhere in the codebase for non-`View` reads of these same keys
+    // (see `AgentSessionsApp.swift`, `ActivationPolicyDecider.swift`,
+    // `StatusItemController.swift`) — is a byte-for-byte behavior match,
+    // not just a "close enough" substitute. `@ObservationIgnored` because
+    // these values, when read from a view via the facade, are not meant to
+    // be Observation-tracked (they were never tracked before either — they
+    // are private to the model and never read by any view).
+    @ObservationIgnored
+    private var enabled: Bool {
+        UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.codexActiveSessionsEnabled) as? Bool ?? true
     }
 
-    @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride)
-    private var registryRootOverride: String = "" {
-        didSet { pushEnvironment(refreshSoon: true) }
+    @ObservationIgnored
+    private var registryRootOverride: String {
+        UserDefaults.standard.string(forKey: PreferencesKey.Cockpit.codexActiveRegistryRootOverride) ?? ""
     }
 
-    @AppStorage(PreferencesKey.Cockpit.hudOpen)
-    private var hudOpen: Bool = false {
-        didSet { pushEnvironment(refreshSoon: false) }
+    @ObservationIgnored
+    private var hudOpen: Bool {
+        UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudOpen) as? Bool ?? false
     }
 
-    @AppStorage(PreferencesKey.Cockpit.hudPinned)
-    private var hudPinned: Bool = false {
-        didSet { pushEnvironment(refreshSoon: false) }
+    @ObservationIgnored
+    private var hudPinned: Bool {
+        UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudPinned) as? Bool ?? false
     }
 
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
@@ -241,13 +293,39 @@ final class CodexActiveSessionsModel: ObservableObject {
     func debugPerformanceSnapshot() async -> PresenceEngine.DebugPerformanceSnapshot {
         await engine.debugPerformanceSnapshot()
     }
+
+    /// Test-only entry point for `apply(_:)` (W6 Task 2). Under
+    /// `AppRuntime.isRunningTests`, `init()` never starts `engine.stream`
+    /// consumption, so tests need a direct way to feed a synthetic
+    /// `PresenceEngine.Emission` through the exact same code path the real
+    /// stream loop uses, to assert on the resulting property values AND the
+    /// three Combine bridge subjects' firing/timing — mirrors the existing
+    /// `debugRunManagedCommand`/`debugPerformanceSnapshot` test-hook pattern.
+    func debugApply(_ emission: PresenceEngine.Emission) {
+        apply(emission)
+    }
 #endif
 
     /// Applies one engine emission on the main actor: updates `latestSnapshot`
-    /// and the 3 @Published properties, matching the exact pre-extraction
-    /// bump semantics (membership version only bumps on a real publish;
-    /// badge version only on a real badge-count change — both already
-    /// decided by the engine before it emitted).
+    /// and the 3 Observation-tracked properties, matching the exact
+    /// pre-extraction bump semantics (membership version only bumps on a real
+    /// publish; badge version only on a real badge-count change — both
+    /// already decided by the engine before it emitted). Each property
+    /// reassignment is followed by firing the matching Combine bridge subject
+    /// with the new value, in the same order, on the same main-actor call
+    /// stack the property write happened on — the subject send is
+    /// synchronous, same-thread, immediately-after-the-value-is-visible,
+    /// which is the same timing `@Published`'s synthesized `willSet`-driven
+    /// emission gave Combine subscribers (both are "fires when this specific
+    /// property's value just changed," main actor, no dispatch hop).
+    /// `presences` and `activeMembershipVersion` always change together in
+    /// this engine (both gated by the single `membershipVersion !=` check
+    /// below — the engine bumps `membershipVersion` whenever it republishes
+    /// `presences`, never independently), so `presenceUpdates` and
+    /// `membershipTicks` fire in the same branch, once per apply, exactly
+    /// when the array's content actually changed — not on every apply() call
+    /// (an emission the engine chose not to publish never reaches here, and
+    /// a badge-only emission does not touch `presences`).
     private func apply(_ emission: PresenceEngine.Emission) {
         let previous = latestSnapshot
         latestSnapshot = emission.snapshot
@@ -255,9 +333,12 @@ final class CodexActiveSessionsModel: ObservableObject {
         if emission.snapshot.membershipVersion != previous.membershipVersion {
             presences = emission.snapshot.presences
             activeMembershipVersion = emission.snapshot.membershipVersion
+            presenceUpdates.send(presences)
+            membershipTicks.send(activeMembershipVersion)
         }
         if emission.snapshot.badgeVersion != previous.badgeVersion {
             subagentBadgeVersion = emission.snapshot.badgeVersion
+            badgeTicks.send(subagentBadgeVersion)
         }
     }
 

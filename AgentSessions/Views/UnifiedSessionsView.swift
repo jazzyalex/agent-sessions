@@ -315,7 +315,7 @@ struct UnifiedSessionsView: View {
     let piIndexer: PiSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
-    @EnvironmentObject var activeCodexSessions: CodexActiveSessionsModel
+    @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -775,7 +775,7 @@ struct UnifiedSessionsView: View {
 							)
 						}
 					}
-                    .onReceive(activeCodexSessions.$activeMembershipVersion) { _ in
+                    .onReceive(activeCodexSessions.membershipTicks) { _ in
                         // A live-presence bump changes Agent live-state dots (active/open),
                         // never the underlying session list — the visible row SET comes from
                         // unified.sessions, not the presence poll. So when Active-only filtering

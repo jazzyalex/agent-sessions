@@ -176,7 +176,7 @@ struct AgentSessionsApp: App {
     @StateObject private var archiveManager = SessionArchiveManager.shared
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
-    @StateObject private var activeCodexSessions = CodexActiveSessionsModel()
+    @State private var activeCodexSessions = CodexActiveSessionsModel()
     @StateObject private var antigravityIndexer = AntigravitySessionIndexer()
     @StateObject private var hermesIndexer = HermesSessionIndexer()
     @StateObject private var copilotIndexer = CopilotSessionIndexer()
@@ -309,7 +309,7 @@ struct AgentSessionsApp: App {
         )
         .environmentObject(codexUsageModel)
         .environmentObject(claudeUsageModel)
-        .environmentObject(activeCodexSessions)
+        .environment(activeCodexSessions)
         .environmentObject(indexer.columnVisibility)
         .environmentObject(archiveManager)
         .environmentObject(updaterController)
@@ -488,7 +488,7 @@ struct AgentSessionsApp: App {
                     claudeIndexer: claudeIndexer,
                     opencodeIndexer: opencodeIndexer
                 )
-                .environmentObject(activeCodexSessions)
+                .environment(activeCodexSessions)
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
                 .background(WindowOpenRegistrationView())
