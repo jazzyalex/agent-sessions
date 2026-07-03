@@ -412,6 +412,11 @@ struct UnifiedSessionsView: View {
     @StateObject private var searchState = UnifiedSearchState()
     @State private var selectionChangeSource: SelectionChangeSource? = nil
     @State private var autoJumpWorkItem: DispatchWorkItem? = nil
+    // Debounced selection-propagation task (see handleSelectionChange). Key-repeat
+    // scrubbing fires selection changes every ~30-90ms; without this, each one used
+    // to schedule transcript teardown/reload on the next runloop turn, which always
+    // lands between key-repeat events — every scrubbed row did full propagation work.
+    @State private var selectionPropagationTask: Task<Void, Never>? = nil
     @State private var restoreCandidate: Session? = nil
     @State private var showRestoredRelaunch = false
     private var rows: [Session] {
@@ -580,6 +585,8 @@ struct UnifiedSessionsView: View {
 			                    activeCodexSessions.setUnifiedConsumerVisible(false, consumerID: activeConsumerID)
 			                    codexUsageModel.setStripVisible(false)
 			                    claudeUsageModel.setStripVisible(false)
+			                    selectionPropagationTask?.cancel()
+			                    selectionPropagationTask = nil
 			                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     unified.setAppActive(true)
@@ -2025,6 +2032,8 @@ struct UnifiedSessionsView: View {
 	    private func handleSelectionChange(_ id: String?) {
 	        guard let id, let s = cachedRowByID[id] else {
 	            cancelAutoJump()
+	            selectionPropagationTask?.cancel()
+	            selectionPropagationTask = nil
 	            updateFocusedSessionIfNeeded(nil)
 	            return
 	        }
@@ -2050,17 +2059,21 @@ struct UnifiedSessionsView: View {
         }
 
         // Everything below triggers transcript-pane work (focus transition,
-        // per-source reload/parse, transcript prewarm). Deferring it to the next
-        // main-runloop turn lets this turn finish and paint the selection
-        // highlight immediately — the highlight no longer waits for transcript
-        // teardown/reload to complete first. Staleness-guarded: if `selection`
-        // has moved on again by the time this runs (rapid clicks), skip —
-        // the newer selection's own deferred block will do this work, which
-        // also naturally coalesces a burst of clicks into loading only the
-        // final one (fewer wasted reload/parse dispatches, not just deferred
-        // ones).
-        Task { @MainActor in
-            guard selection == id else { return }
+        // per-source reload/parse, transcript prewarm). It waits for a short
+        // stability window instead of just the next runloop turn: key-repeat
+        // events during list scrubbing arrive every ~30-90ms, and a next-turn
+        // defer always lands between two of them, so the staleness guard used
+        // to pass for EVERY scrubbed row — each one fired a full transcript
+        // teardown+reload (measured 120-290% CPU, ~1s perceived latency,
+        // independent of list size). Debouncing to 150ms — comfortably above
+        // the key-repeat interval, but still imperceptible for a single
+        // click/arrow-key press — coalesces a whole scrub into one propagation
+        // for the row the user actually rests on.
+        selectionPropagationTask?.cancel()
+        selectionPropagationTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled, selection == id else { return }
+            Perf.event("selectionPropagate", "id=\(id.prefix(8))")
             // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
             if !isAutoSelectingFromSearch {
                 // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
