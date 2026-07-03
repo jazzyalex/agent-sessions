@@ -350,7 +350,18 @@ struct SessionTerminalView: View {
             transcriptFocusToken &+= 1
         }
         .onChange(of: session.events.count) { _, _ in
-            rebuildLines(priority: .utility, debounceNanoseconds: 150_000_000)
+            let debounce = Self.liveTailDebounce(isActive: NSApp.isActive)
+            rebuildLines(priority: .utility, debounceNanoseconds: debounce)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Catch-up on activation: if a background live-tail rebuild is
+            // still debouncing (or content grew while inactive and no
+            // rebuild is pending yet), paint immediately instead of waiting
+            // out the remainder of the 5s inactive debounce. When content is
+            // already current, this is a no-op: rebuildLines computes the
+            // same BuildSignature and the dedupe guard (signature ==
+            // lastCompletedBuildSignature) returns before doing any work.
+            rebuildLines(priority: .userInitiated)
         }
     }
 
@@ -1329,6 +1340,19 @@ struct SessionTerminalView: View {
     /// Tasks 6-8) is the path to older content instead of a full swap.
     nonisolated static func shouldSwapToFullBuild(totalChars: Int) -> Bool {
         totalChars <= FeatureFlags.transcriptFullSwapMaxChars
+    }
+
+    /// Live-tail rebuild debounce policy: a backgrounded window doesn't need
+    /// 2-second live updates, so while the app is inactive the live-tail
+    /// rebuild (fired on every `session.events.count` growth during an
+    /// append burst) is coalesced onto a much longer cadence. `rebuildLines`
+    /// already cancels a still-sleeping debounced dispatch when a newer call
+    /// arrives, so a long inactive debounce naturally collapses an entire
+    /// background append burst into a single rebuild — either the 5s timer
+    /// fires once, or `didBecomeActiveNotification` triggers an immediate
+    /// catch-up rebuild first. Foreground behavior is unchanged.
+    nonisolated static func liveTailDebounce(isActive: Bool) -> UInt64 {
+        isActive ? 150_000_000 : 5_000_000_000
     }
 
     enum TailPatchStrategy: Equatable {

@@ -345,4 +345,14 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         XCTAssertTrue(SessionTerminalView.shouldSwapToFullBuild(totalChars: FeatureFlags.transcriptFullSwapMaxChars))
         XCTAssertFalse(SessionTerminalView.shouldSwapToFullBuild(totalChars: FeatureFlags.transcriptFullSwapMaxChars + 1))
     }
+
+    // MARK: - Live-tail debounce policy (background throttle)
+
+    func testLiveTailDebounceForegroundUnchanged() {
+        XCTAssertEqual(SessionTerminalView.liveTailDebounce(isActive: true), 150_000_000)
+    }
+
+    func testLiveTailDebounceBackgroundThrottled() {
+        XCTAssertEqual(SessionTerminalView.liveTailDebounce(isActive: false), 5_000_000_000)
+    }
 }
