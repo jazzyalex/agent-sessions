@@ -983,6 +983,9 @@ struct SessionTerminalView: View {
             // full-session swap AND the flag-off/small-session single apply that
             // shares this MainActor.run block. Returns immediately when quiet.
             await ListScrubSignal.shared.waitUntilQuiet()
+            // Immutable copy: the Sendable MainActor closure below may not
+            // capture the mutable `didApplyStage1Window` var (Swift 6 error).
+            let stage1WindowApplied = didApplyStage1Window
             await MainActor.run {
                 guard !Task.isCancelled else {
                     if pendingBuildSignature == signature { pendingBuildSignature = nil }
@@ -992,7 +995,7 @@ struct SessionTerminalView: View {
                 // replaced by the full-session build) is measured here; the
                 // flag-off path and the small-session single build are not a
                 // "swap" and would just add noise to the span's tuning signal.
-                if didApplyStage1Window {
+                if stage1WindowApplied {
                     let _s = Perf.begin("transcriptSwapApply", thresholdMs: 50)
                     applyRebuild(result, sessionSnapshot: sessionSnapshot,
                                 skipAgentsPreamble: skipAgentsPreamble, signature: signature,
