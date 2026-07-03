@@ -285,6 +285,21 @@ final class CodexActiveSessionsModel {
     @ObservationIgnored
     private var lastCockpitVisibleAt: Date?
 
+    // Observes the two `@AppStorage`-backed Cockpit preference keys the facade
+    // reads (`enabled` / `registryRootOverride`). The pre-@Observable model
+    // pushed the environment from those keys' `@AppStorage` `didSet`s; now that
+    // they are get-only computed properties over `UserDefaults`, a Preferences
+    // toggle no longer reaches the engine on its own. This restores that path
+    // by re-pushing the environment whenever either key's value changes (see
+    // `FilteredDefaultsObserver` for the tracked-key value-diff prior art).
+    @ObservationIgnored
+    private let defaultsObserver = FilteredDefaultsObserver(keys: [
+        PreferencesKey.Cockpit.codexActiveSessionsEnabled,
+        PreferencesKey.Cockpit.codexActiveRegistryRootOverride
+    ])
+    @ObservationIgnored
+    private var defaultsCancellables: Set<AnyCancellable> = []
+
     private struct SessionLookupCacheEntry {
         var source: SessionSource
         var rawFilePath: String
@@ -320,8 +335,24 @@ final class CodexActiveSessionsModel {
                 self.apply(emission)
             }
         }
+        // Restore the pre-@Observable `@AppStorage` `didSet` path: re-push the
+        // environment whenever the enabled/registry-root keys change (a
+        // Preferences toggle writes `UserDefaults` externally, which never
+        // fired the get-only computed properties' — now nonexistent — didSets).
+        defaultsObserver.publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.pushEnvironment(refreshSoon: true) }
+            .store(in: &defaultsCancellables)
+        let initialEnvironment = buildEnvironment()
         Task {
             await AppReadyGate.waitUntilReady()
+            // Push the real stored environment (enabled / registryRootOverride /
+            // hud flags) BEFORE `start()` so a user with the feature disabled
+            // never starts ps/lsof/osascript polling: `PresenceEnvironment`
+            // defaults `enabled` to `true`, and `start()` -> `startPollingIfNeeded`
+            // gates on `environment.enabled`, so an unpushed environment would
+            // poll indefinitely on menu-bar-only launches.
+            await engine.updateEnvironment(initialEnvironment, refreshSoon: false)
             await engine.start()
         }
     }
@@ -513,7 +544,16 @@ final class CodexActiveSessionsModel {
     /// internally in `updateEnvironment(_:refreshSoon:)`.
     private func pushEnvironment(refreshSoon: Bool) {
         guard !AppRuntime.isRunningTests else { return }
-        let next = PresenceEnvironment(
+        let next = buildEnvironment()
+        Task { await engine.updateEnvironment(next, refreshSoon: refreshSoon) }
+    }
+
+    /// Snapshots the current facade state (`@AppStorage`-backed prefs +
+    /// visibility sets + app-active flag) into a `PresenceEnvironment`. Shared
+    /// by `pushEnvironment` and `init`'s pre-`start()` push so both build the
+    /// environment identically.
+    private func buildEnvironment() -> PresenceEnvironment {
+        PresenceEnvironment(
             enabled: enabled,
             registryRootOverride: registryRootOverride,
             hudOpen: hudOpen,
@@ -525,7 +565,6 @@ final class CodexActiveSessionsModel {
             lastCockpitVisibleAt: lastCockpitVisibleAt,
             deferExpensiveProbesUntil: nil
         )
-        Task { await engine.updateEnvironment(next, refreshSoon: refreshSoon) }
     }
 
     func refreshNow() {

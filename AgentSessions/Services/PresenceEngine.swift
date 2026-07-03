@@ -184,7 +184,17 @@ actor PresenceEngine {
         environment = merged
 
         guard !AppRuntime.isRunningTests else { return }
+        applyEnvironmentScheduling(previous: previous, next: next, refreshSoon: triggerRefreshSoon)
+    }
 
+    /// Start/stop/backoff/ramp/refreshSoon side effects for an environment
+    /// transition. Split out of `updateEnvironment` so its scheduling parity
+    /// can be exercised under XCTest (via `debugApplyEnvironmentScheduling`)
+    /// without the `AppRuntime.isRunningTests` early-return that keeps the
+    /// production start/stop machinery quiet during test runs.
+    private func applyEnvironmentScheduling(previous: PresenceEnvironment,
+                                            next: PresenceEnvironment,
+                                            refreshSoon triggerRefreshSoon: Bool) {
         if next.enabled, !previous.enabled {
             startPollingIfNeeded()
         } else if !next.enabled, previous.enabled {
@@ -194,11 +204,26 @@ actor PresenceEngine {
         let hadVisibleConsumer = previous.hasVisibleConsumer
         let hasVisibleConsumerNow = next.hasVisibleConsumer
         let appBecameActive = next.appIsActive && !previous.appIsActive
+        let hadVisibleCockpitWindow = previous.hasVisibleCockpitWindow
+        let hasVisibleCockpitWindowNow = next.hasVisibleCockpitWindow
+        let cockpitWindowBecameVisible = !hadVisibleCockpitWindow && hasVisibleCockpitWindowNow
 
         if hasVisibleConsumerNow != hadVisibleConsumer || previous.appIsActive != next.appIsActive {
             resetStablePollBackoff()
         }
-        if (!hadVisibleConsumer && hasVisibleConsumerNow && next.appIsActive) || (appBecameActive && hasVisibleConsumerNow) {
+        // Arming parity with v4.0's per-setter `armForegroundProbeRamp()` calls
+        // (`armForegroundProbeRamp` itself still gates on `hasVisibleConsumer`,
+        // so each edge below is the same guard v4.0 applied at the call site):
+        //   - consumer became visible while active (setUnifiedConsumerVisible /
+        //     setCockpitConsumerVisible),
+        //   - app became active (setAppActive — v4.0 armed unconditionally on
+        //     `active`; the internal `hasVisibleConsumer` guard is what makes
+        //     it a no-op when nothing is visible),
+        //   - cockpit window became visible while active (setCockpitWindowVisible —
+        //     `!hadVisibleCockpitWindow && hasVisibleCockpitWindow && appIsActive`).
+        if (!hadVisibleConsumer && hasVisibleConsumerNow && next.appIsActive)
+            || appBecameActive
+            || (cockpitWindowBecameVisible && next.appIsActive) {
             armForegroundProbeRamp()
         }
 
@@ -301,6 +326,47 @@ actor PresenceEngine {
     /// to keep quiet under production XCTest runs.
     func debugRefreshNow() async {
         await performRefreshNow()
+    }
+
+    /// Test-only: runs the environment scheduling side effects (start/stop,
+    /// backoff reset, foreground-probe-ramp arming, refreshSoon) for a
+    /// `previous -> next` transition, bypassing the `AppRuntime.isRunningTests`
+    /// early-return in `updateEnvironment`. Sets `environment = next` first so
+    /// downstream reads (e.g. `armForegroundProbeRamp`'s `hasVisibleConsumer`
+    /// gate) see the post-transition state, matching production ordering.
+    func debugApplyEnvironmentScheduling(previous: PresenceEnvironment, next: PresenceEnvironment) {
+        environment = next
+        applyEnvironmentScheduling(previous: previous, next: next, refreshSoon: false)
+    }
+
+    /// Test-only: whether the foreground probe ramp is currently armed
+    /// (`resumeProbeBudgetIndex == 0`, the value `armForegroundProbeRamp` sets).
+    func debugIsForegroundProbeRampArmed() -> Bool {
+        resumeProbeBudgetIndex == 0
+    }
+
+    /// Test-only: exercises `startPollingIfNeeded`'s `environment.enabled`
+    /// gate + `pollTask == nil` dedupe without the `AppRuntime.isRunningTests`
+    /// early-return that keeps the real poll loop from spinning during XCTest.
+    /// The spawned poll task's body still short-circuits at `refreshOnce`'s own
+    /// `environment.enabled` guard, so no probes run — the observable effect is
+    /// solely whether a `pollTask` was created (`debugPollTaskIsRunning`).
+    func debugStartPollingIfNeeded() {
+        guard environment.enabled else { return }
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.refreshOnce()
+                let interval = await self.pollIntervalSeconds()
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            }
+        }
+    }
+
+    /// Test-only: whether a poll loop task is currently live.
+    func debugPollTaskIsRunning() -> Bool {
+        pollTask != nil
     }
 #endif
 
