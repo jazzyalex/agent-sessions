@@ -76,6 +76,106 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertTrue(remainingSessionIDs.contains("kept"), "session_search row for still-present session must be preserved")
     }
 
+    // MARK: - indexedSessionIDsCurrent (search-staleness fallback currency)
+
+    /// A session whose file changed (files.mtime advanced) but whose session_search row still
+    /// holds the OLD mtime/size (re-ingest throttled) must NOT appear as "current". This is what
+    /// makes SearchCoordinator treat it as unindexed and fall back to a fresh scan.
+    func testIndexedSessionIDsCurrentExcludesStaleRow() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        try await db.begin()
+        // File on disk is now mtime=5/size=99 (freshly appended); session_search still at 1/10.
+        try await db.upsertFile(path: "/tmp/hot.jsonl", mtime: 5, size: 99, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "hot", source: "codex", path: "/tmp/hot.jsonl", mtime: 5))
+        try await db.upsertSessionSearch(sessionID: "hot", source: "codex", mtime: 1, size: 10, text: "old text")
+        try await db.commit()
+
+        let present = try await db.indexedSessionIDs(sources: ["codex"])
+        XCTAssertTrue(present.contains("hot"), "presence-only membership still lists the stale session")
+
+        let current = try await db.indexedSessionIDsCurrent(sources: ["codex"])
+        XCTAssertFalse(current.contains("hot"), "stale session_search row must not count as current")
+    }
+
+    /// A session whose session_search row matches the file's current mtime/size IS current and
+    /// stays on the FTS path (excluded from the scan fallback).
+    func testIndexedSessionIDsCurrentIncludesCurrentRow() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        try await db.begin()
+        try await db.upsertFile(path: "/tmp/stable.jsonl", mtime: 7, size: 42, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "stable", source: "codex", path: "/tmp/stable.jsonl", mtime: 7))
+        try await db.upsertSessionSearch(sessionID: "stable", source: "codex", mtime: 7, size: 42, text: "fresh text")
+        try await db.commit()
+
+        let current = try await db.indexedSessionIDsCurrent(sources: ["codex"])
+        XCTAssertTrue(current.contains("stable"), "matching mtime+size must count as current")
+    }
+
+    /// A stale row (present-but-not-current) is the exact input the coordinator turns into a
+    /// forced unindexed candidate. Verify the derivation (present − current) isolates it, and
+    /// that shouldIncludeUnindexedCandidate then includes it even when it is over the size gate,
+    /// without duplicating a session already returned by FTS (in `seen`).
+    func testStaleRowBecomesUnindexedCandidateWithoutDuplication() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        try await db.begin()
+        // "hot" is a large stale session; "stable" is current.
+        try await db.upsertFile(path: "/tmp/hot.jsonl", mtime: 5, size: 99, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "hot", source: "codex", path: "/tmp/hot.jsonl", mtime: 5))
+        try await db.upsertSessionSearch(sessionID: "hot", source: "codex", mtime: 1, size: 10, text: "old text")
+        try await db.upsertFile(path: "/tmp/stable.jsonl", mtime: 7, size: 42, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "stable", source: "codex", path: "/tmp/stable.jsonl", mtime: 7))
+        try await db.upsertSessionSearch(sessionID: "stable", source: "codex", mtime: 7, size: 42, text: "fresh text")
+        try await db.commit()
+
+        let present = Set(try await db.indexedSessionIDs(sources: ["codex"]))
+        let current = Set(try await db.indexedSessionIDsCurrent(sources: ["codex"]))
+        let stale = present.subtracting(current)
+        XCTAssertEqual(stale, ["hot"], "only the changed-but-not-reingested session is stale")
+
+        let threshold = FeatureFlags.searchSmallSizeBytes
+        let largeSize = threshold * 2
+
+        // Large stale session: over the size gate, but must still be scanned because its FTS row is stale.
+        let hot = Session(id: "hot", source: .codex, startTime: nil, endTime: nil, model: nil,
+                          filePath: "/tmp/hot.jsonl", fileSizeBytes: largeSize, eventCount: 1, events: [],
+                          cwd: nil, repoName: nil, lightweightTitle: "hot")
+        XCTAssertTrue(SearchCoordinator.shouldIncludeUnindexedCandidate(hot,
+                                                                        indexedIDs: current,
+                                                                        seenIDs: [],
+                                                                        enableDeepScan: false,
+                                                                        smallSearchThreshold: threshold,
+                                                                        staleIDs: stale),
+                      "large stale session must be included for a fresh scan despite the size gate")
+
+        // If the same stale session was already returned by FTS (in `seen`), it must NOT be
+        // scanned again — no double-scan / duplicate in merged results.
+        XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(hot,
+                                                                         indexedIDs: current,
+                                                                         seenIDs: ["hot"],
+                                                                         enableDeepScan: false,
+                                                                         smallSearchThreshold: threshold,
+                                                                         staleIDs: stale),
+                       "a session already in FTS results must not be re-added as an unindexed candidate")
+
+        // The current session stays on the FTS path (never a scan candidate).
+        let stable = Session(id: "stable", source: .codex, startTime: nil, endTime: nil, model: nil,
+                             filePath: "/tmp/stable.jsonl", fileSizeBytes: 42, eventCount: 1, events: [],
+                             cwd: nil, repoName: nil, lightweightTitle: "stable")
+        XCTAssertFalse(SearchCoordinator.shouldIncludeUnindexedCandidate(stable,
+                                                                         indexedIDs: current,
+                                                                         seenIDs: [],
+                                                                         enableDeepScan: false,
+                                                                         smallSearchThreshold: threshold,
+                                                                         staleIDs: stale),
+                       "a current (fresh FTS) session must not be scanned")
+    }
+
     // MARK: - SearchIngestService
 
     private var ingestTempDir: URL!

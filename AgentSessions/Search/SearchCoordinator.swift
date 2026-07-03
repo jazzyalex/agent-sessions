@@ -292,7 +292,17 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                 if !freeText.isEmpty {
                     // The analytics-backed DB can be partially populated during warmup.
                     // Use FTS for indexed sessions, then fall back to legacy matching for unindexed ones.
-                    let indexedIDs = Set((try? await db.indexedSessionIDs(sources: allowedRaw)) ?? [])
+                    // Currency-aware membership (not presence-only): a session counts as "indexed" only
+                    // while its `session_search` row still matches the file's current mtime/size. A hot,
+                    // actively-appending file whose re-ingest is throttled (quiet gate + size cooldown in
+                    // SearchIngestService) drops out of this set, so shouldIncludeUnindexedCandidate lets
+                    // the legacy full-scan pick it up and return FRESH text instead of stale FTS rows.
+                    let indexedIDs = Set((try? await db.indexedSessionIDsCurrent(sources: allowedRaw)) ?? [])
+                    // Present-but-not-current: sessions with a session_search row whose stored mtime/size
+                    // no longer matches the file (re-ingest throttled). These have stale/no FTS coverage and
+                    // must be scanned regardless of size (see shouldIncludeUnindexedCandidate).
+                    let presentIDs = Set((try? await db.indexedSessionIDs(sources: allowedRaw)) ?? [])
+                    let staleIDs = presentIDs.subtracting(indexedIDs)
                     if indexedIDs.isEmpty {
                         await self.startLegacySearch(runID: newRunID,
                                                      query: query,
@@ -372,7 +382,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                                              indexedIDs: indexedIDs,
                                                              seenIDs: seen,
                                                              enableDeepScan: enableDeepScan,
-                                                             smallSearchThreshold: smallSearchThreshold)
+                                                             smallSearchThreshold: smallSearchThreshold,
+                                                             staleIDs: staleIDs)
                     }
                     let deepCandidates = deepEnabled
                         ? searchableCandidates.filter { indexedIDs.contains($0.id) && !seen.contains($0.id) && Self.shouldDeepScan(session: $0) }
@@ -623,10 +634,17 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                                 indexedIDs: Set<String>,
                                                 seenIDs: Set<String>,
                                                 enableDeepScan: Bool,
-                                                smallSearchThreshold: Int) -> Bool {
+                                                smallSearchThreshold: Int,
+                                                staleIDs: Set<String> = []) -> Bool {
         guard !indexedIDs.contains(session.id), !seenIDs.contains(session.id) else { return false }
         if enableDeepScan { return true }
         if session.source == .cursor { return true }
+        // A session whose `session_search` row exists but is out of date (changed-but-not-yet-reingested,
+        // held back by SearchIngestService's quiet/cooldown gates) has NO fresh FTS coverage, so it must
+        // be scanned even if it is over the small-size threshold — otherwise a large hot transcript stays
+        // unfindable for the whole re-ingest delay. `indexedIDs` (currency-aware) already excludes it; this
+        // additionally bypasses the size gate that would otherwise drop a large stale file.
+        if staleIDs.contains(session.id) { return true }
         return sizeBytes(for: session) < smallSearchThreshold
     }
 

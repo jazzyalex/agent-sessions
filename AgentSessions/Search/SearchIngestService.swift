@@ -143,9 +143,16 @@ actor SearchIngestService {
             // indexing is never delayed.
             //
             // Tradeoff: content appended to an in-progress session reaches the FTS
-            // index within ~quietSeconds of the session going quiet (not instantly).
-            // The deep-scan search tier (which reads files directly, uninfluenced by
-            // this cache) covers that gap in the meantime.
+            // index within ~quietSeconds of the session going quiet (plus the size-tiered
+            // re-ingest cooldown below), not instantly. Freshness during that gap is NOT
+            // provided by the opt-in `.toolOutputsOnly` deep-scan tier (an earlier comment
+            // claimed it was — that was wrong; deep scan is off by default and only reads
+            // tool output). Instead, the SEARCH path covers the gap: `indexedSessionIDsCurrent`
+            // compares each `session_search` row's stored mtime/size against the file's current
+            // values, so a changed-but-not-yet-reingested session is treated as unindexed and
+            // the legacy full-scan (SearchCoordinator.shouldIncludeUnindexedCandidate, which
+            // bypasses the size gate for such stale rows) reads it directly and returns fresh
+            // results until this service catches up.
             let hasExistingRow = indexedByPath[file.path] != nil || searchReadyPaths.contains(file.path)
             if hasExistingRow {
                 // Clamp to zero: a future mtime (clock skew, or a test/fixture that

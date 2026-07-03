@@ -1678,6 +1678,65 @@ actor IndexDB {
         return ids
     }
 
+    /// Session ids whose `session_search` row is CURRENT — i.e. the mtime/size/format_version
+    /// stored at ingest time still match the file's authoritative current mtime/size (as tracked
+    /// in the `files` table by the indexer's per-scan restat) and the FTS text is on the latest
+    /// format. This is the `session_id`-keyed analogue of `fetchSearchReadyPaths` (which returns
+    /// paths), reusing the same three-table join shape.
+    ///
+    /// Why the search path needs "current" rather than "present": `SearchIngestService` intentionally
+    /// delays re-ingest of a hot, actively-appending file (quiet-period gate + size-tiered cooldown,
+    /// up to tens of minutes). During that window `session_search` still holds the OLD text, and a
+    /// presence-only membership test (`indexedSessionIDs`) would both serve stale FTS results AND
+    /// exclude the file from the legacy full-scan fallback. Feeding this currency-aware set to
+    /// `SearchCoordinator.shouldIncludeUnindexedCandidate` instead makes a changed-but-not-yet-reingested
+    /// session drop out of `indexedIDs`, so the scan picks it up and returns fresh results; once the
+    /// re-ingest lands, its row matches again and it returns to the FTS path.
+    ///
+    /// Cost: one indexed three-way join over `files`/`session_meta`/`session_search`, all keyed on
+    /// (source, path) / (source, session_id) with `idx_files_source` + PRIMARY KEYs. Runs once per
+    /// search, comparable to `indexedSessionIDs` plus the join `fetchSearchReadyPaths` already pays
+    /// on every ingest kick.
+    func indexedSessionIDsCurrent(sources: [String],
+                                  formatVersion: Int = FeatureFlags.sessionSearchFormatVersion) throws -> [String] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        var clauses: [String] = []
+        var binds: [Any] = []
+        if !sources.isEmpty {
+            let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
+            clauses.append("f.source IN (\(qs))")
+            binds.append(contentsOf: sources)
+        }
+        let sourceFilter = clauses.isEmpty ? "" : (" AND " + clauses.joined(separator: " AND "))
+        let sql = """
+        SELECT s.session_id
+        FROM files f
+        JOIN session_meta m ON m.source = f.source AND m.path = f.path
+        JOIN session_search s ON s.source = m.source AND s.session_id = m.session_id
+        WHERE s.mtime = f.mtime
+          AND s.size = f.size
+          AND s.format_version = ?\(sourceFilter);
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var idx: Int32 = 1
+        sqlite3_bind_int(stmt, idx, Int32(formatVersion)); idx += 1
+        for b in binds {
+            if let s = b as? String { sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT) }
+            idx += 1
+        }
+
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let c = sqlite3_column_text(stmt, 0) { ids.append(String(cString: c)) }
+        }
+        return ids
+    }
+
     func fetchSessionMetaPaths(for source: String) throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         let sql = "SELECT path FROM session_meta WHERE source = ?;"
