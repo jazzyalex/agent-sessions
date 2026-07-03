@@ -161,6 +161,18 @@ final class CodexActiveSessionsModel {
     private(set) var subagentBadgeVersion: UInt64 = 0
 
     private(set) var presences: [CodexActivePresence] = []
+
+    // `@Observable` tracks all non-ignored stored properties — internal state
+    // must be explicitly ignored or view bodies that call facade lookups
+    // track (and mutate) it during render. `lastRefreshAt` is reassigned
+    // unconditionally on every `apply(_:)` call (including badge-only and
+    // no-op emissions), unlike `presences`/`activeMembershipVersion`/
+    // `subagentBadgeVersion` which are gated behind a version-change check —
+    // left tracked, it would invalidate every view that merely reads any
+    // other tracked property in the same body. No view reads it (grep
+    // confirms zero call sites outside this file and its test), so ignoring
+    // it changes no observed behavior.
+    @ObservationIgnored
     private(set) var lastRefreshAt: Date? = nil
 
     /// Explicit Combine bridges for the (few) consumers that need a push-style
@@ -180,7 +192,22 @@ final class CodexActiveSessionsModel {
     /// The engine that now owns poll loop, probe launches, merge/classify,
     /// and the publish decision. This facade consumes `engine.stream` on the
     /// main actor and applies each emission as `latestSnapshot`.
+    // `@Observable` tracks all non-ignored stored properties — internal state
+    // must be explicitly ignored or view bodies that call facade lookups
+    // track (and mutate) it during render. `engine` is a reference-type
+    // dependency, never itself read from a view body (only its methods are
+    // called), so tracking it would be pure overhead. `latestSnapshot` is
+    // reassigned unconditionally in `apply(_:)` on every emission, including
+    // badge-only and no-op-for-UI heartbeats — every facade lookup method
+    // (`presence(for:)`, `liveState(for:)`, `isLive(_:)`, `idleReason(for:)`,
+    // `lastActivityAt(for:)`) reads it, so leaving it tracked would make
+    // *any* table row that calls any of those lookups re-render on every
+    // poll tick, defeating the whole point of the property-level
+    // `presences`/`activeMembershipVersion`/`subagentBadgeVersion` split
+    // this migration introduced.
+    @ObservationIgnored
     private let engine = PresenceEngine()
+    @ObservationIgnored
     private var latestSnapshot: PresenceSnapshot = .empty
     // `nonisolated(unsafe)`: under `@Observable`, the compiler infers `deinit`
     // as `nonisolated` (the Observation macro's generated registrar teardown
@@ -192,7 +219,11 @@ final class CodexActiveSessionsModel {
     // an atomic flag), so marking the property itself `nonisolated(unsafe)`
     // — rather than every read site — is the narrowest fix; every other
     // access to `consumeTask` remains on the main actor (only ever written
-    // in `init`, only ever read in `deinit`).
+    // in `init`, only ever read in `deinit`). `@ObservationIgnored`: never
+    // read from a view body — instrumenting it would be pure overhead, and
+    // `deinit`'s `nonisolated` teardown touching Observation-tracked storage
+    // is itself a hazard to avoid.
+    @ObservationIgnored
     private nonisolated(unsafe) var consumeTask: Task<Void, Never>? = nil
 
     // `@Observable`'s macro-synthesized storage rejects property wrappers on
@@ -236,10 +267,22 @@ final class CodexActiveSessionsModel {
         UserDefaults.standard.object(forKey: PreferencesKey.Cockpit.hudPinned) as? Bool ?? false
     }
 
+    // `@Observable` tracks all non-ignored stored properties — internal state
+    // must be explicitly ignored or view bodies that call facade lookups
+    // track (and mutate) it during render. These five are visibility/activity
+    // bookkeeping written only from `set*Visible`/`setAppActive` and read only
+    // by `pushEnvironment(refreshSoon:)` and the `hasVisible*` computed
+    // properties below (none of which is called from a view body) — no view
+    // reads them directly, so tracking would be pure overhead with no upside.
+    @ObservationIgnored
     private var unifiedVisibleConsumerIDs: Set<UUID> = []
+    @ObservationIgnored
     private var cockpitVisibleConsumerIDs: Set<UUID> = []
+    @ObservationIgnored
     private var cockpitWindowVisibleConsumerIDs: Set<UUID> = []
+    @ObservationIgnored
     private var appIsActive: Bool = true
+    @ObservationIgnored
     private var lastCockpitVisibleAt: Date?
 
     private struct SessionLookupCacheEntry {
@@ -253,7 +296,19 @@ final class CodexActiveSessionsModel {
     }
     private static let sessionLookupCacheHardLimit = 500
     private static let sessionLookupCacheTargetSize = 400
+    // `@Observable` tracks all non-ignored stored properties — internal state
+    // must be explicitly ignored or view bodies that call facade lookups
+    // track (and mutate) it during render. Both of these are mutated inside
+    // `lookupCacheEntry(for:)`, which runs synchronously from
+    // `presence(for:)`/`liveState(for:)`/`isLive(_:)` — methods views call
+    // directly from their `body`. Left tracked, every such call would both
+    // (a) register the calling view as an observer of a value that changes
+    // on almost every lookup, causing self-inflicted re-render storms, and
+    // (b) mutate Observation-tracked state during a view update, which is
+    // undefined behavior ("Modifying state during view update").
+    @ObservationIgnored
     private var sessionLookupCacheByID: [String: SessionLookupCacheEntry] = [:]
+    @ObservationIgnored
     private var sessionLookupAccessTick: UInt64 = 0
 
     init() {
