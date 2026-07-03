@@ -1,5 +1,18 @@
 # Performance Master Plan — Make Every Action Feel Instant
 
+> Priority order superseded by `docs/superpowers/plans/2026-07-01-perf-instant-master-plan.md` (post-review).
+>
+> **Task 4 measurement gate (2026-07-01, after quadratic fixes 71617017/e9123bfc/6979bff9):**
+>
+> | Session | transcriptCoalesce | transcriptModelBuild (incl. coalesce) | Prior baseline |
+> |---|---|---|---|
+> | Monster (49,432 events) | 4,226–4,465 ms | **26,939–27,762 ms** | 30,653 ms |
+> | Mid-size (3,497 events) | 253–309 ms | 1,160–1,205 ms | ~926 ms @ 5.7k lines (different metric) |
+>
+> **W2 outcome (2026-07-02):** search ingest re-wired (SearchIngestService + triggers + prune, commits 42aa4ffc..20b3711f); corpus backfilled ~3.7k sessions at .utility with zero user-visible contention; Enter-search verdict from owner: "not instant, but good enough" — W2 gate PASSED, residual latency accepted. Transcript program outcome: cold 49k-event/200MB open 30s+beachball → ~200ms to content (tail-first paint + windowed build, defaults ON). Remaining snappiness target: click-to-focus latency (W3: poll merge off main actor).
+>
+> **Gate verdict: TRIPPED** (≥ 15 s). The Workstream-0 quadratics were real but not dominant. New findings: (a) coalesce alone is ~4.4 s at 49k events — the "coalescing is cheap text-append" design premise is false at scale (suspect per-event JSON work: `renderToolCallLabel`/`compactJSONOneLine`, `ToolTextBlockNormalizer.exitCode(from: rawJSON)`, `PrettyJSON`, `normalizeCodexInlineImageMarkers` locale-aware scans); (b) coalesce ran ~7× for the same session in one open (inline-image mapper, event-ID lookups, rebuild all re-coalesce). Action: re-profile with `sample` to attribute the ~23 s buildLines remainder; add a per-session coalesced-blocks cache; fix attributed hot spots (Task 4b) BEFORE Task 9's two-stage open — otherwise even the windowed first paint pays the full coalesce.
+
 **Goal:** Agent Sessions should feel **instant on every action** — selecting a session, typing in search, getting results, sorting, scrolling, and while idle — even at 3,000–40,000+ sessions and multi-hundred-MB transcripts.
 
 **Status:** Handoff for a dedicated overall-performance pass. Some pieces are shipped, some specced-and-planned, one (the session-list beachball) is the biggest unresolved lever. This doc is the single index + priority order; each workstream links to its detailed plan/spec.
