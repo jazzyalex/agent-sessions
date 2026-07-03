@@ -141,4 +141,87 @@ final class CodexActiveSessionsModelObservationTests: XCTestCase {
         ))
         XCTAssertNotNil(model.lastRefreshAt)
     }
+
+    // MARK: - Tracking-width guard (W6 Task 3)
+
+    // Mechanically pins the "3 tracked / everything else @ObservationIgnored"
+    // census from the Task 2 report's "Fix: tracking width" section: reading
+    // a sync-lookup method (`presence(for:)` / `liveState(for:)`, both backed
+    // solely by `latestSnapshot`, an `@ObservationIgnored` property) must NOT
+    // register a tracked-property access — a table row that only calls these
+    // lookups must not re-render on every poll tick — while reading the
+    // `presences` array directly (the views' actual data source, e.g.
+    // `CockpitView.makeLiveRowsSnapshot()`) MUST register one, and that
+    // registration must actually fire when `apply(_:)` changes membership.
+    // `withObservationTracking(_:onChange:)` is the framework-provided way to
+    // assert this deterministically and synchronously — it does not need the
+    // real actor-fed async stream; `debugApply(_:)` (the same test hook the
+    // tests above use) stands in for "an emission arrived," which is the
+    // narrowest realistic substitute for driving `apply(_:)` without running
+    // the live poll loop. This IS the direct `withObservationTracking` test,
+    // not an approximation — the limitation is only that it exercises
+    // `apply(_:)` via the debug hook rather than a live `PresenceEngine`
+    // stream, which the 4 tests above already establish is behaviorally
+    // identical (same private `apply(_:)` call, same call site).
+
+    func testTrackingWidth_syncLookupsDoNotRegisterObservationDependency() {
+        let model = CodexActiveSessionsModel()
+        let presence = makePresence(id: "lookup-target")
+        model.debugApply(PresenceEngine.Emission(
+            snapshot: makeSnapshot(presences: [presence], membershipVersion: 1, badgeVersion: 0),
+            isMembershipChange: true
+        ))
+
+        var invalidated = false
+        withObservationTracking {
+            // Both are `CodexActivePresence`-keyed facade sync-lookup methods
+            // views call from body-reachable sites (`liveState(for:)` —
+            // CockpitView:167, AgentCockpitHUDView:1996/2008/2222,
+            // UnifiedSessionsView:2654; `idleReason(for:)` —
+            // AgentCockpitHUDView:2223, per the W6 recon census). Both
+            // resolve entirely through `latestSnapshot`, which the Task 2
+            // "Fix: tracking width" pass marked `@ObservationIgnored`.
+            _ = model.liveState(for: presence)
+            _ = model.idleReason(for: presence)
+        } onChange: {
+            invalidated = true
+        }
+
+        // Mutate state the lookups actually read (latestSnapshot, via a real
+        // membership-changing apply) and give Observation a chance to fire
+        // its callback if (and only if) a dependency was registered above.
+        model.debugApply(PresenceEngine.Emission(
+            snapshot: makeSnapshot(presences: [], membershipVersion: 2, badgeVersion: 0),
+            isMembershipChange: true
+        ))
+
+        XCTAssertFalse(invalidated, "liveState(for:)/idleReason(for:) read only @ObservationIgnored state (latestSnapshot) and must not register a tracked-property dependency — a view calling only these lookups must not re-render on every poll tick")
+    }
+
+    func testTrackingWidth_presencesReadRegistersAndFiresOnMembershipChange() {
+        let model = CodexActiveSessionsModel()
+        let seed = makePresence(id: "seed")
+        model.debugApply(PresenceEngine.Emission(
+            snapshot: makeSnapshot(presences: [seed], membershipVersion: 1, badgeVersion: 0),
+            isMembershipChange: true
+        ))
+
+        var invalidated = false
+        withObservationTracking {
+            // `CockpitView.makeLiveRowsSnapshot()`'s legitimate data source —
+            // the property this migration deliberately keeps tracked so
+            // views that render the list itself still update.
+            _ = model.presences
+        } onChange: {
+            invalidated = true
+        }
+
+        let next = makePresence(id: "joined")
+        model.debugApply(PresenceEngine.Emission(
+            snapshot: makeSnapshot(presences: [seed, next], membershipVersion: 2, badgeVersion: 0),
+            isMembershipChange: true
+        ))
+
+        XCTAssertTrue(invalidated, "presences is one of the 3 intentionally Observation-tracked properties — a view reading it directly must be invalidated when apply(_:) changes it")
+    }
 }

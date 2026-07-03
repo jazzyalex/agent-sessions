@@ -309,7 +309,30 @@ struct CockpitView: View {
                 }
                 .width(min: 78, ideal: 90, max: 100)
             }
-            .id("cockpit-table-\(liveFilterModeRaw)-\(activeCodex.activeMembershipVersion)")
+            // No `.id()` keyed to activeMembershipVersion here (removed, W6
+            // Task 3): this predates @Observable (git-introduced 10c473c7,
+            // Feb 2026, back when the facade was a plain ObservableObject) and
+            // is not an Observation invalidation workaround — `content` already
+            // reads `activeCodex.presences` unconditionally above
+            // (`makeLiveRowsSnapshot()`), which is Observation-tracked and
+            // re-evaluates this body on every membership change regardless.
+            // What the `.id` actually did was force SwiftUI's `Table` to fully
+            // rebuild (tear down + recreate every row) on EVERY membership
+            // version bump — which fires on any add/remove/live-state change,
+            // not just reorders (see PresenceEngine's publish-decision:
+            // membershipChanged || metadataChanged || liveStateChanged all
+            // bump it). Compare `UnifiedTableIdentityPolicy` in
+            // UnifiedSessionsView.swift, the sibling fix for the same table's
+            // O(n^2) reorder-diff cost at ~3,300 rows: it deliberately lets
+            // membership changes fall through to SwiftUI's cheap diff and
+            // only forces a rebuild for large (>=128 moved rows) reorders.
+            // Cockpit's row count is bounded by live sessions (small, not
+            // thousands), so the O(n^2)-diff concern that justified the
+            // Unified fix doesn't apply here — this `.id` was unconditional
+            // full-table churn with no offsetting benefit. Selection
+            // (`$selection`, a `Set<String>` keyed by row id) is unaffected by
+            // removing it, same as the Unified table's binding-preserved
+            // selection under its own cheap-diff path.
             .tableStyle(.inset(alternatesRowBackgrounds: true))
             .tint(CockpitStyle.selectionAccent)
             .environment(\.defaultMinListRowHeight, CockpitStyle.rowHeight)
