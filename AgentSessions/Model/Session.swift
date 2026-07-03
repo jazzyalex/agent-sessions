@@ -1170,6 +1170,13 @@ enum ProjectPathNormalizer {
     /// row-body render). Memoized here keyed by the exact input tuple -- the inputs
     /// are stable per session (a session's cwd doesn't change after parse), so this
     /// is a plain correctness-preserving cache, not an approximation.
+    ///
+    /// NOTE: the hit path is cheaper than the full parse but NOT alloc-free --
+    /// every lookup builds one composite key (a Swift String join bridged to
+    /// NSString) before probing the cache. That still shows up as one small
+    /// allocation per call on hot paths like the `rowRepoDisplay` sort key; if a
+    /// future profile fingerprints it, the next step is precomputing per-session
+    /// (keying by `Session.id` in the rows pipeline), not tuning this key.
     private final class CachedResolution {
         let value: Resolution?
         init(_ value: Resolution?) { self.value = value }

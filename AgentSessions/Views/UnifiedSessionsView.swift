@@ -2787,14 +2787,24 @@ struct UnifiedSessionsView: View {
     }
 
     /// Patches the live Claude Desktop archived bit into a precomputed static
-    /// pills array. Safe because `isClaudeArchived` can only ever affect the
-    /// single pill produced by `claudeDesktopSurfacePill` (label "desk", source
-    /// `.claude`) -- every other branch of `surfacePills` ignores the parameter
-    /// entirely, and that branch short-circuits the function (it's always the
-    /// pill, alone, when it fires). So a precomputed array either doesn't need
-    /// patching (source != .claude, or a non-desktop Claude pill set) or is
-    /// exactly `[.desktop(isArchived: false)]` and needs only its one flag
-    /// flipped -- no need to recompute the whole pills array live.
+    /// pills array: a lone unarchived "desk" pill on a non-side-chat `.claude`
+    /// session becomes `[.desktop(isArchived: true)]` when the live archive
+    /// join says the session is archived. No other pill shape is touched.
+    ///
+    /// DELIBERATE DIVERGENCE from the legacy single-call
+    /// `surfacePills(for:isClaudeArchived:)`: a Claude session can reach a
+    /// `[.desktop(isArchived: false)]` pill through the `surface == .desktop`
+    /// SWITCH branch (e.g. `originSource == "claude-desktop"`, which
+    /// `claudeDesktopSurfacePill` does NOT match) while
+    /// `isArchivedClaudeDesktop` is true via the filename-UUID sidecar join
+    /// (`Session.claudeArchiveJoinKey`). Legacy left that pill unarchived --
+    /// the `isClaudeArchived` parameter was only ever consulted inside
+    /// `claudeDesktopSurfacePill`, so the switch branch ignored it. This patch
+    /// promotes it to archived. Adjudicated as the intended behavior in the
+    /// 8a3512f0 review: an archived session should show the archived pill
+    /// regardless of which heuristic classified it as Desktop; the legacy
+    /// non-promotion was the bug. Pinned by
+    /// `testApplyingLiveClaudeArchiveStatePromotesSwitchBranchDesktopPill`.
     ///
     /// `!session.isSideChat` matters: a side-chat session ALSO produces a
     /// `[.standard(label: "desk", ...)]` pill (surfacePills's `isSideChat`

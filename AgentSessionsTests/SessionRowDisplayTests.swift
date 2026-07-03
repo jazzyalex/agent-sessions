@@ -152,6 +152,52 @@ final class SessionRowDisplayTests: XCTestCase {
         XCTAssertEqual(patched.map(\.isArchived), staticPills.map(\.isArchived))
     }
 
+    func testApplyingLiveClaudeArchiveStatePromotesSwitchBranchDesktopPill() {
+        // A Claude session can reach [.desktop(isArchived: false)] via the
+        // surface == .desktop SWITCH branch of surfacePills -- e.g.
+        // originSource "claude-desktop", which claudeDesktopSurfacePill does
+        // NOT match -- while isArchivedClaudeDesktop is true via the
+        // filename-UUID sidecar join. The legacy single-call
+        // surfacePills(for:isClaudeArchived: true) left that pill UNARCHIVED
+        // (the parameter was only consulted inside claudeDesktopSurfacePill).
+        // The live-patch deliberately diverges and promotes it: an archived
+        // session shows the archived pill regardless of which heuristic
+        // classified it as Desktop (adjudicated in the 8a3512f0 review; the
+        // legacy non-promotion was the bug).
+        let s = Session(
+            id: "claude-switch-desktop-1",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/claude-switch-desktop-1.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/Users/test/Repo",
+            repoName: nil,
+            lightweightTitle: "Claude via switch branch",
+            originSource: "claude-desktop",
+            surface: .desktop
+        )
+        // Precondition: this shape resolves through the switch branch, not
+        // claudeDesktopSurfacePill -- legacy ignores isClaudeArchived here.
+        let legacyDirect = UnifiedSessionsView.surfacePills(for: s, isClaudeArchived: true)
+        XCTAssertEqual(legacyDirect.map(\.label), ["desk"])
+        XCTAssertEqual(legacyDirect.map(\.isArchived), [false], "precondition: legacy switch branch never promoted")
+
+        let staticPills = UnifiedSessionsView.staticSurfacePills(for: s)
+        XCTAssertEqual(staticPills.map(\.label), ["desk"])
+        XCTAssertEqual(staticPills.map(\.isArchived), [false])
+
+        let patched = UnifiedSessionsView.applyingLiveClaudeArchiveState(
+            to: staticPills,
+            session: s,
+            isClaudeArchived: true
+        )
+        XCTAssertEqual(patched.map(\.isArchived), [true], "archived session must show the archived pill (new behavior, supersedes legacy)")
+        XCTAssertEqual(patched.map(\.identity), ["desk-archived"])
+    }
+
     func testApplyingLiveClaudeArchiveStateNoOpForSideChatSession() {
         // A side-chat session's surfacePills also short-circuits to a bare
         // [.standard(label: "desk", ...)] pill (before claudeDesktopSurfacePill
