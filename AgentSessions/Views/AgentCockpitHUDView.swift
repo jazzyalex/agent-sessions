@@ -385,19 +385,45 @@ private struct HUDPresentationState {
 /// copy-on-write for a single entry) — `Equatable` on `[Session]` would catch
 /// this too, but at O(n) cost including every session's `events` array, which
 /// is the exact per-body cost the row-body diet exists to avoid. This
-/// fingerprint is O(n) over (id, modifiedAt, eventCount) triples only — no
-/// allocations, no string work — cheap enough to run on every publish.
-private struct SessionListFingerprint: Equatable {
+/// fingerprint compares only the stored fields that feed the HUD rows
+/// snapshot — identity/order (`id`), freshness (`modifiedAt`, `eventCount`),
+/// the title-determining inputs (`customTitle`, `lightweightTitle`, and
+/// `events.isEmpty`, which flips `Session.title`'s computation branch on
+/// lightweight→full hydration), and the projectLabel inputs
+/// (`lightweightRepoName`, `lightweightCwd`, which metadata repairs like
+/// `ClaudeSessionIndexer.fixupHydratedClaudeMetadataIfNeeded` rewrite while
+/// id/modifiedAt/eventCount stay identical). No per-entry allocations beyond
+/// the entry array itself; the optional-string members share storage with the
+/// session's own values.
+/// Internal (not private) so `SessionListFingerprintTests` can pin the
+/// skip/bump decision semantics the sinks rely on.
+struct SessionListFingerprint: Equatable {
     private let entries: [FingerprintEntry]
 
     private struct FingerprintEntry: Equatable {
         let id: String
         let modifiedAt: Date
         let eventCount: Int
+        let eventsIsEmpty: Bool
+        let customTitle: String?
+        let lightweightTitle: String?
+        let lightweightCwd: String?
+        let lightweightRepoName: String?
     }
 
     init(_ sessions: [Session]) {
-        entries = sessions.map { FingerprintEntry(id: $0.id, modifiedAt: $0.modifiedAt, eventCount: $0.eventCount) }
+        entries = sessions.map {
+            FingerprintEntry(
+                id: $0.id,
+                modifiedAt: $0.modifiedAt,
+                eventCount: $0.eventCount,
+                eventsIsEmpty: $0.events.isEmpty,
+                customTitle: $0.customTitle,
+                lightweightTitle: $0.lightweightTitle,
+                lightweightCwd: $0.lightweightCwd,
+                lightweightRepoName: $0.lightweightRepoName
+            )
+        }
     }
 }
 
