@@ -1160,6 +1160,22 @@ struct UnifiedSessionsView: View {
 						sortOrder = [KeyPathComparator(\Session.messageCount, order: .reverse)]
 					}
 				}
+				.onReceive(NotificationCenter.default.publisher(for: PerfBench.selectWalkNotification)) { _ in
+					// Perf harness (AS_PERF_BENCH=select): advance selection to the next row via
+					// the real setActiveSelection(...) path — exercises handleSelectionChange's
+					// full pipeline (debounce window, focus, reload, prewarm), not a bypass, so
+					// captures show whether key-repeat-rate selection changes coalesce as intended.
+					guard !cachedRows.isEmpty else { return }
+					let nextIndex: Int
+					if let current = selection, let idx = cachedRows.firstIndex(where: { $0.id == current }) {
+						nextIndex = (idx + 1) % cachedRows.count
+					} else {
+						nextIndex = 0
+					}
+					let next = cachedRows[nextIndex]
+					Perf.event("selectWalkStep", "index=\(nextIndex) id=\(next.id.prefix(8))")
+					setActiveSelection(next.id, source: next.source, userInitiated: true)
+				}
 #endif
 				.onChange(of: unified.isIndexing) { wasIndexing, isIndexing in
 					// When indexing finishes, reconcile selection in case a deferred

@@ -110,13 +110,18 @@ final class MainThreadStallMonitor {
 /// to attribute a beachball to CPU work vs SwiftUI rendering.
 ///
 /// Env knobs:
-///   AS_PERF_BENCH=sort         which action to drive (currently: "sort")
+///   AS_PERF_BENCH=sort         which action to drive ("sort" or "select")
 ///   AS_PERF_BENCH_DELAY=30     seconds to wait after launch (let indexing settle)
-///   AS_PERF_BENCH_CYCLES=8     number of action cycles to run
-///   AS_PERF_BENCH_INTERVAL=2   seconds between cycles
+///   AS_PERF_BENCH_CYCLES=8     number of action cycles to run (for "select": rows to walk)
+///   AS_PERF_BENCH_INTERVAL=2   seconds between cycles (Double — fractional values like
+///                              0.06 are supported, used by "select" to hit key-repeat rate)
 @MainActor
 enum PerfBench {
     static let toggleSortNotification = Notification.Name("ASPerfToggleSort")
+    /// "select" mode: each cycle posts this to advance selection to the next row,
+    /// exercising the real setActiveSelection(...) path at a driven cadence — used to
+    /// reproduce key-repeat scrubbing (AS_PERF_BENCH_INTERVAL=0.06) without UI automation.
+    static let selectWalkNotification = Notification.Name("ASPerfSelectWalk")
 
     static func startIfRequested() {
         let env = ProcessInfo.processInfo.environment
@@ -147,6 +152,8 @@ enum PerfBench {
         switch mode {
         case "sort":
             NotificationCenter.default.post(name: toggleSortNotification, object: nil)
+        case "select":
+            NotificationCenter.default.post(name: selectWalkNotification, object: nil)
         default:
             print("[perf][bench] unknown mode \(mode)")
         }
