@@ -213,6 +213,99 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         XCTAssertEqual(viaBlocks.eventIDToUserLineID, legacy.eventIDToUserLineID)
     }
 
+    // MARK: - Off-window jump: anchor map is full-session; widening resolves the target
+
+    /// The tail window's build must still expose an anchor block index for EVERY
+    /// event, including those whose user prompt sits below the loaded window — this
+    /// is what lets an off-window jump discover where to widen to. The windowed
+    /// eventIDToUserLineID, by contrast, only has entries whose anchor is in-window.
+    func testTailWindowAnchorMapIsFullSessionWhileLineMapIsWindowed() {
+        let session = deltaSession(pairs: 60)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let window = TranscriptWindow.lastWindow(totalBlocks: blocks.count, blockTarget: 16)
+        XCTAssertFalse(window.coversTop, "fixture must produce a genuine tail window")
+
+        let tail = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                          blockRange: window.lowerBlock...window.upperBlock,
+                                                          skipAgentsPreamble: false,
+                                                          enableReviewCards: true)
+
+        // Anchor map covers every event, line map does not.
+        XCTAssertEqual(tail.eventIDToAnchorBlockIndex.count, blocks.count,
+                       "anchor map must have an entry per block, regardless of window")
+        XCTAssertLessThan(tail.eventIDToUserLineID.count, tail.eventIDToAnchorBlockIndex.count,
+                          "the windowed line map must be a strict subset (off-window entries absent)")
+        XCTAssertEqual(tail.totalBlockCount, blocks.count)
+        XCTAssertEqual(tail.builtBlockRange, window.lowerBlock...window.upperBlock)
+
+        // The very first user event's anchor is block 0, which is below the window,
+        // so it has an anchor entry but NO line-id entry in the tail build.
+        let firstUserEventID = blocks.first { $0.kind == .user }!.eventID
+        XCTAssertEqual(tail.eventIDToAnchorBlockIndex[firstUserEventID], 0)
+        XCTAssertNil(tail.eventIDToUserLineID[firstUserEventID],
+                     "an off-window target must not resolve to a line id in the tail build")
+    }
+
+    /// Simulate the view's widening step: given an off-window target block, rebuild
+    /// over [target-margin ... currentUpper]. The widened build's lines must be a
+    /// byte-identical suffix/slice of the whole-session build (global ids), and its
+    /// eventIDToUserLineID must now contain the previously-off-window target,
+    /// agreeing with the full build.
+    func testWidenedWindowResolvesOffWindowTargetIdenticallyToFullSlice() {
+        let session = deltaSession(pairs: 80)
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        let full = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                          blockRange: nil,
+                                                          skipAgentsPreamble: false,
+                                                          enableReviewCards: true)
+        let tail = TranscriptWindow.lastWindow(totalBlocks: blocks.count, blockTarget: 16)
+        XCTAssertFalse(tail.coversTop)
+
+        // Pick a user event whose anchor block is below the tail window.
+        let tailResult = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                                blockRange: tail.lowerBlock...tail.upperBlock,
+                                                                skipAgentsPreamble: false,
+                                                                enableReviewCards: true)
+        let offWindowUserEvent = blocks.first { block in
+            block.kind == .user && block.globalBlockIndex < tail.lowerBlock
+        }!.eventID
+        let anchorBlock = tailResult.eventIDToAnchorBlockIndex[offWindowUserEvent]!
+        XCTAssertLessThan(anchorBlock, tail.lowerBlock)
+
+        // Widen exactly as widenWindowForJump does: [max(0, anchor-margin) ... upper].
+        let margin = 8
+        let lower = max(0, min(anchorBlock, tail.upperBlock) - margin)
+        let widened = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
+                                                             blockRange: lower...tail.upperBlock,
+                                                             skipAgentsPreamble: false,
+                                                             enableReviewCards: true)
+
+        guard FeatureFlags.transcriptWindowedBuild else {
+            XCTAssertEqual(widened.lines.first?.id, 0)
+            return
+        }
+
+        // Lines are a byte-identical slice of the full build (global ids).
+        let widenedIDs = Set(widened.lines.map(\.id))
+        let wholeByID = Dictionary(uniqueKeysWithValues: full.lines.map { ($0.id, $0) })
+        for line in widened.lines {
+            guard let match = wholeByID[line.id] else {
+                XCTFail("widened line id \(line.id) absent from full build"); continue
+            }
+            XCTAssertEqual(line.text, match.text)
+            XCTAssertEqual(line.role, match.role)
+            XCTAssertEqual(line.blockIndex, match.blockIndex)
+        }
+
+        // The previously off-window target now resolves to a line id, and it agrees
+        // with the full build — the jump will land on the correct line.
+        let resolved = widened.eventIDToUserLineID[offWindowUserEvent]
+        XCTAssertNotNil(resolved, "widened window must resolve the target to a line id")
+        XCTAssertEqual(resolved, full.eventIDToUserLineID[offWindowUserEvent],
+                       "widened target line id must match the full build's")
+        XCTAssertTrue(widenedIDs.contains(resolved!))
+    }
+
     // MARK: - Task 9b: tool-group-key pass clamped to the window (cost fix)
 
     /// Slice build's tool-group-key pass must only touch windowed blocks. Verifies

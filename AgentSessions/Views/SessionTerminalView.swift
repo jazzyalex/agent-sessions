@@ -203,8 +203,20 @@ struct SessionTerminalView: View {
     @State private var semanticNavIndicesCacheVisible: [SemanticKind: [Int]] = [:]
     @State private var semanticNavIndicesCacheAll: [SemanticKind: [Int]] = [:]
     @State private var eventIDToUserLineID: [String: Int] = [:]
+    // Full-session (window-independent) map from event id to the global block
+    // index of the user prompt it anchors to. Lets an off-window jump resolve
+    // where its target lives so the loaded window can be widened to cover it.
+    @State private var eventIDToAnchorBlockIndex: [String: Int] = [:]
+    // The global block range currently built into `lines` (nil = whole session).
+    @State private var loadedBlockRange: ClosedRange<Int>? = nil
+    @State private var totalBlockCount: Int = 0
     @State private var pendingEventJumpID: String? = nil
     @State private var pendingUserPromptIndex: Int? = nil
+    // Set when a first-prompt jump is requested but the loaded window doesn't
+    // reach the top of the session (monster-session tail window). Re-fired by
+    // applyRebuild's retry path after the window is widened to cover block 0,
+    // once conversationStartLineID reflects the real first prompt.
+    @State private var pendingFirstPromptJump: Bool = false
     @State private var transcriptFocusToken: Int = 0
     @State private var imageHighlightLineID: Int? = nil
     @State private var imageHighlightToken: Int = 0
@@ -862,6 +874,18 @@ struct SessionTerminalView: View {
         let toolLineIndices: [Int]
         let errorLineIndices: [Int]
         let eventIDToUserLineID: [String: Int]
+        /// Full-session map (every block, regardless of the loaded window) from an
+        /// event id to the GLOBAL block index of the user prompt it anchors to.
+        /// `eventIDToUserLineID` only has entries whose anchor block was inside the
+        /// built window; this map lets an off-window jump resolve where the target
+        /// lives so the window can be widened to cover it. Cheap to build: pure
+        /// integer bookkeeping over the anchor array, no line construction.
+        let eventIDToAnchorBlockIndex: [String: Int]
+        /// Total coalesced block count for the session (independent of window).
+        let totalBlockCount: Int
+        /// The block range whose lines were actually built into `lines`, or nil
+        /// for a whole-session build.
+        let builtBlockRange: ClosedRange<Int>?
     }
 
     private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0, force: Bool = false) {
@@ -1011,6 +1035,73 @@ struct SessionTerminalView: View {
         }
     }
 
+    /// Widen the currently-loaded transcript window downward so it covers
+    /// `targetBlock`, then re-run the pending jump (`pendingEventJumpID` /
+    /// `pendingUserPromptIndex`) via `applyRebuild`'s existing retry path.
+    ///
+    /// On monster sessions (totalChars > transcriptFullSwapMaxChars) the two-stage
+    /// open leaves only the last window built and never swaps to the full session,
+    /// so a deeplink/search/image jump to older content resolves to a block below
+    /// the loaded window. Without this the jump silently no-ops. The widen keeps
+    /// the current upper bound and extends the lower bound to
+    /// `max(0, targetBlock - transcriptWindowBlockTarget)` — a bounded slice, NOT
+    /// the whole session, so a 49k-block transcript never rebuilds in full on main.
+    /// The caller has already stored the pending jump; the retry path fires it
+    /// after this build applies.
+    private func widenWindowForJump(toIncludeBlock targetBlock: Int, priority: TaskPriority) {
+        let sessionSnapshot = session
+        let skipAgentsPreamble = skipAgentsPreambleEnabled()
+        let reviewCardsEnabled = transcriptReviewCardsEnabled
+        let currentUpper = loadedBlockRange?.upperBound
+        let signature = BuildSignature(sessionID: sessionSnapshot.id,
+                                       eventCount: sessionSnapshot.events.count,
+                                       fileSizeBytes: sessionSnapshot.fileSizeBytes ?? -1,
+                                       skipAgentsPreamble: skipAgentsPreamble,
+                                       reviewCardsEnabled: reviewCardsEnabled)
+
+        rebuildTask?.cancel()
+        pendingBuildSignature = signature
+        Perf.event("transcriptWidenForJump", "id=\(sessionSnapshot.id.prefix(8)) target=\(targetBlock)")
+
+        rebuildTask = Task.detached(priority: priority) { [sessionSnapshot, skipAgentsPreamble, reviewCardsEnabled, targetBlock, currentUpper] in
+            let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
+            guard !blocks.isEmpty else {
+                await MainActor.run {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                }
+                return
+            }
+            let upper = min(blocks.count - 1, currentUpper ?? (blocks.count - 1))
+            let lower = max(0, min(targetBlock, upper) - FeatureFlags.transcriptWindowBlockTarget)
+            let result = Self.buildRebuildResult(session: sessionSnapshot,
+                                                 blocks: blocks,
+                                                 blockRange: lower...upper,
+                                                 skipAgentsPreamble: skipAgentsPreamble,
+                                                 enableReviewCards: reviewCardsEnabled)
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                }
+                return
+            }
+            await ListScrubSignal.shared.waitUntilQuiet()
+            await MainActor.run {
+                guard !Task.isCancelled else {
+                    if pendingBuildSignature == signature { pendingBuildSignature = nil }
+                    return
+                }
+                // Not isFinalApply: leave lastCompletedBuildSignature untouched so a
+                // later content-change rebuild for this same signature still runs and
+                // re-establishes the last-window operating regime. The pending jump is
+                // resolved inside applyRebuild's retry path.
+                applyRebuild(result, sessionSnapshot: sessionSnapshot,
+                             skipAgentsPreamble: skipAgentsPreamble, signature: signature,
+                             isFinalApply: false)
+                if pendingBuildSignature == signature { pendingBuildSignature = nil }
+            }
+        }
+    }
+
     /// Applies a `RebuildResult` to view state. Shared by the flag-off single
     /// full build, the flag-on stage-1 windowed first paint, and the flag-on
     /// stage-2 full-session swap.
@@ -1046,6 +1137,9 @@ struct SessionTerminalView: View {
         toolLineIndices = result.toolLineIndices
         errorLineIndices = result.errorLineIndices
         eventIDToUserLineID = result.eventIDToUserLineID
+        eventIDToAnchorBlockIndex = result.eventIDToAnchorBlockIndex
+        loadedBlockRange = result.builtBlockRange
+        totalBlockCount = result.totalBlockCount
         rebuildNavIndexCaches()
 
         if isFinalApply {
@@ -1057,6 +1151,12 @@ struct SessionTerminalView: View {
         }
         if let pending = pendingEventJumpID, jumpToEventID(pending) {
             pendingEventJumpID = nil
+        }
+        if pendingFirstPromptJump, loadedBlockRange.map({ $0.lowerBound == 0 }) ?? true {
+            pendingFirstPromptJump = false
+            if let lineID = userPromptLineID(for: .firstUserPrompt, skipAgentsPreamble: skipAgentsPreamble) {
+                jumpToUserPrompt(lineID: lineID, alignTop: true)
+            }
         }
 
         if appendOnlyUpdate {
@@ -1248,6 +1348,11 @@ struct SessionTerminalView: View {
         }
 
         var eventIDToUserLineID: [String: Int] = [:]
+        // Full-session anchor map: eventID -> GLOBAL block index of the user
+        // prompt it anchors to. Populated for EVERY block (not just windowed
+        // ones) so an off-window jump can resolve where its target lives and
+        // widen the window to cover it. See RebuildResult.eventIDToAnchorBlockIndex.
+        var eventIDToAnchorBlockIndex: [String: Int] = [:]
         if !blocks.isEmpty {
             let userBlockIndices = blocks.enumerated().compactMap { $0.element.kind == .user ? $0.offset : nil }
             let anchors = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
@@ -1260,6 +1365,7 @@ struct SessionTerminalView: View {
                       blocks.indices.contains(targetUserBlockOffset) else { continue }
                 // firstLineForBlock is keyed by line.blockIndex == globalBlockIndex.
                 let lookupKey = blocks[targetUserBlockOffset].globalBlockIndex
+                eventIDToAnchorBlockIndex[block.eventID] = lookupKey
                 guard let lineID = firstLineForBlock[lookupKey] else { continue }
                 eventIDToUserLineID[block.eventID] = lineID
             }
@@ -1344,6 +1450,14 @@ struct SessionTerminalView: View {
             return grouped.values.sorted()
         }
 
+        let builtBlockRange: ClosedRange<Int>? = {
+            guard let blockRange, !blocks.isEmpty else { return nil }
+            let lower = max(0, blockRange.lowerBound)
+            let upper = min(blocks.count - 1, blockRange.upperBound)
+            guard lower <= upper else { return nil }
+            return lower...upper
+        }()
+
         return RebuildResult(
             lines: built,
             conversationStartLineID: startLineID,
@@ -1352,7 +1466,10 @@ struct SessionTerminalView: View {
             assistantLineIndices: messageIDs { $0 == .assistant },
             toolLineIndices: toolMessageIDs(),
             errorLineIndices: messageIDs { $0 == .error },
-            eventIDToUserLineID: eventIDToUserLineID
+            eventIDToUserLineID: eventIDToUserLineID,
+            eventIDToAnchorBlockIndex: eventIDToAnchorBlockIndex,
+            totalBlockCount: blocks.count,
+            builtBlockRange: builtBlockRange
         )
     }
 
@@ -2200,6 +2317,16 @@ struct SessionTerminalView: View {
     }
 
     private func jumpToFirstPrompt() {
+        // Monster-session tail window: the true first prompt (and the
+        // skip-preamble conversation-start anchor) live above the loaded window,
+        // so userLineIndices/conversationStartLineID reflect only the window's
+        // first user line — the wrong anchor. Widen to the top first, then re-fire
+        // this jump via applyRebuild's retry path with the correct anchors.
+        if let loaded = loadedBlockRange, loaded.lowerBound > 0 {
+            pendingFirstPromptJump = true
+            widenWindowForJump(toIncludeBlock: 0, priority: .userInitiated)
+            return
+        }
         guard let lineID = userPromptLineID(for: .firstUserPrompt, skipAgentsPreamble: skipAgentsPreambleEnabled()) else { return }
         jumpToUserPrompt(lineID: lineID, alignTop: true)
     }
@@ -2229,11 +2356,24 @@ struct SessionTerminalView: View {
     }
 
     private func jumpToEventID(_ eventID: String) -> Bool {
-        guard let lineID = eventIDToUserLineID[eventID] else { return false }
-        jumpToUserPrompt(lineID: lineID)
-        imageHighlightLineID = lineID
-        imageHighlightToken &+= 1
-        return true
+        if let lineID = eventIDToUserLineID[eventID] {
+            jumpToUserPrompt(lineID: lineID)
+            imageHighlightLineID = lineID
+            imageHighlightToken &+= 1
+            return true
+        }
+        // Off-window target on a monster session: the anchor block for this event
+        // lives below the loaded window, so no line id exists yet. Widen the window
+        // to cover it; the widened apply's retry path (see applyRebuild) fires the
+        // stored pending jump once the target's line id materializes.
+        if let anchorBlock = eventIDToAnchorBlockIndex[eventID],
+           let loaded = loadedBlockRange,
+           anchorBlock < loaded.lowerBound {
+            pendingEventJumpID = eventID
+            widenWindowForJump(toIncludeBlock: anchorBlock, priority: .userInitiated)
+            return true
+        }
+        return false
     }
 
     private func updateUserNavigationPosition(lineID: Int) {
