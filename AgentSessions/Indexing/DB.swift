@@ -783,6 +783,31 @@ actor IndexDB {
         return out
     }
 
+    /// Bulk variant of `sessionRefTSForPath`: fetch COALESCE(end_ts, mtime) for every
+    /// path of a source in one query, keyed by path. Used by `SearchIngestService` so
+    /// the toolIO-window skip-gate check costs one query per ingest call (alongside its
+    /// other prefetches) rather than one per candidate file.
+    func sessionRefTSByPath(for source: String) throws -> [String: Int64] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT path, COALESCE(end_ts, mtime)
+        FROM session_meta
+        WHERE source = ?;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var out: [String: Int64] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let c = sqlite3_column_text(stmt, 0) else { continue }
+            out[String(cString: c)] = sqlite3_column_int64(stmt, 1)
+        }
+        return out
+    }
+
     /// Fetch COALESCE(end_ts, mtime) for a session identified by its file path.
     /// Used to gate date-based behaviors without re-parsing the raw session file.
     func sessionRefTSForPath(source: String, path: String) throws -> Int64? {

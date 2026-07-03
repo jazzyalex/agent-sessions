@@ -80,11 +80,11 @@ final class SearchIngestTests: XCTestCase {
 
     private var ingestTempDir: URL!
 
-    private func makeCodexFixture(named name: String, userText: String, assistantText: String, in dir: URL) throws -> URL {
+    private func makeCodexFixture(named name: String, userText: String, assistantText: String, in dir: URL, isoTimestamp: String = "2026-01-01T00:00:00.000Z") throws -> URL {
         let url = dir.appendingPathComponent(name)
         let lines = [
-            #"{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(userText)"}]}}"#,
-            #"{"timestamp":"2026-01-01T00:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"\#(assistantText)"}]}}"#
+            #"{"timestamp":"\#(isoTimestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\#(userText)"}]}}"#,
+            #"{"timestamp":"\#(isoTimestamp)","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"\#(assistantText)"}]}}"#
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         return url
@@ -518,6 +518,81 @@ final class SearchIngestTests: XCTestCase {
 
         let idsAfter = try await db.toolIOSessionIDs(sources: ["codex"])
         XCTAssertTrue(idsAfter.contains("old1"), "prune must not run at all when tool-IO indexing is disabled")
+    }
+
+    // MARK: - SearchIngestService: toolIO-window skip gate (old cohort)
+
+    /// The skip-gate must not demand a `session_tool_io` row from a file whose refTS
+    /// falls outside `toolIOIndexRecentDays` — the ingest loop itself (`ingestFile`)
+    /// deliberately never writes a tool-IO row for such a file (see the `refTS >=
+    /// toolIOCutoffTS` guard around the `toolIOText` computation), so requiring one at
+    /// the gate makes an old-cohort file permanently un-skippable: every ingest kick
+    /// re-parses it forever. This pins the fix.
+    func testOldCohortSkipsWithoutToolIORow() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let oldDays = FeatureFlags.toolIOIndexRecentDays + 5
+        let oldDate = Date().addingTimeInterval(-Double(oldDays) * 24 * 60 * 60)
+        let iso = ISO8601DateFormatter.init()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoTimestamp = iso.string(from: oldDate)
+
+        let url = try makeCodexFixture(named: "old-cohort.jsonl", userText: "ancient content narwhalpewter", assistantText: "ack narwhalpewter", in: ingestTempDir, isoTimestamp: isoTimestamp)
+        let service = SearchIngestService(db: db)
+        let ref = try fileRef(for: url)
+
+        // First ingest: toolIOEnabled true, but the session's refTS is outside the
+        // recent window, so `ingestFile` must produce a search row and deliberately
+        // NO tool-IO row.
+        let first = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: true, quietSeconds: 0)
+        XCTAssertEqual(first.processed, 1)
+
+        let hasSearchRow = try await db.hasSearchData(sources: ["codex"])
+        XCTAssertTrue(hasSearchRow, "sanity: old-cohort file must still get a search row")
+
+        let toolIOReady = try await db.fetchToolIOReadyPaths(for: "codex")
+        XCTAssertFalse(toolIOReady.contains(url.path), "sanity: old-cohort file must NOT receive a tool-IO row (outside the recency window)")
+
+        // Second ingest, identical file: must be skipped, not re-ingested forever
+        // waiting for a tool-IO row that will never come.
+        let second = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: true, quietSeconds: 0)
+        XCTAssertEqual(second.skipped, 1, "old-cohort file (outside the toolIO window) must be skipped even though it has no session_tool_io row")
+        XCTAssertEqual(second.processed, 0)
+    }
+
+    /// Inverse pin: a file INSIDE the toolIO window that legitimately has no toolIO row
+    /// yet (e.g. the toolIO preference was off during its first ingest, then later
+    /// turned on) must still re-ingest exactly once to backfill that row. The new
+    /// "outside window" exemption must not accidentally swallow this case.
+    func testRecentFileWithoutToolIORowReingestsToGainIt() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoTimestamp = iso.string(from: Date())
+
+        let url = try makeCodexFixture(named: "recent-no-toolio.jsonl", userText: "fresh content ospreyvelvet", assistantText: "ack ospreyvelvet", in: ingestTempDir, isoTimestamp: isoTimestamp)
+        let service = SearchIngestService(db: db)
+        let ref = try fileRef(for: url)
+
+        // First ingest with toolIO disabled: search row only, no tool-IO row, even
+        // though this file's refTS is well within the recent window.
+        let first = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 0)
+        XCTAssertEqual(first.processed, 1)
+
+        let toolIOReadyBefore = try await db.fetchToolIOReadyPaths(for: "codex")
+        XCTAssertFalse(toolIOReadyBefore.contains(url.path), "sanity: no tool-IO row yet (toolIO was disabled on first ingest)")
+
+        // Second ingest, same unchanged file, toolIO now enabled: must re-ingest (not
+        // skip) so the file gains its tool-IO row.
+        let second = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: true, quietSeconds: 0)
+        XCTAssertEqual(second.processed, 1, "recent file missing its tool-IO row must re-ingest to gain it, not be skipped")
+        XCTAssertEqual(second.skipped, 0)
+
+        let toolIOReadyAfter = try await db.fetchToolIOReadyPaths(for: "codex")
+        XCTAssertTrue(toolIOReadyAfter.contains(url.path), "file must now have a tool-IO row")
     }
 
     // MARK: - SearchIngestCoordinator (pure single-flight + coalesce state machine)

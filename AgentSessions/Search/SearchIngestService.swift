@@ -91,6 +91,14 @@ actor SearchIngestService {
         // exemption as before, just backed by the DB instead of process memory.
         let updatedAtByPath = (try? await db.sessionSearchUpdatedAt(for: sourceRaw)) ?? [:]
         let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
+        // refTS (COALESCE(end_ts, mtime)) per path, fetched once per ingest call — mirrors
+        // the deleted `AnalyticsIndexer.indexFileIfNeeded`'s per-file `sessionRefTSForPath`
+        // read (git show 31f6a619^), but batched. Used at the skip-gate below to tell
+        // whether a file is inside or outside the toolIO recency window WITHOUT re-parsing
+        // it: `ingestFile` never writes a `session_tool_io` row for a file outside the
+        // window (see its `refTS >= toolIOCutoffTS` guard), so the gate must not demand one
+        // for such a file either — otherwise it can never be skipped again.
+        let refTSByPath = toolIOEnabled ? ((try? await db.sessionRefTSByPath(for: sourceRaw)) ?? [:]) : [:]
 
         var processed = 0
         var skipped = 0
@@ -102,7 +110,18 @@ actor SearchIngestService {
 
             let isCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
             if isCurrent, searchReadyPaths.contains(file.path) {
-                if !toolIOEnabled || toolIOReadyPaths.contains(file.path) {
+                // toolIO readiness is only a requirement for files that would actually
+                // receive a toolIO row. A file whose refTS is older than the toolIO
+                // recency window (`toolIOCutoffTS`) never gets one — `ingestFile` skips
+                // writing `session_tool_io` for it by design (see its own `refTS >=
+                // toolIOCutoffTS` guard) — so demanding `toolIOReadyPaths.contains` for
+                // such a file makes it permanently un-skippable. Fall back to `file.mtime`
+                // when the path has no `session_meta` row yet (refTSByPath lookup miss);
+                // `isCurrent`/`searchReadyPaths` already guarantee a row exists in that
+                // case in practice, but the fallback keeps this branch safe regardless.
+                let refTS = refTSByPath[file.path] ?? file.mtime
+                let outsideToolIOWindow = refTS < toolIOCutoffTS
+                if !toolIOEnabled || toolIOReadyPaths.contains(file.path) || outsideToolIOWindow {
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
