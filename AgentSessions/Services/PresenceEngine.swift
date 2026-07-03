@@ -81,6 +81,14 @@ actor PresenceEngine {
 
     private let probeRunner: ProbeRunner
 
+    /// Wall-clock seam used ONLY by the cadence-diet throttle
+    /// (`emitFreshnessOnlyIfDue`/`emit`). Everything else in the engine
+    /// (`refreshOnce`'s `now`, `deferExpensiveProbesForSelectionOpen`) still
+    /// calls `Date()` directly — this narrow seam exists solely so
+    /// `PresenceEngineTests` can drive the throttle deterministically without
+    /// sleeping in real time. Defaults to the real clock in production.
+    private let now: () -> Date
+
     // MARK: - Environment (pushed in from the facade)
 
     private var environment = PresenceEnvironment()
@@ -135,10 +143,15 @@ actor PresenceEngine {
     private var staleRefreshResultsDropped: UInt64 = 0
 #endif
 
-    init(probeRunner: ProbeRunner = RealProbeRunner()) {
+    init(probeRunner: ProbeRunner = RealProbeRunner(), now: @escaping () -> Date = Date.init) {
         self.probeRunner = probeRunner
+        self.now = now
         var continuation: AsyncStream<Emission>.Continuation!
-        self.stream = AsyncStream { cont in
+        // Only the latest snapshot matters to a consumer that's behind: each
+        // `PresenceSnapshot` carries FULL state (not a delta), so coalescing
+        // to the newest element is lossless — a busy main actor should apply
+        // one fresh snapshot, not replay a backlog of redundant body re-evals.
+        self.stream = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { cont in
             continuation = cont
         }
         self.continuation = continuation
@@ -803,14 +816,14 @@ actor PresenceEngine {
             emit(snapshot, isMembershipChange: false)
             return
         }
-        let now = Date()
-        let elapsed = lastFreshnessOnlyEmitAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+        let nowValue = now()
+        let elapsed = lastFreshnessOnlyEmitAt.map { nowValue.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         guard elapsed >= Self.inactiveFreshnessMinInterval else { return }
         emit(snapshot, isMembershipChange: false)
     }
 
     private func emit(_ snapshot: PresenceSnapshot, isMembershipChange: Bool) {
-        lastFreshnessOnlyEmitAt = Date()
+        lastFreshnessOnlyEmitAt = now()
         continuation?.yield(Emission(snapshot: snapshot, isMembershipChange: isMembershipChange))
     }
 
