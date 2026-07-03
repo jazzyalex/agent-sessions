@@ -2202,12 +2202,17 @@ struct AgentCockpitHUDView: View {
                                              now: Date = Date()) -> HUDRowsSnapshot {
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let allSessions = codexSessions + claudeSessions + opencodeSessions
+        let supportedFallbackSources: Set<SessionSource> = [.claude, .opencode]
+        var directJoinFallbackKeys: Set<String> = []
+        for session in allSessions where supportedFallbackSources.contains(session.source) {
+            guard activeCodex.presence(for: session) != nil else { continue }
+            directJoinFallbackKeys.insert(UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id))
+        }
         let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: allSessions,
-            presences: presences
-        ) { candidate in
-            activeCodex.presence(for: candidate) != nil
-        }
+            presences: presences,
+            directJoinSessionKeys: directJoinFallbackKeys
+        )
 
         var fallbackSessionByPresenceKey: [String: Session] = [:]
         fallbackSessionByPresenceKey.reserveCapacity(fallbackBySessionKey.count)

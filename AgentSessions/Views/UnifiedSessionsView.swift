@@ -351,6 +351,11 @@ struct UnifiedSessionsView: View {
         // step. Lets per-click paths (handleSelectionChange, selectedSession)
         // avoid an O(n) `cachedRows.first(where:)` scan.
         @State private var cachedRowByID: [String: Session] = [:]
+        // Precomputed `staticSurfacePills(for:)` per row, rebuilt alongside
+        // cachedRows (SessionRowsBuilder.build already iterates every session).
+        // `cellSource(for:)` reads this instead of calling `surfacePills`
+        // per row-body call (W7 Task 1 -- see SessionRowsBuilder.RowsOutput).
+        @State private var cachedSurfacePillsBySessionID: [String: [CodexSurfacePill]] = [:]
         // Bumped on every updateCachedRows() trigger (both the synchronous and
         // the off-main async paths) BEFORE any async work starts. The async
         // path's apply step checks its captured generation against the current
@@ -978,6 +983,11 @@ struct UnifiedSessionsView: View {
                    max: showTitle ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
+                // Both variants are still computed every body call (`.help` takes an
+                // eager String, not a lazily-evaluated closure, so the untaken branch's
+                // string can't be skipped) -- but `s.modifiedRelative` now reads a
+                // shared, lock-guarded RelativeDateTimeFormatter (Session.swift) instead
+                // of allocating a fresh one per call, which was the fingerprinted cost.
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
                 let primary = (display == .relative) ? s.modifiedRelative : absoluteTimeUnified(s.modifiedAt)
                 let helpText = (display == .relative) ? absoluteTimeUnified(s.modifiedAt) : s.modifiedRelative
@@ -2353,13 +2363,15 @@ struct UnifiedSessionsView: View {
         /// phase, ready to run sync or via `Task.detached`.
         private func prepareRowsRebuild() -> SessionRowsBuilder.RowsInput? {
             selectionReplacementDeferredDuringChurn = false
-#if DEBUG
-            let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
-#endif
-            rebuildCachedFallbackPresences()
-#if DEBUG
-            Perf.end(_fpSpan)
-#endif
+            // Cheap main-actor step only: the direct-join lookup itself must run
+            // here (CodexActiveSessionsModel.presence(for:) reads main-actor-only
+            // lookup caches), but the heavy fallback-presence grouping/sorting
+            // moves into SessionRowsBuilder.build, off-main (W7 Task 1 Step 6c;
+            // was `rebuildCachedFallbackPresences()`, computed unconditionally on
+            // main under the "fallbackPresences" span every rebuild).
+            let allSessionsForFallback = unified.allSessions
+            let presencesForFallback = activeCodexSessions.presences
+            let directJoinFallbackKeys = directJoinFallbackKeys(for: allSessionsForFallback)
             let nextRows: [Session]
             if FeatureFlags.coalesceListResort {
                 // unified.sessions is already sorted by the view model's descriptor
@@ -2393,12 +2405,14 @@ struct UnifiedSessionsView: View {
 
             return SessionRowsBuilder.RowsInput(
                 nextRows: nextRows,
-                allSessions: unified.allSessions,
+                allSessions: allSessionsForFallback,
                 previousCachedRows: cachedRows,
                 collapsedParents: collapsedParents,
                 showSubagentHierarchy: showSubagentHierarchy,
                 searchActive: !query.isEmpty,
-                isHierarchyBrowsing: isHierarchyBrowsing
+                isHierarchyBrowsing: isHierarchyBrowsing,
+                presences: presencesForFallback,
+                directJoinFallbackKeys: directJoinFallbackKeys
             )
         }
 
@@ -2423,6 +2437,8 @@ struct UnifiedSessionsView: View {
                 cachedVisibleRowIDs = output.cachedVisibleRowIDs
                 cachedExpandableParentIDs = output.cachedExpandableParentIDs
                 cachedRowByID = output.cachedRowByID
+                cachedSurfacePillsBySessionID = output.surfacePillsBySessionID
+                cachedFallbackPresenceBySessionKey = output.fallbackPresenceBySessionKey
             }
 
             if let selectedID = selection,
@@ -2685,7 +2701,16 @@ struct UnifiedSessionsView: View {
             return !stripMonochrome ? sourceAccent(session) : .primary
         }()
         let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
-        let surfacePills = Self.surfacePills(for: session, isClaudeArchived: unified.isArchivedClaudeDesktop(session))
+        // Static part precomputed once per rows rebuild (SessionRowsBuilder.build);
+        // only the live Claude Desktop archived bit is patched in here. Falls back
+        // to the full per-call computation if the row hasn't been through a rebuild
+        // yet (cache miss should not happen in steady state, but must never crash).
+        let staticPills = cachedSurfacePillsBySessionID[session.id] ?? Self.staticSurfacePills(for: session)
+        let surfacePills = Self.applyingLiveClaudeArchiveState(
+            to: staticPills,
+            session: session,
+            isClaudeArchived: unified.isArchivedClaudeDesktop(session)
+        )
         switch session.source {
         case .codex: label = "Codex"
         case .claude: label = "Claude"
@@ -2748,6 +2773,48 @@ struct UnifiedSessionsView: View {
         let stateToken = state?.rawValue ?? "none"
         let lastSeenToken = lastSeenAt.map { String($0.timeIntervalSince1970) } ?? "none"
         return "\(stateToken)-\(lastSeenToken)"
+    }
+
+    /// Live-presence-independent variant of `surfacePills`, always resolving the
+    /// Claude Desktop `isArchived` bit to `false`. This is the part that's safe to
+    /// precompute once per rows rebuild (`SessionRowsBuilder.build`) instead of
+    /// per row-body call, since it depends only on static `Session` fields.
+    /// `cellSource(for:)` patches in the live `isArchivedClaudeDesktop` bit at
+    /// render time via `Self.applyingLiveClaudeArchiveState(to:session:isClaudeArchived:)`
+    /// -- see that function's doc comment for why the patch is safe.
+    static func staticSurfacePills(for session: Session) -> [CodexSurfacePill] {
+        surfacePills(for: session, isClaudeArchived: false)
+    }
+
+    /// Patches the live Claude Desktop archived bit into a precomputed static
+    /// pills array. Safe because `isClaudeArchived` can only ever affect the
+    /// single pill produced by `claudeDesktopSurfacePill` (label "desk", source
+    /// `.claude`) -- every other branch of `surfacePills` ignores the parameter
+    /// entirely, and that branch short-circuits the function (it's always the
+    /// pill, alone, when it fires). So a precomputed array either doesn't need
+    /// patching (source != .claude, or a non-desktop Claude pill set) or is
+    /// exactly `[.desktop(isArchived: false)]` and needs only its one flag
+    /// flipped -- no need to recompute the whole pills array live.
+    ///
+    /// `!session.isSideChat` matters: a side-chat session ALSO produces a
+    /// `[.standard(label: "desk", ...)]` pill (surfacePills's `isSideChat`
+    /// branch fires before `claudeDesktopSurfacePill` is ever consulted), which
+    /// is label/isArchived-identical to an unarchived Claude Desktop pill but
+    /// must never be promoted to an archived Desktop pill here.
+    static func applyingLiveClaudeArchiveState(
+        to staticPills: [CodexSurfacePill],
+        session: Session,
+        isClaudeArchived: Bool
+    ) -> [CodexSurfacePill] {
+        guard session.source == .claude,
+              !session.isSideChat,
+              isClaudeArchived,
+              staticPills.count == 1,
+              staticPills[0].label == "desk",
+              staticPills[0].isArchived == false else {
+            return staticPills
+        }
+        return [.desktop(isArchived: true)]
     }
 
     static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [CodexSurfacePill] {
@@ -3263,25 +3330,66 @@ struct UnifiedSessionsView: View {
         return cachedFallbackPresenceBySessionKey[fallbackKey]
     }
 
-    private func rebuildCachedFallbackPresences() {
-        cachedFallbackPresenceBySessionKey = Self.buildFallbackPresenceMap(
-            sessions: unified.allSessions,
-            presences: activeCodexSessions.presences
-        ) { candidate in
-            activeCodexSessions.presence(for: candidate) != nil
+    /// Sessions eligible for fallback-presence matching whose `activeCodexSessions.presence(for:)`
+    /// lookup (main-actor: hits `CodexActiveSessionsModel`'s internal lookup caches,
+    /// not just Sendable data) already resolved directly. Computed on main --
+    /// this is the one part of the fallback-presence pipeline that genuinely
+    /// cannot move off-main (see doc comment on `buildFallbackPresenceMap`) --
+    /// but it's the same O(sessions) set of calls this function always made, just
+    /// isolated from the heavy grouping/sorting that used to run alongside it.
+    private func directJoinFallbackKeys(for sessions: [Session]) -> Set<String> {
+        let supportedSources: Set<SessionSource> = [.claude, .opencode]
+        var keys: Set<String> = []
+        for session in sessions where supportedSources.contains(session.source) {
+            guard activeCodexSessions.presence(for: session) != nil else { continue }
+            keys.insert(Self.fallbackPresenceKey(source: session.source, sessionID: session.id))
         }
+        return keys
     }
 
+    /// Main-actor, standalone fallback-presence refresh for the membership-tick
+    /// "cheap path" (dots-only update when Active-only filtering is off, see the
+    /// call site's comment: SET+order don't change on a live-presence poll, only
+    /// dot state does, so a full rows rebuild would be wasted work). This is
+    /// distinct from the rows-rebuild pipeline's fallback-presence computation
+    /// (SessionRowsBuilder.build, off-main, W7 Task 1 Step 6c) -- this path must
+    /// stay synchronous and main-actor because it runs on every live-poll tick
+    /// independent of any rows rebuild.
+    private func rebuildCachedFallbackPresences() {
+        let sessions = unified.allSessions
+        cachedFallbackPresenceBySessionKey = Self.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: activeCodexSessions.presences,
+            directJoinSessionKeys: directJoinFallbackKeys(for: sessions)
+        )
+    }
+
+    /// Builds the reverse (session -> presence) fallback join used when a session
+    /// has no presence directly keyed to it (no session-specific join signals in
+    /// the presence payload) but can still be matched by workspace/cwd or, failing
+    /// that, by ordinal position within its source. Pure over `Sendable` inputs --
+    /// runnable off the main actor via `SessionRowsBuilder.build` (W7 Task 1;
+    /// Task 0 fingerprint: 170 samples / 43ms-per-call spans on main).
+    ///
+    /// `directJoinSessionKeys` replaces the old `hasDirectJoin: (Session) -> Bool`
+    /// closure parameter, which called `CodexActiveSessionsModel.presence(for:)`
+    /// (main-actor: reads `latestSnapshot`/`lookupCacheEntry`, not just the
+    /// Sendable `presences` array) -- that lookup itself cannot move off-main
+    /// without duplicating the model's private cache logic, so the caller
+    /// precomputes the direct-join key set on main (`directJoinFallbackKeys`,
+    /// cheap: same call count as before) and hands it in as plain `Set<String>`
+    /// data instead.
     static func buildFallbackPresenceMap(sessions: [Session],
                                          presences: [CodexActivePresence],
-                                         hasDirectJoin: (Session) -> Bool) -> [String: CodexActivePresence] {
+                                         directJoinSessionKeys: Set<String>) -> [String: CodexActivePresence] {
         let supportedSources: Set<SessionSource> = [.claude, .opencode]
         var fallbackBySessionKey: [String: CodexActivePresence] = [:]
         var fallbackEligibleBySource: [SessionSource: [Session]] = [:]
         var fallbackEligibleByWorkspace: [String: [Session]] = [:]
 
         for session in sessions where supportedSources.contains(session.source) {
-            guard !hasDirectJoin(session) else { continue }
+            let key = fallbackPresenceKey(source: session.source, sessionID: session.id)
+            guard !directJoinSessionKeys.contains(key) else { continue }
             fallbackEligibleBySource[session.source, default: []].append(session)
 
             guard let cwdRaw = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),

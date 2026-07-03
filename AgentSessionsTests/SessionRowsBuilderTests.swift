@@ -106,7 +106,9 @@ final class SessionRowsBuilderTests: XCTestCase {
             collapsedParents: collapsedParents,
             showSubagentHierarchy: showSubagentHierarchy,
             searchActive: searchActive,
-            isHierarchyBrowsing: isHierarchyBrowsing
+            isHierarchyBrowsing: isHierarchyBrowsing,
+            presences: [],
+            directJoinFallbackKeys: []
         )
         let actual = SessionRowsBuilder.build(input: input)
 

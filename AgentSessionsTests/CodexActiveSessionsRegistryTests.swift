@@ -307,7 +307,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let map = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: sessions,
             presences: [workspacePresence],
-            hasDirectJoin: { _ in false }
+            directJoinSessionKeys: []
         )
 
         let newestKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "newest")
@@ -341,7 +341,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let map = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: sessions,
             presences: [olderPresence, newestPresence],
-            hasDirectJoin: { _ in false }
+            directJoinSessionKeys: []
         )
 
         let newestKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "newest")
@@ -367,7 +367,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let map = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: sessions,
             presences: [unresolvedPresence],
-            hasDirectJoin: { $0.id == "direct" }
+            directJoinSessionKeys: [UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "direct")]
         )
 
         let directKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: "direct")
@@ -401,7 +401,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let map = UnifiedSessionsView.buildFallbackPresenceMap(
             sessions: sessions,
             presences: [claudePresence, openCodePresence],
-            hasDirectJoin: { _ in false }
+            directJoinSessionKeys: []
         )
 
         let claudeKey = UnifiedSessionsView.fallbackPresenceKey(source: .claude, sessionID: sharedID)

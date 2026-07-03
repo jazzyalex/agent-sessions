@@ -28,6 +28,28 @@ public enum SessionRelationshipKind: String, Codable, Sendable {
     case sideChat
 }
 
+/// Shared, lock-guarded formatters for row-body display strings. `Session.modifiedRelative`
+/// used to allocate a fresh `RelativeDateTimeFormatter` on every access — measured as a
+/// hot per-row-body cost during fast scroll (W7 Task 0). `RelativeDateTimeFormatter`'s
+/// thread-safety is undocumented, and this type has at least one confirmed off-main
+/// caller (`SessionTranscriptBuilder.headerLine`, invoked from `SessionTerminalView`'s
+/// `Task.detached` rebuild), so reads are serialized with a lock rather than assumed
+/// main-thread-only.
+private enum SessionRowFormatters {
+    private static let lock = NSLock()
+    private static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+
+    static func relativeString(for date: Date, relativeTo referenceDate: Date) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return relative.localizedString(for: date, relativeTo: referenceDate)
+    }
+}
+
 public struct Session: Identifiable, Equatable, Codable, Sendable {
     public let id: String
     public let source: SessionSource
@@ -823,9 +845,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var modifiedRelative: String {
         // Use modifiedAt which correctly uses filename timestamp
         let ref = modifiedAt
-        let r = RelativeDateTimeFormatter()
-        r.unitsStyle = .short
-        return r.localizedString(for: ref, relativeTo: Date())
+        return SessionRowFormatters.relativeString(for: ref, relativeTo: Date())
     }
 
     public var modifiedAt: Date {
@@ -1144,6 +1164,38 @@ enum ProjectPathNormalizer {
         case suppress
     }
 
+    /// `resolve(cwd:usesDesktopWorktreeHeuristics:storedProjectName:gitRepositoryURL:gitBranch:)`
+    /// runs pure path-component parsing over stable per-session inputs (W7 Task 0
+    /// fingerprint: 163 samples in `rowRepoDisplay`/`rowRepoName`, called on every
+    /// row-body render). Memoized here keyed by the exact input tuple -- the inputs
+    /// are stable per session (a session's cwd doesn't change after parse), so this
+    /// is a plain correctness-preserving cache, not an approximation.
+    private final class CachedResolution {
+        let value: Resolution?
+        init(_ value: Resolution?) { self.value = value }
+    }
+    private static let resolutionCache = NSCache<NSString, CachedResolution>()
+
+    private static func resolutionCacheKey(
+        cwd: String?,
+        usesDesktopWorktreeHeuristics: Bool,
+        storedProjectName: String?,
+        gitRepositoryURL: String?,
+        gitBranch: String?
+    ) -> NSString {
+        // '\u{1F}' (unit separator) as a field delimiter: won't appear in real
+        // paths/branch names, avoiding accidental collisions from naive "|"-joins
+        // when a component itself contains the delimiter character.
+        let sep = "\u{1F}"
+        return NSString(string: [
+            cwd ?? "\u{0}",
+            usesDesktopWorktreeHeuristics ? "1" : "0",
+            storedProjectName ?? "\u{0}",
+            gitRepositoryURL ?? "\u{0}",
+            gitBranch ?? "\u{0}"
+        ].joined(separator: sep))
+    }
+
     static func normalizedProjectName(for session: Session) -> String? {
         guard case let .name(name, _) = resolve(for: session) else { return nil }
         return name
@@ -1200,6 +1252,34 @@ enum ProjectPathNormalizer {
         storedProjectName: String? = nil,
         gitRepositoryURL: String? = nil,
         gitBranch: String? = nil
+    ) -> Resolution? {
+        let cacheKey = resolutionCacheKey(
+            cwd: cwd,
+            usesDesktopWorktreeHeuristics: usesDesktopWorktreeHeuristics,
+            storedProjectName: storedProjectName,
+            gitRepositoryURL: gitRepositoryURL,
+            gitBranch: gitBranch
+        )
+        if let cached = resolutionCache.object(forKey: cacheKey) {
+            return cached.value
+        }
+        let resolution = resolveUncached(
+            cwd: cwd,
+            usesDesktopWorktreeHeuristics: usesDesktopWorktreeHeuristics,
+            storedProjectName: storedProjectName,
+            gitRepositoryURL: gitRepositoryURL,
+            gitBranch: gitBranch
+        )
+        resolutionCache.setObject(CachedResolution(resolution), forKey: cacheKey)
+        return resolution
+    }
+
+    private static func resolveUncached(
+        cwd: String?,
+        usesDesktopWorktreeHeuristics: Bool,
+        storedProjectName: String?,
+        gitRepositoryURL: String?,
+        gitBranch: String?
     ) -> Resolution? {
         guard let cwd, !cwd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil

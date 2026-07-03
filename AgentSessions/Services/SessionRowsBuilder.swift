@@ -31,6 +31,15 @@ enum SessionRowsBuilder {
         /// `isHierarchyBrowsing` at trigger time — gates whether
         /// `cachedExpandableParentIDs` is computed at all.
         let isHierarchyBrowsing: Bool
+        /// `activeCodexSessions.presences` snapshot (Sendable value data) and the
+        /// set of fallback keys that already resolved via a direct join (computed
+        /// on main -- see `UnifiedSessionsView.directJoinFallbackKeys`, which is
+        /// the one part of this pipeline that cannot move off-main because it
+        /// calls into `CodexActiveSessionsModel`'s private lookup caches). The
+        /// heavy grouping/sorting in `buildFallbackPresenceMap` itself is pure
+        /// and runs here, off-main (W7 Task 1 Step 6c).
+        let presences: [CodexActivePresence]
+        let directJoinFallbackKeys: Set<String>
 
         init(nextRows: [Session],
              allSessions: [Session],
@@ -38,7 +47,9 @@ enum SessionRowsBuilder {
              collapsedParents: Set<String>,
              showSubagentHierarchy: Bool,
              searchActive: Bool,
-             isHierarchyBrowsing: Bool) {
+             isHierarchyBrowsing: Bool,
+             presences: [CodexActivePresence],
+             directJoinFallbackKeys: Set<String>) {
             self.nextRows = nextRows
             self.allSessions = allSessions
             self.previousCachedRows = previousCachedRows
@@ -46,6 +57,8 @@ enum SessionRowsBuilder {
             self.showSubagentHierarchy = showSubagentHierarchy
             self.searchActive = searchActive
             self.isHierarchyBrowsing = isHierarchyBrowsing
+            self.presences = presences
+            self.directJoinFallbackKeys = directJoinFallbackKeys
         }
     }
 
@@ -67,6 +80,17 @@ enum SessionRowsBuilder {
         /// bumps `tableReorderGeneration` on apply when this is true — that bump
         /// must happen in the same main-actor turn as assigning `cachedRows`.
         let isLargeReorder: Bool
+        /// Precomputed `UnifiedSessionsView.staticSurfacePills(for:)` per row, so
+        /// `cellSource(for:)` stops allocating a pills array + doing lowercased
+        /// string compares on every row-body call (W7 Task 0 fingerprint). Static
+        /// only -- the live Claude Desktop `isArchived` bit is patched in at
+        /// render time via `applyingLiveClaudeArchiveState`.
+        let surfacePillsBySessionID: [String: [UnifiedSessionsView.CodexSurfacePill]]
+        /// `UnifiedSessionsView.buildFallbackPresenceMap` result, computed here
+        /// off-main instead of on every `prepareRowsRebuild()` call (W7 Task 1
+        /// Step 6c; Task 0 fingerprint: `fallbackPresences` span, 43ms/call, 170
+        /// samples on main).
+        let fallbackPresenceBySessionKey: [String: CodexActivePresence]
     }
 
     /// Build the hierarchy + row-derived state. Pure function — safe to call from
@@ -107,6 +131,24 @@ enum SessionRowsBuilder {
             cachedExpandableParentIDs = []
         }
 
+        var surfacePillsBySessionID: [String: [UnifiedSessionsView.CodexSurfacePill]] = [:]
+        surfacePillsBySessionID.reserveCapacity(newRows.count)
+        for row in newRows {
+            surfacePillsBySessionID[row.id] = UnifiedSessionsView.staticSurfacePills(for: row)
+        }
+
+#if DEBUG
+        let _fpSpan = Perf.begin("fallbackPresences", thresholdMs: 4)
+#endif
+        let fallbackPresenceBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
+            sessions: input.allSessions,
+            presences: input.presences,
+            directJoinSessionKeys: input.directJoinFallbackKeys
+        )
+#if DEBUG
+        Perf.end(_fpSpan)
+#endif
+
         return RowsOutput(
             cachedRows: newRows,
             hierarchyRowMeta: hierarchyResult.rowMeta,
@@ -115,7 +157,9 @@ enum SessionRowsBuilder {
             cachedVisibleRowIDs: cachedVisibleRowIDs,
             cachedExpandableParentIDs: cachedExpandableParentIDs,
             cachedRowByID: cachedRowByID,
-            isLargeReorder: isLargeReorder
+            isLargeReorder: isLargeReorder,
+            surfacePillsBySessionID: surfacePillsBySessionID,
+            fallbackPresenceBySessionKey: fallbackPresenceBySessionKey
         )
     }
 }
