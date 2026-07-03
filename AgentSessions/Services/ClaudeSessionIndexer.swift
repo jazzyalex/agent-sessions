@@ -93,6 +93,14 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     @Published private var filterEpoch: Int = 0
     private var transcriptPrewarmTask: Task<Void, Never>? = nil
     private var refreshTask: Task<Void, Never>? = nil
+    /// Key-filtered observer for the sessions-root-override / probe-visibility
+    /// sync below: the raw `didChangeNotification` fires on every process-wide
+    /// defaults write (incl. AppKit window/splitview bookkeeping); narrowing to
+    /// these two keys avoids re-running that sync on unrelated writes. The
+    /// three hideZero/hideLow/showHousekeeping prefs above are @AppStorage with
+    /// their own didSet -> filterEpoch bump, so they don't need to be tracked
+    /// here. See AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var rootOverrideDefaultsObserver: FilteredDefaultsObserver?
 
     init() {
         // Initialize discovery with current override (if any)
@@ -143,9 +151,18 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         }
         .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        // Tracked keys: sessions-root override + probe-visibility toggle are the
+        // only raw UserDefaults reads in this closure. hideZero/hideLow/
+        // showHousekeeping are @AppStorage above with their own didSet that
+        // already bumps filterEpoch, so they don't need tracking here.
+        let rootOverrideObserver = FilteredDefaultsObserver(keys: [
+            "ClaudeSessionsRootOverride",
+            "ShowSystemProbeSessions"
+        ])
+        self.rootOverrideDefaultsObserver = rootOverrideObserver
+        rootOverrideObserver.publisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] in
                 guard let self else { return }
                 self.publishAfterCurrentUpdate { [weak self] in
                     guard let self else { return }

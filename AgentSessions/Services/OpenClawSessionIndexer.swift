@@ -61,6 +61,13 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    /// Key-filtered observer: the raw `didChangeNotification` fires on every
+    /// process-wide defaults write (incl. AppKit window/splitview bookkeeping);
+    /// narrowing to these two keys avoids re-running discovery/refresh on
+    /// unrelated writes. HideZero/HideLow/ShowHousekeeping are read inline in
+    /// the $allSessions filter pipeline below (not gated by this observer), so
+    /// they aren't tracked here. See AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var rootOverrideDefaultsObserver: FilteredDefaultsObserver?
 
     private static let originProjectLabels: Set<String> = [
         "telegram",
@@ -108,9 +115,14 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
             .receive(on: DispatchQueue.main)
             .assign(to: &$sessions)
 
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        let rootOverrideObserver = FilteredDefaultsObserver(keys: [
+            PreferencesKey.Paths.openClawSessionsRootOverride,
+            PreferencesKey.Advanced.includeOpenClawDeletedSessions
+        ])
+        self.rootOverrideDefaultsObserver = rootOverrideObserver
+        rootOverrideObserver.publisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] in
                 guard let self else { return }
                 let customRoot = UserDefaults.standard.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
                 let includeDeleted = UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions)

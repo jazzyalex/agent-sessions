@@ -655,6 +655,13 @@ final class UnifiedSessionIndexer: ObservableObject {
     private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
     private var notificationObserverTokens: [NSObjectProtocol] = []
+    /// Key-filtered defaults observers: the raw `didChangeNotification` fires on
+    /// every process-wide defaults write (incl. AppKit window/splitview
+    /// bookkeeping); these narrow to only the keys each subscriber consults so
+    /// unrelated writes no longer trigger a full recompute. See
+    /// AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var enablementSyncDefaultsObserver: FilteredDefaultsObserver?
+    private var recomputeDefaultsObserver: FilteredDefaultsObserver?
     private var favorites = FavoritesStore()
     private var favoritesSnapshotVersion: UInt64 = 0
     private let favoritesAggregationVersion = CurrentValueSubject<UInt64, Never>(0)
@@ -731,15 +738,36 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
         syncAgentEnablementFromDefaults()
-        // Observe UserDefaults changes to sync external toggles (Preferences) to this model
-        notificationObserverTokens.append(NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: UserDefaults.standard, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
-            if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
-            let archivedOnly = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedCodexDesktopOnly)
-            if archivedOnly != self.showArchivedCodexDesktopOnly { self.showArchivedCodexDesktopOnly = archivedOnly }
-            self.syncAgentEnablementFromDefaults()
-        })
+        // Observe UserDefaults changes to sync external toggles (Preferences) to this model.
+        // Tracked keys: only the ones this closure actually reads/passes to
+        // syncAgentEnablementFromDefaults() (which reads all 10 per-agent
+        // enablement keys via AgentEnablement.enablementKey(for:)).
+        let enablementSyncObserver = FilteredDefaultsObserver(keys: [
+            "UnifiedHasCommandsOnly",
+            PreferencesKey.Unified.showArchivedCodexDesktopOnly,
+            PreferencesKey.Agents.codexEnabled,
+            PreferencesKey.Agents.claudeEnabled,
+            PreferencesKey.Agents.antigravityEnabled,
+            PreferencesKey.Agents.openCodeEnabled,
+            PreferencesKey.Agents.hermesEnabled,
+            PreferencesKey.Agents.copilotEnabled,
+            PreferencesKey.Agents.droidEnabled,
+            PreferencesKey.Agents.openClawEnabled,
+            PreferencesKey.Agents.cursorEnabled,
+            PreferencesKey.Agents.piEnabled
+        ])
+        self.enablementSyncDefaultsObserver = enablementSyncObserver
+        enablementSyncObserver.publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self else { return }
+                let v = UserDefaults.standard.bool(forKey: "UnifiedHasCommandsOnly")
+                if v != self.hasCommandsOnly { self.hasCommandsOnly = v }
+                let archivedOnly = UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showArchivedCodexDesktopOnly)
+                if archivedOnly != self.showArchivedCodexDesktopOnly { self.showArchivedCodexDesktopOnly = archivedOnly }
+                self.syncAgentEnablementFromDefaults()
+            }
+            .store(in: &cancellables)
 
         let agentEnabledFlags = Publishers.CombineLatest(
             Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $antigravityAgentEnabled, $openCodeAgentEnabled),
@@ -1090,9 +1118,20 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        // recomputeNow() -> applyFiltersAndSort() consults @AppStorage-backed
+        // prefs (hideZeroMessageSessionsPref/hideLowMessageSessionsPref/
+        // showHousekeepingSessionsPref) that read these three keys; the rest
+        // of the filter state is already tracked via @Published properties
+        // with their own change handling, not raw defaults reads.
+        let recomputeObserver = FilteredDefaultsObserver(keys: [
+            "HideZeroMessageSessions",
+            "HideLowMessageSessions",
+            PreferencesKey.showHousekeepingSessions
+        ])
+        self.recomputeDefaultsObserver = recomputeObserver
+        recomputeObserver.publisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.recomputeNow() }
+            .sink { [weak self] in self?.recomputeNow() }
             .store(in: &cancellables)
 
         Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, antigravity.$launchPhase, opencode.$launchPhase),

@@ -212,6 +212,13 @@ final class SessionIndexer: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var recomputeDebouncer: DispatchWorkItem? = nil
     private var lastShowSystemProbeSessions: Bool = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
+    /// Key-filtered defaults observers: the raw `didChangeNotification` fires on
+    /// every process-wide defaults write (incl. AppKit window/splitview
+    /// bookkeeping); these narrow to only the keys each subscriber consults so
+    /// unrelated writes no longer trigger a refresh/recompute. See
+    /// AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var probeVisibilityDefaultsObserver: FilteredDefaultsObserver?
+    private var recomputeDefaultsObserver: FilteredDefaultsObserver?
     private var refreshToken = UUID()
     private let knownFileStatsLock = NSLock()
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
@@ -276,9 +283,11 @@ final class SessionIndexer: ObservableObject {
             .store(in: &cancellables)
 
         // Observe probe-visibility toggle and refresh index when it changes
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        let probeVisibilityObserver = FilteredDefaultsObserver(keys: ["ShowSystemProbeSessions"])
+        self.probeVisibilityDefaultsObserver = probeVisibilityObserver
+        probeVisibilityObserver.publisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] in
                 guard let self = self else { return }
                 let show = UserDefaults.standard.bool(forKey: "ShowSystemProbeSessions")
                 if show != self.lastShowSystemProbeSessions {
@@ -295,9 +304,18 @@ final class SessionIndexer: ObservableObject {
             .sink { [weak self] raw in self?.projectFilterStored = raw }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+        // recomputeNow() consults @AppStorage-backed hideZeroMessageSessionsPref/
+        // hideLowMessageSessionsPref/showHousekeepingSessionsPref — those three
+        // keys are the only raw defaults reads in its filter path.
+        let recomputeObserver = FilteredDefaultsObserver(keys: [
+            "HideZeroMessageSessions",
+            "HideLowMessageSessions",
+            PreferencesKey.showHousekeepingSessions
+        ])
+        self.recomputeDefaultsObserver = recomputeObserver
+        recomputeObserver.publisher
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.recomputeNow() }
+            .sink { [weak self] in self?.recomputeNow() }
             .store(in: &cancellables)
 
         // Refresh Codex sessions when probe cleanup succeeds so removed probe files disappear immediately
