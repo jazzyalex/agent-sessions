@@ -1,5 +1,7 @@
 # Transcript Phase 4 — Bidirectional Find + Counts + Jump-to-Range (Windowed) Implementation Plan
 
+> **⛔ PARKED (2026-07-03) — do not start.** After the Task 9 two-stage open landed, under-threshold sessions get whole-session Find for free post-swap; this plan's window-paging Find machinery only serves the over-threshold (monster) tier of the Terminal view. The transcript UI redesign (`docs/transcript-ui-redesign-proposal.md`) may make a rich block-list view the default mode, which changes what Find infrastructure is worth building here. Re-evaluate scope only after redesign Phase 1 decisions are made.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make in-session Find (both ⌘F local Find and ⌥⌘F Unified Search) work across the WHOLE session under windowed transcript build — accurate total match counts up front from a cheap model-level scan over `Session.events`, with Find next/prev navigating that global match list by loading older OR newer windows to bring the target match into the loaded window, explicit wrap semantics, and jump-to-range/deep-link loading the containing window then scrolling.
