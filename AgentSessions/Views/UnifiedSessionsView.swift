@@ -1166,14 +1166,15 @@ struct UnifiedSessionsView: View {
 					// full pipeline (debounce window, focus, reload, prewarm), not a bypass, so
 					// captures show whether key-repeat-rate selection changes coalesce as intended.
 					guard !cachedRows.isEmpty else { return }
+					let stride = PerfBench.selectWalkStride
 					let nextIndex: Int
 					if let current = selection, let idx = cachedRows.firstIndex(where: { $0.id == current }) {
-						nextIndex = (idx + 1) % cachedRows.count
+						nextIndex = (idx + stride) % cachedRows.count
 					} else {
 						nextIndex = 0
 					}
 					let next = cachedRows[nextIndex]
-					Perf.event("selectWalkStep", "index=\(nextIndex) id=\(next.id.prefix(8))")
+					Perf.event("selectWalkStep", "index=\(nextIndex) stride=\(stride) id=\(next.id.prefix(8))")
 					setActiveSelection(next.id, source: next.source, userInitiated: true)
 				}
 #endif

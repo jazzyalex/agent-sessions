@@ -115,6 +115,10 @@ final class MainThreadStallMonitor {
 ///   AS_PERF_BENCH_CYCLES=8     number of action cycles to run (for "select": rows to walk)
 ///   AS_PERF_BENCH_INTERVAL=2   seconds between cycles (Double — fractional values like
 ///                              0.06 are supported, used by "select" to hit key-repeat rate)
+///   AS_PERF_BENCH_STRIDE=1     rows advanced per "select" cycle. 1 = key-repeat scrub;
+///                              large strides (e.g. 25) jump across row ranges, forcing
+///                              scroll-to-row + fresh row materialization — a fast-scroll
+///                              simulation (W7 Task 0)
 @MainActor
 enum PerfBench {
     static let toggleSortNotification = Notification.Name("ASPerfToggleSort")
@@ -122,6 +126,8 @@ enum PerfBench {
     /// exercising the real setActiveSelection(...) path at a driven cadence — used to
     /// reproduce key-repeat scrubbing (AS_PERF_BENCH_INTERVAL=0.06) without UI automation.
     static let selectWalkNotification = Notification.Name("ASPerfSelectWalk")
+    /// Read by the select-walk receiver in UnifiedSessionsView.
+    static let selectWalkStride: Int = max(1, Int(ProcessInfo.processInfo.environment["AS_PERF_BENCH_STRIDE"] ?? "") ?? 1)
 
     static func startIfRequested() {
         let env = ProcessInfo.processInfo.environment
