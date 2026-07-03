@@ -355,4 +355,44 @@ final class TranscriptWindowedBuildTests: XCTestCase {
     func testLiveTailDebounceBackgroundThrottled() {
         XCTAssertEqual(SessionTerminalView.liveTailDebounce(isActive: false), 5_000_000_000)
     }
+
+    // MARK: - Activation catch-up: forced dispatch bypasses a sleeping pending build
+
+    /// Pins all four force/no-force x pending/completed combinations for
+    /// `shouldSkipRebuild`. The activation catch-up's whole fix is expressed in
+    /// this pure decision: `force: true` must bypass ONLY the `pending` half of
+    /// the guard, never the `lastCompleted` half.
+    private func signature(eventCount: Int) -> SessionTerminalView.BuildSignature {
+        SessionTerminalView.BuildSignature(sessionID: "s", eventCount: eventCount,
+                                           fileSizeBytes: -1, skipAgentsPreamble: false,
+                                           reviewCardsEnabled: true)
+    }
+
+    func testShouldSkipRebuild_matchesPending_noForce_skips() {
+        let sig = signature(eventCount: 10)
+        XCTAssertTrue(SessionTerminalView.shouldSkipRebuild(signature: sig, lastCompleted: nil,
+                                                            pending: sig, force: false),
+                      "an identical sleeping/in-flight build must still block a duplicate non-forced dispatch")
+    }
+
+    func testShouldSkipRebuild_matchesPending_force_proceeds() {
+        let sig = signature(eventCount: 10)
+        XCTAssertFalse(SessionTerminalView.shouldSkipRebuild(signature: sig, lastCompleted: nil,
+                                                             pending: sig, force: true),
+                       "force must bypass the pending guard so the activation catch-up can supersede a sleeping debounce")
+    }
+
+    func testShouldSkipRebuild_matchesLastCompleted_noForce_skips() {
+        let sig = signature(eventCount: 10)
+        XCTAssertTrue(SessionTerminalView.shouldSkipRebuild(signature: sig, lastCompleted: sig,
+                                                            pending: nil, force: false),
+                      "truly current content is a no-op without force")
+    }
+
+    func testShouldSkipRebuild_matchesLastCompleted_force_stillSkips() {
+        let sig = signature(eventCount: 10)
+        XCTAssertTrue(SessionTerminalView.shouldSkipRebuild(signature: sig, lastCompleted: sig,
+                                                            pending: nil, force: true),
+                      "force must NOT bypass the lastCompleted guard — truly current content stays a no-op even when forced")
+    }
 }

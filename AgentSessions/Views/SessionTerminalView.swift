@@ -142,7 +142,7 @@ struct SessionTerminalView: View {
     /// flight. A trigger with genuinely different inputs (e.g. live-tail
     /// growing `session.events.count`) must still rebuild — this only guards
     /// the same-input case.
-    private struct BuildSignature: Equatable {
+    struct BuildSignature: Equatable {
         let sessionID: String
         let eventCount: Int
         let fileSizeBytes: Int
@@ -358,10 +358,14 @@ struct SessionTerminalView: View {
             // still debouncing (or content grew while inactive and no
             // rebuild is pending yet), paint immediately instead of waiting
             // out the remainder of the 5s inactive debounce. When content is
-            // already current, this is a no-op: rebuildLines computes the
-            // same BuildSignature and the dedupe guard (signature ==
-            // lastCompletedBuildSignature) returns before doing any work.
-            rebuildLines(priority: .userInitiated)
+            // already current, this is still a no-op: the lastCompleted half
+            // of the guard is unaffected by `force` and returns before doing
+            // any work. `force: true` is what makes the "still sleeping"
+            // case work: without it, a signature-identical pending rebuild
+            // (the common case — nothing about the inputs changed since the
+            // debounce was scheduled) would short-circuit here too, leaving
+            // the sleeper neither cancelled nor accelerated.
+            rebuildLines(priority: .userInitiated, force: true)
         }
     }
 
@@ -860,7 +864,7 @@ struct SessionTerminalView: View {
         let eventIDToUserLineID: [String: Int]
     }
 
-    private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0) {
+    private func rebuildLines(priority: TaskPriority, debounceNanoseconds: UInt64 = 0, force: Bool = false) {
         let sessionSnapshot = session
         let skipAgentsPreamble = skipAgentsPreambleEnabled()
         let reviewCardsEnabled = transcriptReviewCardsEnabled
@@ -872,14 +876,21 @@ struct SessionTerminalView: View {
                                        reviewCardsEnabled: reviewCardsEnabled)
 
         // Skip when an identical build already applied (lastCompleted) OR an
-        // identical build is in flight (pending) — cancelling an in-flight
-        // synchronous build cannot stop it; it runs to completion and only the
-        // apply is skipped, so re-dispatching the same inputs doubles the cost.
-        // The return happens before rebuildTask?.cancel() below so a skip never
-        // cancels the identical in-flight build. Any input difference (event
-        // count from a live-tail append or a lazy full load, preamble/review-card
-        // toggles, etc.) still rebuilds exactly as before.
-        if signature == lastCompletedBuildSignature || signature == pendingBuildSignature {
+        // identical build is in flight/sleeping (pending) — cancelling an
+        // in-flight synchronous build cannot stop it; it runs to completion and
+        // only the apply is skipped, so re-dispatching the same inputs doubles
+        // the cost. The return happens before rebuildTask?.cancel() below so a
+        // non-forced skip never cancels the identical in-flight build. Any
+        // input difference (event count from a live-tail append or a lazy full
+        // load, preamble/review-card toggles, etc.) still rebuilds exactly as
+        // before. `force` (app-activation catch-up) bypasses ONLY the pending
+        // half: an identical build that is still SLEEPING out its debounce no
+        // longer blocks a fresh dispatch, whose own rebuildTask?.cancel() below
+        // then kills the sleeper — see shouldSkipRebuild's doc comment.
+        if Self.shouldSkipRebuild(signature: signature,
+                                  lastCompleted: lastCompletedBuildSignature,
+                                  pending: pendingBuildSignature,
+                                  force: force) {
             return
         }
 
@@ -1340,6 +1351,26 @@ struct SessionTerminalView: View {
     /// Tasks 6-8) is the path to older content instead of a full swap.
     nonisolated static func shouldSwapToFullBuild(totalChars: Int) -> Bool {
         totalChars <= FeatureFlags.transcriptFullSwapMaxChars
+    }
+
+    /// `rebuildLines` dedupe guard, extracted for unit testing. `force` is for
+    /// the app-activation catch-up: a debounced live-tail rebuild may still be
+    /// SLEEPING with the exact same `pending` signature (nothing about the
+    /// inputs changed since it was scheduled), and without `force` that sleeper
+    /// would neither be cancelled nor accelerated — the user stares at stale
+    /// content for up to the remainder of the inactive debounce. `force: true`
+    /// skips ONLY the `pending` half of the guard so a fresh dispatch proceeds;
+    /// the caller's subsequent `rebuildTask?.cancel()` then kills the sleeper as
+    /// usual. The `lastCompleted` half stays active even when forced — truly
+    /// current content (already applied) must remain a no-op regardless of why
+    /// the caller asked.
+    nonisolated static func shouldSkipRebuild(signature: BuildSignature,
+                                              lastCompleted: BuildSignature?,
+                                              pending: BuildSignature?,
+                                              force: Bool) -> Bool {
+        if signature == lastCompleted { return true }
+        if !force, signature == pending { return true }
+        return false
     }
 
     /// Live-tail rebuild debounce policy: a backgrounded window doesn't need
