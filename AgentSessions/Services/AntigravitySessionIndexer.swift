@@ -41,6 +41,13 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    /// HideZero/HideLow are read inline in the $allSessions filter pipeline and
+    /// in recomputeNow() below (raw UserDefaults reads, not @AppStorage); this
+    /// key-filtered observer tracks exactly those two keys so toggling either
+    /// preference refreshes the visible list instead of waiting for an
+    /// unrelated input to change first. See
+    /// AgentSessions/Support/FilteredDefaultsObserver.swift.
+    private var recomputeDefaultsObserver: FilteredDefaultsObserver?
 
     init() {
         self.discovery = AntigravitySessionDiscovery()
@@ -67,6 +74,19 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             }
             .receive(on: DispatchQueue.main)
             .assign(to: &$sessions)
+
+        // recomputeNow() -> the filter pipeline above both consult HideZero/
+        // HideLow via raw UserDefaults reads; track exactly those two keys so
+        // toggling either preference refreshes the visible list.
+        let recomputeObserver = FilteredDefaultsObserver(keys: [
+            "HideZeroMessageSessions",
+            "HideLowMessageSessions"
+        ])
+        self.recomputeDefaultsObserver = recomputeObserver
+        recomputeObserver.publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.recomputeNow() }
+            .store(in: &cancellables)
     }
 
     var canAccessRootDirectory: Bool {

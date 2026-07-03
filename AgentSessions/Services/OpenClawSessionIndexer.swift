@@ -64,10 +64,13 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
     /// Key-filtered observer: the raw `didChangeNotification` fires on every
     /// process-wide defaults write (incl. AppKit window/splitview bookkeeping);
     /// narrowing to these two keys avoids re-running discovery/refresh on
-    /// unrelated writes. HideZero/HideLow/ShowHousekeeping are read inline in
-    /// the $allSessions filter pipeline below (not gated by this observer), so
-    /// they aren't tracked here. See AgentSessions/Support/FilteredDefaultsObserver.swift.
+    /// unrelated writes. See AgentSessions/Support/FilteredDefaultsObserver.swift.
     private var rootOverrideDefaultsObserver: FilteredDefaultsObserver?
+    /// HideZero/HideLow/ShowHousekeeping are read inline in the $allSessions
+    /// filter pipeline and in recomputeNow() below — this observer tracks
+    /// exactly those three keys so toggling them re-fires the pipeline instead
+    /// of waiting for an unrelated input to change first.
+    private var recomputeDefaultsObserver: FilteredDefaultsObserver?
 
     private static let originProjectLabels: Set<String> = [
         "telegram",
@@ -134,6 +137,20 @@ final class OpenClawSessionIndexer: ObservableObject, @unchecked Sendable {
                     self.refresh()
                 }
             }
+            .store(in: &cancellables)
+
+        // recomputeNow() -> the filter pipeline above both consult HideZero/
+        // HideLow/ShowHousekeeping via raw UserDefaults reads; track exactly
+        // those three keys so toggling any of them refreshes the visible list.
+        let recomputeObserver = FilteredDefaultsObserver(keys: [
+            "HideZeroMessageSessions",
+            "HideLowMessageSessions",
+            PreferencesKey.showHousekeepingSessions
+        ])
+        self.recomputeDefaultsObserver = recomputeObserver
+        recomputeObserver.publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.recomputeNow() }
             .store(in: &cancellables)
     }
 
