@@ -425,6 +425,35 @@ enum TranscriptSessionResolutionPolicy {
     }
 }
 
+/// Decides whether an incoming search auto-jump request (fired when a session is selected
+/// while a search filter is active) should be latched/applied against the transcript pane
+/// currently on screen. A request only targets one specific session id at a time; the
+/// transcript pane must be showing that same session (and search must still be active) for
+/// the request to be relevant — otherwise it's either stale (search was cleared, or the
+/// pane has since moved to a different session) or not-yet-relevant (the pane hasn't caught
+/// up to the settled selection yet, in which case the request stays pending and is re-checked
+/// on the next rebuild rather than being dropped).
+enum TranscriptAutoJumpPolicy {
+    /// Should `TranscriptPlainView` latch this token as a pending auto-jump for `session`?
+    static func shouldLatch(requestedSessionID: String?,
+                            isSearchActive: Bool,
+                            displayedSessionID: String) -> Bool {
+        isSearchActive && requestedSessionID == displayedSessionID
+    }
+
+    /// Should a latched pending auto-jump actually fire right now?
+    static func shouldApply(pendingToken: Int?,
+                            lastHandledToken: Int,
+                            pendingSessionID: String?,
+                            isSearchActive: Bool,
+                            displayedSessionID: String,
+                            isTranscriptReady: Bool) -> Bool {
+        guard let pending = pendingToken, pending > lastHandledToken else { return false }
+        guard isSearchActive, pendingSessionID == displayedSessionID else { return false }
+        return isTranscriptReady
+    }
+}
+
 /// Codex transcript view - now a wrapper around UnifiedTranscriptView
 struct TranscriptPlainView: View {
     @EnvironmentObject var indexer: SessionIndexer
@@ -752,7 +781,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
             }
             .onChange(of: searchState.autoJumpToken) { _, newValue in
-                guard searchState.autoJumpSessionID == session.id, isUnifiedSearchActive else { return }
+                guard TranscriptAutoJumpPolicy.shouldLatch(
+                    requestedSessionID: searchState.autoJumpSessionID,
+                    isSearchActive: isUnifiedSearchActive,
+                    displayedSessionID: session.id
+                ) else { return }
                 pendingAutoJumpToken = newValue
                 pendingAutoJumpSessionID = session.id
                 applyAutoJumpIfReady(session: session)
@@ -2152,12 +2185,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	    }
 
     private func applyAutoJumpIfReady(session: Session) {
-        guard let pending = pendingAutoJumpToken, pending > lastHandledAutoJumpToken else { return }
-        guard isUnifiedSearchActive, sessionID == session.id else { return }
-        guard pendingAutoJumpSessionID == session.id else { return }
-        guard isTranscriptReady(for: session) else { return }
+        guard sessionID == session.id else { return }
+        guard TranscriptAutoJumpPolicy.shouldApply(
+            pendingToken: pendingAutoJumpToken,
+            lastHandledToken: lastHandledAutoJumpToken,
+            pendingSessionID: pendingAutoJumpSessionID,
+            isSearchActive: isUnifiedSearchActive,
+            displayedSessionID: session.id,
+            isTranscriptReady: isTranscriptReady(for: session)
+        ) else { return }
         performUnifiedFind(resetIndex: true, shouldJump: true)
-        lastHandledAutoJumpToken = pending
+        lastHandledAutoJumpToken = pendingAutoJumpToken!
         pendingAutoJumpToken = nil
         pendingAutoJumpSessionID = nil
     }

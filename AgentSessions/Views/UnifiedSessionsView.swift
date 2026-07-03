@@ -415,13 +415,10 @@ struct UnifiedSessionsView: View {
 #endif
 
     private enum SourceColorStyle: String, CaseIterable { case none, text, background } // deprecated
-    private enum SelectionChangeSource { case mouse }
 
     @StateObject private var searchCoordinator: SearchCoordinator
     @StateObject private var focusCoordinator = WindowFocusCoordinator()
     @StateObject private var searchState = UnifiedSearchState()
-    @State private var selectionChangeSource: SelectionChangeSource? = nil
-    @State private var autoJumpWorkItem: DispatchWorkItem? = nil
     // Debounced selection-propagation task (see handleSelectionChange). Key-repeat
     // scrubbing fires selection changes every ~30-90ms; without this, each one used
     // to schedule transcript teardown/reload on the next runloop turn, which always
@@ -943,7 +940,6 @@ struct UnifiedSessionsView: View {
                 cellSource(for: s)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
-                        selectionChangeSource = .mouse
                         setActiveSelection(s.id, source: s.source, userInitiated: true)
                         autoSelectEnabled = false
                         focusActiveTerminal(for: s)
@@ -971,7 +967,6 @@ struct UnifiedSessionsView: View {
                     )
 	                    .contentShape(Rectangle())
 	                    .onTapGesture {
-	                        selectionChangeSource = .mouse
 	                        // Explicitly select the tapped row to avoid relying solely on Table's mouse handling.
 	                        setActiveSelection(s.id, source: s.source, userInitiated: true)
 	                        autoSelectEnabled = false
@@ -2073,18 +2068,16 @@ struct UnifiedSessionsView: View {
 	        }
 	        ListScrubSignal.shared.noteSelectionChange()
         // Only the cheap, selection-visual-relevant work runs synchronously in
-        // this SwiftUI update turn: the row lookup, presence-probe deferral, and
-        // search auto-jump bookkeeping. This is what lets the native selection
-        // highlight paint on the NEXT runloop turn instead of waiting behind
-        // transcript-pane teardown/reload — see the deferred block below.
+        // this SwiftUI update turn: the row lookup and presence-probe deferral.
+        // This is what lets the native selection highlight paint on the NEXT
+        // runloop turn instead of waiting behind transcript-pane teardown/reload —
+        // see the deferred block below. Search auto-jump is requested from inside
+        // that deferred block too (once selection settles), not here.
         activeCodexSessions.deferExpensiveProbesForSelectionOpen()
 	        selectionSource = s.source
 	        lastSelectedSource = s.source
 
-        if !searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let immediate = consumeImmediateSelectionJump()
-            scheduleAutoJump(for: id, immediate: immediate)
-        } else {
+        if searchState.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             cancelAutoJump()
         }
         // If a large, unparsed session is clicked during an active search, promote it in the coordinator.
@@ -2115,6 +2108,14 @@ struct UnifiedSessionsView: View {
             guard !Task.isCancelled, selection == id else { return }
             Perf.event("selectionPropagate", "id=\(id.prefix(8))")
             settledSelection = id
+            // Auto-jump to the first search-term occurrence in the transcript, but only once
+            // the transcript pane's own selection (settledSelection) is about to match this id —
+            // TranscriptPlainView gates its match on searchState.autoJumpSessionID == session.id,
+            // where session.id tracks settledSelection, not the raw (possibly still-scrubbing)
+            // selection. Requesting the jump here (instead of eagerly in the raw-selection
+            // branch above) keeps the two in lockstep so manual clicks/arrows land the same
+            // instant auto-jump the first search-selected result already gets.
+            scheduleAutoJump(for: id)
             // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
             if !wasAutoSelectingFromSearch {
                 // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
@@ -2600,36 +2601,24 @@ struct UnifiedSessionsView: View {
         isDatasetChurning || unified.isIndexing || searchCoordinator.isRunning
     }
 
-    private func scheduleAutoJump(for sessionID: String, immediate: Bool) {
+    // Called only from within the 150ms-settled selection-propagation task, i.e. once
+    // `settledSelection` (and therefore the transcript pane's resolved session.id) is about
+    // to match `sessionID`. Firing here — rather than eagerly off the raw selection stream —
+    // is what keeps this request in lockstep with TranscriptPlainView's
+    // `searchState.autoJumpSessionID == session.id` gate; see the call site for the full
+    // rationale.
+    private func scheduleAutoJump(for sessionID: String) {
         cancelAutoJump()
         let q = searchState.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
-        let work = DispatchWorkItem { searchState.requestAutoJump(sessionID: sessionID) }
-        if immediate {
-            work.perform()
-        } else {
-            autoJumpWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
-        }
+        searchState.requestAutoJump(sessionID: sessionID)
     }
 
     private func cancelAutoJump() {
-        autoJumpWorkItem?.cancel()
-        autoJumpWorkItem = nil
-    }
-
-    private func consumeImmediateSelectionJump() -> Bool {
-        if selectionChangeSource == .mouse {
-            selectionChangeSource = nil
-            return true
-        }
-        guard let event = NSApp.currentEvent else { return false }
-        switch event.type {
-        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
-            return true
-        default:
-            return false
-        }
+        // Clear any outstanding request so a transcript pane that hasn't caught up yet
+        // (e.g. selection was cleared, or search was cleared mid-settle) doesn't apply a
+        // stale jump once it does.
+        searchState.autoJumpSessionID = nil
     }
 
 	    private func refreshColumnLayout() {
