@@ -12,7 +12,7 @@ final class ListScrubSignalTests: XCTestCase {
         let sig = ListScrubSignal(now: { t })
         sig.noteSelectionChange()
         t = t.addingTimeInterval(0.10)
-        XCTAssertTrue(sig.isScrubbing)   // 100ms after change, interval 200ms
+        XCTAssertTrue(sig.isScrubbing)   // 100ms after change, interval 150ms
         t = t.addingTimeInterval(0.15)
         XCTAssertFalse(sig.isScrubbing)  // 250ms after change
     }

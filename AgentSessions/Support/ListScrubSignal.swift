@@ -12,7 +12,10 @@ final class ListScrubSignal {
     private(set) var lastSelectionChangeAt: Date = .distantPast
     let quietInterval: TimeInterval
 
-    init(quietInterval: TimeInterval = 0.20, now: @escaping () -> Date = Date.init) {
+    // 0.15 aligns with UnifiedSessionsView's 150ms selection-propagation window:
+    // a settled click's apply always lands after quiet (zero added latency),
+    // while key-repeat scrubbing (30-90ms between changes) still holds the gate.
+    init(quietInterval: TimeInterval = 0.15, now: @escaping () -> Date = Date.init) {
         self.quietInterval = quietInterval
         self.now = now
     }
