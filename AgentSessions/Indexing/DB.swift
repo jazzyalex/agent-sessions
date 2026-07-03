@@ -703,6 +703,36 @@ actor IndexDB {
         return out
     }
 
+    /// Fetch the persisted last-ingest timestamp (`session_search.updated_at`) for every
+    /// path of a source, keyed by path. Backs the size-aware re-ingest cooldown in
+    /// `SearchIngestService`: unlike an in-memory map, this survives app relaunch since
+    /// `updated_at` is written on every successful `upsertSessionSearch` and only advances
+    /// inside a committed ingest transaction (a failed ingest rolls back and leaves the
+    /// prior timestamp in place, so a retry is throttled by the OLD cooldown, not skipped
+    /// indefinitely). A path with no `session_search` row (never ingested) is simply absent
+    /// from the result, which the caller treats as cooldown-exempt.
+    func sessionSearchUpdatedAt(for source: String) throws -> [String: Int64] {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        let sql = """
+        SELECT m.path, s.updated_at
+        FROM session_search s
+        JOIN session_meta m ON m.source = s.source AND m.session_id = s.session_id
+        WHERE s.source = ?;
+        """
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw DBError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT)
+        var out: [String: Int64] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let c = sqlite3_column_text(stmt, 0) else { continue }
+            out[String(cString: c)] = sqlite3_column_int64(stmt, 1)
+        }
+        return out
+    }
+
     // Fetch session_meta rows for a source (used to hydrate sessions list quickly)
     func fetchSessionMeta(for source: String) throws -> [SessionMetaRow] {
         guard let db = handle else { throw DBError.openFailed("db closed") }

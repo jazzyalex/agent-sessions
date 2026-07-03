@@ -333,7 +333,8 @@ final class SearchIngestTests: XCTestCase {
         let firstRef = try fileRef(for: url)
 
         // Call 1: first-time ingest (no existing row) — always proceeds, unaffected by
-        // the cooldown gate (which only applies to RE-ingest).
+        // the cooldown gate (which only applies to RE-ingest). This also writes the
+        // persisted `session_search.updated_at` timestamp that now backs the cooldown.
         let first = try await service.ingest(source: .codex, files: [firstRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 3600)
         XCTAssertEqual(first.processed, 1)
 
@@ -344,31 +345,21 @@ final class SearchIngestTests: XCTestCase {
         let secondRef = try fileRef(for: url)
         XCTAssertNotEqual(secondRef.mtime, firstRef.mtime, "sanity: mtime must have changed")
 
-        // Call 2: first RE-ingest for this path this app run — no `lastReingestAt` entry
-        // yet, so it proceeds regardless of cooldown, and records the timestamp for
-        // subsequent throttling.
+        // Call 2: the first RE-ingest attempt for this path. Under the persisted
+        // (DB-backed) cooldown, `session_search.updated_at` from call 1 is only
+        // moments old, so this is blocked immediately — unlike the old in-memory
+        // mechanism, there is no "first re-ingest this process run is free" grace
+        // period, because the cooldown's clock started at the first successful
+        // ingest, not at process/actor start.
         let second = try await service.ingest(source: .codex, files: [secondRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 3600)
-        XCTAssertEqual(second.processed, 1, "first re-ingest this run must proceed and record the cooldown timestamp")
-
-        // Mutate again; call 3 is the second RE-ingest, which must now be blocked by
-        // the cooldown override recorded from call 2 — keyed off wall-clock time since
-        // the last successful re-ingest, not the file's mtime.
-        try "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"further updated content mongoosecopper\"}]}}\n".write(to: url, atomically: true, encoding: .utf8)
-        // Offset by one second more than call 2's mtime so the two are guaranteed to
-        // differ even if both calls land within the same wall-clock second.
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: TimeInterval(secondRef.mtime) - 1)], ofItemAtPath: url.path)
-        let thirdRef = try fileRef(for: url)
-        XCTAssertNotEqual(thirdRef.mtime, secondRef.mtime, "sanity: mtime must have changed again")
-
-        let third = try await service.ingest(source: .codex, files: [thirdRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 3600)
-        XCTAssertEqual(third.skipped, 1, "re-ingest within the cooldown override window must be skipped")
-        XCTAssertEqual(third.processed, 0)
+        XCTAssertEqual(second.skipped, 1, "re-ingest within the cooldown window (measured from the first ingest's persisted timestamp) must be skipped")
+        XCTAssertEqual(second.processed, 0)
 
         let staleStillThere = try await db.searchSessionIDsFTS(
             sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
-            dateFrom: nil, dateTo: nil, query: "jackalvermillion", includeSystemProbes: true, limit: 10
+            dateFrom: nil, dateTo: nil, query: "nightjarumber", includeSystemProbes: true, limit: 10
         )
-        XCTAssertEqual(staleStillThere.count, 1, "content from the last successful re-ingest must be retained while cooldown blocks the next one")
+        XCTAssertEqual(staleStillThere.count, 1, "content from the first ingest must be retained while cooldown blocks the re-ingest")
     }
 
     func testReingestCooldownOverrideZeroAllowsImmediateReingest() async throws {
@@ -396,6 +387,61 @@ final class SearchIngestTests: XCTestCase {
             dateFrom: nil, dateTo: nil, query: "flamingoazure", includeSystemProbes: true, limit: 10
         )
         XCTAssertEqual(newContentMatches.count, 1, "new content must be findable after cooldown-override-0 re-ingest")
+    }
+
+    /// Pins the actual bug this cooldown mechanism was rewritten to fix: the old
+    /// `lastReingestAt` map lived in the `SearchIngestService` actor's own memory, so it
+    /// was wiped every time a fresh service instance was constructed — exactly what
+    /// happens on every app relaunch. This test proves the cooldown now survives that:
+    /// it is re-derived from `session_search.updated_at` (read fresh via
+    /// `sessionSearchUpdatedAt` at the top of every `ingest` call), not carried in
+    /// process/actor state.
+    func testReingestCooldownPersistsAcrossServiceInstances() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "cooldown-persist.jsonl", userText: "first pass content wombatsienna", assistantText: "ack wombatsienna", in: ingestTempDir)
+
+        // Instance 1 performs the first-time ingest, writing `session_search.updated_at`.
+        let serviceOne = SearchIngestService(db: db)
+        let firstRef = try fileRef(for: url)
+        let first = try await serviceOne.ingest(source: .codex, files: [firstRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 3600)
+        XCTAssertEqual(first.processed, 1)
+
+        // Mutate the file and push mtime 2 hours into the past so it clears the quiet
+        // gate entirely (quietSeconds: 0) and looks like a settled, changed file.
+        try "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"updated content coyotebergamot\"}]}}\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)], ofItemAtPath: url.path)
+        let secondRef = try fileRef(for: url)
+        XCTAssertNotEqual(secondRef.mtime, firstRef.mtime, "sanity: mtime must have changed")
+
+        // Brand-new SearchIngestService actor, same underlying DB — simulates the
+        // service being torn down and reconstructed across an app relaunch. It has no
+        // in-memory state whatsoever; the cooldown must be honored purely from the
+        // DB-persisted `updated_at` written by instance 1.
+        let serviceTwo = SearchIngestService(db: db)
+        let blocked = try await serviceTwo.ingest(source: .codex, files: [secondRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 3600)
+        XCTAssertEqual(blocked.skipped, 1, "a fresh service instance must still honor the cooldown recorded by a prior instance")
+        XCTAssertEqual(blocked.processed, 0)
+
+        let staleStillThere = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "wombatsienna", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(staleStillThere.count, 1, "content from instance 1's ingest must be retained while the cross-instance cooldown blocks the re-ingest")
+
+        // A third, also-fresh instance with cooldown override 0 must re-ingest
+        // immediately: proves the block above is cooldown-driven, not a stuck gate.
+        let serviceThree = SearchIngestService(db: db)
+        let allowed = try await serviceThree.ingest(source: .codex, files: [secondRef], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(allowed.processed, 1, "cooldown override 0 on yet another fresh instance must allow immediate re-ingest")
+        XCTAssertEqual(allowed.skipped, 0)
+
+        let newContentMatches = try await db.searchSessionIDsFTS(
+            sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "coyotebergamot", includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(newContentMatches.count, 1, "new content must be findable once the override-0 instance re-ingests")
     }
 
     // MARK: - SearchIngestService: tool-IO retention prune

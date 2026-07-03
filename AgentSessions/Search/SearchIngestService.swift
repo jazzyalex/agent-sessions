@@ -26,12 +26,6 @@ actor SearchIngestService {
 
     private let db: IndexDB
 
-    /// Wall-clock timestamp of the last successful RE-ingest (not first-time ingest)
-    /// per path. In-memory only — reset on app restart, which means the first
-    /// re-ingest after a relaunch always proceeds (acceptable: it's a one-time cost,
-    /// not the steady-state thrash this cooldown targets). Keyed on `FileRef.path`.
-    private var lastReingestAt: [String: Date] = [:]
-
     init(db: IndexDB) {
         self.db = db
     }
@@ -89,6 +83,13 @@ actor SearchIngestService {
         let toolIOReadyPaths = toolIOEnabled
             ? ((try? await db.fetchToolIOReadyPaths(for: sourceRaw)) ?? [])
             : []
+        // Persistent re-ingest cooldown source of truth: `session_search.updated_at`,
+        // keyed by path. Replaces the old in-memory `lastReingestAt` map (which forgot
+        // on every relaunch, so the first kick after a restart re-parsed every changed
+        // big file regardless of how recently it had actually been re-ingested). A path
+        // absent from this map has no `session_search` row yet — same never-ingested
+        // exemption as before, just backed by the DB instead of process memory.
+        let updatedAtByPath = (try? await db.sessionSearchUpdatedAt(for: sourceRaw)) ?? [:]
         let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
 
         var processed = 0
@@ -145,12 +146,12 @@ actor SearchIngestService {
                 // multi-hundred-MB session that changes all day, crossing quiet->changed
                 // repeatedly. Each crossing costs a full parseFileFull + a 48k-char
                 // sampled-text rebuild — throttle those refreshes independently of
-                // quietSeconds, scaled by file size. Same never-ingested exemption as
-                // the quiet gate: only applies when we have a prior successful re-ingest
-                // timestamp on file for this path; the first re-ingest this app run
-                // always proceeds (and records the timestamp for next time).
+                // quietSeconds, scaled by file size. Persisted in `session_search.updated_at`
+                // (via `updatedAtByPath`, read once above) rather than in-memory, so the
+                // cooldown survives app relaunch: same never-ingested exemption as the quiet
+                // gate — a path with no row (nil lookup) always proceeds.
                 let cooldown = reingestCooldownOverride ?? Self.reingestCooldown(forFileSize: file.size)
-                if cooldown > 0, let last = lastReingestAt[file.path], Date().timeIntervalSince(last) < cooldown {
+                if cooldown > 0, let lastTS = updatedAtByPath[file.path], nowTS - Double(lastTS) < cooldown {
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
@@ -163,9 +164,6 @@ actor SearchIngestService {
                                               toolIOEnabled: toolIOEnabled, toolIOCutoffTS: toolIOCutoffTS)
             if didIngest {
                 processed += 1
-                if hasExistingRow {
-                    lastReingestAt[file.path] = Date()
-                }
             } else {
                 skipped += 1
             }
