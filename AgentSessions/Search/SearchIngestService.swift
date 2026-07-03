@@ -26,8 +26,25 @@ actor SearchIngestService {
 
     private let db: IndexDB
 
+    /// Wall-clock timestamp of the last successful RE-ingest (not first-time ingest)
+    /// per path. In-memory only — reset on app restart, which means the first
+    /// re-ingest after a relaunch always proceeds (acceptable: it's a one-time cost,
+    /// not the steady-state thrash this cooldown targets). Keyed on `FileRef.path`.
+    private var lastReingestAt: [String: Date] = [:]
+
     init(db: IndexDB) {
         self.db = db
+    }
+
+    /// Re-ingest cooldown tiers: a changed-but-quiet file is re-ingested at most
+    /// this often. Big files cost a full parse to refresh a 48k-char sampled
+    /// text — throttle hard; the deep-scan tier covers staleness in between.
+    static func reingestCooldown(forFileSize size: Int64) -> TimeInterval {
+        switch size {
+        case ..<2_000_000:    return 0           // small: quiet gate alone suffices
+        case ..<20_000_000:   return 15 * 60     // medium: 15 min
+        default:              return 45 * 60     // large: 45 min
+        }
     }
 
     /// Ingest one source's files. `files` comes from the caller's discovery
@@ -44,12 +61,18 @@ actor SearchIngestService {
     /// - Parameter quietSeconds: Re-ingest quiet-period gate (see `ingest` body comment
     ///   at the skip-check for the tradeoff this encodes). Callers should keep the
     ///   default unless a test needs a different window.
+    /// - Parameter reingestCooldownOverride: Test-only override for the size-tiered
+    ///   re-ingest cooldown (`reingestCooldown(forFileSize:)`). Production callers must
+    ///   pass `nil` (the default) so real callers get the size-derived tiers; tests use
+    ///   this to exercise the cooldown gate against tiny fixtures that would otherwise
+    ///   always land in the zero-cooldown small-file tier.
     func ingest(source: SessionSource,
                 files: [FileRef],
                 toolIOEnabled: Bool,
                 yieldNanoseconds: UInt64 = 40_000_000,
                 toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap,
-                quietSeconds: TimeInterval = 120) async throws -> Progress {
+                quietSeconds: TimeInterval = 120,
+                reingestCooldownOverride: TimeInterval? = nil) async throws -> Progress {
         let sourceRaw = source.rawValue
         // `fetchSearchReadyPaths`/`fetchToolIOReadyPaths` only tell us the path's row is
         // format-current relative to whatever mtime/size the DB already has on file — they
@@ -116,12 +139,33 @@ actor SearchIngestService {
                     }
                     continue
                 }
+
+                // Size-aware re-ingest cooldown: a file that has already cleared the
+                // quiet gate (i.e. it looks stable right now) can still be a
+                // multi-hundred-MB session that changes all day, crossing quiet->changed
+                // repeatedly. Each crossing costs a full parseFileFull + a 48k-char
+                // sampled-text rebuild — throttle those refreshes independently of
+                // quietSeconds, scaled by file size. Same never-ingested exemption as
+                // the quiet gate: only applies when we have a prior successful re-ingest
+                // timestamp on file for this path; the first re-ingest this app run
+                // always proceeds (and records the timestamp for next time).
+                let cooldown = reingestCooldownOverride ?? Self.reingestCooldown(forFileSize: file.size)
+                if cooldown > 0, let last = lastReingestAt[file.path], Date().timeIntervalSince(last) < cooldown {
+                    skipped += 1
+                    if idx < files.count - 1 {
+                        try? await Task.sleep(nanoseconds: yieldNanoseconds)
+                    }
+                    continue
+                }
             }
 
             let didIngest = await ingestFile(file, source: source, sourceRaw: sourceRaw,
                                               toolIOEnabled: toolIOEnabled, toolIOCutoffTS: toolIOCutoffTS)
             if didIngest {
                 processed += 1
+                if hasExistingRow {
+                    lastReingestAt[file.path] = Date()
+                }
             } else {
                 skipped += 1
             }
