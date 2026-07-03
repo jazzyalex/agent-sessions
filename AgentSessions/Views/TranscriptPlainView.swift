@@ -4009,19 +4009,28 @@ private struct ClaudeArchiveRestoreStripControl: View {
         } message: { o in
             Text(o.message)
         }
-        .task(id: session.id) { await MainActor.run { refreshArchiveState() } }
+        .task(id: session.id) { await refreshArchiveState() }
         .onReceive(NotificationCenter.default.publisher(for: .claudeArchiveDidChange)) { _ in
-            refreshArchiveState()
+            Task { await refreshArchiveState() }
         }
     }
 
-    private func refreshArchiveState() {
+    /// `ClaudeDesktopSessionTitles.records()` enumerates
+    /// `~/Library/Application Support/Claude/claude-code-sessions` every call
+    /// (per-file parse results are cached by mtime since W7 Task 2b, but the
+    /// directory walk itself still runs every time) — run it off the main
+    /// actor so that walk never blocks the main thread, matching
+    /// `ClaudeRunwaySnapshotLoader`'s existing off-main usage of the same call.
+    private func refreshArchiveState() async {
         didRestore = false
         guard session.source == .claude, let key = session.claudeArchiveJoinKey else {
             archivedSidecarPath = nil
             return
         }
-        let rec = ClaudeDesktopSessionTitles.records()[key]
+        let rec = await Task.detached(priority: .utility) {
+            ClaudeDesktopSessionTitles.records()[key]
+        }.value
+        guard !Task.isCancelled else { return }
         archivedSidecarPath = (rec?.isArchived == true) ? rec?.sidecarPath : nil
     }
 

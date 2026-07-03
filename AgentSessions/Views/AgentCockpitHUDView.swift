@@ -378,6 +378,29 @@ private struct HUDPresentationState {
     )
 }
 
+/// Cheap per-source content fingerprint for `AgentCockpitHUDDerivedStateModel`'s
+/// `$allSessions` sinks. A provider's `@Published allSessions` can refire with
+/// content the HUD doesn't care about (e.g. a focused-session hydration or an
+/// unrelated background-monitor write that replaces the whole array via
+/// copy-on-write for a single entry) — `Equatable` on `[Session]` would catch
+/// this too, but at O(n) cost including every session's `events` array, which
+/// is the exact per-body cost the row-body diet exists to avoid. This
+/// fingerprint is O(n) over (id, modifiedAt, eventCount) triples only — no
+/// allocations, no string work — cheap enough to run on every publish.
+private struct SessionListFingerprint: Equatable {
+    private let entries: [FingerprintEntry]
+
+    private struct FingerprintEntry: Equatable {
+        let id: String
+        let modifiedAt: Date
+        let eventCount: Int
+    }
+
+    init(_ sessions: [Session]) {
+        entries = sessions.map { FingerprintEntry(id: $0.id, modifiedAt: $0.modifiedAt, eventCount: $0.eventCount) }
+    }
+}
+
 @MainActor
 private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     @Published private(set) var snapshot = HUDRowsSnapshot(rows: [], activeCount: 0, idleCount: 0)
@@ -387,6 +410,9 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     private var codexSessions: [Session]
     private var claudeSessions: [Session]
     private var opencodeSessions: [Session]
+    private var codexSessionsFingerprint: SessionListFingerprint
+    private var claudeSessionsFingerprint: SessionListFingerprint
+    private var opencodeSessionsFingerprint: SessionListFingerprint
     private var lookupIndexes: SessionLookupIndexes
     private var presences: [CodexActivePresence] = []
     private var isCompact: Bool
@@ -432,6 +458,9 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         codexSessions = codexIndexer.allSessions
         claudeSessions = claudeIndexer.allSessions
         opencodeSessions = opencodeIndexer.allSessions
+        codexSessionsFingerprint = SessionListFingerprint(codexSessions)
+        claudeSessionsFingerprint = SessionListFingerprint(claudeSessions)
+        opencodeSessionsFingerprint = SessionListFingerprint(opencodeSessions)
         lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
@@ -439,9 +468,25 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         )
         isCompact = initialCompact
 
+        // Each sink below skips the rebuild when the incoming array is
+        // content-identical to what the HUD already has. `@Published` fires on
+        // every assignment regardless of equality, and a provider's
+        // `allSessions` can be reassigned (copy-on-write whole-array replace
+        // for a single-session update, an unrelated background-monitor write,
+        // etc.) without any content change relevant to HUD rows. Before this
+        // guard, every such refire unconditionally bumped `sessionsGeneration`
+        // and ran `rebuildLookupIndexes()` (O(n) over all sessions, string
+        // normalization + dictionary inserts) — bypassing `HUDRebuildGate`
+        // entirely, since the gate only sees `sessionsGeneration` AFTER it was
+        // already bumped. This was the dominant cost behind the W7 Task 0
+        // HUD-storm sample evidence (scheduleRebuild/rebuildIfReady/
+        // makeRowsSnapshot ~800/5228 main-thread samples).
         codexIndexer.$allSessions
             .sink { [weak self] sessions in
                 guard let self else { return }
+                let fingerprint = SessionListFingerprint(sessions)
+                guard fingerprint != codexSessionsFingerprint else { return }
+                codexSessionsFingerprint = fingerprint
                 codexSessions = sessions
                 sessionsGeneration &+= 1
                 rebuildLookupIndexes()
@@ -452,6 +497,9 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         claudeIndexer.$allSessions
             .sink { [weak self] sessions in
                 guard let self else { return }
+                let fingerprint = SessionListFingerprint(sessions)
+                guard fingerprint != claudeSessionsFingerprint else { return }
+                claudeSessionsFingerprint = fingerprint
                 claudeSessions = sessions
                 sessionsGeneration &+= 1
                 rebuildLookupIndexes()
@@ -462,6 +510,9 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         opencodeIndexer.$allSessions
             .sink { [weak self] sessions in
                 guard let self else { return }
+                let fingerprint = SessionListFingerprint(sessions)
+                guard fingerprint != opencodeSessionsFingerprint else { return }
+                opencodeSessionsFingerprint = fingerprint
                 opencodeSessions = sessions
                 sessionsGeneration &+= 1
                 rebuildLookupIndexes()
