@@ -2086,12 +2086,17 @@ struct UnifiedSessionsView: View {
         // click/arrow-key press — coalesces a whole scrub into one propagation
         // for the row the user actually rests on.
         selectionPropagationTask?.cancel()
+        // Sample the flag now, synchronously: isAutoSelectingFromSearch is reset by a
+        // DispatchQueue.main.async on the very next runloop turn after search auto-selection
+        // sets it, which always fires well before this task's 150ms sleep wakes. Re-reading
+        // the @State var inside the propagation body would therefore always observe false.
+        let wasAutoSelectingFromSearch = isAutoSelectingFromSearch
         selectionPropagationTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled, selection == id else { return }
             Perf.event("selectionPropagate", "id=\(id.prefix(8))")
             // When selection is changed due to search auto-selection, do not steal focus or collapse inline search
-            if !isAutoSelectingFromSearch {
+            if !wasAutoSelectingFromSearch {
                 // CRITICAL: Selecting session FORCES cleanup of all search UI (Apple Notes behavior)
                 focusCoordinator.perform(.selectSession(id: id))
                 NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
