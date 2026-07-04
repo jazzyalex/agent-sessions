@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Sessions — Transcript Redesign Mockup</title>
+<style>
+  :root {
+    --bg: #1e1e21; --surface: #26262a; --surface2: #2d2d32; --inset: #18181b;
+    --border: #3a3a40; --border-muted: #323238;
+    --text: #e8e8ea; --text-2: #a8a8b0; --text-3: #77777f;
+    --user: #4c8dff; --user-bg: #1b2534;
+    --assistant: #c98a4b; --assistant-bg: #26221d; /* Claude brand accent */
+    --tool: #b98a2f; --tool-bg: #24211a;
+    --think: #8f7bd8; --think-bg: #221f2e;
+    --err: #e5534b; --ok: #4fb06d;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+    --sans: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
+  .window { max-width: 900px; margin: 24px auto; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+
+  /* ── Session header ── */
+  .header { display:flex; align-items:center; gap:8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .badge { font: 10px/1 var(--mono); padding: 3px 7px; border-radius: 20px; letter-spacing: .5px; }
+  .badge.provider { background: var(--assistant); color: #fff; font-weight: 700; }
+  .chip { font: 11px var(--mono); color: var(--text-2); background: var(--inset); border: 1px solid var(--border-muted); padding: 2px 7px; border-radius: 5px; }
+  .chip b { color: var(--text); font-weight: 600; }
+  .spacer { flex: 1; }
+  .seg { display:flex; border:1px solid var(--border); border-radius: 6px; overflow:hidden; }
+  .seg button { background: transparent; border: 0; color: var(--text-2); font: 12px var(--sans); padding: 4px 12px; cursor: pointer; }
+  .seg button.on { background: var(--user); color: #fff; }
+
+  .list { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
+
+  /* ── Message cards ── */
+  .msg { border-left: 3px solid var(--border); border-radius: 0 8px 8px 0; padding: 8px 12px 10px; }
+  .msg.user      { border-color: var(--user); background: var(--user-bg); }
+  .msg.assistant { border-color: var(--assistant); background: var(--assistant-bg); }
+  .msg.tools     { border-color: var(--tool); background: var(--tool-bg); }
+  .mhead { display:flex; align-items:center; gap:7px; margin-bottom: 6px; }
+  .avatar { width: 18px; height: 18px; border-radius: 50%; font: 700 10px/18px var(--sans); text-align:center; color:#fff; }
+  .user .avatar { background: var(--user); } .assistant .avatar { background: var(--assistant); } .tools .avatar { background: var(--tool); }
+  .rolename { font-weight: 600; font-size: 12px; }
+  .user .rolename { color: var(--user); } .assistant .rolename { color: var(--assistant); } .tools .rolename { color: var(--tool); }
+  .meta { margin-left:auto; display:flex; gap:8px; align-items:center; font: 10px var(--mono); color: var(--text-3); }
+  .meta .turn { background: var(--inset); border: 1px solid var(--border-muted); border-radius: 8px; padding: 1px 6px; }
+  .body p { margin: 0 0 8px; } .body p:last-child { margin-bottom: 0; }
+
+  /* markdown bits */
+  code.inline { font: 12px var(--mono); background: var(--inset); border: 1px solid var(--border-muted); border-radius: 4px; padding: 1px 5px; }
+  pre { background: #141417; border: 1px solid var(--border-muted); border-radius: 6px; padding: 10px 12px; font: 12px/1.5 var(--mono); overflow-x: auto; margin: 8px 0; color:#cdd6f4; }
+  table.md { border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+  table.md th, table.md td { border: 1px solid var(--border-muted); padding: 5px 10px; text-align: left; }
+  table.md th { background: var(--inset); font-weight: 600; }
+  .ok { color: var(--ok); } .bad { color: var(--err); }
+
+  /* ── Tool blocks ── */
+  .tool { border-top: 1px solid var(--border-muted); }
+  .tool:first-of-type { border-top: 0; }
+  .thead { display:flex; align-items:center; gap:8px; padding: 5px 0; cursor: pointer; user-select:none; }
+  .chev { color: var(--text-3); font-size: 10px; width: 10px; transition: transform .15s; }
+  .open > .thead .chev { transform: rotate(90deg); }
+  .tname { font: 600 12px var(--mono); color: var(--tool); }
+  .tsum { font: 12px var(--mono); color: var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .tdur { font: 10px var(--mono); color: var(--text-3); }
+  .tdur.slow { color: #e8a13c; }
+  .tbody { display: none; padding: 2px 0 8px 18px; }
+  .open > .tbody { display: block; }
+  .tags { display:flex; gap:6px; margin-bottom:6px; flex-wrap:wrap; }
+  .tag { font: 10px var(--mono); color: var(--text-2); background: var(--inset); border:1px solid var(--border-muted); border-radius:4px; padding:1px 6px; }
+
+  .toolcount { font: 11px var(--sans); color: var(--text-3); margin-left: 4px; }
+
+  footer { padding: 10px 16px; color: var(--text-3); font-size: 11px; border-top: 1px solid var(--border); background: var(--surface); }
+  .note { max-width: 900px; margin: 8px auto 40px; color: var(--text-2); font-size: 12px; padding: 0 4px; }
+  h1 { max-width: 900px; margin: 30px auto 0; font-size: 16px; padding: 0 4px; }
+  .focused-hide { }
+  body.focused .focused-hide { display: none; }
+</style>
+</head>
+<body>
+
+<h1>Proposed transcript view — Agent Sessions (dark)</h1>
+<div class="note">One unified style, inside the existing AS toolbar (Session/Text/JSON menu kept). Click tool rows to expand/collapse. Colors reuse AS's existing role palette (user blue, tool accent, Claude brand accent for assistant).</div>
+
+<div class="window">
+  <!-- Existing AS toolbar, unchanged except the view-mode menu gains the new default -->
+  <div class="header">
+    <span class="chip" title="Existing view-mode menu — Session / Text / JSON, new mode added">Text ▾</span>
+    <span class="chip" title="Session ID chip (click to copy)">9390</span>
+    <span class="spacer"></span>
+    <span class="chip">A−</span><span class="chip">A+</span>
+    <span class="chip">Copy</span>
+    <span class="chip">Export</span>
+    <span class="chip">Find</span>
+  </div>
+
+  <div class="list">
+
+    <!-- USER -->
+    <div class="msg user">
+      <div class="mhead">
+        <span class="avatar">U</span><span class="rolename">User</span>
+        <span class="meta"><span>Jun 25 11:07</span></span>
+      </div>
+      <div class="body"><p>ok, lets add runway for claude. need to decide where it will be placed. now we have Codex runway under whole QM — i think runway for each agent should be under own agent?</p></div>
+    </div>
+
+    <!-- intermediate assistant (hidden in Focused) -->
+    <div class="msg assistant">
+      <div class="mhead">
+        <span class="avatar">A</span><span class="rolename">Assistant</span>
+        <span class="meta"><span class="turn">4.8s · 1 call</span><span>11:11</span></span>
+      </div>
+      <div class="body"><p>Locked: shared control, applied to each agent's runway independently. Let me check how the parser tests behave first:</p></div>
+    </div>
+
+    <!-- TOOL GROUP (hidden in Focused) -->
+    <div class="msg tools">
+      <div class="mhead">
+        <span class="avatar">⚙</span><span class="rolename">3 tool calls</span>
+        <span class="meta"><span class="turn">58.9s total</span><span>11:27</span></span>
+      </div>
+      <div class="tool open" onclick="this.classList.toggle('open')">
+        <div class="thead"><span class="chev">▶</span><span class="tname">Bash</span><span class="tsum">Re-run Claude runway tests</span><span class="tdur">14.5s</span></div>
+        <div class="tbody">
+          <div class="tags"><span class="tag">cwd: ~/Repository/Codex-History</span><span class="tag">xcodebuild test</span></div>
+          <pre>xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions \
+  test -only-testing:AgentSessionsTests/ClaudeRunwayParserTests
+→ Test Case testRecentSessionScannerDiscoversActiveLog… <span class="ok">passed</span> (4/4)</pre>
+        </div>
+      </div>
+      <div class="tool" onclick="this.classList.toggle('open')">
+        <div class="thead"><span class="chev">▶</span><span class="tname">Bash</span><span class="tsum">Run existing Codex runway/usage tests</span><span class="tdur slow">39.6s</span></div>
+        <div class="tbody"><pre>All 94 Codex tests passed — no regression.</pre></div>
+      </div>
+      <div class="tool" onclick="this.classList.toggle('open')">
+        <div class="thead"><span class="chev">▶</span><span class="tname">Edit</span><span class="tsum">ClaudeRunwayParserTests.swift (+7 −4)</span><span class="tdur">4.8s</span></div>
+        <div class="tbody"><pre><span class="bad">- XCTAssertEqual(path, "/var/…")</span>
+<span class="ok">+ XCTAssertEqual(resolved, canonical) // symlink-agnostic</span></pre></div>
+      </div>
+    </div>
+
+    <!-- FINAL assistant (always visible) -->
+    <div class="msg assistant">
+      <div class="mhead">
+        <span class="avatar">A</span><span class="rolename">Assistant</span>
+        <span class="meta"><span class="turn">39.6s · 1 call</span><span>11:28</span></span>
+      </div>
+      <div class="body">
+        <p><b>Done. Claude runway is implemented, building green, and tested.</b></p>
+        <p>What Claude has / doesn't have:</p>
+        <table class="md">
+          <tr><th>Ingredient</th><th>Claude status</th></tr>
+          <tr><td>Provider baseline (remaining %, reset)</td><td><span class="ok">✔</span> <code class="inline">ClaudeUsageModel</code> publishes it</td></tr>
+          <tr><td>Per-session <code class="inline">rate_limits</code> in log</td><td><span class="bad">✘</span> limits come from the OAuth API</td></tr>
+          <tr><td>Reusable calculator / EQ math</td><td><span class="ok">✔</span> <code class="inline">CodexRunwayCalculator</code> is source-agnostic</td></tr>
+        </table>
+        <p>So Claude Runway = the token-attribution path only (<code class="inline">.mixed</code>). Codex falls back to exactly this when direct samples are absent, so there's precedent.</p>
+      </div>
+    </div>
+
+  </div>
+  <footer>Existing AS toolbar/chrome unchanged — this mockup only redesigns the content area. Tool blocks collapsed by default with one-line summaries. ⌘F Find, selection & copy work across blocks.</footer>
+</div>
+
+</body>
+</html>
