@@ -6,6 +6,11 @@ import AVFoundation
 private struct MatchOccurrence: Equatable {
     let range: NSRange
     let lineID: Int
+    /// Offset of the match within the line's rendered text. The search snapshot
+    /// and the text storage agree per-line but not globally (the storage also
+    /// contains inline-image runs the snapshot omits), so highlights must be
+    /// re-anchored to the storage's line range at paint time.
+    let lineLocalRange: NSRange
 }
 
 private struct TextSnapshot {
@@ -232,6 +237,16 @@ struct SessionTerminalView: View {
     @State private var toolbarWidthBucket: Int = 0
 
     // Unified Search navigation/highlight state
+    // Session-wide match info for monster sessions where only a tail window of
+    // blocks is built: the window snapshots can't see matches above the window,
+    // so totals come from an async scan over ALL coalesced blocks, and
+    // navigation widens the window to reach a match block that isn't loaded.
+    @State private var unifiedGlobalMatchBlocks: [Int] = []
+    @State private var unifiedGlobalTotalMatches: Int? = nil
+    @State private var unifiedGlobalScanQuery: String = ""
+    @State private var unifiedGlobalScanGen: Int = 0
+    @State private var unifiedGlobalScanTask: Task<Void, Never>? = nil
+    @State private var pendingUnifiedMatchScroll: Bool = false
     @State private var unifiedMatchOccurrences: [MatchOccurrence] = []
     @State private var unifiedCurrentMatchLineID: Int? = nil
 
@@ -1175,6 +1190,10 @@ struct SessionTerminalView: View {
             }
         } else {
             // Reset Unified Search + Find state when rebuilding from a non-append change.
+            // Also drop the whole-session scan results: block indices are only
+            // valid for the block list they were scanned from (and a session
+            // switch would otherwise briefly navigate on the old session's scan).
+            cancelGlobalUnifiedScan()
             unifiedMatchOccurrences = []
             unifiedCurrentMatchLineID = nil
             unifiedExternalMatchCount = 0
@@ -1191,6 +1210,13 @@ struct SessionTerminalView: View {
 
             if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeUnifiedMatches(resetIndex: true)
+                // A search-driven widen just loaded the match block; the reset
+                // recompute selected the first (newly loaded) match — scroll to it.
+                if pendingUnifiedMatchScroll, let lineID = unifiedCurrentMatchLineID {
+                    pendingUnifiedMatchScroll = false
+                    scrollTargetLineID = lineID
+                    scrollTargetToken &+= 1
+                }
             }
             if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeFindMatches(resetIndex: true)
@@ -2107,6 +2133,7 @@ struct SessionTerminalView: View {
             unifiedExternalMatchCount = 0
             unifiedExternalTotalMatchCount = 0
             unifiedExternalCurrentMatchIndex = 0
+            cancelGlobalUnifiedScan()
             return
         }
 
@@ -2117,11 +2144,36 @@ struct SessionTerminalView: View {
         unifiedExternalMatchCount = visibleOccurrences.count
 
         let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
-        unifiedExternalTotalMatchCount = totalRanges.count
+        let windowCoversWholeSession = loadedBlockRange.map {
+            $0.lowerBound == 0 && $0.upperBound >= max(0, totalBlockCount - 1)
+        } ?? true
+        if windowCoversWholeSession {
+            unifiedExternalTotalMatchCount = totalRanges.count
+            cancelGlobalUnifiedScan()
+        } else {
+            // The built lines cover only a tail window of the session; the real
+            // total comes from the async whole-session scan. Show the window
+            // count until it lands.
+            if unifiedGlobalScanQuery == query, let globalTotal = unifiedGlobalTotalMatches {
+                unifiedExternalTotalMatchCount = max(globalTotal, totalRanges.count)
+            } else {
+                unifiedExternalTotalMatchCount = totalRanges.count
+                kickOffGlobalUnifiedScan(query: query)
+            }
+        }
 
         guard !visibleOccurrences.isEmpty else {
             unifiedCurrentMatchLineID = nil
             unifiedExternalCurrentMatchIndex = 0
+            // Next/prev on 0 visible matches: if the whole-session scan found
+            // matches above the loaded window, widen the window to the nearest
+            // matching block so the user can actually reach them.
+            if !resetIndex,
+               let loaded = loadedBlockRange, loaded.lowerBound > 0,
+               let target = unifiedGlobalMatchBlocks.last(where: { $0 < loaded.lowerBound }) {
+                pendingUnifiedMatchScroll = true
+                widenWindowForJump(toIncludeBlock: target, priority: .userInitiated)
+            }
             return
         }
 
@@ -2146,6 +2198,56 @@ struct SessionTerminalView: View {
 
         let clampedIndex = min(max(unifiedExternalCurrentMatchIndex, 0), visibleOccurrences.count - 1)
         unifiedCurrentMatchLineID = visibleOccurrences[clampedIndex].lineID
+    }
+
+    private func cancelGlobalUnifiedScan() {
+        unifiedGlobalScanTask?.cancel()
+        unifiedGlobalScanTask = nil
+        unifiedGlobalMatchBlocks = []
+        unifiedGlobalTotalMatches = nil
+        unifiedGlobalScanQuery = ""
+    }
+
+    /// Whole-session match scan for windowed (monster) sessions. Runs off-main
+    /// over the coalesced blocks — the same block list and indices that
+    /// `widenWindowForJump(toIncludeBlock:)` operates on — so navigation can
+    /// widen the window to a matching block that isn't currently built.
+    /// Debounced so per-keystroke query changes don't re-coalesce the session.
+    private func kickOffGlobalUnifiedScan(query: String) {
+        if unifiedGlobalScanQuery == query, unifiedGlobalScanTask != nil { return }
+        unifiedGlobalScanGen &+= 1
+        let gen = unifiedGlobalScanGen
+        unifiedGlobalScanQuery = query
+        unifiedGlobalTotalMatches = nil
+        unifiedGlobalMatchBlocks = []
+        unifiedGlobalScanTask?.cancel()
+        let sessionSnapshot = session
+        unifiedGlobalScanTask = Task.detached(priority: .utility) { [sessionSnapshot, query] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
+            var total = 0
+            var matchBlocks: [Int] = []
+            for (idx, block) in blocks.enumerated() {
+                if Task.isCancelled { return }
+                let count = SearchTextMatcher.matchRanges(in: block.text, query: query).count
+                if count > 0 {
+                    total += count
+                    matchBlocks.append(idx)
+                }
+            }
+            let foundTotal = total
+            let foundBlocks = matchBlocks
+            await MainActor.run {
+                guard gen == unifiedGlobalScanGen,
+                      session.id == sessionSnapshot.id,
+                      unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                unifiedGlobalMatchBlocks = foundBlocks
+                unifiedGlobalTotalMatches = foundTotal
+                unifiedGlobalScanTask = nil
+                unifiedExternalTotalMatchCount = max(foundTotal, unifiedExternalTotalMatchCount)
+            }
+        }
     }
 
     private func recomputeFindMatches(resetIndex: Bool,
@@ -2240,8 +2342,10 @@ struct SessionTerminalView: View {
         var out: [MatchOccurrence] = []
         out.reserveCapacity(ranges.count)
         for range in ranges {
-            guard let lineID = lineID(for: range.location, in: snapshot) else { continue }
-            out.append(MatchOccurrence(range: range, lineID: lineID))
+            guard let lineID = lineID(for: range.location, in: snapshot),
+                  let lineRange = snapshot.lineRanges[lineID] else { continue }
+            let local = NSRange(location: range.location - lineRange.location, length: range.length)
+            out.append(MatchOccurrence(range: range, lineID: lineID, lineLocalRange: local))
         }
         return out
     }
@@ -4854,7 +4958,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             updateLayoutManagerUnifiedFind(lm,
                                            query: unifiedFindQuery,
                                            occurrences: effectiveUnifiedMatchOccurrences,
-                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID,
+                                           storageLineRanges: ranges)
             updateLayoutManagerLocalFind(lm,
                                          query: findQuery,
                                          currentLineID: effectiveFindCurrentMatchLineID,
@@ -4966,7 +5071,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             updateLayoutManagerUnifiedFind(lm,
                                            query: unifiedFindQuery,
                                            occurrences: effectiveUnifiedMatchOccurrences,
-                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID,
+                                           storageLineRanges: mergedRanges)
             updateLayoutManagerLocalFind(lm,
                                          query: findQuery,
                                          currentLineID: effectiveFindCurrentMatchLineID,
@@ -5077,7 +5183,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             updateLayoutManagerUnifiedFind(lm,
                                            query: unifiedFindQuery,
                                            occurrences: effectiveUnifiedMatchOccurrences,
-                                           currentLineID: effectiveUnifiedCurrentMatchLineID)
+                                           currentLineID: effectiveUnifiedCurrentMatchLineID,
+                                           storageLineRanges: mergedRanges)
             updateLayoutManagerLocalFind(lm,
                                          query: findQuery,
                                          currentLineID: effectiveFindCurrentMatchLineID,
@@ -5105,7 +5212,8 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         updateLayoutManagerUnifiedFind(lm,
                                        query: query,
                                        occurrences: occurrences,
-                                       currentLineID: currentLineID)
+                                       currentLineID: currentLineID,
+                                       storageLineRanges: context.coordinator.lineRanges)
         textView.setNeedsDisplay(textView.bounds)
         context.coordinator.lastUnifiedFindQuery = query
         context.coordinator.lastUnifiedMatchOccurrences = occurrences
@@ -5271,7 +5379,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
         }
     }
 
-    private func updateLayoutManagerUnifiedFind(_ lm: TerminalLayoutManager, query: String, occurrences: [MatchOccurrence], currentLineID: Int?) {
+    private func updateLayoutManagerUnifiedFind(_ lm: TerminalLayoutManager, query: String, occurrences: [MatchOccurrence], currentLineID: Int?, storageLineRanges: [Int: NSRange]) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !occurrences.isEmpty else {
             lm.matchLineIDs = []
@@ -5280,8 +5388,16 @@ private struct TerminalTextScrollView: NSViewRepresentable {
             return
         }
 
-        let matches = occurrences.map { occurrence in
-            TerminalLayoutManager.FindMatch(range: occurrence.range, isCurrentLine: occurrence.lineID == currentLineID)
+        // Re-anchor snapshot-relative matches onto the text storage's line
+        // ranges: the storage interleaves inline-image runs the snapshot lacks,
+        // so global snapshot offsets drift after the first image block.
+        let matches = occurrences.compactMap { occurrence -> TerminalLayoutManager.FindMatch? in
+            guard let storageLine = storageLineRanges[occurrence.lineID] else { return nil }
+            let location = storageLine.location + occurrence.lineLocalRange.location
+            let length = occurrence.lineLocalRange.length
+            guard length > 0, location + length <= storageLine.location + storageLine.length else { return nil }
+            return TerminalLayoutManager.FindMatch(range: NSRange(location: location, length: length),
+                                                   isCurrentLine: occurrence.lineID == currentLineID)
         }
         lm.matchLineIDs = Set(occurrences.map(\.lineID))
         lm.currentMatchLineID = currentLineID
