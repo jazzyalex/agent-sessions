@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.0</title>
-            <pubDate>Sun, 28 Jun 2026 10:57:57 -0700</pubDate>
+            <title>4.1</title>
+            <pubDate>Fri, 03 Jul 2026 18:09:14 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,44 +27,34 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.0</h2>
+<h2>What&#x27;s New in 4.1</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Quota Meter — now with Session Runway.</strong> See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, <strong>Session Runway</strong> adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly &quot;Limits Cockpit.&quot;)</li>
-<li><strong>Codex Side Chats</strong> — recover Codex Desktop side chats as searchable rows with a distinct <code>side</code> badge and parent context; filter with <code>#side</code> (and <code>#side phrase</code>), and Copy Session ID copies the parent thread ID.</li>
-<li><strong>Antigravity provider</strong> (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via <code>agy --conversation &lt;id&gt;</code> (with <code>--continue</code> fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.</li>
-<li><strong>Restore archived Claude sessions</strong> — Agent Sessions surfaces archived Claude Code sessions (an <code>archived</code> pill and an archived-only filter) and restores them in place, within its searchable local history. Because the app is otherwise read-only, restore is an explicit opt-in that&#x27;s off by default — Agent Sessions only writes to Claude&#x27;s files once you enable it.</li>
-<li><strong>Claude dynamic workflows</strong> — Claude Code&#x27;s Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a <code>workflow</code> badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.</li>
-</ul>
-<h3>Features</h3>
-<ul>
-<li><strong>Codex reset credits</strong> — when Codex grants a free &quot;reset your usage now&quot; credit, the Quota Meter and menu bar now surface it and show when it expires, so you can see how many resets you have banked and how long they last.</li>
-<li><strong>Transcript identity strip</strong> — a compact strip showing session identity, <code>side</code>/<code>sub</code> labels, and parent context, so the transcript stays identifiable even when the session list loses focus.</li>
+<li><strong>The Instant release.</strong> This release is a top-to-bottom performance program: transcripts open instantly, sorting is instant, search is indexed, scrolling is smooth, and the app is dramatically quieter when idle.</li>
+<li><strong>Transcripts open instantly</strong> — even monster sessions. Opening a session paints the newest content immediately and completes the rest in the background; the multi-second (sometimes 30s+) beachball on large histories is gone. Jumping to older content (search hits, deep links, first prompt) loads the needed portion on demand.</li>
+<li><strong>Instant sort and smoother lists</strong> — clicking a sort column re-orders in place instead of re-running the whole pipeline (~7s → ~0.5s on large histories), fast scrolling no longer stutters, and scrubbing the list no longer stalls the transcript or the HUD.</li>
+<li><strong>Indexed full-text search</strong> — the search corpus is now ingested into the SQLite FTS index in the background, so searches hit the index instead of re-scanning files; recently-changed sessions are still scanned live so results are never stale. Selecting a result from a search-filtered list auto-jumps to the first match.</li>
+<li><strong>Quieter when idle</strong> — live-session probing, HUD rebuilds, and indexing are now gated and deduplicated; idle CPU and &quot;Using Significant Energy&quot; pressure are sharply reduced.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li>Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.</li>
-<li>Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.</li>
-<li>Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option.</li>
-<li>Session list: the Claude agent filter is now a segmented pill matching Codex, and Claude Desktop rows show their Desktop session name.</li>
-<li>Unified Window: collapsed hierarchy state now persists across relaunches.</li>
-<li>Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).</li>
+<li>Session list: row rendering diet — shared date formatting, precomputed pills, and memoized project names keep scrolling smooth at large row counts.</li>
+<li>Transcript: live-tail rebuilds are throttled while the app is inactive and catch up instantly on activation.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Unified Window: fixed hangs on large Codex histories — the session list no longer stalls diffing full transcript payloads, the Project column no longer re-parses raw transcript JSON during layout, and returning to the app caches hierarchy state instead of rebuilding it.</li>
-<li>Claude usage: OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota.</li>
-<li>Claude usage: projected-exhaustion alerts now use fractional usage, so small real burns are not missed.</li>
-<li>Claude usage: Claude Code 2.x <code>/usage</code> quota gaps and rate-limit responses are treated as unavailable data instead of false 0% readings.</li>
-<li>Claude usage: hard refresh now finds Homebrew <code>tmux</code> from GUI launches, stale credentials point to <code>claude /login</code>, and built-in <code>~/.local</code> updater installs are recognized by the per-agent update action.</li>
+<li>Transcript: Antigravity and GitHub Copilot sessions now render inline images that were previously detected but never displayed.</li>
+<li>Session list: toggling &quot;Hide zero-message sessions&quot;, &quot;Hide low-message sessions&quot;, or housekeeping visibility now refreshes OpenClaw and Antigravity results immediately instead of waiting for an unrelated refresh.</li>
+<li>Session list: archived-pill behavior is pinned for switch-branch Claude Desktop sessions.</li>
+<li>Quota Meter: the Session Runway overflow label now always reads &quot;+N sessions&quot; instead of splitting into burn/idle &quot;bursts&quot;.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.0</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>53</sparkle:version>
-            <sparkle:shortVersionString>4.0</sparkle:shortVersionString>
+            <sparkle:version>54</sparkle:version>
+            <sparkle:shortVersionString>4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.0/AgentSessions-4.0.dmg" length="19288183" type="application/octet-stream" sparkle:edSignature="rLi+TLSM8q7FQL54TkW6vS7nmffTsyvb7iuJp2LhOUmZkQ80FjP0cy7QFSwrQGAesz9JKLF5G5pUtrGLkexdCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.1/AgentSessions-4.1.dmg" length="19284440" type="application/octet-stream" sparkle:edSignature="/k3q0sUGl+0xj9I3Gdqk/Yh80NccnpLrwz1Odq7shQ38KbcBY314yiOnRpJeA1gZFbctdSmNzBp58P50ZSTGCQ=="/>
         </item>
     </channel>
 </rss>
