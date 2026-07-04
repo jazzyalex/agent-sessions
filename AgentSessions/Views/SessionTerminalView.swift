@@ -95,6 +95,10 @@ private func isSyntheticSemanticHeader(_ text: String,
 /// Terminal-style session view with filters, optional gutter, and legend toggles.
 struct SessionTerminalView: View {
     let session: Session
+    // Phase 0 / W6. Owner of block-space derived state (user anchors, total
+    // block count). Created and updated by UnifiedTranscriptView; this view only
+    // reads its snapshot. Exactly one instance — never construct one here.
+    let derivedState: TranscriptDerivedState
     // Unified Search (⌥⌘F): shared query from the sessions list, used for in-transcript navigation/highlights.
     let unifiedQuery: String
     let unifiedFindToken: Int
@@ -228,12 +232,10 @@ struct SessionTerminalView: View {
     @State private var semanticNavIndicesCacheAll: [SemanticKind: [Int]] = [:]
     @State private var eventIDToUserLineID: [String: Int] = [:]
     // Full-session (window-independent) map from event id to the global block
-    // index of the user prompt it anchors to. Lets an off-window jump resolve
-    // where its target lives so the loaded window can be widened to cover it.
-    @State private var eventIDToAnchorBlockIndex: [String: Int] = [:]
+    // index of the user prompt it anchors to, plus the session's total block
+    // count, now both owned by `derivedState.snapshot` (Phase 0 / W6).
     // The global block range currently built into `lines` (nil = whole session).
     @State private var loadedBlockRange: ClosedRange<Int>? = nil
-    @State private var totalBlockCount: Int = 0
     @State private var pendingEventJumpID: String? = nil
     @State private var pendingUserPromptIndex: Int? = nil
     // Set when a first-prompt jump is requested but the loaded window doesn't
@@ -921,15 +923,6 @@ struct SessionTerminalView: View {
         let toolLineIndices: [Int]
         let errorLineIndices: [Int]
         let eventIDToUserLineID: [String: Int]
-        /// Full-session map (every block, regardless of the loaded window) from an
-        /// event id to the GLOBAL block index of the user prompt it anchors to.
-        /// `eventIDToUserLineID` only has entries whose anchor block was inside the
-        /// built window; this map lets an off-window jump resolve where the target
-        /// lives so the window can be widened to cover it. Cheap to build: pure
-        /// integer bookkeeping over the anchor array, no line construction.
-        let eventIDToAnchorBlockIndex: [String: Int]
-        /// Total coalesced block count for the session (independent of window).
-        let totalBlockCount: Int
         /// The block range whose lines were actually built into `lines`, or nil
         /// for a whole-session build.
         let builtBlockRange: ClosedRange<Int>?
@@ -1178,9 +1171,7 @@ struct SessionTerminalView: View {
         toolLineIndices = result.toolLineIndices
         errorLineIndices = result.errorLineIndices
         eventIDToUserLineID = result.eventIDToUserLineID
-        eventIDToAnchorBlockIndex = result.eventIDToAnchorBlockIndex
         loadedBlockRange = result.builtBlockRange
-        totalBlockCount = result.totalBlockCount
         rebuildNavIndexCaches()
 
         if isFinalApply {
@@ -1419,11 +1410,11 @@ struct SessionTerminalView: View {
         }
 
         var eventIDToUserLineID: [String: Int] = [:]
-        // Full-session anchor map: eventID -> GLOBAL block index of the user
-        // prompt it anchors to. Populated for EVERY block (not just windowed
-        // ones) so an off-window jump can resolve where its target lives and
-        // widen the window to cover it. See RebuildResult.eventIDToAnchorBlockIndex.
-        var eventIDToAnchorBlockIndex: [String: Int] = [:]
+        // Line-space map: eventID -> first line id of the user prompt it anchors
+        // to, limited to blocks whose lines are in the built window. The
+        // full-session anchor map (eventID -> global block index), used for
+        // off-window widen jumps, now lives solely in TranscriptDerivedState
+        // (Phase 0 / W6); the per-block anchor derivation below is shared with it.
         if !blocks.isEmpty {
             let userBlockIndices = blocks.enumerated().compactMap { $0.element.kind == .user ? $0.offset : nil }
             let anchors = TranscriptUserAnchors.anchors(userBlockIndices: userBlockIndices,
@@ -1436,7 +1427,6 @@ struct SessionTerminalView: View {
                       blocks.indices.contains(targetUserBlockOffset) else { continue }
                 // firstLineForBlock is keyed by line.blockIndex == globalBlockIndex.
                 let lookupKey = blocks[targetUserBlockOffset].globalBlockIndex
-                eventIDToAnchorBlockIndex[block.eventID] = lookupKey
                 guard let lineID = firstLineForBlock[lookupKey] else { continue }
                 eventIDToUserLineID[block.eventID] = lineID
             }
@@ -1538,8 +1528,6 @@ struct SessionTerminalView: View {
             toolLineIndices: toolMessageIDs(),
             errorLineIndices: messageIDs { $0 == .error },
             eventIDToUserLineID: eventIDToUserLineID,
-            eventIDToAnchorBlockIndex: eventIDToAnchorBlockIndex,
-            totalBlockCount: blocks.count,
             builtBlockRange: builtBlockRange
         )
     }
@@ -1645,8 +1633,8 @@ struct SessionTerminalView: View {
         }
     }
 
-    nonisolated private static func computePreambleUserBlockIndexes(session: Session,
-                                                                    blocks: [SessionTranscriptBuilder.LogicalBlock]) -> Set<Int> {
+    nonisolated static func computePreambleUserBlockIndexes(session: Session,
+                                                             blocks: [SessionTranscriptBuilder.LogicalBlock]) -> Set<Int> {
         // Only style preamble differently for Codex + Droid, where the "system prompt" is commonly embedded
         // as a user-authored-looking block.
         guard session.source == .codex || session.source == .droid else { return [] }
@@ -2197,7 +2185,7 @@ struct SessionTerminalView: View {
 
         let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
         let windowCoversWholeSession = loadedBlockRange.map {
-            $0.lowerBound == 0 && $0.upperBound >= max(0, totalBlockCount - 1)
+            $0.lowerBound == 0 && $0.upperBound >= max(0, derivedState.snapshot.totalBlockCount - 1)
         } ?? true
         if windowCoversWholeSession {
             unifiedExternalTotalMatchCount = totalRanges.count
@@ -2382,7 +2370,7 @@ struct SessionTerminalView: View {
 
         let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
         let windowCoversWholeSession = loadedBlockRange.map {
-            $0.lowerBound == 0 && $0.upperBound >= max(0, totalBlockCount - 1)
+            $0.lowerBound == 0 && $0.upperBound >= max(0, derivedState.snapshot.totalBlockCount - 1)
         } ?? true
         if windowCoversWholeSession {
             externalTotalMatchCount = totalRanges.count
@@ -2599,7 +2587,7 @@ struct SessionTerminalView: View {
         // lives below the loaded window, so no line id exists yet. Widen the window
         // to cover it; the widened apply's retry path (see applyRebuild) fires the
         // stored pending jump once the target's line id materializes.
-        if let anchorBlock = eventIDToAnchorBlockIndex[eventID],
+        if let anchorBlock = derivedState.snapshot.eventIDToAnchorBlockIndex[eventID],
            let loaded = loadedBlockRange,
            anchorBlock < loaded.lowerBound {
             pendingEventJumpID = eventID

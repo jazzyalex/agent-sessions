@@ -1,6 +1,15 @@
 # Transcript Render Redesign — Session Handover
 
-**Date:** 2026-07-03 · **From:** planning/review session (v4.1 release) · **Status:** approved direction, no code started
+**Date:** 2026-07-03 · **From:** planning/review session (v4.1 release) · **Status:** ~~approved direction, no code started~~ **PHASE 0+1 CODE-COMPLETE (2026-07-04)** — see status block below
+
+> **STATUS 2026-07-04 — Phases 0+1 implemented, awaiting owner acceptance QA.**
+> Executed via subagent-driven development on branch `feature/transcript-redesign-v5` (all work UNCOMMITTED by owner rule; plan + ledger: [2026-07-03-transcript-redesign-phase0-1.md](2026-07-03-transcript-redesign-phase0-1.md), `.superpowers/sdd/progress.md`).
+> - **Phase 0 done:** `TranscriptDerivedState` (@Observable block-space owner) extracted; `SessionTerminalView` consumes it; behavior parity pinned by tests.
+> - **Phase 1 done:** new **"Rich"** view mode (`SessionViewMode.blocks`, listed first in the mode menu; Terminal/Text/JSON untouched; Text remains default until parity is accepted): NSTableView card list, collapsible tool cards with one-line summaries + "N tool calls" merge + ShowAll truncation, windowing (load-older/widen/follow-tail), jump intents, cross-block selection+copy, ⌘F + unified search + auto-jump-on-open, toolbar Copy/Export parity.
+> - **macOS floor stays 14.0** — the briefly-approved 15 bump was implemented then reverted same day (owner call; the memo's `@Observable`-needs-15 claim was wrong — Observation is macOS 14+; no chosen API needs 15).
+> - Suite 1209 → **1269 green** (60 new tests). Final whole-branch review (Opus): no Critical/Important; ready to merge after owner QA.
+> - **Next:** owner acceptance QA (checklist in ledger) → commit/merge decision → **Phase 2** (markdown rendering + search-auto-expand of collapsed tool cards) → Phase 3 (turn timing badges).
+> - Flagged repo follow-up (do separately): pbxproj contains THREE duplicate `AgentSessionsLogicTests` targets (live: `9E29F9AF3D49DDA01A884CB7`); `xcode_add_unit_test_target.rb` lacks an existence check.
 **Read first:** [docs/transcript-ui-redesign-proposal.md](../../transcript-ui-redesign-proposal.md) (the full proposal — personas, AV analysis, phases). This handover adds decisions, repo state, and marching orders.
 
 ## Goal

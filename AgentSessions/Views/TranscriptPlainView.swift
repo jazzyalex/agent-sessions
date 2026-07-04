@@ -506,7 +506,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var transcript: String = ""
     @State private var rebuildTask: Task<Void, Never>?
     @State private var jsonBuildTask: Task<Void, Never>?
+    // In-flight whole-transcript copy for Rich (.blocks) mode; retrigger cancels the prior one.
+    @State private var copyAllTask: Task<Void, Never>?
     @State private var renderGate = TranscriptRenderGenerationGate()
+
+    // Phase 0 / W6. Single owner of block-space state; created here and passed
+    // into SessionTerminalView (and, later, Task 5's block view) so exactly one
+    // instance derives coalescedBlocks/user anchors/total block count.
+    @State private var derivedState = TranscriptDerivedState()
+    // Mirrors SessionTerminalView's review-cards toggle so the owner's Key is
+    // computed from the same two settings the Terminal build reads.
+    @AppStorage(PreferencesKey.Transcript.enableReviewCards) private var transcriptReviewCardsEnabled: Bool = true
 
     // Unified Search (⌥⌘F): window-level query used to filter sessions and navigate within transcript
     @State private var unifiedMatches: [NSRange] = []
@@ -548,6 +558,27 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalFindDirection: Int = 1
     @State private var terminalFindResetFlag: Bool = true
     @State private var terminalAllowMatchAutoScroll: Bool = true
+
+    // Rich-mode (.blocks) find state (Task 10). Mirrors the terminal find token
+    // pattern: performFind bumps the token; TranscriptBlockListView consumes it,
+    // computes whole-session matches from derivedState.findMatches, and publishes
+    // counts back through the two external bindings. Only two count bindings are
+    // needed (not three) because in Rich mode every match is whole-session: the
+    // "visible" and "total" counts are identical, so the find bar shows n/total.
+    @State private var richFindToken: Int = 0
+    @State private var richFindDirection: Int = 1
+    @State private var richFindReset: Bool = true
+    @State private var richFindAllowAutoScroll: Bool = true
+    @State private var richFindMatchesCount: Int = 0
+    @State private var richFindCurrentIndex: Int = 0
+    // Rich-mode unified-search find state (Task 8/10). Same token machinery, fed
+    // by unifiedFreeText instead of the local find query.
+    @State private var richUnifiedFindToken: Int = 0
+    @State private var richUnifiedFindDirection: Int = 1
+    @State private var richUnifiedFindReset: Bool = true
+    @State private var richUnifiedFindAllowAutoScroll: Bool = true
+    @State private var richUnifiedMatchesCount: Int = 0
+    @State private var richUnifiedCurrentIndex: Int = 0
 
     // Toggles (view-scoped)
     @State private var showTimestamps: Bool = false
@@ -625,6 +656,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var terminalRoleNavRole: SessionTerminalView.RoleToggle = .user
     @State private var terminalRoleNavDirection: Int = 1
     @State private var pendingFirstRenderSessionID: String? = nil
+    // Rich-mode (Task 8) jump triggers — same external intents Terminal mode
+    // handles via terminalJumpToken / .navigateToSessionEventFromImages, routed
+    // to TranscriptBlockListView's controller via token props. Tokens (not raw
+    // booleans) so the controller can tell a genuinely-new intent from a stale
+    // one still sitting on this view's state after a Terminal<->Rich switch.
+    @State private var richFirstPromptJumpToken: Int = 0
+    @State private var richEventJumpToken: Int = 0
+    @State private var richEventJumpID: String? = nil
+    @State private var richUserPromptIndexJumpToken: Int = 0
+    @State private var richUserPromptIndexJump: Int? = nil
 
     // Text view navigation cursors (used for keyboard jumps)
     @State private var lastUserJumpLocation: Int? = nil
@@ -702,6 +743,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 ZStack {
                     if viewMode == .terminal {
                         terminalTranscriptView(session: session)
+                    } else if viewMode == .blocks {
+                        blocksTranscriptView(session: session)
                     } else {
                         plainTranscriptView(session: session)
                     }
@@ -752,7 +795,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 guard let resolvedSession = resolvedSessionForRender(id: id) else { return }
                 transcriptTrace("task rebuild id=\(id) events=\(resolvedSession.events.count) eventCount=\(resolvedSession.eventCount)")
                 lastResolvedSession = resolvedSession
-                guard viewMode != .terminal else { return }
+                // Owner update runs for BOTH modes (before the terminal early-out)
+                // so Terminal- and Rich-mode block-space consumers share one snapshot.
+                derivedState.update(
+                    session: resolvedSession,
+                    settings: .init(skipAgentsPreamble: skipAgentsPreambleEnabled(),
+                                    reviewCardsEnabled: transcriptReviewCardsEnabled))
+                guard viewMode != .terminal, viewMode != .blocks else { return }
                 rebuild(session: resolvedSession)
             }
             .onChange(of: viewModeRaw) { _, _ in
@@ -806,6 +855,44 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     showRawSheet = true
                     indexer.requestOpenRawSheet = false
                 }
+            }
+            // Task 8: Rich-mode counterpart of SessionTerminalView's identical
+            // receiver (image strip / cross-window deeplinks). Terminal keeps
+            // its own handling untouched; this only adds Rich-mode routing so
+            // the same notification isn't silently dropped when Rich is the
+            // active view mode. Only acts when Rich mode is actually showing —
+            // otherwise Terminal's own receiver (or a future Text/JSON handler)
+            // owns the intent.
+            .onReceive(NotificationCenter.default.publisher(for: .navigateToSessionEventFromImages)) { n in
+                guard viewMode == .blocks else { return }
+                guard let sid = n.object as? String, sid == session.id else { return }
+                if let eventID = n.userInfo?["eventID"] as? String {
+                    richEventJumpID = eventID
+                    richEventJumpToken &+= 1
+                } else if let userPromptIndex = n.userInfo?["userPromptIndex"] as? Int {
+                    // Resolved against userBlockIndices inside the controller
+                    // (not here) so it still works if derivedState.snapshot
+                    // hasn't landed yet when this notification arrives.
+                    richUserPromptIndexJump = userPromptIndex
+                    richUserPromptIndexJumpToken &+= 1
+                }
+            }
+            // Task 10: Rich-mode auto-jump-on-open. Rich never runs `rebuild`, so
+            // the transcript-ready gate that Text/JSON use won't flip on its own;
+            // instead re-attempt the pending auto-jump when the derived snapshot
+            // lands (isComputing → false) for this session. Mirrors Terminal's
+            // post-render auto-jump-on-open (a session opened from list search
+            // with an active query lands on the first match).
+            .onChange(of: derivedState.isComputing) { _, computing in
+                guard viewMode == .blocks, !computing else { return }
+                // Snapshot landed for this session. Re-drive an active ⌘F query
+                // (a session switch reset the controller's find state, and the
+                // find token doesn't bump on its own) so highlights/counts come
+                // back on the new session, then attempt the pending auto-jump.
+                if isFindBarVisible, !findQuery.isEmpty {
+                    performFind(resetIndex: true, shouldJump: false)
+                }
+                applyAutoJumpIfReady(session: session)
             }
         } else {
             Text("Select a session to view transcript")
@@ -905,6 +992,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func terminalTranscriptView(session: Session) -> some View {
         SessionTerminalView(
             session: session,
+            derivedState: derivedState,
             unifiedQuery: unifiedFreeText,
             unifiedFindToken: terminalUnifiedFindToken,
             unifiedFindDirection: terminalUnifiedFindDirection,
@@ -934,6 +1022,35 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             externalTotalMatchCount: $terminalFindTotalMatchesCount,
             externalCurrentMatchIndex: $terminalFindCurrentIndex
         )
+    }
+
+    /// Rich mode: NSTableView-backed block cards over the derived block stream.
+    private func blocksTranscriptView(session: Session) -> some View {
+        TranscriptBlockListView(
+            derivedState: derivedState,
+            session: session,
+            fontSize: CGFloat(transcriptFontSize),
+            firstPromptJumpToken: richFirstPromptJumpToken,
+            eventJumpToken: richEventJumpToken,
+            eventJumpID: richEventJumpID,
+            userPromptIndexJumpToken: richUserPromptIndexJumpToken,
+            userPromptIndexJump: richUserPromptIndexJump,
+            findQuery: findQuery,
+            findToken: richFindToken,
+            findDirection: richFindDirection,
+            findReset: richFindReset,
+            findAllowAutoScroll: richFindAllowAutoScroll,
+            findMatchCount: $richFindMatchesCount,
+            findCurrentIndex: $richFindCurrentIndex,
+            unifiedQuery: unifiedFreeText,
+            unifiedFindToken: richUnifiedFindToken,
+            unifiedFindDirection: richUnifiedFindDirection,
+            unifiedFindReset: richUnifiedFindReset,
+            unifiedFindAllowAutoScroll: richUnifiedFindAllowAutoScroll,
+            unifiedMatchCount: $richUnifiedMatchesCount,
+            unifiedCurrentIndex: $richUnifiedCurrentIndex
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func plainTranscriptView(session: Session) -> some View {
@@ -1165,6 +1282,9 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var viewModeMenu: some View {
         Menu {
+            viewModeMenuButton(.blocks,
+                               title: "Rich",
+                               help: "Structured cards with collapsible tool calls.")
             viewModeMenuButton(.terminal,
                                title: "Session",
                                help: "Terminal-inspired output with colorized commands and tool output.")
@@ -1202,6 +1322,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var viewModeMenuTitle: String {
         switch viewMode {
+        case .blocks: return "Rich"
         case .terminal: return "Session"
         case .transcript: return "Text"
         case .json: return "JSON"
@@ -1257,16 +1378,20 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         shortcutButton(action: { navigateNextMatch(direction: -1) }, key: "g", modifiers: [.command, .shift])
         shortcutButton(action: { navigateNextMatch(direction: 1) }, key: "g", modifiers: .command)
         shortcutButton(action: {
-            let current = SessionViewMode.from(TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal)
+            // Use the live `viewMode` (not the legacy renderModeRaw round-trip) so
+            // Rich mode — which has no distinct TranscriptRenderMode of its own —
+            // is correctly identified and cycled instead of collapsing to Text.
+            let current = viewMode
             let next: SessionViewMode
             switch current {
-            case .transcript:
+            case .blocks:
                 next = .terminal
             case .terminal:
                 next = .transcript
+            case .transcript:
+                next = .json
             case .json:
-                // From JSON, Cmd+Shift+T toggles back to Text.
-                next = .transcript
+                next = .blocks
             }
             viewModeRaw = next.rawValue
             renderModeRaw = next.transcriptRenderMode.rawValue
@@ -1876,6 +2001,26 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	            return
         }
 
+        // Rich (.blocks) mode: unified-search navigation shares the block
+        // controller's whole-session find, fed by unifiedFreeText. Token-driven,
+        // mirroring the Terminal unified branch above.
+        if viewMode == .blocks {
+            let uq = unifiedFreeText
+            guard !uq.isEmpty else {
+                richUnifiedMatchesCount = 0
+                richUnifiedCurrentIndex = 0
+                richUnifiedFindAllowAutoScroll = false
+                richUnifiedFindReset = true
+                richUnifiedFindToken &+= 1
+                return
+            }
+            richUnifiedFindAllowAutoScroll = shouldJump
+            richUnifiedFindDirection = direction
+            richUnifiedFindReset = resetIndex
+            richUnifiedFindToken &+= 1
+            return
+        }
+
 	        let q = unifiedFreeText
 	        guard !q.isEmpty else {
 	            unifiedMatches = []
@@ -1951,6 +2096,28 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return
         }
 
+        // Rich (.blocks) mode: whole-session find lives in the block controller;
+        // the token machinery mirrors Terminal. TranscriptBlockListView consumes
+        // the token, computes matches from derivedState.findMatches, and reports
+        // counts back through the external bindings. Empty query bumps the token
+        // too so the controller strips highlights + resets counts.
+        if viewMode == .blocks {
+            let q = findQuery
+            guard !q.isEmpty else {
+                richFindMatchesCount = 0
+                richFindCurrentIndex = 0
+                richFindAllowAutoScroll = false
+                richFindReset = true
+                richFindToken &+= 1
+                return
+            }
+            richFindAllowAutoScroll = shouldJump
+            richFindDirection = direction
+            richFindReset = resetIndex
+            richFindToken &+= 1
+            return
+        }
+
         let q = findQuery
         guard !q.isEmpty else {
             findMatches = []
@@ -2011,6 +2178,12 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                                   visible: terminalUnifiedMatchesCount,
                                   total: terminalUnifiedTotalMatchesCount)
         }
+        if viewMode == .blocks {
+            // Rich mode: whole-session counts, so visible == total (n/total).
+            let total = richUnifiedMatchesCount
+            if total == 0 { return "0/0" }
+            return "\(richUnifiedCurrentIndex)/\(total)"
+        }
         let total = unifiedMatches.count
         if total == 0 { return "0/0" }
         return "\(unifiedCurrentMatchIndex + 1)/\(total)"
@@ -2022,6 +2195,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return terminalStatus(currentIndex: terminalFindCurrentIndex,
                                   visible: terminalFindMatchesCount,
                                   total: terminalFindTotalMatchesCount)
+        }
+        if viewMode == .blocks {
+            // Rich mode: the controller publishes a 1-based current ordinal and a
+            // whole-session total; visible == total so no "(total)" suffix.
+            let total = richFindMatchesCount
+            if total == 0 { return "0/0" }
+            return "\(richFindCurrentIndex)/\(total)"
         }
         let total = findMatches.count
         if total == 0 { return "0/0" }
@@ -2042,12 +2222,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         if viewMode == .terminal {
             return terminalUnifiedMatchesCount == 0 || unifiedFreeText.isEmpty
         }
+        if viewMode == .blocks {
+            return richUnifiedMatchesCount == 0 || unifiedFreeText.isEmpty
+        }
         return unifiedMatches.isEmpty || unifiedFreeText.isEmpty
     }
 
     private var isFindNavigationDisabled: Bool {
         if viewMode == .terminal {
             return terminalFindMatchesCount == 0 || findQuery.isEmpty
+        }
+        if viewMode == .blocks {
+            return richFindMatchesCount == 0 || findQuery.isEmpty
         }
         return findMatches.isEmpty || findQuery.isEmpty
     }
@@ -2058,8 +2244,45 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func copyAll() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(transcript, forType: .string)
+        guard viewMode == .blocks else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(transcript, forType: .string)
+            return
+        }
+
+        // Rich (.blocks) mode keeps `transcript` empty (the `.task(id: renderKey)`
+        // early-out skips the flat rebuild for blocks). Parity decision: the Copy
+        // button is mode-independent — it copies the same decorated plain-terminal
+        // text Text mode's copyAll copies, produced by the identical chain
+        // `rebuild()` uses for `.transcript`:
+        //   buildPlainTerminalTranscript(filters: .current(showTimestamps:, showMeta: false),
+        //                                mode: .normal)  // .blocks and .transcript both
+        //                                                // map to TranscriptRenderMode.normal
+        //   → decorateTranscriptIfNeeded(_, session:)    // "Conversation starts here" divider
+        // One canonical path: always cold-build off-main (no cache reuse — the
+        // transcriptCache is Codex-only and reusing it here risked decoration drift),
+        // then decorate + write the pasteboard back on MainActor. Mirrors rebuild()'s
+        // Task.detached + MainActor.run house pattern.
+        guard let session = sessionID.flatMap({ resolvedSessionForRender(id: $0) }) else { return }
+
+        let filters: TranscriptFilters = .current(showTimestamps: showTimestamps, showMeta: false)
+        let sessionSnapshot = session
+        copyAllTask?.cancel()
+        copyAllTask = Task.detached(priority: .userInitiated) {
+            let text = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: sessionSnapshot, filters: filters, mode: .normal)
+            await MainActor.run {
+                // Retrigger dedup only: if the user hit Copy again, the newer task
+                // owns the pasteboard. Deliberately NO current-session-id guard here
+                // (unlike rebuild()'s canApplyRender): an explicit copy command copies
+                // the session the user invoked it on, even if they switched sessions
+                // while the build ran — rebuild mutates VIEW state so it must guard;
+                // copy writes the pasteboard the user just asked for.
+                guard !Task.isCancelled else { return }
+                let decorated = self.decorateTranscriptIfNeeded(text, session: sessionSnapshot)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(decorated, forType: .string)
+            }
+        }
     }
 
     private func exportMarkdown(session: Session) {
@@ -2162,6 +2385,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	        findMatches = []
 	        findCurrentMatchIndex = 0
 	        findCurrentRange = nil
+	        // Rich/Terminal keep their highlights in an AppKit view driven by the
+	        // find token, not by `findMatches` — bump the token (empty query) so a
+	        // close cleanly strips highlights and resets counts even though the
+	        // find bar's onChange won't fire once it's removed.
+	        if viewMode == .blocks || viewMode == .terminal {
+	            performFind(resetIndex: true, shouldJump: false)
+	        }
 	        focusCoordinator.perform(.closeAllSearch)
 	    }
 
@@ -2201,6 +2431,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func isTranscriptReady(for session: Session) -> Bool {
+        // Rich (.blocks) mode never runs `rebuild` (no `lastBuildKey`); its
+        // readiness is the derived-state snapshot landing for this session. When
+        // ready, the block controller can resolve a unified match to a block and
+        // auto-jump, mirroring Terminal's post-9456faa3 auto-jump-on-open.
+        if viewMode == .blocks {
+            return derivedState.snapshot.key?.sessionID == session.id && !derivedState.isComputing
+        }
         guard let key = lastBuildKey else { return false }
         return key.hasPrefix("\(session.id)|")
     }
@@ -2543,6 +2780,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func jumpToFirstPrompt(session: Session) {
         if viewMode == .terminal {
             terminalJumpToken &+= 1
+            return
+        }
+        if viewMode == .blocks {
+            richFirstPromptJumpToken &+= 1
             return
         }
         let r: NSRange?

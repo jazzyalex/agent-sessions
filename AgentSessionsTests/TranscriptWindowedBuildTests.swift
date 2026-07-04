@@ -229,19 +229,24 @@ final class TranscriptWindowedBuildTests: XCTestCase {
                                                           blockRange: window.lowerBlock...window.upperBlock,
                                                           skipAgentsPreamble: false,
                                                           enableReviewCards: true)
+        // Full-session anchor map + total block count now live in the owner,
+        // window-independent by construction (see TranscriptDerivedState).
+        let snap = TranscriptDerivedState.computeSnapshot(
+            session: session,
+            settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true))
 
         // Anchor map covers every event, line map does not.
-        XCTAssertEqual(tail.eventIDToAnchorBlockIndex.count, blocks.count,
+        XCTAssertEqual(snap.eventIDToAnchorBlockIndex.count, blocks.count,
                        "anchor map must have an entry per block, regardless of window")
-        XCTAssertLessThan(tail.eventIDToUserLineID.count, tail.eventIDToAnchorBlockIndex.count,
+        XCTAssertLessThan(tail.eventIDToUserLineID.count, snap.eventIDToAnchorBlockIndex.count,
                           "the windowed line map must be a strict subset (off-window entries absent)")
-        XCTAssertEqual(tail.totalBlockCount, blocks.count)
+        XCTAssertEqual(snap.totalBlockCount, blocks.count)
         XCTAssertEqual(tail.builtBlockRange, window.lowerBlock...window.upperBlock)
 
         // The very first user event's anchor is block 0, which is below the window,
         // so it has an anchor entry but NO line-id entry in the tail build.
         let firstUserEventID = blocks.first { $0.kind == .user }!.eventID
-        XCTAssertEqual(tail.eventIDToAnchorBlockIndex[firstUserEventID], 0)
+        XCTAssertEqual(snap.eventIDToAnchorBlockIndex[firstUserEventID], 0)
         XCTAssertNil(tail.eventIDToUserLineID[firstUserEventID],
                      "an off-window target must not resolve to a line id in the tail build")
     }
@@ -261,15 +266,16 @@ final class TranscriptWindowedBuildTests: XCTestCase {
         let tail = TranscriptWindow.lastWindow(totalBlocks: blocks.count, blockTarget: 16)
         XCTAssertFalse(tail.coversTop)
 
-        // Pick a user event whose anchor block is below the tail window.
-        let tailResult = SessionTerminalView.buildRebuildResult(session: session, blocks: blocks,
-                                                                blockRange: tail.lowerBlock...tail.upperBlock,
-                                                                skipAgentsPreamble: false,
-                                                                enableReviewCards: true)
+        // Pick a user event whose anchor block is below the tail window. The
+        // full-session anchor map (used by the view's widen path) lives in the
+        // owner and is window-independent by construction.
+        let snap = TranscriptDerivedState.computeSnapshot(
+            session: session,
+            settings: .init(skipAgentsPreamble: false, reviewCardsEnabled: true))
         let offWindowUserEvent = blocks.first { block in
             block.kind == .user && block.globalBlockIndex < tail.lowerBlock
         }!.eventID
-        let anchorBlock = tailResult.eventIDToAnchorBlockIndex[offWindowUserEvent]!
+        let anchorBlock = snap.eventIDToAnchorBlockIndex[offWindowUserEvent]!
         XCTAssertLessThan(anchorBlock, tail.lowerBlock)
 
         // Widen exactly as widenWindowForJump does: [max(0, anchor-margin) ... upper].
