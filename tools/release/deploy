@@ -148,18 +148,37 @@ require_qa_stamp() {
     fi
   fi
 
-  if [[ ! -f "$QA_STAMP_FILE" ]]; then
-    red "ERROR: No release QA stamp found."
-    red "Run: tools/release/deploy qa --version $version"
-    red "Or explicitly bypass with SKIP_QA=1 tools/release/deploy release $version"
-    exit 2
-  fi
-
   local current_head
   current_head=$(git rev-parse HEAD)
   if [[ -z "$expected_head" ]]; then
     expected_head="$current_head"
   fi
+
+  # Auto-run QA when the stamp is missing or invalid on a fully clean tree,
+  # instead of bouncing the operator to a manual `deploy qa` round-trip.
+  if ! qa_stamp_matches "$version" "$expected_head"; then
+    if [[ -n "$tracked_dirty" || -n "$untracked_dirty" ]]; then
+      red "ERROR: No valid release QA stamp and the tree is not fully clean; cannot auto-run QA."
+      red "Run: tools/release/deploy qa --version $version"
+      exit 2
+    fi
+    yellow "No valid QA stamp for $version at $expected_head — running release QA now (auto)"
+    run_release_qa_core "$version"
+    if ! qa_stamp_matches "$version" "$expected_head"; then
+      red "ERROR: Release QA stamp is still not valid after auto-run."
+      exit 2
+    fi
+  fi
+
+  green "✓ Release QA stamp valid for $version at $expected_head"
+}
+
+# Returns 0 when the stamp exists and matches version/head and is < 24h old.
+qa_stamp_matches() {
+  local version="$1"
+  local expected_head="$2"
+
+  [[ -f "$QA_STAMP_FILE" ]] || return 1
 
   STAMP_PATH_VALUE="$QA_STAMP_FILE" \
   EXPECTED_VERSION="$version" \
@@ -204,8 +223,6 @@ if errors:
         print(f"  - {error}", file=sys.stderr)
     sys.exit(2)
 PYEOF
-
-  green "✓ Release QA stamp valid for $version at $expected_head"
 }
 
 count_lines() {
@@ -560,6 +577,15 @@ cmd_qa() {
   if [[ -z "$VERSION" ]]; then
     VERSION=$(current_project_version)
   fi
+
+  run_release_qa_core "$VERSION"
+}
+
+# Core QA work (build + suites + stamp). Callable from cmd_qa and from
+# require_qa_stamp's auto-run path; must NOT call init_logging (the caller
+# owns logging; re-exec'ing tee here would hijack the release log).
+run_release_qa_core() {
+  local VERSION="$1"
 
   echo "==> Release QA preflight"
   if [[ -n $(git status --porcelain) ]]; then

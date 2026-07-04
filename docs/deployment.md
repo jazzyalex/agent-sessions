@@ -25,7 +25,7 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 - `tools/release/deploy qa --version <VERSION>`
 - `tools/release/deploy bump [patch|minor|major]`
 - `git push origin main`
-- `tools/release/deploy qa --version <VERSION>`
+- `tools/release/deploy qa --version <VERSION>` — optional: `release` auto-runs QA when no valid stamp exists and the tree is fully clean; run it explicitly only to front-load the wait or inspect QA output separately
 - `tools/release/deploy release <VERSION>`
 - `tools/release/deploy verify <VERSION>`
 
