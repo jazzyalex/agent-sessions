@@ -59,8 +59,8 @@ final class PresenceEngineRegressionTests: XCTestCase {
             return Data()
         }
 
-        func cancel(kind: PresenceEngine.ManagedProbeKind, reason: String) async {}
-        func cancelAll(reason: String) async {}
+        func cancel(kind: PresenceEngine.ManagedProbeKind) async {}
+        func cancelAll() async {}
     }
 
     /// Returns a fixed lsof machine-format blob for the codex query so a single

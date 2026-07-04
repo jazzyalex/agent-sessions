@@ -63,11 +63,11 @@ final class PresenceEngineTests: XCTestCase {
             return Data()
         }
 
-        func cancel(kind: PresenceEngine.ManagedProbeKind, reason: String) async {
+        func cancel(kind: PresenceEngine.ManagedProbeKind) async {
             cancelledKinds.append(kind)
         }
 
-        func cancelAll(reason: String) async {
+        func cancelAll() async {
             cancelAllCount += 1
         }
     }

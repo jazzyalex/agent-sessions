@@ -36,10 +36,10 @@ protocol ProbeRunner: Sendable {
              timeout: TimeInterval) async -> Data?
 
     /// Cancel any in-flight command of this kind (best-effort SIGTERM then SIGKILL).
-    func cancel(kind: PresenceEngine.ManagedProbeKind, reason: String) async
+    func cancel(kind: PresenceEngine.ManagedProbeKind) async
 
     /// Cancel every in-flight command, regardless of kind.
-    func cancelAll(reason: String) async
+    func cancelAll() async
 }
 
 /// Off-main-actor presence engine. Owns the poll loop, interval policy,
@@ -253,7 +253,7 @@ actor PresenceEngine {
         resetStablePollBackoff()
         armForegroundProbeRamp()
         refreshTask?.cancel()
-        await probeRunner.cancelAll(reason: "manual-refresh")
+        await probeRunner.cancelAll()
         refreshTask = Task { [weak self] in
             await self?.refreshOnce()
         }
@@ -392,7 +392,7 @@ actor PresenceEngine {
         pollTask = nil
         refreshTask?.cancel()
         refreshTask = nil
-        Task { await probeRunner.cancelAll(reason: clear ? "stop-clear" : "stop") }
+        Task { await probeRunner.cancelAll() }
         refreshInFlight = false
         refreshQueued = false
         resetStablePollBackoff()
@@ -1496,12 +1496,12 @@ actor RealProbeRunner: ProbeRunner {
         let waitResult = await withTaskCancellationHandler {
             await self.waitForExit(command.process, timeout: timeout)
         } onCancel: { [weak self] in
-            Task { await self?.cancel(kind: kind, reason: "task-cancelled") }
+            Task { await self?.cancel(kind: kind) }
         }
         command.process.terminationHandler = nil
         let timedOut = waitResult == .timedOut
         if timedOut {
-            await cancel(kind: kind, reason: "timeout")
+            await cancel(kind: kind)
         }
         let wasCancelled = Task.isCancelled
         let data = await drainedOutput
@@ -1513,15 +1513,15 @@ actor RealProbeRunner: ProbeRunner {
         return data
     }
 
-    func cancel(kind: PresenceEngine.ManagedProbeKind, reason: String) async {
+    func cancel(kind: PresenceEngine.ManagedProbeKind) async {
         guard let command = inFlightCommands.removeValue(forKey: kind) else { return }
         command.terminate()
     }
 
-    func cancelAll(reason: String) async {
+    func cancelAll() async {
         let kinds = Array(inFlightCommands.keys)
         for kind in kinds {
-            await cancel(kind: kind, reason: reason)
+            await cancel(kind: kind)
         }
     }
 
