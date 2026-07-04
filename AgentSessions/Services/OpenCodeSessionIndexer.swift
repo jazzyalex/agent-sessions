@@ -62,7 +62,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q,
@@ -126,7 +126,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
         indexingError = nil
         hasEmptyDirectory = false
 
-        let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated
+        let prio: TaskPriority = FeatureFlags.backgroundIngestTaskPriority
 
         switch backend {
         case .sqlite:
@@ -257,7 +257,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             return session
         }()
 
-        let ioQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let ioQueue = FeatureFlags.backgroundIngestQueue
         let capturedBackend = detectedBackend
         let capturedCustomRoot = sessionsRootOverride.isEmpty ? nil : sessionsRootOverride
         ioQueue.async {

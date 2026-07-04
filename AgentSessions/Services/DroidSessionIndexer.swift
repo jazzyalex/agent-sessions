@@ -65,7 +65,7 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
             $selectedModel.removeDuplicates()
         )
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q,
@@ -232,7 +232,7 @@ final class DroidSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
             return session
         }()
 
-        let ioQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let ioQueue = FeatureFlags.backgroundIngestQueue
         ioQueue.async {
             defer {
                 self.reloadLock.lock()

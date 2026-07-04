@@ -6,6 +6,17 @@ enum FeatureFlags {
     static let filterUsesCachedTranscriptOnly = false
     // Background indexing/ingest stays at .utility to remain a good system citizen.
     static let lowerQoSForBackgroundIngest = true
+    // Shared accessors for the ~25 identical inline ternaries this flag used to
+    // spawn across the indexers. Use `backgroundIngestQueue` for
+    // `.receive(on:)`/`DispatchQueue.global(qos:)` call sites and
+    // `backgroundIngestTaskPriority` for `Task(priority:)`/`Task.detached(priority:)`
+    // call sites.
+    static var backgroundIngestQueue: DispatchQueue {
+        DispatchQueue.global(qos: lowerQoSForBackgroundIngest ? .utility : .userInitiated)
+    }
+    static var backgroundIngestTaskPriority: TaskPriority {
+        lowerQoSForBackgroundIngest ? .utility : .userInitiated
+    }
     // Interactive search runs at .userInitiated with no inter-batch sleep so typing stays responsive.
     static let lowerQoSForInteractiveSearch = false
     // Building the transcript for the session you just clicked is interactive: run it at
@@ -88,7 +99,16 @@ enum FeatureFlags {
     // tail content in ~200ms of pipeline work while the full parse (~11s)
     // continues in the background and the two-stage swap replaces the
     // provisional paint.
-    static let transcriptTailFirstPaint = true
+    // The dependency on transcriptWindowedBuild is enforced structurally below
+    // (not just documented): the public accessor ANDs the raw stored flag with
+    // transcriptWindowedBuild, so tail-first paint can never be effectively "on"
+    // while windowed build is "off" — that combination would make the
+    // replacing swap a full, non-windowed rebuild of 49k+ lines on the main
+    // thread instead of the cheap windowed one.
+    private static let transcriptTailFirstPaintRaw = true
+    static var transcriptTailFirstPaint: Bool {
+        transcriptTailFirstPaintRaw && transcriptWindowedBuild
+    }
     static let transcriptTailFirstPaintMinBytes: Int = 8_000_000
 
 }

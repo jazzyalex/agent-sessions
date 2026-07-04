@@ -127,7 +127,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             $selectedKinds.removeDuplicates(),
             $allSessions
         )
-        .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+        .receive(on: FeatureFlags.backgroundIngestQueue)
         .map { [weak self] combined, kinds, all -> [Session] in
             let (input, repoName, _) = combined
             let (q, from, to, model) = input
@@ -817,7 +817,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             return session
         }()
 
-        let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let bgQueue = FeatureFlags.backgroundIngestQueue
         bgQueue.async {
             defer {
                 self.reloadLock.lock()
@@ -920,7 +920,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.allSessions[idx] = merged
 
                 let cache = self.transcriptCache
-                Task.detached(priority: FeatureFlags.lowerQoSForBackgroundIngest ? .utility : .userInitiated) {
+                Task.detached(priority: FeatureFlags.backgroundIngestTaskPriority) {
                     let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                     let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(
                         session: merged,

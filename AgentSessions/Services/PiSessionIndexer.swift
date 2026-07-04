@@ -53,7 +53,7 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
         )
 
         Publishers.CombineLatest3(inputs, $selectedKinds.removeDuplicates(), $allSessions)
-            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q,
@@ -193,7 +193,7 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
             return session
         }()
 
-        let ioQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let ioQueue = FeatureFlags.backgroundIngestQueue
         ioQueue.async {
             defer {
                 self.reloadLock.lock()

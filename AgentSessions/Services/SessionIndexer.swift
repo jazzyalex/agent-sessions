@@ -248,7 +248,7 @@ final class SessionIndexer: ObservableObject {
             $selectedKinds.removeDuplicates(),
             $allSessions
         )
-            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] input, kinds, all -> [Session] in
                 let (q, from, to, model) = input
                 let filters = Filters(query: q, dateFrom: from, dateTo: to, model: model, kinds: kinds, repoName: self?.projectFilter, pathContains: nil)
@@ -369,7 +369,7 @@ final class SessionIndexer: ObservableObject {
         reloadingSessionIDs.insert(id)
         reloadLock.unlock()
 
-        let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+        let bgQueue = FeatureFlags.backgroundIngestQueue
         bgQueue.async {
             let loadingTimer: DispatchSourceTimer? = nil
             defer {
@@ -662,7 +662,7 @@ final class SessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+            let bgQueue = FeatureFlags.backgroundIngestQueue
             bgQueue.async {
                 let filters = Filters(query: self.query, dateFrom: self.dateFrom, dateTo: self.dateTo, model: self.selectedModel, kinds: self.selectedKinds, repoName: self.projectFilter, pathContains: nil)
                 var results = FilterEngine.filterSessions(self.allSessions,
