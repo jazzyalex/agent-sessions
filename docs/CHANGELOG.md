@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [4.1] - 2026-07-03
 ### Highlights
 - **The Instant release.** This release is a top-to-bottom performance program: transcripts open instantly, sorting is instant, search is indexed, scrolling is smooth, and the app is dramatically quieter when idle.
 - **Transcripts open instantly** — even monster sessions. Opening a session paints the newest content immediately and completes the rest in the background; the multi-second (sometimes 30s+) beachball on large histories is gone. Jumping to older content (search hits, deep links, first prompt) loads the needed portion on demand.
