@@ -12,6 +12,13 @@ struct HUDRebuildGate {
         var sessionsGeneration: UInt64
         var isCompact: Bool
         var showProbes: Bool
+        /// `UserDefaults` "SkipAgentsPreamble" (see `Session.title`,
+        /// `PreferencesKey.Unified.skipAgentsPreamble`). Rendered row titles
+        /// read this preference directly, so a flip must trigger an immediate
+        /// rebuild (C3) rather than waiting for `staleReclassifyInterval` --
+        /// without it in `Inputs`, `shouldRebuild` sees no versioned-input
+        /// change and the HUD would show stale titles for up to 5s.
+        var skipAgentsPreamble: Bool
     }
 
     let staleReclassifyInterval: TimeInterval

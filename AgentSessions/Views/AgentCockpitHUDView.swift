@@ -487,7 +487,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         codexSessionsFingerprint = SessionListFingerprint(codexSessions)
         claudeSessionsFingerprint = SessionListFingerprint(claudeSessions)
         opencodeSessionsFingerprint = SessionListFingerprint(opencodeSessions)
-        lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+        lookupIndexes = Self.buildSessionLookupIndexes(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
             opencodeSessions: opencodeSessions
@@ -582,7 +582,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     }
 
     private func rebuildLookupIndexes() {
-        lookupIndexes = AgentCockpitHUDView.buildSessionLookupIndexes(
+        lookupIndexes = Self.buildSessionLookupIndexes(
             codexSessions: codexSessions,
             claudeSessions: claudeSessions,
             opencodeSessions: opencodeSessions
@@ -607,12 +607,20 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         guard let activeCodex else { return }
         let now = Date()
         let showProbes = UserDefaults.standard.bool(forKey: PreferencesKey.Cockpit.showProbeSessionsInHUD)
+        // C3: rendered row titles read this preference directly (`Session.title`
+        // via `PreferencesKey.Unified.skipAgentsPreamble`) -- default `true`
+        // when unset, matching `Session.title`'s own default so the gate's
+        // notion of "current value" agrees with what will actually render.
+        let skipAgentsPreamble = UserDefaults.standard.object(forKey: PreferencesKey.Unified.skipAgentsPreamble) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble)
         let gateInputs = HUDRebuildGate.Inputs(
             membershipVersion: activeCodex.activeMembershipVersion,
             badgeVersion: activeCodex.subagentBadgeVersion,
             sessionsGeneration: sessionsGeneration,
             isCompact: isCompact,
-            showProbes: showProbes
+            showProbes: showProbes,
+            skipAgentsPreamble: skipAgentsPreamble
         )
         guard rebuildGate.shouldRebuild(inputs: gateInputs, now: now) else { return }
 #if DEBUG
@@ -643,6 +651,48 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
 #if DEBUG
         Self.recordDebugRebuild()
 #endif
+    }
+
+    /// Moved from `AgentCockpitHUDView` (T3) -- the only real callers are this
+    /// model's `init` and `rebuildLookupIndexes()`; `AgentCockpitHUDView` keeps
+    /// a thin static forwarder only because `liveSessionSummary(activeCodex:
+    /// codexIndexer:...)` (used by `StatusItemController`/`UsageMenuBar`,
+    /// outside this model entirely) needs a lookup-index build independent of
+    /// any model instance.
+    static func buildSessionLookupIndexes(codexSessions: [Session],
+                                          claudeSessions: [Session],
+                                          opencodeSessions: [Session] = []) -> SessionLookupIndexes {
+        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
+        let allSessions = codexSessions + claudeSessions + opencodeSessions
+
+        var byLogPath: [String: Session] = [:]
+        var bySessionID: [String: Session] = [:]
+        var byWorkspace: [String: Session] = [:]
+        byLogPath.reserveCapacity(allSessions.count)
+        bySessionID.reserveCapacity(allSessions.count * 2)
+        byWorkspace.reserveCapacity(allSessions.count)
+
+        for session in allSessions where supportedSources.contains(session.source) {
+            let logKey = CodexActiveSessionsModel.logLookupKey(
+                source: session.source,
+                normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
+            )
+            byLogPath[logKey] = AgentCockpitHUDView.preferredSession(existing: byLogPath[logKey], incoming: session)
+
+            for runtimeID in CodexActiveSessionsModel.liveSessionIDCandidates(for: session) {
+                let sid = runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !sid.isEmpty else { continue }
+                let sessionKey = CodexActiveSessionsModel.sessionLookupKey(source: session.source, sessionId: sid)
+                bySessionID[sessionKey] = AgentCockpitHUDView.preferredSession(existing: bySessionID[sessionKey], incoming: session)
+            }
+
+            if let cwd = AgentCockpitHUDView.normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
+                let workspaceKey = AgentCockpitHUDView.workspaceLookupKey(source: session.source, normalizedPath: cwd)
+                byWorkspace[workspaceKey] = AgentCockpitHUDView.preferredSession(existing: byWorkspace[workspaceKey], incoming: session)
+            }
+        }
+
+        return SessionLookupIndexes(byLogPath: byLogPath, bySessionID: bySessionID, byWorkspace: byWorkspace)
     }
 }
 
@@ -2202,13 +2252,12 @@ struct AgentCockpitHUDView: View {
                                              now: Date = Date()) -> HUDRowsSnapshot {
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let allSessions = codexSessions + claudeSessions + opencodeSessions
-        let supportedFallbackSources: Set<SessionSource> = [.claude, .opencode]
-        var directJoinFallbackKeys: Set<String> = []
-        for session in allSessions where supportedFallbackSources.contains(session.source) {
-            guard activeCodex.presence(for: session) != nil else { continue }
-            directJoinFallbackKeys.insert(UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id))
+        // S2: shared with `CockpitView.makeLiveRowsSnapshot()`, which used to
+        // carry a byte-identical copy of this direct-join key computation.
+        let directJoinFallbackKeys = SessionRowsBuilder.directJoinFallbackKeys(for: allSessions) { session in
+            activeCodex.presence(for: session)
         }
-        let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
+        let fallbackBySessionKey = SessionRowsBuilder.buildFallbackPresenceMap(
             sessions: allSessions,
             presences: presences,
             directJoinSessionKeys: directJoinFallbackKeys
@@ -2218,7 +2267,7 @@ struct AgentCockpitHUDView: View {
         fallbackSessionByPresenceKey.reserveCapacity(fallbackBySessionKey.count)
 
         for session in allSessions {
-            let sessionKey = UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id)
+            let sessionKey = SessionRowsBuilder.fallbackPresenceKey(source: session.source, sessionID: session.id)
             guard let presence = fallbackBySessionKey[sessionKey] else { continue }
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
             guard presenceKey != "unknown" else { continue }
@@ -2993,43 +3042,23 @@ struct AgentCockpitHUDView: View {
         return Self.codexRolloutTimestampFormatter.date(from: ts)
     }
 
+    /// Moved to `AgentCockpitHUDDerivedStateModel` (T3) -- the only real
+    /// callers are that model's `init`/`rebuildLookupIndexes()`. This
+    /// forwarder stays because `liveSessionSummary(activeCodex:codexIndexer:...)`
+    /// below needs a lookup-index build independent of any model instance
+    /// (it's also called from `StatusItemController`/`UsageMenuBar`, outside
+    /// the HUD's derived-state model entirely).
     static func buildSessionLookupIndexes(codexSessions: [Session],
                                           claudeSessions: [Session],
                                           opencodeSessions: [Session] = []) -> SessionLookupIndexes {
-        let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
-        let allSessions = codexSessions + claudeSessions + opencodeSessions
-
-        var byLogPath: [String: Session] = [:]
-        var bySessionID: [String: Session] = [:]
-        var byWorkspace: [String: Session] = [:]
-        byLogPath.reserveCapacity(allSessions.count)
-        bySessionID.reserveCapacity(allSessions.count * 2)
-        byWorkspace.reserveCapacity(allSessions.count)
-
-        for session in allSessions where supportedSources.contains(session.source) {
-            let logKey = CodexActiveSessionsModel.logLookupKey(
-                source: session.source,
-                normalizedPath: CodexActiveSessionsModel.normalizePath(session.filePath)
-            )
-            byLogPath[logKey] = Self.preferredSession(existing: byLogPath[logKey], incoming: session)
-
-            for runtimeID in CodexActiveSessionsModel.liveSessionIDCandidates(for: session) {
-                let sid = runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !sid.isEmpty else { continue }
-                let sessionKey = CodexActiveSessionsModel.sessionLookupKey(source: session.source, sessionId: sid)
-                bySessionID[sessionKey] = Self.preferredSession(existing: bySessionID[sessionKey], incoming: session)
-            }
-
-            if let cwd = Self.normalizedWorkingDirectory(session.cwd), !cwd.isEmpty {
-                let workspaceKey = Self.workspaceLookupKey(source: session.source, normalizedPath: cwd)
-                byWorkspace[workspaceKey] = Self.preferredSession(existing: byWorkspace[workspaceKey], incoming: session)
-            }
-        }
-
-        return SessionLookupIndexes(byLogPath: byLogPath, bySessionID: bySessionID, byWorkspace: byWorkspace)
+        AgentCockpitHUDDerivedStateModel.buildSessionLookupIndexes(
+            codexSessions: codexSessions,
+            claudeSessions: claudeSessions,
+            opencodeSessions: opencodeSessions
+        )
     }
 
-    private static func preferredSession(existing: Session?, incoming: Session) -> Session {
+    fileprivate static func preferredSession(existing: Session?, incoming: Session) -> Session {
         guard let existing else { return incoming }
         if incoming.modifiedAt != existing.modifiedAt {
             return incoming.modifiedAt > existing.modifiedAt ? incoming : existing
@@ -3045,7 +3074,7 @@ struct AgentCockpitHUDView: View {
         return incoming.id < existing.id ? incoming : existing
     }
 
-    private static func normalizedWorkingDirectory(_ raw: String?) -> String? {
+    fileprivate static func normalizedWorkingDirectory(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let normalized = CodexActiveSessionsModel.normalizePath(raw)
         return normalized.isEmpty ? nil : normalized
@@ -3061,7 +3090,7 @@ struct AgentCockpitHUDView: View {
         return "/dev/\(trimmed)"
     }
 
-    private static func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
+    fileprivate static func workspaceLookupKey(source: SessionSource, normalizedPath: String) -> String {
         "\(source.rawValue)|cwd:\(normalizedPath)"
     }
 }

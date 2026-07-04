@@ -376,4 +376,104 @@ final class SessionRowsBuilderTests: XCTestCase {
             )
         }
     }
+
+#if DEBUG
+    // MARK: - E3: fallback-presence map cache reuse
+    //
+    // `SessionRowsBuilder.build` used to call `buildFallbackPresenceMap`
+    // unconditionally on every rebuild -- including the ~2s live-poll cadence
+    // (`UnifiedSessionsView.onChange(of: unified.sessions)`), which republishes
+    // even when `allSessions` is content-identical. These pin the fix: the same
+    // (allSessions, presences, directJoinFallbackKeys) signature must be served
+    // from cache on the second call, and a genuine change in any of those three
+    // inputs must force a recompute.
+
+    func testFallbackPresenceMapReusedForIdenticalInputs() {
+        SessionRowsBuilder.debugResetFallbackPresenceCache()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = (0..<10).map { i in makeSession(id: "s\(i)", modifiedAt: base.addingTimeInterval(Double(i))) }
+
+        func input() -> SessionRowsBuilder.RowsInput {
+            SessionRowsBuilder.RowsInput(
+                nextRows: rows,
+                allSessions: rows,
+                previousCachedRows: rows,
+                collapsedParents: [],
+                showSubagentHierarchy: false,
+                searchActive: false,
+                isHierarchyBrowsing: false,
+                presences: [],
+                directJoinFallbackKeys: []
+            )
+        }
+
+        _ = SessionRowsBuilder.build(input: input())
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 1,
+                       "first call always computes (nothing cached yet)")
+
+        _ = SessionRowsBuilder.build(input: input())
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 1,
+                       "second call with identical inputs must be served from cache, not recomputed")
+
+        _ = SessionRowsBuilder.build(input: input())
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 1,
+                       "repeated identical calls stay cached (matches the ~2s live-poll re-trigger pattern)")
+    }
+
+    func testFallbackPresenceMapRecomputesWhenAllSessionsChange() {
+        SessionRowsBuilder.debugResetFallbackPresenceCache()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = (0..<5).map { i in makeSession(id: "s\(i)", modifiedAt: base.addingTimeInterval(Double(i))) }
+        let changedRows = rows + [makeSession(id: "s-new", modifiedAt: base.addingTimeInterval(99))]
+
+        func input(_ sessions: [Session]) -> SessionRowsBuilder.RowsInput {
+            SessionRowsBuilder.RowsInput(
+                nextRows: sessions,
+                allSessions: sessions,
+                previousCachedRows: sessions,
+                collapsedParents: [],
+                showSubagentHierarchy: false,
+                searchActive: false,
+                isHierarchyBrowsing: false,
+                presences: [],
+                directJoinFallbackKeys: []
+            )
+        }
+
+        _ = SessionRowsBuilder.build(input: input(rows))
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 1)
+
+        _ = SessionRowsBuilder.build(input: input(changedRows))
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 2,
+                       "a genuine allSessions change (new session appended) must force a recompute")
+    }
+
+    func testFallbackPresenceMapRecomputesWhenDirectJoinKeysChange() {
+        SessionRowsBuilder.debugResetFallbackPresenceCache()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = (0..<5).map { i in makeSession(id: "s\(i)", source: .claude, modifiedAt: base.addingTimeInterval(Double(i))) }
+
+        func input(directJoinFallbackKeys: Set<String>) -> SessionRowsBuilder.RowsInput {
+            SessionRowsBuilder.RowsInput(
+                nextRows: rows,
+                allSessions: rows,
+                previousCachedRows: rows,
+                collapsedParents: [],
+                showSubagentHierarchy: false,
+                searchActive: false,
+                isHierarchyBrowsing: false,
+                presences: [],
+                directJoinFallbackKeys: directJoinFallbackKeys
+            )
+        }
+
+        _ = SessionRowsBuilder.build(input: input(directJoinFallbackKeys: []))
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 1)
+
+        let key = SessionRowsBuilder.fallbackPresenceKey(source: .claude, sessionID: "s0")
+        _ = SessionRowsBuilder.build(input: input(directJoinFallbackKeys: [key]))
+        XCTAssertEqual(SessionRowsBuilder.debugFallbackPresenceComputeCount(), 2,
+                       "a genuine directJoinFallbackKeys change must force a recompute")
+    }
+#endif
 }

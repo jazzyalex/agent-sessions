@@ -116,13 +116,13 @@ struct CockpitView: View {
         let lookupIndexes = buildSessionLookupIndexes()
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let allSessions = codexIndexer.allSessions + claudeIndexer.allSessions + opencodeIndexer.allSessions
-        let supportedFallbackSources: Set<SessionSource> = [.claude, .opencode]
-        var directJoinFallbackKeys: Set<String> = []
-        for session in allSessions where supportedFallbackSources.contains(session.source) {
-            guard activeCodex.presence(for: session) != nil else { continue }
-            directJoinFallbackKeys.insert(UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id))
+        // S2: shared with `AgentCockpitHUDView.makeRowsSnapshot(...)`, which
+        // used to carry a byte-identical copy of this direct-join key
+        // computation.
+        let directJoinFallbackKeys = SessionRowsBuilder.directJoinFallbackKeys(for: allSessions) { session in
+            activeCodex.presence(for: session)
         }
-        let fallbackBySessionKey = UnifiedSessionsView.buildFallbackPresenceMap(
+        let fallbackBySessionKey = SessionRowsBuilder.buildFallbackPresenceMap(
             sessions: allSessions,
             presences: activeCodex.presences,
             directJoinSessionKeys: directJoinFallbackKeys
@@ -130,7 +130,7 @@ struct CockpitView: View {
         var fallbackSessionByPresenceKey: [String: Session] = [:]
         fallbackSessionByPresenceKey.reserveCapacity(fallbackBySessionKey.count)
         for session in allSessions {
-            let sessionKey = UnifiedSessionsView.fallbackPresenceKey(source: session.source, sessionID: session.id)
+            let sessionKey = SessionRowsBuilder.fallbackPresenceKey(source: session.source, sessionID: session.id)
             guard let presence = fallbackBySessionKey[sessionKey] else { continue }
             let presenceKey = CodexActiveSessionsModel.presenceKey(for: presence)
             guard presenceKey != "unknown" else { continue }

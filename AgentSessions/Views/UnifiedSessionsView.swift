@@ -2764,123 +2764,27 @@ struct UnifiedSessionsView: View {
         return "\(stateToken)-\(lastSeenToken)"
     }
 
-    /// Live-presence-independent variant of `surfacePills`, always resolving the
-    /// Claude Desktop `isArchived` bit to `false`. This is the part that's safe to
-    /// precompute once per rows rebuild (`SessionRowsBuilder.build`) instead of
-    /// per row-body call, since it depends only on static `Session` fields.
-    /// `cellSource(for:)` patches in the live `isArchivedClaudeDesktop` bit at
-    /// render time via `Self.applyingLiveClaudeArchiveState(to:session:isClaudeArchived:)`
-    /// -- see that function's doc comment for why the patch is safe.
+    /// Surface-pill classification (`staticSurfacePills`, `surfacePills`,
+    /// `applyingLiveClaudeArchiveState`, and their private helpers) lives in
+    /// `SessionRowsBuilder` (Services) -- it's pure business logic over
+    /// `Session` data with no SwiftUI dependency, whereas `CodexSurfacePill`
+    /// itself stays here since it carries presentation (`Color`/`Font`)
+    /// methods. These are thin forwarders so call sites in this file can keep
+    /// using `Self.<name>(...)` (T2).
     static func staticSurfacePills(for session: Session) -> [CodexSurfacePill] {
-        surfacePills(for: session, isClaudeArchived: false)
+        SessionRowsBuilder.staticSurfacePills(for: session)
     }
 
-    /// Patches the live Claude Desktop archived bit into a precomputed static
-    /// pills array: a lone unarchived "desk" pill on a non-side-chat `.claude`
-    /// session becomes `[.desktop(isArchived: true)]` when the live archive
-    /// join says the session is archived. No other pill shape is touched.
-    ///
-    /// DELIBERATE DIVERGENCE from the legacy single-call
-    /// `surfacePills(for:isClaudeArchived:)`: a Claude session can reach a
-    /// `[.desktop(isArchived: false)]` pill through the `surface == .desktop`
-    /// SWITCH branch (e.g. `originSource == "claude-desktop"`, which
-    /// `claudeDesktopSurfacePill` does NOT match) while
-    /// `isArchivedClaudeDesktop` is true via the filename-UUID sidecar join
-    /// (`Session.claudeArchiveJoinKey`). Legacy left that pill unarchived --
-    /// the `isClaudeArchived` parameter was only ever consulted inside
-    /// `claudeDesktopSurfacePill`, so the switch branch ignored it. This patch
-    /// promotes it to archived. Adjudicated as the intended behavior in the
-    /// 8a3512f0 review: an archived session should show the archived pill
-    /// regardless of which heuristic classified it as Desktop; the legacy
-    /// non-promotion was the bug. Pinned by
-    /// `testApplyingLiveClaudeArchiveStatePromotesSwitchBranchDesktopPill`.
-    ///
-    /// `!session.isSideChat` matters: a side-chat session ALSO produces a
-    /// `[.standard(label: "desk", ...)]` pill (surfacePills's `isSideChat`
-    /// branch fires before `claudeDesktopSurfacePill` is ever consulted), which
-    /// is label/isArchived-identical to an unarchived Claude Desktop pill but
-    /// must never be promoted to an archived Desktop pill here.
     static func applyingLiveClaudeArchiveState(
         to staticPills: [CodexSurfacePill],
         session: Session,
         isClaudeArchived: Bool
     ) -> [CodexSurfacePill] {
-        guard session.source == .claude,
-              !session.isSideChat,
-              isClaudeArchived,
-              staticPills.count == 1,
-              staticPills[0].label == "desk",
-              staticPills[0].isArchived == false else {
-            return staticPills
-        }
-        return [.desktop(isArchived: true)]
+        SessionRowsBuilder.applyingLiveClaudeArchiveState(to: staticPills, session: session, isClaudeArchived: isClaudeArchived)
     }
 
     static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [CodexSurfacePill] {
-        if session.isSideChat {
-            return [.standard(label: "desk", accessibilityLabel: "Desktop")]
-        }
-        if let claudeDesktopPill = claudeDesktopSurfacePill(for: session, isArchived: isClaudeArchived) {
-            return [claudeDesktopPill]
-        }
-
-        switch session.surface ?? session.codexSurface {
-        case .desktop:
-            return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
-        case .vscode:
-            guard session.source == .codex else { return [] }
-            return [.standard(label: "vsc", accessibilityLabel: "VS Code")]
-        case .cli:
-            guard supportsAgentSurfacePills(session) else { return [] }
-            return [.standard(label: "cli", accessibilityLabel: "CLI")]
-        case .subagent:
-            guard session.source == .codex else { return [] }
-            return codexOriginatorSurfacePill(for: session).map { [$0] } ?? []
-        case .other, .unknown, .none:
-            if session.isCodexDesktopSession {
-                return [.desktop(isArchived: session.isArchivedCodexDesktopSession)]
-            }
-            guard supportsAgentSurfacePills(session) else { return [] }
-            return session.isSubagent ? [] : [.standard(label: "cli", accessibilityLabel: "CLI")]
-        }
-    }
-
-    private static func supportsAgentSurfacePills(_ session: Session) -> Bool {
-        session.source == .codex || session.source == .claude
-    }
-
-    private static func claudeDesktopSurfacePill(for session: Session, isArchived: Bool) -> CodexSurfacePill? {
-        guard session.source == .claude else { return nil }
-        let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let originSource = session.originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if originator == "claude desktop" || originSource == "local-agent-mode" || isClaudeDesktopLocalAgentPath(session.filePath) {
-            return .desktop(isArchived: isArchived)
-        }
-        return nil
-    }
-
-    private static func isClaudeDesktopLocalAgentPath(_ path: String) -> Bool {
-        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
-        return components.contains("local-agent-mode-sessions") &&
-            components.contains(".claude") &&
-            components.contains("projects") &&
-            components.contains { $0.hasPrefix("local_") }
-    }
-
-    private static func codexOriginatorSurfacePill(for session: Session) -> CodexSurfacePill? {
-        let originator = session.codexOriginator?.lowercased()
-        if originator == "codex desktop" ||
-            originator?.contains("desktop") == true ||
-            originator?.contains("app") == true {
-            return .desktop(isArchived: session.isArchivedCodexDesktopSession)
-        }
-        if originator == "codex_vscode" {
-            return .standard(label: "vsc", accessibilityLabel: "VS Code")
-        }
-        if originator == "codex_cli_rs" || originator == "codex-tui" {
-            return .standard(label: "cli", accessibilityLabel: "CLI")
-        }
-        return nil
+        SessionRowsBuilder.surfacePills(for: session, isClaudeArchived: isClaudeArchived)
     }
 
     struct CodexSurfacePill {
@@ -3336,14 +3240,13 @@ struct UnifiedSessionsView: View {
     /// cannot move off-main (see doc comment on `buildFallbackPresenceMap`) --
     /// but it's the same O(sessions) set of calls this function always made, just
     /// isolated from the heavy grouping/sorting that used to run alongside it.
+    /// Delegates to `SessionRowsBuilder.directJoinFallbackKeys` (S2 shared
+    /// helper) so this file, `CockpitView`, and `AgentCockpitHUDView` don't
+    /// each keep their own copy of the same source-filter loop.
     private func directJoinFallbackKeys(for sessions: [Session]) -> Set<String> {
-        let supportedSources: Set<SessionSource> = [.claude, .opencode]
-        var keys: Set<String> = []
-        for session in sessions where supportedSources.contains(session.source) {
-            guard activeCodexSessions.presence(for: session) != nil else { continue }
-            keys.insert(Self.fallbackPresenceKey(source: session.source, sessionID: session.id))
+        SessionRowsBuilder.directJoinFallbackKeys(for: sessions) { session in
+            activeCodexSessions.presence(for: session)
         }
-        return keys
     }
 
     /// Main-actor, standalone fallback-presence refresh for the membership-tick
@@ -3356,180 +3259,42 @@ struct UnifiedSessionsView: View {
     /// independent of any rows rebuild.
     private func rebuildCachedFallbackPresences() {
         let sessions = unified.allSessions
-        cachedFallbackPresenceBySessionKey = Self.buildFallbackPresenceMap(
+        cachedFallbackPresenceBySessionKey = SessionRowsBuilder.buildFallbackPresenceMap(
             sessions: sessions,
             presences: activeCodexSessions.presences,
             directJoinSessionKeys: directJoinFallbackKeys(for: sessions)
         )
     }
 
-    /// Builds the reverse (session -> presence) fallback join used when a session
-    /// has no presence directly keyed to it (no session-specific join signals in
-    /// the presence payload) but can still be matched by workspace/cwd or, failing
-    /// that, by ordinal position within its source. Pure over `Sendable` inputs --
-    /// runnable off the main actor via `SessionRowsBuilder.build` (W7 Task 1;
-    /// Task 0 fingerprint: 170 samples / 43ms-per-call spans on main).
-    ///
-    /// `directJoinSessionKeys` replaces the old `hasDirectJoin: (Session) -> Bool`
-    /// closure parameter, which called `CodexActiveSessionsModel.presence(for:)`
-    /// (main-actor: reads `latestSnapshot`/`lookupCacheEntry`, not just the
-    /// Sendable `presences` array) -- that lookup itself cannot move off-main
-    /// without duplicating the model's private cache logic, so the caller
-    /// precomputes the direct-join key set on main (`directJoinFallbackKeys`,
-    /// cheap: same call count as before) and hands it in as plain `Set<String>`
-    /// data instead.
+    /// Fallback-presence join logic (`buildFallbackPresenceMap` and its
+    /// private helpers, plus `fallbackClaimedPresence`/`fallbackEligibleSessions`/
+    /// `fallbackSessionSort`/`fallbackPresenceSort`) lives in `SessionRowsBuilder`
+    /// (Services) -- pure business logic over `Session`/`CodexActivePresence`
+    /// Sendable data, with no View dependency (T2). These are thin forwarders
+    /// so call sites in this file can keep using `Self.<name>(...)`.
     static func buildFallbackPresenceMap(sessions: [Session],
                                          presences: [CodexActivePresence],
                                          directJoinSessionKeys: Set<String>) -> [String: CodexActivePresence] {
-        let supportedSources: Set<SessionSource> = [.claude, .opencode]
-        var fallbackBySessionKey: [String: CodexActivePresence] = [:]
-        var fallbackEligibleBySource: [SessionSource: [Session]] = [:]
-        var fallbackEligibleByWorkspace: [String: [Session]] = [:]
-
-        for session in sessions where supportedSources.contains(session.source) {
-            let key = fallbackPresenceKey(source: session.source, sessionID: session.id)
-            guard !directJoinSessionKeys.contains(key) else { continue }
-            fallbackEligibleBySource[session.source, default: []].append(session)
-
-            guard let cwdRaw = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !cwdRaw.isEmpty else { continue }
-            let normalizedCWD = CodexActiveSessionsModel.normalizePath(cwdRaw)
-            guard !normalizedCWD.isEmpty else { continue }
-            let workspaceKey = fallbackWorkspaceKey(source: session.source, normalizedCWD: normalizedCWD)
-            fallbackEligibleByWorkspace[workspaceKey, default: []].append(session)
-        }
-
-        var claimableWorkspacePresences: [String: [CodexActivePresence]] = [:]
-        var unresolvedPresencesBySource: [SessionSource: [CodexActivePresence]] = [:]
-
-        for presence in presences where supportedSources.contains(presence.source) {
-            if !presenceHasSessionSpecificJoinSignals(presence),
-               let workspaceRaw = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !workspaceRaw.isEmpty {
-                let normalizedWorkspace = CodexActiveSessionsModel.normalizePath(workspaceRaw)
-                if !normalizedWorkspace.isEmpty {
-                    let workspaceKey = fallbackWorkspaceKey(source: presence.source, normalizedCWD: normalizedWorkspace)
-                    claimableWorkspacePresences[workspaceKey, default: []].append(presence)
-                }
-            }
-
-            guard !presenceHasStrongJoinSignals(presence) else { continue }
-            guard hasFallbackIdentitySignals(presence) else { continue }
-            unresolvedPresencesBySource[presence.source, default: []].append(presence)
-        }
-
-        for (workspaceKey, candidateSessions) in fallbackEligibleByWorkspace {
-            guard let workspacePresences = claimableWorkspacePresences[workspaceKey], !workspacePresences.isEmpty else {
-                continue
-            }
-            let orderedSessions = candidateSessions.sorted(by: fallbackSessionSort)
-            let orderedPresences = workspacePresences.sorted(by: fallbackPresenceSort)
-            let limit = min(orderedSessions.count, orderedPresences.count)
-            guard limit > 0 else { continue }
-            for index in 0..<limit {
-                let key = fallbackPresenceKey(
-                    source: orderedSessions[index].source,
-                    sessionID: orderedSessions[index].id
-                )
-                guard fallbackBySessionKey[key] == nil else { continue }
-                fallbackBySessionKey[key] = orderedPresences[index]
-            }
-        }
-
-        for source in supportedSources {
-            guard let sourceSessions = fallbackEligibleBySource[source], !sourceSessions.isEmpty else { continue }
-            guard let unresolvedPresences = unresolvedPresencesBySource[source], !unresolvedPresences.isEmpty else { continue }
-
-            let remainingSessions = sourceSessions.filter {
-                let key = fallbackPresenceKey(source: $0.source, sessionID: $0.id)
-                return fallbackBySessionKey[key] == nil
-            }
-            guard !remainingSessions.isEmpty else { continue }
-
-            let orderedSessions = remainingSessions.sorted(by: fallbackSessionSort)
-            let orderedPresences = unresolvedPresences.sorted(by: fallbackPresenceSort)
-            let limit = min(orderedSessions.count, orderedPresences.count)
-            guard limit > 0 else { continue }
-            for index in 0..<limit {
-                let key = fallbackPresenceKey(
-                    source: orderedSessions[index].source,
-                    sessionID: orderedSessions[index].id
-                )
-                guard fallbackBySessionKey[key] == nil else { continue }
-                fallbackBySessionKey[key] = orderedPresences[index]
-            }
-        }
-
-        return fallbackBySessionKey
+        SessionRowsBuilder.buildFallbackPresenceMap(
+            sessions: sessions,
+            presences: presences,
+            directJoinSessionKeys: directJoinSessionKeys
+        )
     }
 
     static func fallbackPresenceKey(source: SessionSource, sessionID: String) -> String {
-        "\(source.rawValue)|session:\(sessionID)"
-    }
-
-    private static func fallbackWorkspaceKey(source: SessionSource, normalizedCWD: String) -> String {
-        "\(source.rawValue)|cwd:\(normalizedCWD)"
-    }
-
-    private static func hasFallbackIdentitySignals(_ presence: CodexActivePresence) -> Bool {
-        let hasTTY = presence.tty?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasPID = presence.pid != nil
-        let hasITermID = presence.terminal?.itermSessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return hasTTY || hasPID || hasITermID
-    }
-
-    private static func presenceHasSessionSpecificJoinSignals(_ presence: CodexActivePresence) -> Bool {
-        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return hasSessionID || hasLogPath
+        SessionRowsBuilder.fallbackPresenceKey(source: source, sessionID: sessionID)
     }
 
     static func fallbackClaimedPresence(for session: Session,
                                         among candidateSessions: [Session],
                                         using fallbackPresences: [CodexActivePresence]) -> CodexActivePresence? {
-        guard !candidateSessions.isEmpty, !fallbackPresences.isEmpty else { return nil }
-        let orderedSessions = candidateSessions.sorted(by: fallbackSessionSort)
-        guard let rank = orderedSessions.firstIndex(where: { $0.source == session.source && $0.id == session.id }) else {
-            return nil
-        }
-        let orderedPresences = fallbackPresences.sorted(by: fallbackPresenceSort)
-        guard rank < orderedPresences.count else { return nil }
-        return orderedPresences[rank]
+        SessionRowsBuilder.fallbackClaimedPresence(for: session, among: candidateSessions, using: fallbackPresences)
     }
 
     static func fallbackEligibleSessions(from candidateSessions: [Session],
                                          hasDirectJoin: (Session) -> Bool) -> [Session] {
-        candidateSessions.filter { !hasDirectJoin($0) }
-    }
-
-    static func fallbackSessionSort(_ lhs: Session, _ rhs: Session) -> Bool {
-        if lhs.modifiedAt != rhs.modifiedAt { return lhs.modifiedAt > rhs.modifiedAt }
-        if lhs.startTime != rhs.startTime { return (lhs.startTime ?? .distantPast) > (rhs.startTime ?? .distantPast) }
-        if lhs.filePath != rhs.filePath { return lhs.filePath < rhs.filePath }
-        return lhs.id < rhs.id
-    }
-
-    static func fallbackPresenceSort(_ lhs: CodexActivePresence, _ rhs: CodexActivePresence) -> Bool {
-        let leftSeen = lhs.lastSeenAt ?? .distantPast
-        let rightSeen = rhs.lastSeenAt ?? .distantPast
-        if leftSeen != rightSeen { return leftSeen > rightSeen }
-
-        let leftStarted = lhs.startedAt ?? .distantPast
-        let rightStarted = rhs.startedAt ?? .distantPast
-        if leftStarted != rightStarted { return leftStarted > rightStarted }
-
-        let leftKey = CodexActiveSessionsModel.presenceKey(for: lhs)
-        let rightKey = CodexActiveSessionsModel.presenceKey(for: rhs)
-        if leftKey != rightKey { return leftKey < rightKey }
-        return (lhs.pid ?? .min) < (rhs.pid ?? .min)
-    }
-
-    private static func presenceHasStrongJoinSignals(_ presence: CodexActivePresence) -> Bool {
-        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasWorkspace = presence.workspaceRoot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let hasSourcePath = presence.sourceFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        return hasSessionID || hasLogPath || hasWorkspace || hasSourcePath
+        SessionRowsBuilder.fallbackEligibleSessions(from: candidateSessions, hasDirectJoin: hasDirectJoin)
     }
 
 	    private func progressLineText(_ p: SearchCoordinator.Progress) -> String {

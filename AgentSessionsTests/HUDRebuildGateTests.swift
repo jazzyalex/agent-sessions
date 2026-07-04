@@ -5,10 +5,10 @@ final class HUDRebuildGateTests: XCTestCase {
 
     private func inputs(membership: UInt64 = 1, badge: UInt64 = 1,
                         sessions: UInt64 = 1, compact: Bool = false,
-                        probes: Bool = false) -> HUDRebuildGate.Inputs {
+                        probes: Bool = false, skipPreamble: Bool = true) -> HUDRebuildGate.Inputs {
         HUDRebuildGate.Inputs(membershipVersion: membership, badgeVersion: badge,
                               sessionsGeneration: sessions, isCompact: compact,
-                              showProbes: probes)
+                              showProbes: probes, skipAgentsPreamble: skipPreamble)
     }
 
     func testFirstCallAlwaysRebuilds() {
@@ -44,5 +44,18 @@ final class HUDRebuildGateTests: XCTestCase {
         _ = gate.shouldRebuild(inputs: inputs(), now: Date(timeIntervalSince1970: 100))
         gate.forceNextRebuild()
         XCTAssertTrue(gate.shouldRebuild(inputs: inputs(), now: Date(timeIntervalSince1970: 100.5)))
+    }
+
+    /// C3: rendered row titles read `SkipAgentsPreamble` directly
+    /// (`Session.title`), so flipping the preference must trigger an
+    /// immediate rebuild instead of waiting up to `staleReclassifyInterval`
+    /// for the next age-based reclassify.
+    func testSkipAgentsPreambleChangeRebuildsImmediately() {
+        var gate = HUDRebuildGate(staleReclassifyInterval: 5)
+        _ = gate.shouldRebuild(inputs: inputs(skipPreamble: true), now: Date(timeIntervalSince1970: 100))
+        XCTAssertFalse(gate.shouldRebuild(inputs: inputs(skipPreamble: true), now: Date(timeIntervalSince1970: 100.5)),
+                       "sanity: unchanged inputs within the interval should still skip")
+        XCTAssertTrue(gate.shouldRebuild(inputs: inputs(skipPreamble: false), now: Date(timeIntervalSince1970: 100.6)),
+                      "SkipAgentsPreamble flip must rebuild immediately, not wait for the stale-reclassify interval")
     }
 }
