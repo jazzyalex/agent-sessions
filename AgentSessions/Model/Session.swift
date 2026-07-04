@@ -1148,16 +1148,8 @@ enum ClaudeDesktopProjectClassifier {
 }
 
 enum ProjectPathNormalizer {
-    private final class CachedWorktreeBase {
-        let value: String?
-
-        init(_ value: String?) {
-            self.value = value
-        }
-    }
-
-    private static let gitWorktreeBaseCache = NSCache<NSString, CachedWorktreeBase>()
-    private static let gitOriginBaseCache = NSCache<NSString, CachedWorktreeBase>()
+    private static let gitWorktreeBaseCache = NSCacheMemo<String?>()
+    private static let gitOriginBaseCache = NSCacheMemo<String?>()
 
     private enum Resolution {
         case name(String, worktree: String?)
@@ -1177,11 +1169,7 @@ enum ProjectPathNormalizer {
     /// allocation per call on hot paths like the `rowRepoDisplay` sort key; if a
     /// future profile fingerprints it, the next step is precomputing per-session
     /// (keying by `Session.id` in the rows pipeline), not tuning this key.
-    private final class CachedResolution {
-        let value: Resolution?
-        init(_ value: Resolution?) { self.value = value }
-    }
-    private static let resolutionCache = NSCache<NSString, CachedResolution>()
+    private static let resolutionCache = NSCacheMemo<Resolution?>()
 
     private static func resolutionCacheKey(
         cwd: String?,
@@ -1268,7 +1256,7 @@ enum ProjectPathNormalizer {
             gitBranch: gitBranch
         )
         if let cached = resolutionCache.object(forKey: cacheKey) {
-            return cached.value
+            return cached
         }
         let resolution = resolveUncached(
             cwd: cwd,
@@ -1277,7 +1265,7 @@ enum ProjectPathNormalizer {
             gitRepositoryURL: gitRepositoryURL,
             gitBranch: gitBranch
         )
-        resolutionCache.setObject(CachedResolution(resolution), forKey: cacheKey)
+        resolutionCache.setObject(resolution, forKey: cacheKey)
         return resolution
     }
 
@@ -1523,11 +1511,11 @@ enum ProjectPathNormalizer {
 
         let cacheKey = worktreeURL.standardizedFileURL.path as NSString
         if let cached = gitWorktreeBaseCache.object(forKey: cacheKey) {
-            return cached.value
+            return cached
         }
 
         let project = readGitWorktreeBaseProjectName(from: worktreeURL)
-        gitWorktreeBaseCache.setObject(CachedWorktreeBase(project), forKey: cacheKey)
+        gitWorktreeBaseCache.setObject(project, forKey: cacheKey)
         return project
     }
 
@@ -1547,7 +1535,7 @@ enum ProjectPathNormalizer {
             .standardizedFileURL.path
         let cacheKey = "\(repositoryRoot.parentURL.standardizedFileURL.path)|\(currentRoot)|\(normalizedTarget)" as NSString
         if let cached = gitOriginBaseCache.object(forKey: cacheKey) {
-            return cached.value
+            return cached
         }
 
         let project = readOriginMatchedBaseProjectName(
@@ -1555,7 +1543,7 @@ enum ProjectPathNormalizer {
             currentRoot: currentRoot,
             normalizedTarget: normalizedTarget
         )
-        gitOriginBaseCache.setObject(CachedWorktreeBase(project), forKey: cacheKey)
+        gitOriginBaseCache.setObject(project, forKey: cacheKey)
         return project
     }
 

@@ -451,20 +451,11 @@ struct SessionTranscriptBuilder {
     /// same-count-rewrite edge case; a false-positive mismatch is harmless and
     /// only conservative — worst case it costs one extra recompute.
     /// countLimit 2 keeps at most one monster session's blocks resident.
-    private static let coalesceCache: NSCache<NSString, CoalescedBlocksBox> = {
-        let cache = NSCache<NSString, CoalescedBlocksBox>()
-        cache.countLimit = 2
-        return cache
-    }()
-
-    final class CoalescedBlocksBox {
-        let blocks: [LogicalBlock]
-        init(blocks: [LogicalBlock]) { self.blocks = blocks }
-    }
+    private static let coalesceCache = NSCacheMemo<[LogicalBlock]>(countLimit: 2)
 
     /// Test-only hook to isolate cache state between tests.
     static func _testResetCoalesceCache() {
-        coalesceCache.removeAllObjects()
+        coalesceCache.removeAll()
     }
 
     /// Expose coalesced logical blocks for reuse in terminal-specific builders.
@@ -475,12 +466,12 @@ struct SessionTranscriptBuilder {
                                 includeMeta: Bool) -> [LogicalBlock] {
         let key = "\(session.id)|\(session.events.count)|\(session.fileSizeBytes ?? -1)|\(includeMeta ? 1 : 0)" as NSString
         if let hit = coalesceCache.object(forKey: key) {
-            return hit.blocks
+            return hit
         }
         let _span = Perf.begin("transcriptCoalesce", thresholdMs: 20, "events=\(session.events.count)")
         defer { Perf.end(_span) }
         let blocks = coalesce(session: session, includeMeta: includeMeta)
-        coalesceCache.setObject(CoalescedBlocksBox(blocks: blocks), forKey: key)
+        coalesceCache.setObject(blocks, forKey: key)
         return blocks
     }
 

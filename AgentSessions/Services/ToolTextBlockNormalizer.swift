@@ -62,15 +62,6 @@ enum ToolTextBlockNormalizer {
         return normalize(context: context)
     }
 
-    /// Box wrapping a (possibly nil) `normalize(block:source:)` result so both
-    /// hit and miss outcomes can live in the same `NSCache` entry — an
-    /// `NSCache` can't store `nil` directly, and re-deriving "this block has
-    /// no tool content" on every call would defeat the point of memoizing.
-    final class NormalizeResultBox {
-        let value: ToolTextBlock?
-        init(value: ToolTextBlock?) { self.value = value }
-    }
-
     /// Memo cache for `normalize(block:source:)`. This is the dominant cost
     /// of a full transcript rebuild (recursive `extractOutputInfo` JSON
     /// parsing of `rawJSON`, ~88% of sampled build-thread work on a monster
@@ -84,17 +75,13 @@ enum ToolTextBlockNormalizer {
     /// result), kind disambiguates toolCall/toolOut sharing an eventID if that
     /// ever occurs. countLimit bounds a monster session's tool-block memo
     /// footprint; individual results are small.
-    private static let normalizeCache: NSCache<NSString, NormalizeResultBox> = {
-        let cache = NSCache<NSString, NormalizeResultBox>()
-        cache.countLimit = 4096
-        return cache
-    }()
+    private static let normalizeCache = NSCacheMemo<ToolTextBlock?>(countLimit: 4096)
 
     /// Test-only hook to isolate cache state between tests (content-varying
     /// fixtures that reuse event ids across test cases would otherwise
     /// collide on a stale memoized result).
     static func _testResetNormalizeCache() {
-        normalizeCache.removeAllObjects()
+        normalizeCache.removeAll()
     }
 
     private static func normalizeCacheKey(eventID: String, textByteCount: Int, kind: SessionTranscriptBuilder.LogicalBlock.Kind, source: SessionSource?) -> NSString {
@@ -107,7 +94,7 @@ enum ToolTextBlockNormalizer {
                                     kind: block.kind,
                                     source: source)
         if let cached = normalizeCache.object(forKey: key) {
-            return cached.value
+            return cached
         }
 
         let kind: ToolTextBlock.Kind
@@ -117,7 +104,7 @@ enum ToolTextBlockNormalizer {
         case .toolOut:
             kind = .toolOutput
         default:
-            normalizeCache.setObject(NormalizeResultBox(value: nil), forKey: key)
+            normalizeCache.setObject(nil, forKey: key)
             return nil
         }
 
@@ -133,7 +120,7 @@ enum ToolTextBlockNormalizer {
             source: source
         )
         let result = normalize(context: context)
-        normalizeCache.setObject(NormalizeResultBox(value: result), forKey: key)
+        normalizeCache.setObject(result, forKey: key)
         return result
     }
 

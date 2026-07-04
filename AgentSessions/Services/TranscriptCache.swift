@@ -4,129 +4,51 @@ import Foundation
 /// The cache is bounded so long-running indexing sessions do not grow memory
 /// without limit.
 ///
-/// Eviction is least-recently-used and O(1): entries live in an intrusive
-/// doubly-linked list (most-recently-used at `head`, least at `tail`), so a
-/// `set` that overflows a cap drops the tail without scanning the whole map.
-/// `prev` is weak so the list holds no retain cycles.
+/// Storage/eviction is delegated to the generic `LRUCache` (O(1) LRU with a
+/// count cap of 512 and a 64 MB total-cost cap keyed on transcript UTF-8 byte
+/// length). The `indexingInProgress` bookkeeping stays local here.
 final class TranscriptCache: @unchecked Sendable {
-    private final class Node {
-        let key: String
-        var transcript: String
-        var cost: Int
-        var next: Node?
-        weak var prev: Node?
+    private let store = LRUCache<String, String>(
+        maxEntries: 512,
+        maxTotalCost: 64 * 1024 * 1024,
+        cost: { $0.utf8.count }
+    )
 
-        init(key: String, transcript: String, cost: Int) {
-            self.key = key
-            self.transcript = transcript
-            self.cost = cost
-        }
-    }
-
-    private let lock = NSLock()
-    private var nodes: [String: Node] = [:]
-    private var head: Node?              // most recently used
-    private var tail: Node?              // least recently used
-    private var totalCost: Int = 0
+    private let indexingLock = NSLock()
     private var indexingInProgress = false
 
-    private let maxEntries = 512
-    private let maxTotalCost = 64 * 1024 * 1024
-
-    private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
+    private func withIndexingLock<T>(_ body: () -> T) -> T {
+        indexingLock.lock()
+        defer { indexingLock.unlock() }
         return body()
-    }
-
-    // MARK: - Intrusive LRU list (all callers must hold `lock`)
-
-    private func addToFront(_ node: Node) {
-        node.prev = nil
-        node.next = head
-        head?.prev = node
-        head = node
-        if tail == nil { tail = node }
-    }
-
-    private func detach(_ node: Node) {
-        let p = node.prev
-        let n = node.next
-        p?.next = n
-        n?.prev = p
-        if head === node { head = n }
-        if tail === node { tail = p }
-        node.prev = nil
-        node.next = nil
-    }
-
-    private func moveToFront(_ node: Node) {
-        guard head !== node else { return }
-        detach(node)
-        addToFront(node)
-    }
-
-    private func removeNode(_ node: Node) {
-        detach(node)
-        nodes.removeValue(forKey: node.key)
-        totalCost = max(0, totalCost - node.cost)
-    }
-
-    private func evictIfNeeded() {
-        while nodes.count > maxEntries || totalCost > maxTotalCost {
-            guard let lru = tail else { break }
-            removeNode(lru)
-        }
     }
 
     /// Retrieve cached transcript for a session (thread-safe)
     func getCached(_ sessionID: String) -> String? {
-        withLock {
-            guard let node = nodes[sessionID] else { return nil }
-            moveToFront(node)
-            return node.transcript
-        }
+        store.get(sessionID)
     }
 
     /// Store a generated transcript (thread-safe)
     func set(_ sessionID: String, transcript: String) {
-        withLock {
-            let cost = max(1, transcript.utf8.count)
-            if let existing = nodes[sessionID] {
-                totalCost = max(0, totalCost - existing.cost)
-                existing.transcript = transcript
-                existing.cost = cost
-                totalCost += cost
-                moveToFront(existing)
-            } else {
-                let node = Node(key: sessionID, transcript: transcript, cost: cost)
-                nodes[sessionID] = node
-                addToFront(node)
-                totalCost += cost
-            }
-            evictIfNeeded()
-        }
+        store.set(sessionID, transcript)
     }
 
     /// Remove a single cached transcript (thread-safe)
     func remove(_ sessionID: String) {
-        withLock {
-            guard let node = nodes[sessionID] else { return }
-            removeNode(node)
-        }
+        store.remove(sessionID)
     }
 
     /// Generate and cache transcripts for multiple sessions in background
     /// Skips sessions that are already cached or have no events (lightweight sessions)
     func generateAndCache(sessions: [Session]) async {
         // Check if already indexing (avoid concurrent runs)
-        let shouldStart = withLock { () -> Bool in
+        let shouldStart = withIndexingLock { () -> Bool in
             if indexingInProgress { return false }
             indexingInProgress = true
             return true
         }
         guard shouldStart else { return }
-        defer { withLock { indexingInProgress = false } }
+        defer { withIndexingLock { indexingInProgress = false } }
 
         let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
         var indexed = 0
@@ -141,7 +63,7 @@ final class TranscriptCache: @unchecked Sendable {
                 if Task.isCancelled { break }
             }
             if Task.isCancelled { break }
-            let alreadyCached = withLock { nodes[session.id] != nil }
+            let alreadyCached = store.contains(session.id)
 
             // Skip if already cached or lightweight (no events)
             guard !alreadyCached, !session.events.isEmpty else { continue }
@@ -167,7 +89,7 @@ final class TranscriptCache: @unchecked Sendable {
             }
         }
 
-        let totalCount = withLock { nodes.count }
+        let totalCount = store.count
 
         #if DEBUG
         print("TRANSCRIPT CACHE: Indexed \(indexed) sessions (total cached: \(totalCount))")
@@ -176,22 +98,17 @@ final class TranscriptCache: @unchecked Sendable {
 
     /// Clear all cached transcripts (thread-safe)
     func clear() {
-        withLock {
-            nodes.removeAll()
-            head = nil
-            tail = nil
-            totalCost = 0
-        }
+        store.removeAll()
     }
 
     /// Get current cache size (thread-safe)
     func count() -> Int {
-        withLock { nodes.count }
+        store.count
     }
 
     /// Check if indexing is currently in progress (thread-safe)
     func isIndexing() -> Bool {
-        withLock { indexingInProgress }
+        withIndexingLock { indexingInProgress }
     }
 
     /// Synchronous transcript getter for use in FilterEngine

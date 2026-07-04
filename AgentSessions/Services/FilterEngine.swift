@@ -219,92 +219,36 @@ enum SearchTextMatcher {
     static func resetTokenizationCacheForTesting() { tokenCache.clear() }
 
     /// Bounded, thread-safe LRU mapping a session's content version to its tokenized
-    /// transcript. O(1) get/set/evict (intrusive doubly-linked list + dict). The lock
-    /// guards only map mutations — tokenization itself runs outside it.
+    /// transcript. Storage/eviction is delegated to the generic `LRUCache` (count-only
+    /// cap of 512); the `misses` counter (test instrumentation) stays local. Each
+    /// `set` is a cache miss by construction — callers only `set` after a failed
+    /// `get` — so the counter is bumped on every `set`.
     private final class TokenizationCache: @unchecked Sendable {
-        private final class Node {
-            let key: TokenCacheKey
-            var tokens: [TextToken]
-            var next: Node?
-            weak var prev: Node?
-            init(key: TokenCacheKey, tokens: [TextToken]) {
-                self.key = key
-                self.tokens = tokens
-            }
-        }
-
-        private let lock = NSLock()
-        private var nodes: [TokenCacheKey: Node] = [:]
-        private var head: Node?
-        private var tail: Node?
-        private let maxEntries = 512
+        private let store = LRUCache<TokenCacheKey, [TextToken]>(maxEntries: 512)
+        private let missLock = NSLock()
         private var misses = 0
 
         var missCount: Int {
-            lock.lock(); defer { lock.unlock() }
+            missLock.lock(); defer { missLock.unlock() }
             return misses
         }
 
         func get(_ key: TokenCacheKey) -> [TextToken]? {
-            lock.lock(); defer { lock.unlock() }
-            guard let node = nodes[key] else { return nil }
-            moveToFront(node)
-            return node.tokens
+            store.get(key)
         }
 
         func set(_ key: TokenCacheKey, tokens: [TextToken]) {
-            lock.lock(); defer { lock.unlock() }
+            missLock.lock()
             misses += 1
-            if let node = nodes[key] {
-                node.tokens = tokens
-                moveToFront(node)
-            } else {
-                let node = Node(key: key, tokens: tokens)
-                nodes[key] = node
-                addToFront(node)
-                evictIfNeeded()
-            }
+            missLock.unlock()
+            store.set(key, tokens)
         }
 
         func clear() {
-            lock.lock(); defer { lock.unlock() }
-            nodes.removeAll()
-            head = nil
-            tail = nil
+            store.removeAll()
+            missLock.lock()
             misses = 0
-        }
-
-        // All helpers below require `lock` to be held.
-        private func addToFront(_ node: Node) {
-            node.prev = nil
-            node.next = head
-            head?.prev = node
-            head = node
-            if tail == nil { tail = node }
-        }
-
-        private func detach(_ node: Node) {
-            let p = node.prev
-            let n = node.next
-            p?.next = n
-            n?.prev = p
-            if head === node { head = n }
-            if tail === node { tail = p }
-            node.prev = nil
-            node.next = nil
-        }
-
-        private func moveToFront(_ node: Node) {
-            guard head !== node else { return }
-            detach(node)
-            addToFront(node)
-        }
-
-        private func evictIfNeeded() {
-            while nodes.count > maxEntries, let lru = tail {
-                detach(lru)
-                nodes.removeValue(forKey: lru.key)
-            }
+            missLock.unlock()
         }
     }
 
