@@ -82,12 +82,12 @@ __pycache__/
 *.pyc
 
 # Local test derived data
-.deriveddata-tests/
-.deriveddata-launch/
-.deriveddata-manual/
-.deriveddata-manual-test/
+.deriveddata-*/
 .deriveddata-cpu-*/
 .deriveddata-review/
 .deriveddata-claudefix/
 .deriveddata-audit/
 .deriveddata-run/
+
+# stray local artifact (kept out of release clean-tree gate)
+docs/assets/geo-test-2.pdf
