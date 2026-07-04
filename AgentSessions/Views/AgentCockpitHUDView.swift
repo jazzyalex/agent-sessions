@@ -4577,7 +4577,10 @@ private struct HUDRunwayPanel: View {
     }
 
     private func summaryLabel(_ summary: RunwayShortBurstSummary) -> String {
-        summary.quotaMinutesPerHour > 0 ? "+\(summary.count) bursts" : "+\(summary.count) sessions"
+        // Overflow rows aggregate the same "session" entities as the rows above,
+        // so the noun stays "sessions" regardless of burn state (the rate cell
+        // and load bar already convey whether they're actively burning).
+        "+\(summary.count) sessions"
     }
 }
 
