@@ -1138,10 +1138,68 @@ SUBCOMMANDS:
     resume                      Resume failed deployment from last checkpoint
                                 Automatically continues from where it left off
 
+    status                      Show whether a deployment is running, its
+                                current phase, checkpoint, and recent log lines
+
 DOCUMENTATION:
     See docs/deployment.md for prerequisites, environment variables, logs, and troubleshooting.
 
 EOF
+}
+
+# ============================================================================
+# SUBCOMMAND: status
+# ============================================================================
+
+cmd_status() {
+  echo "==> Deploy status"
+
+  # 1. Live processes
+  local live
+  live=$(pgrep -fl "deploy-agent-sessions.sh|build_sign_notarize_release.sh" 2>/dev/null || true)
+  local building
+  building=$(pgrep -fl "xcodebuild.*AgentSessions" 2>/dev/null || true)
+  local notarizing
+  notarizing=$(pgrep -fl "notarytool" 2>/dev/null || true)
+
+  if [[ -n "$live" ]]; then
+    green "Pipeline: RUNNING"
+    [[ -n "$building" ]]   && echo "  Phase: Release build in progress (typ. ~8-12 min)"
+    [[ -n "$notarizing" ]] && echo "  Phase: notarization in progress (typ. 2-10 min)"
+  else
+    echo "Pipeline: not running"
+  fi
+
+  # 2. Checkpoint state
+  if [[ -f "$STATE_FILE" ]]; then
+    echo ""
+    echo "Checkpoint ($STATE_FILE):"
+    python3 -c "
+import json,sys
+from datetime import datetime,timezone
+s=json.load(open('$STATE_FILE'))
+ts=s.get('timestamp','')
+age=''
+try:
+    dt=datetime.fromisoformat(ts)
+    if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+    age=f\" ({int((datetime.now(timezone.utc)-dt.astimezone(timezone.utc)).total_seconds()//60)} min ago)\"
+except Exception: pass
+print(f\"  version: {s.get('version')}  last_step: {s.get('last_step')}{age}\")
+" 2>/dev/null || cat "$STATE_FILE"
+  else
+    echo "Checkpoint: none (no deployment in progress or last one completed cleanly)"
+  fi
+
+  # 3. Latest log tail
+  local latest_log
+  latest_log=$(ls -t /tmp/deploy-*.log /tmp/release-*.log 2>/dev/null | head -n1 || true)
+  if [[ -n "$latest_log" ]]; then
+    echo ""
+    echo "Latest log: $latest_log"
+    echo "Recent progress:"
+    grep -E "^==>|^\[20|ERROR|WARN|✓" "$latest_log" 2>/dev/null | tail -8 | sed 's/^/  /'
+  fi
 }
 
 # ============================================================================
@@ -1165,6 +1223,9 @@ case "$SUBCOMMAND" in
     ;;
   changelog)
     cmd_changelog "$@"
+    ;;
+  status)
+    cmd_status
     ;;
   resume)
     cmd_resume "$@"

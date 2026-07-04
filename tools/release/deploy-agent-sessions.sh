@@ -449,7 +449,8 @@ if [[ "${RESUME_FROM:-}" == "appcast" ]] || [[ "${RESUME_FROM:-}" == "appcast_co
   fi
   SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
 else
-  green "==> Building and notarizing"
+  green "==> Building and notarizing (Release build typ. ~10 min, notarization typ. 2-10 min — watch the log for heartbeats)"
+  save_state "building_and_notarizing"
   chmod +x "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"
   TEAM_ID="$TEAM_ID" NOTARY_PROFILE="$NOTARY_PROFILE" NOTARY_KEY_PATH="$NOTARY_KEY_PATH" NOTARY_KEY_ID="$NOTARY_KEY_ID" NOTARY_ISSUER="$NOTARY_ISSUER" NOTARY_APPLE_ID="$NOTARY_APPLE_ID" NOTARY_TEAM_ID="$NOTARY_TEAM_ID" NOTARY_PASSWORD="$NOTARY_PASSWORD" TAG="$TAG" VERSION="$VERSION" DEV_ID_APP="$DEV_ID_APP" \
     "$REPO_ROOT/tools/release/build_sign_notarize_release.sh"

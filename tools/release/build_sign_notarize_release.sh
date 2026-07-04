@@ -102,7 +102,7 @@ BUILD_PID=$!
     sleep 60
     elapsed=$((elapsed + 60))
     if kill -0 "$BUILD_PID" 2>/dev/null; then
-      echo "==> Release build still running (${elapsed}s elapsed)"
+      echo "==> Release build still running (${elapsed}s elapsed; whole-module-optimized Release builds typically take ~8-12 min — not stalled while compiler processes are listed below)"
       swift_processes=$(ps -axo pid,etime,comm,args | awk '/swift-frontend/ && !/awk/ { print "    " $0 }' | head -5 || true)
       if [[ -n "$swift_processes" ]]; then
         echo "    Active Swift compiler processes:"

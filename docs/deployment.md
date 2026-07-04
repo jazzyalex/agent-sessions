@@ -27,6 +27,7 @@ This runbook provides a **fully automated deployment process** with comprehensiv
 - `git push origin main`
 - `tools/release/deploy qa --version <VERSION>` — optional: `release` auto-runs QA when no valid stamp exists and the tree is fully clean; run it explicitly only to front-load the wait or inspect QA output separately
 - `tools/release/deploy release <VERSION>`
+- `tools/release/deploy status` — anytime during a release: shows whether the pipeline is running, its current phase (build/notarize), the checkpoint, and recent log lines. Use this before assuming a long build is stalled (Release builds take ~8-12 min).
 - `tools/release/deploy verify <VERSION>`
 
 ## Sparkle Update Integrity (Appcast + Signatures)
