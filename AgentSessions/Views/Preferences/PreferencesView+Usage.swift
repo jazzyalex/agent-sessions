@@ -197,6 +197,22 @@ extension PreferencesView {
                     .pickerStyle(.segmented)
                     .help("Choose when Quota Meter shows the session runway drawer.")
                 }
+
+                labeledRow("On-track glyph") {
+                    Picker("", selection: Binding(
+                        get: { QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw) },
+                        set: { quotaMeterOnTrackGlyphRaw = $0.rawValue }
+                    )) {
+                        ForEach(QuotaMeterOnTrackGlyph.allCases) { glyph in
+                            Text(glyph.title).tag(glyph)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("When you’re working but on track to fit the 5-hour window, show a smiling face or a quiet dot in the run-out column.")
+                }
+                Text(QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw).detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // Menu Bar controls moved to the Menu Bar pane

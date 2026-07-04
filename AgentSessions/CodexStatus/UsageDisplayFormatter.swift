@@ -82,6 +82,10 @@ struct UsageLimitProjectionTracker {
     private var previous: ResolvedSample?
     private var lastProjection: Projection?
     private(set) var lastDiagnostics: String = "Waiting for data"
+    /// Observed time of the most recent sample whose measured burn projected
+    /// run-out at or after the reset — i.e. actively working but fitting the
+    /// 5h window. `nil` when running out early or when no burn is measured.
+    private(set) var lastOnTrackObservedAt: Date?
 
     mutating func update(with sample: UsageLimitProjectionSample,
                          now: Date = Date()) -> UsageLimitProjectionEstimate? {
@@ -154,10 +158,12 @@ struct UsageLimitProjectionTracker {
         guard projectedRunoutAt < current.resetDate else {
             lastProjection = nil
             self.previous = current
+            lastOnTrackObservedAt = current.observedAt
             lastDiagnostics = "Run-out after reset"
             return nil
         }
         self.previous = current
+        lastOnTrackObservedAt = nil
         lastProjection = Projection(
             runoutAt: projectedRunoutAt,
             resetDate: current.resetDate,
@@ -171,6 +177,7 @@ struct UsageLimitProjectionTracker {
     mutating func reset() {
         previous = nil
         lastProjection = nil
+        lastOnTrackObservedAt = nil
         lastDiagnostics = "Waiting for data"
     }
 
@@ -199,6 +206,7 @@ struct UsageLimitProjectionTracker {
             lastDiagnostics = "Run-out after reset"
             return nil
         }
+        lastOnTrackObservedAt = nil
         lastDiagnostics = Self.diagnosticsLabel(runoutAt: projection.runoutAt, observedAt: projection.observedAt, now: now)
         return UsageLimitProjectionEstimate(runoutAt: projection.runoutAt, observedAt: projection.observedAt)
     }
@@ -227,6 +235,15 @@ struct UsageLimitProjectionTracker {
         let remainingPercent: Double
         let observedAt: Date
     }
+}
+
+/// Whether an on-track observation is recent enough to still trust — mirrors the
+/// 3-minute freshness window used by the projected run-out token, so the smile
+/// fades back to a calm dot shortly after a session stops burning.
+func usageOnTrackIsFresh(observedAt: Date?, now: Date = Date()) -> Bool {
+    guard let observedAt else { return false }
+    let age = now.timeIntervalSince(observedAt)
+    return age >= 0 && age <= 3 * 60
 }
 
 func formatUsageProjectionLabel(runoutAt: Date?,

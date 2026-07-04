@@ -58,6 +58,9 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var lastRawOAuthPayload: String? = nil
     @Published var fiveHourProjectedRunoutAt: Date? = nil
     @Published var fiveHourProjectionObservedAt: Date? = nil
+    /// Set while a measured burn projects run-out at/after reset ("on track,
+    /// fits the 5h window"); drives the smile glyph in the Quota Meter row.
+    @Published var fiveHourOnTrackObservedAt: Date? = nil
 
     private var sourceManager: ClaudeUsageSourceManager?
     // Kept for hard-probe diagnostics that need direct tmux access
@@ -208,6 +211,7 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
+        fiveHourOnTrackObservedAt = nil
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
@@ -489,6 +493,7 @@ final class ClaudeUsageModel: ObservableObject {
         let diagnostics = trimmed.isEmpty ? "Claude usage unavailable" : trimmed
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
+        fiveHourOnTrackObservedAt = nil
         recordProjectionDiagnostics(diagnostics, estimate: nil)
     }
 
@@ -510,6 +515,7 @@ final class ClaudeUsageModel: ObservableObject {
         ), now: now)
         fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
         fiveHourProjectionObservedAt = projectionEstimate?.observedAt
+        fiveHourOnTrackObservedAt = fiveHourProjectionTracker.lastOnTrackObservedAt
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate)
     }
 

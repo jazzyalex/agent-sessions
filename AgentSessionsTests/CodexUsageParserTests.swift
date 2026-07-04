@@ -1091,6 +1091,92 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(tracker.lastDiagnostics, "Run-out after reset")
     }
 
+    func testUsageLimitProjectionTrackerMarksOnTrackWhenRunoutAfterReset() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(20 * 60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 96,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        // A measured burn that projects run-out after reset is the "on track" state:
+        // no early-runout estimate, but we remember when we last measured it fitting.
+        XCTAssertNil(estimate)
+        XCTAssertEqual(tracker.lastOnTrackObservedAt, secondTime)
+    }
+
+    func testUsageLimitProjectionTrackerClearsOnTrackWhenRunningOutEarly() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(6 * 60)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        let estimate = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: secondTime
+        ), now: secondTime)
+
+        // Burning fast enough to run out before reset — that is not the on-track state.
+        XCTAssertNotNil(estimate)
+        XCTAssertNil(tracker.lastOnTrackObservedAt)
+    }
+
+    func testUsageLimitProjectionTrackerHasNoOnTrackBeforeFirstBurn() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: formatResetISO8601(reset),
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        // One sample, no burn measured yet — nothing to smile about.
+        XCTAssertNil(tracker.lastOnTrackObservedAt)
+    }
+
+    func testUsageOnTrackIsFreshOnlyWithinWindow() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertFalse(usageOnTrackIsFresh(observedAt: nil, now: now))
+        XCTAssertTrue(usageOnTrackIsFresh(observedAt: now.addingTimeInterval(-120), now: now))
+        XCTAssertFalse(usageOnTrackIsFresh(observedAt: now.addingTimeInterval(-4 * 60), now: now))
+    }
+
     func testUsageLimitProjectionTrackerHidesRunoutWhenResetHappensFirst() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000) // 4:24 equivalent

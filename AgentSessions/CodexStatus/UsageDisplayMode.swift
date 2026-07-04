@@ -65,6 +65,42 @@ enum UsageDisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the Quota Meter run-out column renders the "on track" state — a session
+/// that is actively burning but projected to fit the 5h window. The default
+/// shows a smiling face (same color as the row, with an occasional playful
+/// spin); the quiet option falls back to the muted dot.
+enum QuotaMeterOnTrackGlyph: String, CaseIterable, Identifiable {
+    case smile
+    case dot
+
+    static let storageKey = PreferencesKey.quotaMeterOnTrackGlyph
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .smile:
+            return "Smile"
+        case .dot:
+            return "Dot"
+        }
+    }
+
+    /// One-line explanation shown under the selector for the active option.
+    var detail: String {
+        switch self {
+        case .smile:
+            return "Shows a smiling face while you’re working but on track to fit the 5-hour window."
+        case .dot:
+            return "Shows a quiet dot instead of the smile."
+        }
+    }
+
+    static func current(raw: String) -> QuotaMeterOnTrackGlyph {
+        QuotaMeterOnTrackGlyph(rawValue: raw) ?? .smile
+    }
+}
+
 enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case alwaysOn = "always_on"

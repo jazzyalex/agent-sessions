@@ -3389,6 +3389,7 @@ private struct HUDLimitsProviderEntry {
     let lastDataTimestamp: Date?
     let fiveHourProjectedRunoutAt: Date?
     let fiveHourProjectionObservedAt: Date?
+    var fiveHourOnTrackObservedAt: Date? = nil
 }
 
 private extension CodexRunwaySnapshot {
@@ -3826,7 +3827,8 @@ private struct HUDLimitsBar: View {
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt
+                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
+                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -3839,7 +3841,8 @@ private struct HUDLimitsBar: View {
                 isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: claudeUsageModel.lastUpdate,
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt
+                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
+                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt
             ))
         }
         return out
@@ -4037,7 +4040,8 @@ private struct HUDLimitsRowsPanel: View {
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt
+                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
+                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -4050,7 +4054,8 @@ private struct HUDLimitsRowsPanel: View {
                 isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: claudeUsageModel.lastUpdate,
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt
+                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
+                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt
             ))
         }
         return out
@@ -4807,7 +4812,16 @@ private struct HUDLimitsProjectionToken: View {
     /// fresh projection, so the run-out column is never blank and the width never
     /// reflows as burn starts/stops. The detail panel leaves this off (unchanged).
     var idleMarker: Bool = false
+    /// When true (compact row only), the "no early run-out" state is an *earned*
+    /// on-track signal — a fresh burn that fits the 5h window — so we show a
+    /// smiling face instead of the idle dot, unless the quiet preference is set.
+    var onTrack: Bool = false
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PreferencesKey.quotaMeterOnTrackGlyph) private var onTrackGlyphRaw = QuotaMeterOnTrackGlyph.smile.rawValue
+
+    private var showsSmile: Bool {
+        onTrack && QuotaMeterOnTrackGlyph.current(raw: onTrackGlyphRaw) == .smile
+    }
 
     var body: some View {
         Group {
@@ -4816,6 +4830,9 @@ private struct HUDLimitsProjectionToken: View {
                     .fontWeight(.bold)
                     .foregroundStyle(hudProjectionColor(colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if idleMarker && showsSmile {
+                HUDOnTrackSmile()
+                    .frame(maxWidth: .infinity, alignment: .center)
             } else if idleMarker {
                 Text("·")
                     .foregroundStyle(.secondary)
@@ -4826,6 +4843,41 @@ private struct HUDLimitsProjectionToken: View {
                     .foregroundStyle(hudProjectionColor(colorScheme))
                     .opacity(0)
                     .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+/// The "on track" smile for the compact Quota Meter run-out column. Inherits the
+/// row's foreground color (white in dark mode, black in light) so it reads as a
+/// quiet "all good" rather than a colored badge. Every so often it does a quick
+/// playful trick — a flat spin or a turn-around — never on a constant loop, and
+/// never when Reduce Motion is on.
+private struct HUDOnTrackSmile: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var spin = 0.0
+    @State private var flip = 0.0
+
+    var body: some View {
+        Image(systemName: "face.smiling")
+            .rotationEffect(.degrees(spin))
+            .rotation3DEffect(.degrees(flip), axis: (x: 0, y: 1, z: 0))
+            .accessibilityLabel("On track")
+            .task {
+                await runTricks()
+            }
+    }
+
+    private func runTricks() async {
+        guard !reduceMotion else { return }
+        while !Task.isCancelled {
+            let delay = 6.0 + Double.random(in: 0...11)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { break }
+            if Bool.random() {
+                withAnimation(.easeInOut(duration: 0.7)) { spin += 360 }
+            } else {
+                withAnimation(.easeInOut(duration: 0.8)) { flip += 360 }
             }
         }
     }
@@ -4911,6 +4963,14 @@ private struct HUDLimitsProviderText: View {
         )
     }
 
+    // A fresh measured burn that projects run-out at/after reset: working, but
+    // fitting the 5h window. The tracker only sets this timestamp in that state,
+    // so no early-runout check is needed here.
+    private var fiveHourOnTrack: Bool {
+        guard projectedRunoutEnabled else { return false }
+        return usageOnTrackIsFresh(observedAt: entry.fiveHourOnTrackObservedAt, now: now)
+    }
+
     private func fiveHourResetLabel() -> String? {
         if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
         let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4957,7 +5017,7 @@ private struct HUDLimitsProviderText: View {
             }
             .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
 
-            HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true)
+            HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true, onTrack: fiveHourOnTrack)
                 .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale)
 
             if showResets, let r = fiveHourResetLabel() {

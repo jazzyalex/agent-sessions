@@ -161,6 +161,9 @@ final class CodexUsageModel: ObservableObject {
     @Published var lastSuccessAt: Date? = nil
     @Published var fiveHourProjectedRunoutAt: Date? = nil
     @Published var fiveHourProjectionObservedAt: Date? = nil
+    /// Set while a measured burn projects run-out at/after reset ("on track,
+    /// fits the 5h window"); drives the smile glyph in the Quota Meter row.
+    @Published var fiveHourOnTrackObservedAt: Date? = nil
     // Reset credits (free "reset your usage now" grants). Display-only.
     // Count + expiry are derived from `resetCredits` by CodexResetCredits.*,
     // so the raw available_count is intentionally not mirrored here.
@@ -425,6 +428,7 @@ final class CodexUsageModel: ObservableObject {
         fiveHourProjectionTracker.reset()
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
+        fiveHourOnTrackObservedAt = nil
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil, provider: .codex)
     }
 
@@ -464,6 +468,7 @@ final class CodexUsageModel: ObservableObject {
         ), now: now)
         fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
         fiveHourProjectionObservedAt = projectionEstimate?.observedAt
+        fiveHourOnTrackObservedAt = fiveHourProjectionTracker.lastOnTrackObservedAt
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
         limitNotifier.handle(snapshot: UsageLimitSnapshot(
             provider: .codex,
