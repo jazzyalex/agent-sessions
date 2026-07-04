@@ -2004,19 +2004,22 @@ final class UnifiedSessionIndexer: ObservableObject {
     private func kickSearchIngest(source: SessionSource) {
         guard searchIngestService != nil else { return }
         let coordinator = searchIngestCoordinator
-        var task: Task<Void, Never>!
-        task = Task.detached(priority: .utility) { [weak self] in
-            // Register with the coordinator as the very first statement, before any
-            // ingest work starts, so a `deinit`-time `cancelAll()` can never race ahead
-            // of tracking: there is no window where this task is running but absent
-            // from `tasksBySource`. (Previously `track` was posted from a second,
-            // unordered `Task { ... }` that could be scheduled after this task had
-            // already started — or finished — its ingest work.)
-            await coordinator.track(task, for: source)
-            guard let self else { return }
-            let decision = await coordinator.request(source: source)
-            guard decision == .startNow else { return }
-            await self.runSearchIngestLoop(source: source)
+        // The coordinator creates and tracks the ingest task in one actor-isolated step
+        // (see `SearchIngestCoordinatorBox.startTracked`). This preserves the invariant
+        // that a `deinit`-time `cancelAll()` can never race ahead of tracking — there is no
+        // window where the task is running but absent from `tasksBySource` — without the
+        // ingest body needing a reference to its own `Task`. A prior version assigned the
+        // detached task to a `var task: Task! = Task { track(task) }` and read that
+        // implicitly-unwrapped optional as the task's first statement; the detached body
+        // could run before the assignment landed, read a nil `task`, and trap on the
+        // force-unwrap (EXC_BREAKPOINT).
+        Task { [weak self] in
+            await coordinator.startTracked(source: source) {
+                guard let self else { return }
+                let decision = await coordinator.request(source: source)
+                guard decision == .startNow else { return }
+                await self.runSearchIngestLoop(source: source)
+            }
         }
     }
 
