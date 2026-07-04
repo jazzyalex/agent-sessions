@@ -1209,9 +1209,13 @@ struct SessionTerminalView: View {
             externalCurrentMatchIndex = 0
 
             if !unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Opening a session while the list search is active should land
+                // on the first match without an extra next-arrow press: arm the
+                // scroll before recomputing. If the match is above the loaded
+                // window, the whole-session scan's completion widens the window
+                // and this flag scrolls after THAT apply instead.
+                pendingUnifiedMatchScroll = true
                 recomputeUnifiedMatches(resetIndex: true)
-                // A search-driven widen just loaded the match block; the reset
-                // recompute selected the first (newly loaded) match — scroll to it.
                 if pendingUnifiedMatchScroll, let lineID = unifiedCurrentMatchLineID {
                     pendingUnifiedMatchScroll = false
                     scrollTargetLineID = lineID
@@ -2133,6 +2137,7 @@ struct SessionTerminalView: View {
             unifiedExternalMatchCount = 0
             unifiedExternalTotalMatchCount = 0
             unifiedExternalCurrentMatchIndex = 0
+            pendingUnifiedMatchScroll = false
             cancelGlobalUnifiedScan()
             return
         }
@@ -2246,6 +2251,17 @@ struct SessionTerminalView: View {
                 unifiedGlobalTotalMatches = foundTotal
                 unifiedGlobalScanTask = nil
                 unifiedExternalTotalMatchCount = max(foundTotal, unifiedExternalTotalMatchCount)
+                // Session opened via list search with all matches above the
+                // loaded window: widen to the nearest match block now, so the
+                // first match appears without the user pressing next. The
+                // armed pendingUnifiedMatchScroll then scrolls after the
+                // widened build applies.
+                if pendingUnifiedMatchScroll,
+                   unifiedMatchOccurrences.isEmpty,
+                   let loaded = loadedBlockRange, loaded.lowerBound > 0,
+                   let target = foundBlocks.last(where: { $0 < loaded.lowerBound }) {
+                    widenWindowForJump(toIncludeBlock: target, priority: .userInitiated)
+                }
             }
         }
     }
