@@ -319,6 +319,130 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(stableMatches.count, 1, "unchanged file b must remain findable across both runs")
     }
 
+    // MARK: - SearchIngestService: aggregate early-out (E2)
+
+    /// A second `ingest` call with an identical `[FileRef]` list (same paths, mtimes,
+    /// sizes, and `toolIOEnabled`) must skip the per-source SQLite map reads entirely
+    /// via the aggregate early-out, not merely land on the per-file skip-gate after
+    /// paying for `fetchIndexedFiles`/`fetchSearchReadyPaths`/`sessionSearchUpdatedAt`.
+    /// Proven via `earlyOutHitCountForTesting` rather than inferring it from
+    /// `Progress` alone, since a full pass that skips every file produces the same
+    /// processed/skipped counts as the early-out.
+    func testSecondIngestWithIdenticalFileRefsEarlyOuts() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        // Back-date well past any gate window so the safety valve (which requires
+        // every file to be older than the widest quiet/cooldown window) doesn't
+        // itself suppress the early-out.
+        let url = try makeCodexFixture(named: "stable.jsonl", userText: "steady content gibbonquartz", assistantText: "ack gibbonquartz", in: ingestTempDir)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 3600)], ofItemAtPath: url.path)
+        let ref = try fileRef(for: url)
+
+        let service = SearchIngestService(db: db)
+        let first = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(first.processed, 1)
+        let hitsAfterFirst = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterFirst, 0, "the very first pass for a source must never early-out")
+
+        let second = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(second.processed, 0)
+        XCTAssertEqual(second.skipped, 1)
+        let hitsAfterSecond = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterSecond, 1, "identical FileRefs on a second pass must hit the aggregate early-out")
+
+        // A third call, still identical, must early-out again (not a one-shot fluke).
+        let third = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(third.processed, 0)
+        let hitsAfterThird = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterThird, 2, "early-out must fire again on a subsequent identical pass")
+    }
+
+    /// A changed `FileRef` (different mtime/size on an existing path, or a newly added
+    /// path) must bust the early-out: the aggregate no longer matches the remembered
+    /// one, so the pass falls through to the full per-file check and actually re-ingests.
+    func testChangedFileRefBustsEarlyOut() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "changing.jsonl", userText: "original content peacockumber", assistantText: "ack peacockumber", in: ingestTempDir)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 3600)], ofItemAtPath: url.path)
+        let service = SearchIngestService(db: db)
+        let ref1 = try fileRef(for: url)
+
+        let first = try await service.ingest(source: .codex, files: [ref1], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(first.processed, 1)
+
+        // Mutate content + mtime, still well outside any gate window.
+        try "{\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"updated content peacockumber-v2\"}]}}\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 3600 + 60)], ofItemAtPath: url.path)
+        let ref2 = try fileRef(for: url)
+        XCTAssertNotEqual(ref2.mtime, ref1.mtime, "sanity: mtime must have changed")
+
+        let second = try await service.ingest(source: .codex, files: [ref2], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(second.processed, 1, "changed FileRef must bust the early-out and actually re-ingest")
+        let hitsAfterSecond = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterSecond, 0, "a changed aggregate must never hit the early-out")
+
+        // Now repeat the identical (post-change) FileRef: the early-out should engage
+        // again against the NEW remembered aggregate.
+        let third = try await service.ingest(source: .codex, files: [ref2], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(third.processed, 0)
+        let hitsAfterThird = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterThird, 1, "early-out must re-engage once the aggregate is stable again post-change")
+    }
+
+    /// A brand-new file appended to the list (same existing file unchanged, plus one
+    /// new path) changes `fileCount`/`totalSize`, busting the early-out even though the
+    /// pre-existing file's own FileRef is untouched.
+    func testAddedFileBustsEarlyOut() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let urlA = try makeCodexFixture(named: "a.jsonl", userText: "first file content toucanamber", assistantText: "ack toucanamber", in: ingestTempDir)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 3600)], ofItemAtPath: urlA.path)
+        let service = SearchIngestService(db: db)
+        let refA = try fileRef(for: urlA)
+
+        let first = try await service.ingest(source: .codex, files: [refA], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(first.processed, 1)
+
+        let urlB = try makeCodexFixture(named: "b.jsonl", userText: "second file content heronviolet", assistantText: "ack heronviolet", in: ingestTempDir)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3 * 3600)], ofItemAtPath: urlB.path)
+        let refB = try fileRef(for: urlB)
+
+        let second = try await service.ingest(source: .codex, files: [refA, refB], toolIOEnabled: false, quietSeconds: 0, reingestCooldownOverride: 0)
+        XCTAssertEqual(second.processed, 1, "the new file must be ingested")
+        XCTAssertEqual(second.skipped, 1, "the pre-existing unchanged file must still be skipped by the per-file gate")
+        let hitsAfterSecond = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterSecond, 0, "a newly added file must bust the early-out even though the old file's FileRef alone is unchanged")
+    }
+
+    /// A file within any active gate window (quiet or cooldown) must never be covered
+    /// by the early-out, even with an otherwise-identical aggregate: the safety valve
+    /// exists precisely so a file that could flip from gated to eligible purely from
+    /// elapsed wall-clock time is always re-evaluated by the real per-file gate.
+    func testHotFileNeverEarlyOuts() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let url = try makeCodexFixture(named: "hot.jsonl", userText: "hot content quailsaffron", assistantText: "ack quailsaffron", in: ingestTempDir)
+        let service = SearchIngestService(db: db)
+        let ref = try fileRef(for: url)
+
+        // First pass: brand-new file, always ingests regardless of quietness.
+        let first = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(first.processed, 1)
+
+        // Second pass, identical FileRef (file itself untouched), but mtime is "now" —
+        // inside the quiet window. The safety valve must block the early-out so the
+        // real quiet-gate (not a cached aggregate) is what decides the skip.
+        let second = try await service.ingest(source: .codex, files: [ref], toolIOEnabled: false, quietSeconds: 3600)
+        XCTAssertEqual(second.skipped, 1)
+        let hitsAfterSecond = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(hitsAfterSecond, 0, "a file inside the quiet/cooldown danger zone must never be covered by the aggregate early-out")
+    }
+
     // MARK: - SearchIngestService: quiet-period gate
 
     func testIngestSkipsHotFileWithinQuietPeriod() async throws {
@@ -753,5 +877,79 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertFalse(coordinator.finish(source: .codex))
         // A brand-new request after a clean finish (no coalescing) starts immediately again.
         XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+    }
+
+    // MARK: - UnifiedSessionIndexer.SessionListFingerprint (E4 kickSearchIngest skip-gate)
+
+    /// `performProviderRefresh` gates `kickSearchIngest` on this fingerprint being
+    /// unchanged before vs. after a refresh's wait loop (see
+    /// `UnifiedSessionIndexer.performProviderRefresh`). The indexer itself is not
+    /// practically unit-testable in isolation (it owns and drives 10 live provider
+    /// indexers), so these tests exercise the actual decision-bearing unit directly:
+    /// the fingerprint's equality semantics over `Session` fixtures built the same way
+    /// `currentSessions(for:)` would see them.
+    private func makeFingerprintSession(id: String, endTime: Date?, sizeBytes: Int?) -> Session {
+        Session(id: id, source: .codex, startTime: nil, endTime: endTime, model: nil,
+                filePath: "/tmp/\(id).jsonl", fileSizeBytes: sizeBytes, eventCount: 1, events: [],
+                cwd: nil, repoName: nil, lightweightTitle: id)
+    }
+
+    func testFingerprintEqualForIdenticalSessionLists() {
+        let end = Date(timeIntervalSince1970: 1_000_000)
+        let before = [
+            makeFingerprintSession(id: "a", endTime: end, sizeBytes: 100),
+            makeFingerprintSession(id: "b", endTime: end.addingTimeInterval(-10), sizeBytes: 200)
+        ]
+        let after = [
+            makeFingerprintSession(id: "a", endTime: end, sizeBytes: 100),
+            makeFingerprintSession(id: "b", endTime: end.addingTimeInterval(-10), sizeBytes: 200)
+        ]
+
+        let fpBefore = UnifiedSessionIndexer.SessionListFingerprint(sessions: before)
+        let fpAfter = UnifiedSessionIndexer.SessionListFingerprint(sessions: after)
+        XCTAssertEqual(fpBefore, fpAfter, "an unchanged session list must produce an equal fingerprint, so kickSearchIngest is skipped for a no-op refresh")
+    }
+
+    func testFingerprintChangesWhenSessionAdded() {
+        let end = Date(timeIntervalSince1970: 1_000_000)
+        let before = [makeFingerprintSession(id: "a", endTime: end, sizeBytes: 100)]
+        let after = [
+            makeFingerprintSession(id: "a", endTime: end, sizeBytes: 100),
+            makeFingerprintSession(id: "c", endTime: end.addingTimeInterval(5), sizeBytes: 50)
+        ]
+
+        let fpBefore = UnifiedSessionIndexer.SessionListFingerprint(sessions: before)
+        let fpAfter = UnifiedSessionIndexer.SessionListFingerprint(sessions: after)
+        XCTAssertNotEqual(fpBefore, fpAfter, "a newly discovered session must change the fingerprint so kickSearchIngest is NOT skipped")
+    }
+
+    func testFingerprintChangesWhenExistingSessionGrows() {
+        // Same session count, but the file grew (size) and got a newer endTime — the
+        // common "session still being appended to" case a refresh must not treat as
+        // a no-op.
+        let before = [makeFingerprintSession(id: "a", endTime: Date(timeIntervalSince1970: 1_000_000), sizeBytes: 100)]
+        let after = [makeFingerprintSession(id: "a", endTime: Date(timeIntervalSince1970: 1_000_100), sizeBytes: 5_000)]
+
+        let fpBefore = UnifiedSessionIndexer.SessionListFingerprint(sessions: before)
+        let fpAfter = UnifiedSessionIndexer.SessionListFingerprint(sessions: after)
+        XCTAssertNotEqual(fpBefore, fpAfter, "a grown/updated session must change the fingerprint so kickSearchIngest is NOT skipped")
+    }
+
+    func testFingerprintStableAcrossSessionOrdering() {
+        // `currentSessions(for:)` ordering is not guaranteed to be stable across two
+        // reads of the same underlying `allSessions` array in every provider indexer;
+        // the fingerprint must not spuriously differ purely from list order.
+        let s1 = makeFingerprintSession(id: "a", endTime: Date(timeIntervalSince1970: 1_000_000), sizeBytes: 100)
+        let s2 = makeFingerprintSession(id: "b", endTime: Date(timeIntervalSince1970: 1_000_050), sizeBytes: 200)
+
+        let fpForward = UnifiedSessionIndexer.SessionListFingerprint(sessions: [s1, s2])
+        let fpReversed = UnifiedSessionIndexer.SessionListFingerprint(sessions: [s2, s1])
+        XCTAssertEqual(fpForward, fpReversed, "fingerprint must be order-independent (count/total-size/max-endTime), matching how currentSessions(for:) is compared before/after the wait loop")
+    }
+
+    func testFingerprintEqualForEmptyLists() {
+        let fpBefore = UnifiedSessionIndexer.SessionListFingerprint(sessions: [])
+        let fpAfter = UnifiedSessionIndexer.SessionListFingerprint(sessions: [])
+        XCTAssertEqual(fpBefore, fpAfter, "two empty session lists (e.g. a disabled/never-populated source) must compare equal")
     }
 }

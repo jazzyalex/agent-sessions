@@ -24,7 +24,44 @@ actor SearchIngestService {
         let skipped: Int
     }
 
+    /// Cheap per-source aggregate of an incoming `[FileRef]` list, used to detect
+    /// "nothing changed since the last completed pass" without touching SQLite.
+    /// Not a substitute for the real per-file mtime/size skip-gate below — just a
+    /// fast early-out for the common steady-state kick where the caller's freshly
+    /// re-stat'd file list is byte-for-byte identical to what it was last time.
+    private struct IngestAggregate: Equatable {
+        let fileCount: Int
+        let maxMtime: Int64
+        let totalSize: Int64
+        // Included so toggling the tool-IO preference between calls (same files,
+        // same mtimes/sizes) busts the early-out and falls through to the real
+        // per-file gate, which is what actually backfills the missing toolIO rows.
+        let toolIOEnabled: Bool
+
+        init(files: [FileRef], toolIOEnabled: Bool) {
+            fileCount = files.count
+            maxMtime = files.map(\.mtime).max() ?? 0
+            totalSize = files.reduce(0) { $0 + $1.size }
+            self.toolIOEnabled = toolIOEnabled
+        }
+    }
+
     private let db: IndexDB
+
+    /// Remembered aggregate from the last ingest pass that ran to completion (no
+    /// throw, no cancellation) for each source. Only ever read/written from within
+    /// `ingest`, which is safe since this is an actor. Cleared implicitly by simply
+    /// never being set for a source that has never completed a clean pass, which is
+    /// exactly the "never ingested / last pass was interrupted" case that must always
+    /// fall through to the full check rather than early-out.
+    private var lastCleanAggregateBySource: [String: IngestAggregate] = [:]
+
+    /// Test-only observability: incremented each time the aggregate early-out fires
+    /// (i.e. `ingest` returned before touching `fetchIndexedFiles`/`fetchSearchReadyPaths`
+    /// /`sessionSearchUpdatedAt`/toolIO map reads). Harmless in production — just a
+    /// counter nobody else reads — but gives tests a way to prove the early-out path
+    /// was actually taken rather than inferring it indirectly from `Progress` alone.
+    private(set) var earlyOutHitCountForTesting = 0
 
     init(db: IndexDB) {
         self.db = db
@@ -68,6 +105,35 @@ actor SearchIngestService {
                 quietSeconds: TimeInterval = 120,
                 reingestCooldownOverride: TimeInterval? = nil) async throws -> Progress {
         let sourceRaw = source.rawValue
+
+        // Cheap early-out, before any of the per-source SQLite map reads below: if the
+        // caller's freshly re-stat'd file list is aggregate-identical to what it was on
+        // the last pass that ran to completion for this source, there is nothing new to
+        // ingest — every file would fall through the per-file skip-gate anyway, just
+        // after paying for fetchIndexedFiles/fetchSearchReadyPaths/sessionSearchUpdatedAt
+        // (+ toolIO variants). This is an optimization, not a correctness gate: a source
+        // with no recorded clean pass (never ingested, or its last pass threw/was
+        // cancelled) always falls through to the full check below.
+        //
+        // Safety valve: the quiet-period and re-ingest-cooldown gates below are
+        // time-dependent (they compare `nowTS` against a stored timestamp), so a file
+        // can flip from "gated" to "eligible" purely because wall-clock time passed,
+        // with its FileRef (mtime/size) never changing. An aggregate match alone can't
+        // see that. So the early-out additionally requires every incoming file to be
+        // older than the widest possible gate window (quietSeconds and the largest
+        // re-ingest cooldown tier) — i.e. no file could plausibly still be waiting out
+        // a gate — before trusting "identical aggregate" to mean "nothing to do".
+        let nowTS = Date().timeIntervalSince1970
+        let widestGateWindow = max(quietSeconds, reingestCooldownOverride ?? Self.reingestCooldown(forFileSize: .max))
+        let noFileInDangerZone = files.allSatisfy { nowTS - Double($0.mtime) >= widestGateWindow }
+        let incomingAggregate = IngestAggregate(files: files, toolIOEnabled: toolIOEnabled)
+        if noFileInDangerZone,
+           let lastClean = lastCleanAggregateBySource[sourceRaw],
+           lastClean == incomingAggregate {
+            earlyOutHitCountForTesting += 1
+            return Progress(processed: 0, total: files.count, skipped: files.count)
+        }
+
         // `fetchSearchReadyPaths`/`fetchToolIOReadyPaths` only tell us the path's row is
         // format-current relative to whatever mtime/size the DB already has on file — they
         // don't compare against the caller's freshly-stat'd FileRef. Pair them with
@@ -103,7 +169,6 @@ actor SearchIngestService {
         var processed = 0
         var skipped = 0
         let total = files.count
-        let nowTS = Date().timeIntervalSince1970
 
         for (idx, file) in files.enumerated() {
             try Task.checkCancellation()
@@ -212,6 +277,11 @@ actor SearchIngestService {
             defer { Perf.end(_span) }
             try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: toolIOOldBytesCap)
         }
+
+        // Reaching here means the pass ran to completion (no throw/cancellation
+        // propagated out of the loop above) — safe to remember this source's
+        // aggregate as the early-out baseline for the next kick.
+        lastCleanAggregateBySource[sourceRaw] = incomingAggregate
 
         return Progress(processed: processed, total: total, skipped: skipped)
     }

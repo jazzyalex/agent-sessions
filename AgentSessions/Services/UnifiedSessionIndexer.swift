@@ -1009,7 +1009,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
         .combineLatest($includePi)
         Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags))
-            .receive(on: FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated))
+            .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] combined -> [Session] in
                 guard let self else { return [] }
                 let (input, kinds, all, combinedFlags) = combined
@@ -1902,6 +1902,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
         guard didTrigger else { return }
 
+        let fingerprintBeforeWait: SessionListFingerprint? = await MainActor.run { [weak self] in
+            self?.currentSearchIngestFingerprint(for: source)
+        }
+
         var waits = 0
         while waits < 240 {
             if Task.isCancelled { break }
@@ -1916,7 +1920,41 @@ final class UnifiedSessionIndexer: ObservableObject {
         // Source refresh has completed (core index + session_meta are current for this
         // source). Kick the search-corpus backfill/incremental ingest for it now — strictly
         // after, never blocking the refresh above. Single-flight + coalesced per source.
-        kickSearchIngest(source: source)
+        //
+        // Always-kick triggers (manual/launch/cleanup) bypass the no-change gate below:
+        // a manual refresh/relaunch/full rebuild must never silently skip the corpus
+        // pass. `.monitor`/`.providerEnabled` are the steady-state background kicks this
+        // gate targets — for those, compare the discovered session list's cheap
+        // fingerprint (already published by the refresh, no extra I/O) captured just
+        // before vs. just after the wait loop above: identical means this refresh found
+        // nothing new/changed for the source, so there is nothing for search-ingest to do.
+        let alwaysKick = trigger == .manual || trigger == .launch || trigger == .cleanup
+        var shouldKickSearchIngest = true
+        if !alwaysKick {
+            let fingerprintAfterWait: SessionListFingerprint? = await MainActor.run { [weak self] in
+                self?.currentSearchIngestFingerprint(for: source)
+            }
+            if let before = fingerprintBeforeWait, let after = fingerprintAfterWait, before == after {
+                shouldKickSearchIngest = false
+            }
+        }
+        if !shouldKickSearchIngest {
+            // Exemption: a source whose search corpus has never been populated at all
+            // (fresh install, or a source just newly enabled) must still get its first
+            // backfill kick even though this particular refresh found "no change" —
+            // e.g. the very first refresh after launch, or a source whose corpus was
+            // wiped by `rebuildCoreIndex`. Checked only in this (would-otherwise-skip)
+            // branch via a single cheap `EXISTS` query — far cheaper than the full
+            // ingest map reads this gate exists to avoid paying on every kick.
+            let coverageDB = try? IndexDB()
+            let coverageExists = try? await coverageDB?.hasSearchData(sources: [source.rawValue])
+            if (coverageExists ?? nil) != true {
+                shouldKickSearchIngest = true
+            }
+        }
+        if shouldKickSearchIngest {
+            kickSearchIngest(source: source)
+        }
 
         await MainActor.run { [weak self] in
             guard let self else { return }
@@ -2044,6 +2082,27 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: return cursor.allSessions
         case .pi: return pi.allSessions
         }
+    }
+
+    /// Cheap "did this source's discovered session list change at all" signal, built
+    /// purely from fields the provider refresh already computed and published on
+    /// `allSessions` — no extra disk or DB I/O. Used to skip `kickSearchIngest` when a
+    /// refresh completed but genuinely found nothing new/changed for this source.
+    struct SessionListFingerprint: Equatable {
+        let count: Int
+        let totalSizeBytes: Int
+        let newestEndTime: Date?
+
+        init(sessions: [Session]) {
+            count = sessions.count
+            totalSizeBytes = sessions.reduce(0) { $0 + ($1.fileSizeBytes ?? 0) }
+            newestEndTime = sessions.compactMap(\.endTime).max()
+        }
+    }
+
+    @MainActor
+    private func currentSearchIngestFingerprint(for source: SessionSource) -> SessionListFingerprint {
+        SessionListFingerprint(sessions: currentSessions(for: source))
     }
 
     private static func recentToolIOIndexEnabled() -> Bool {
@@ -2483,7 +2542,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            let bgQueue = FeatureFlags.lowerQoSForBackgroundIngest ? DispatchQueue.global(qos: .utility) : DispatchQueue.global(qos: .userInitiated)
+            let bgQueue = FeatureFlags.backgroundIngestQueue
             bgQueue.async {
                 let results = self.applyFiltersAndSort(to: self.allSessions)
                 DispatchQueue.main.async {
