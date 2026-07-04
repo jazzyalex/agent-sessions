@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.0/AgentSessions-4.0.dmg"><b>Download Agent Sessions 4.0 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.1/AgentSessions-4.1.dmg"><b>Download Agent Sessions 4.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -72,22 +72,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.0
+## What's New in 4.1
 
-**TL;DR** - The Quota Meter takes center stage with **Session Runway** — see in real time which sessions are burning your Codex and Claude quota. Plus recoverable Codex Side Chats, the new Antigravity provider replacing Gemini CLI, and visibility + restore for archived Claude sessions.
+**TL;DR** - The Instant release. 4.1 is a top-to-bottom performance pass: transcripts open instantly (even massive ones), sorting and search are instant, scrolling is smooth, and the app is dramatically quieter when idle.
 
-**Highlights:** The **Quota Meter** shows at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. Its marquee 4.0 addition, **Session Runway**, adds live per-session burn-rate bars so you can spot which active session is eating your quota fastest before it costs you the window.
+**Highlights:** Opening a session now paints the newest content immediately and finishes the rest in the background — the multi-second freeze on large histories is gone. Sorting re-orders in place (~7s → ~0.5s on big lists), full-text search hits a background-built SQLite index instead of re-scanning files (with live scanning for freshly-changed sessions so results are never stale), and live-session probing, HUD rebuilds, and indexing are gated so idle CPU and "Using Significant Energy" pressure drop sharply.
 
-Also new in 4.0:
-- **Codex Side Chats** — recover Codex Desktop side chats as searchable session rows with their own `side` badge and parent context; filter with `#side` (and `#side phrase` to search within them).
-- **Antigravity provider** — replaces Gemini CLI support; discovers Antigravity CLI session transcripts, resumes with `agy --conversation <id>`, tracks live sessions, and surfaces local screenshots in the transcript and image browser.
-- **Restore archived Claude sessions** — Agent Sessions surfaces archived Claude Code sessions (an `archived` pill and an archived-only filter) and restores them in place, within its searchable local history. Since the app is otherwise read-only, restore is an explicit opt-in, off by default — it only writes to Claude's files once you enable it.
-- **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the list loses focus.
-- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
-- **Codex reset credits** — when Codex grants a free "reset your usage now" credit, the Quota Meter and menu bar now show it and when it expires, so you can see how many resets you have banked.
-- **Unified Sessions performance** — fixed several hangs on large histories (full-payload SwiftUI diffing, Project-column JSON re-parsing, foreground-return rebuilds) and backgrounded side-chat discovery so big Codex logs no longer block refresh.
-- **Claude usage accuracy** — OAuth/Web refreshes preserve recent hard-probe 5h limit/reset data, projected-exhaustion alerts use fractional usage, and Claude Code 2.x `/usage` gaps are treated as unavailable rather than false 0% readings.
-- Maintenance: re-verified agent-format support across all supported CLIs (Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, Pi), updating parsers where formats changed.
+New in 4.1:
+- **Instant transcript open** — two-stage rendering paints the tail of the session first; jumps to older content (search hits, deep links, first prompt) load the needed portion on demand.
+- **Instant sort & smooth scrolling** — in-place re-ordering, row rendering diet, and scrub-stall fixes across the session list, transcript, and HUD.
+- **Indexed search** — the FTS corpus builds in the background; selecting a result from a search-filtered list auto-jumps to the first match.
+- **Quieter idle** — deduplicated rebuilds and gated probing across the Quota Meter, Cockpit, and indexers.
+
+Previous release — 4.0: Quota Meter with **Session Runway** (live per-session burn-rate bars), Codex Side Chats, the Antigravity provider, archived Claude session restore, and Claude dynamic workflow nesting. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -141,7 +138,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.0/AgentSessions-4.0.dmg)
+1. [Download AgentSessions-4.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.1/AgentSessions-4.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

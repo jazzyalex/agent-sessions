@@ -3,12 +3,22 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Highlights
+- **The Instant release.** This release is a top-to-bottom performance program: transcripts open instantly, sorting is instant, search is indexed, scrolling is smooth, and the app is dramatically quieter when idle.
+- **Transcripts open instantly** — even monster sessions. Opening a session paints the newest content immediately and completes the rest in the background; the multi-second (sometimes 30s+) beachball on large histories is gone. Jumping to older content (search hits, deep links, first prompt) loads the needed portion on demand.
+- **Instant sort and smoother lists** — clicking a sort column re-orders in place instead of re-running the whole pipeline (~7s → ~0.5s on large histories), fast scrolling no longer stutters, and scrubbing the list no longer stalls the transcript or the HUD.
+- **Indexed full-text search** — the search corpus is now ingested into the SQLite FTS index in the background, so searches hit the index instead of re-scanning files; recently-changed sessions are still scanned live so results are never stale. Selecting a result from a search-filtered list auto-jumps to the first match.
+- **Quieter when idle** — live-session probing, HUD rebuilds, and indexing are now gated and deduplicated; idle CPU and "Using Significant Energy" pressure are sharply reduced.
+
 ### Improvements
-- Session list: clicking a sort column header is now instant on large histories — sorting re-orders the current results in place instead of re-running the whole filter pipeline, and no longer freezes for several seconds after the first click.
-- Transcript: very large sessions now show a "Large session" screen with a "Show full transcript" opt-in, so opening a huge transcript no longer hangs the app; the opt-in is honored when returning to the app or pulling to refresh.
+- Session list: row rendering diet — shared date formatting, precomputed pills, and memoized project names keep scrolling smooth at large row counts.
+- Transcript: live-tail rebuilds are throttled while the app is inactive and catch up instantly on activation.
 
 ### Bug Fixes
 - Transcript: Antigravity and GitHub Copilot sessions now render inline images that were previously detected but never displayed.
+- Session list: toggling "Hide zero-message sessions", "Hide low-message sessions", or housekeeping visibility now refreshes OpenClaw and Antigravity results immediately instead of waiting for an unrelated refresh.
+- Session list: archived-pill behavior is pinned for switch-branch Claude Desktop sessions.
+- Quota Meter: the Session Runway overflow label now always reads "+N sessions" instead of splitting into burn/idle "bursts".
 
 ## [4.0] - 2026-06-28
 ### Highlights
