@@ -155,6 +155,25 @@ struct SessionTerminalView: View {
         let reviewCardsEnabled: Bool
     }
 
+    /// Identity of the coalesced block list a whole-session match scan was
+    /// computed against. `coalescedBlocks` is a pure function of the session's
+    /// events (the preamble/review-card toggles only affect rendering, not the
+    /// block list or its indices), so a scan stays valid across a window widen
+    /// or a toggle-only rebuild and is only invalidated by a session switch or
+    /// a content change. Used to avoid discarding a valid scan on every
+    /// non-append rebuild.
+    struct ScanValidityKey: Equatable {
+        let sessionID: String
+        let eventCount: Int
+        let fileSizeBytes: Int
+    }
+
+    private var currentScanValidityKey: ScanValidityKey {
+        ScanValidityKey(sessionID: session.id,
+                        eventCount: session.events.count,
+                        fileSizeBytes: session.fileSizeBytes ?? -1)
+    }
+
     /// Signature of the most recently APPLIED build's inputs.
     @State private var lastCompletedBuildSignature: BuildSignature?
     /// Signature of the build currently in flight (dispatching → applied/cancelled).
@@ -246,11 +265,22 @@ struct SessionTerminalView: View {
     @State private var unifiedGlobalScanQuery: String = ""
     @State private var unifiedGlobalScanGen: Int = 0
     @State private var unifiedGlobalScanTask: Task<Void, Never>? = nil
+    @State private var unifiedGlobalScanValidity: ScanValidityKey? = nil
     @State private var pendingUnifiedMatchScroll: Bool = false
     @State private var unifiedMatchOccurrences: [MatchOccurrence] = []
     @State private var unifiedCurrentMatchLineID: Int? = nil
 
     // Local Find state
+    // Same whole-session scan machinery as unified search: on monster sessions
+    // the built snapshots cover only the tail window, so the ⌘F total and
+    // next/prev navigation would otherwise be limited to loaded content.
+    @State private var findGlobalMatchBlocks: [Int] = []
+    @State private var findGlobalTotalMatches: Int? = nil
+    @State private var findGlobalScanQuery: String = ""
+    @State private var findGlobalScanGen: Int = 0
+    @State private var findGlobalScanTask: Task<Void, Never>? = nil
+    @State private var findGlobalScanValidity: ScanValidityKey? = nil
+    @State private var pendingFindMatchScroll: Bool = false
     @State private var findMatchOccurrences: [MatchOccurrence] = []
     @State private var findCurrentMatchLineID: Int? = nil
     @State private var conversationStartLineID: Int? = nil
@@ -319,6 +349,8 @@ struct SessionTerminalView: View {
             pendingBuildSignature = nil
             inlineImagesTask?.cancel()
             inlineImagesTask = nil
+            cancelGlobalUnifiedScan()
+            cancelGlobalFindScan()
         }
         .onChange(of: jumpToken) { _, _ in
             jumpToFirstPrompt()
@@ -1190,10 +1222,17 @@ struct SessionTerminalView: View {
             }
         } else {
             // Reset Unified Search + Find state when rebuilding from a non-append change.
-            // Also drop the whole-session scan results: block indices are only
-            // valid for the block list they were scanned from (and a session
-            // switch would otherwise briefly navigate on the old session's scan).
-            cancelGlobalUnifiedScan()
+            // Drop a whole-session scan ONLY when its block indices are actually
+            // stale — i.e. the session's content identity changed. A window widen
+            // (or a preamble/review-card toggle) leaves the coalesced block list
+            // unchanged, so keeping the scan avoids a redundant full re-scan and
+            // the total-count flicker that a re-scan would cause.
+            if unifiedGlobalScanValidity != currentScanValidityKey {
+                cancelGlobalUnifiedScan()
+            }
+            if findGlobalScanValidity != currentScanValidityKey {
+                cancelGlobalFindScan()
+            }
             unifiedMatchOccurrences = []
             unifiedCurrentMatchLineID = nil
             unifiedExternalMatchCount = 0
@@ -1224,6 +1263,14 @@ struct SessionTerminalView: View {
             }
             if !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeFindMatches(resetIndex: true)
+                // A next/prev-driven widen just loaded the target block; scroll to
+                // the now-visible match (armed in recomputeFindMatches' empty-window
+                // branch). resetIndex:true above prevents re-widening.
+                if pendingFindMatchScroll, let lineID = findCurrentMatchLineID {
+                    pendingFindMatchScroll = false
+                    scrollTargetLineID = lineID
+                    scrollTargetToken &+= 1
+                }
             }
         }
 
@@ -2205,24 +2252,42 @@ struct SessionTerminalView: View {
         unifiedCurrentMatchLineID = visibleOccurrences[clampedIndex].lineID
     }
 
+    /// Pure whole-session block scan shared by the unified-search and local-find
+    /// scanners. Runs off-main over the coalesced blocks — the same block list
+    /// and indices `widenWindowForJump(toIncludeBlock:)` operates on. Returns nil
+    /// if cancelled mid-scan.
+    private nonisolated static func scanSessionBlocks(session: Session, query: String) -> (total: Int, blocks: [Int])? {
+        let blocks = SessionTranscriptBuilder.coalescedBlocks(for: session, includeMeta: false)
+        var total = 0
+        var matchBlocks: [Int] = []
+        for (idx, block) in blocks.enumerated() {
+            if Task.isCancelled { return nil }
+            let count = SearchTextMatcher.matchRanges(in: block.text, query: query).count
+            if count > 0 {
+                total += count
+                matchBlocks.append(idx)
+            }
+        }
+        return (total, matchBlocks)
+    }
+
     private func cancelGlobalUnifiedScan() {
         unifiedGlobalScanTask?.cancel()
         unifiedGlobalScanTask = nil
         unifiedGlobalMatchBlocks = []
         unifiedGlobalTotalMatches = nil
         unifiedGlobalScanQuery = ""
+        unifiedGlobalScanValidity = nil
     }
 
-    /// Whole-session match scan for windowed (monster) sessions. Runs off-main
-    /// over the coalesced blocks — the same block list and indices that
-    /// `widenWindowForJump(toIncludeBlock:)` operates on — so navigation can
-    /// widen the window to a matching block that isn't currently built.
-    /// Debounced so per-keystroke query changes don't re-coalesce the session.
+    /// Whole-session match scan for windowed (monster) sessions, debounced so
+    /// per-keystroke query changes don't re-coalesce the session.
     private func kickOffGlobalUnifiedScan(query: String) {
         if unifiedGlobalScanQuery == query, unifiedGlobalScanTask != nil { return }
         unifiedGlobalScanGen &+= 1
         let gen = unifiedGlobalScanGen
         unifiedGlobalScanQuery = query
+        unifiedGlobalScanValidity = currentScanValidityKey
         unifiedGlobalTotalMatches = nil
         unifiedGlobalMatchBlocks = []
         unifiedGlobalScanTask?.cancel()
@@ -2230,27 +2295,15 @@ struct SessionTerminalView: View {
         unifiedGlobalScanTask = Task.detached(priority: .utility) { [sessionSnapshot, query] in
             try? await Task.sleep(nanoseconds: 200_000_000)
             guard !Task.isCancelled else { return }
-            let blocks = SessionTranscriptBuilder.coalescedBlocks(for: sessionSnapshot, includeMeta: false)
-            var total = 0
-            var matchBlocks: [Int] = []
-            for (idx, block) in blocks.enumerated() {
-                if Task.isCancelled { return }
-                let count = SearchTextMatcher.matchRanges(in: block.text, query: query).count
-                if count > 0 {
-                    total += count
-                    matchBlocks.append(idx)
-                }
-            }
-            let foundTotal = total
-            let foundBlocks = matchBlocks
+            guard let result = Self.scanSessionBlocks(session: sessionSnapshot, query: query) else { return }
             await MainActor.run {
                 guard gen == unifiedGlobalScanGen,
                       session.id == sessionSnapshot.id,
                       unifiedQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-                unifiedGlobalMatchBlocks = foundBlocks
-                unifiedGlobalTotalMatches = foundTotal
+                unifiedGlobalMatchBlocks = result.blocks
+                unifiedGlobalTotalMatches = result.total
                 unifiedGlobalScanTask = nil
-                unifiedExternalTotalMatchCount = max(foundTotal, unifiedExternalTotalMatchCount)
+                unifiedExternalTotalMatchCount = max(result.total, unifiedExternalTotalMatchCount)
                 // Session opened via list search with all matches above the
                 // loaded window: widen to the nearest match block now, so the
                 // first match appears without the user pressing next. The
@@ -2259,9 +2312,49 @@ struct SessionTerminalView: View {
                 if pendingUnifiedMatchScroll,
                    unifiedMatchOccurrences.isEmpty,
                    let loaded = loadedBlockRange, loaded.lowerBound > 0,
-                   let target = foundBlocks.last(where: { $0 < loaded.lowerBound }) {
+                   let target = result.blocks.last(where: { $0 < loaded.lowerBound }) {
                     widenWindowForJump(toIncludeBlock: target, priority: .userInitiated)
                 }
+            }
+        }
+    }
+
+    private func cancelGlobalFindScan() {
+        findGlobalScanTask?.cancel()
+        findGlobalScanTask = nil
+        findGlobalMatchBlocks = []
+        findGlobalTotalMatches = nil
+        findGlobalScanQuery = ""
+        findGlobalScanValidity = nil
+    }
+
+    /// Local-find counterpart to `kickOffGlobalUnifiedScan`. Unlike unified
+    /// search, ⌘F is never "opened from the list", so there is no on-arrival
+    /// auto-jump — the scan only supplies the true total; off-window matches are
+    /// reached by pressing next/prev (see the empty-window branch in
+    /// `recomputeFindMatches`).
+    private func kickOffGlobalFindScan(query: String) {
+        if findGlobalScanQuery == query, findGlobalScanTask != nil { return }
+        findGlobalScanGen &+= 1
+        let gen = findGlobalScanGen
+        findGlobalScanQuery = query
+        findGlobalScanValidity = currentScanValidityKey
+        findGlobalTotalMatches = nil
+        findGlobalMatchBlocks = []
+        findGlobalScanTask?.cancel()
+        let sessionSnapshot = session
+        findGlobalScanTask = Task.detached(priority: .utility) { [sessionSnapshot, query] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            guard let result = Self.scanSessionBlocks(session: sessionSnapshot, query: query) else { return }
+            await MainActor.run {
+                guard gen == findGlobalScanGen,
+                      session.id == sessionSnapshot.id,
+                      findQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                findGlobalMatchBlocks = result.blocks
+                findGlobalTotalMatches = result.total
+                findGlobalScanTask = nil
+                externalTotalMatchCount = max(result.total, externalTotalMatchCount)
             }
         }
     }
@@ -2276,6 +2369,8 @@ struct SessionTerminalView: View {
             externalMatchCount = 0
             externalTotalMatchCount = 0
             externalCurrentMatchIndex = 0
+            pendingFindMatchScroll = false
+            cancelGlobalFindScan()
             return
         }
 
@@ -2286,11 +2381,35 @@ struct SessionTerminalView: View {
         externalMatchCount = visibleOccurrences.count
 
         let totalRanges = SearchTextMatcher.matchRanges(in: fullSnapshot.text, query: query)
-        externalTotalMatchCount = totalRanges.count
+        let windowCoversWholeSession = loadedBlockRange.map {
+            $0.lowerBound == 0 && $0.upperBound >= max(0, totalBlockCount - 1)
+        } ?? true
+        if windowCoversWholeSession {
+            externalTotalMatchCount = totalRanges.count
+            cancelGlobalFindScan()
+        } else {
+            // Only a tail window is built; the true total comes from the async
+            // whole-session scan. Show the window count until it lands.
+            if findGlobalScanQuery == query, let globalTotal = findGlobalTotalMatches {
+                externalTotalMatchCount = max(globalTotal, totalRanges.count)
+            } else {
+                externalTotalMatchCount = totalRanges.count
+                kickOffGlobalFindScan(query: query)
+            }
+        }
 
         guard !visibleOccurrences.isEmpty else {
             findCurrentMatchLineID = nil
             externalCurrentMatchIndex = 0
+            // Next/prev with no visible matches: if the whole-session scan found
+            // matches above the loaded window, widen to the nearest one so ⌘F can
+            // actually step to it. The widen's apply scrolls via pendingFindMatchScroll.
+            if !resetIndex,
+               let loaded = loadedBlockRange, loaded.lowerBound > 0,
+               let target = findGlobalMatchBlocks.last(where: { $0 < loaded.lowerBound }) {
+                pendingFindMatchScroll = true
+                widenWindowForJump(toIncludeBlock: target, priority: .userInitiated)
+            }
             return
         }
 
