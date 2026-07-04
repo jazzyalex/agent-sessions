@@ -1019,17 +1019,11 @@ struct SessionTerminalView: View {
                 // replaced by the full-session build) is measured here; the
                 // flag-off path and the small-session single build are not a
                 // "swap" and would just add noise to the span's tuning signal.
-                if stage1WindowApplied {
-                    let _s = Perf.begin("transcriptSwapApply", thresholdMs: 50)
-                    applyRebuild(result, sessionSnapshot: sessionSnapshot,
-                                skipAgentsPreamble: skipAgentsPreamble, signature: signature,
-                                isFinalApply: true)
-                    Perf.end(_s)
-                } else {
-                    applyRebuild(result, sessionSnapshot: sessionSnapshot,
-                                skipAgentsPreamble: skipAgentsPreamble, signature: signature,
-                                isFinalApply: true)
-                }
+                let _s: Perf.Span? = stage1WindowApplied ? Perf.begin("transcriptSwapApply", thresholdMs: 50) : nil
+                applyRebuild(result, sessionSnapshot: sessionSnapshot,
+                            skipAgentsPreamble: skipAgentsPreamble, signature: signature,
+                            isFinalApply: true)
+                if let _s { Perf.end(_s) }
                 if pendingBuildSignature == signature { pendingBuildSignature = nil }
             }
         }
