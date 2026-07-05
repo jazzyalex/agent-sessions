@@ -466,8 +466,18 @@ actor SearchIngestCoordinatorBox {
         return shouldRunAgain
     }
 
-    /// Records the running task for `source` so `cancelAll()` can stop it on teardown.
-    func track(_ task: Task<Void, Never>, for source: SessionSource) {
+    /// Creates the ingest task for `source` at `.utility` and records it under
+    /// `tasksBySource` in one actor-isolated step, so `cancelAll()` can never observe a
+    /// running-but-untracked task. Creation and storage have no suspension point between
+    /// them, so any later actor method (`cancelAll`, `finish`) is guaranteed to see the
+    /// task. Crucially, `operation` needs no reference to its own `Task`: this removes the
+    /// self-reference race a caller-side `var task: Task! = Task { track(task) }` hits, where
+    /// the detached body can read the still-nil implicitly-unwrapped optional before the
+    /// assignment lands and trap on the force-unwrap.
+    func startTracked(source: SessionSource, _ operation: @escaping @Sendable () async -> Void) {
+        let task = Task.detached(priority: .utility) {
+            await operation()
+        }
         tasksBySource[source] = task
     }
 
