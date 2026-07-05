@@ -436,6 +436,74 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// that row re-raises the pulse and every other cell resets to base alpha.
     private var flashingRowID: Int?
 
+    // MARK: Turn/tool timing badges (Phase 3 Task 19)
+
+    /// `TranscriptTurnTiming.compute(blocks:)` results for the CURRENT full
+    /// block stream, cached so a per-row lookup (`turnTiming(forRowID:)` /
+    /// `toolTiming(forRowID:)`) is O(1) rather than re-scanning the stream on
+    /// every `configure`. Recomputed on the same seam as the other per-snapshot
+    /// derived maps (`allBlocksCache`/`totalBlockCount`): a live append that
+    /// changes `totalBlockCount`, or a session switch — never on every `apply`
+    /// call, since most passes carry an unchanged stream (window widen, font
+    /// change, find navigation). Reset to empty on session switch alongside the
+    /// other per-session caches.
+    private var turnTimingCache: [Int: TurnTiming] = [:]
+    private var toolTimingCache: [Int: ToolTiming] = [:]
+    /// `totalBlockCount` the timing caches were last computed against. Distinct
+    /// sentinel (-1) from `totalBlockCount`'s own 0-default so the very first
+    /// `apply` (totalBlockCount often starts at 0 for an empty/new session)
+    /// still triggers one compute rather than reading as "unchanged".
+    private var lastTimingComputedBlockCount: Int = -1
+
+    /// Turn-chip lookup for a row id (the row's `BlockRowModel.id`, which for a
+    /// plain message row equals its block's `globalBlockIndex` — the same space
+    /// `TranscriptTurnTiming.compute`'s `turns` dict is keyed by). Returns nil
+    /// for a row that isn't a turn anchor (most rows).
+    func turnTiming(forRowID rowID: Int) -> TurnTiming? { turnTimingCache[rowID] }
+
+    /// Per-tool duration lookup, keyed by the `.toolOut` block's
+    /// `globalBlockIndex` (NOT the row id — see `toolDurationText(for:)`,
+    /// which resolves the right key for a row).
+    func toolTiming(forRowID rowID: Int) -> ToolTiming? { toolTimingCache[rowID] }
+
+    /// The turn chip text for a row, or `""` (render nothing) when the row
+    /// isn't a turn anchor or the turn's duration is nil. A turn anchor is
+    /// always `.assistant` or `.user` kind (`TranscriptTurnTiming.compute`'s
+    /// contract), so this is only ever non-empty for a plain message row —
+    /// looking it up for a tool row is harmless (simply misses) but never
+    /// fires in practice.
+    private func turnChipText(forRowID rowID: Int) -> String {
+        guard let timing = turnTimingCache[rowID] else { return "" }
+        return TranscriptTurnTiming.turnChipText(durationSeconds: timing.durationSeconds,
+                                                 toolCallCount: timing.toolCallCount)
+    }
+
+    /// Per-tool duration suffix for a tool row, formatted and ready to append
+    /// to the collapsed header — or nil to render nothing. Decision (Task 19,
+    /// documented per the brief's "decide + document" instruction): Task 6's
+    /// `mergeToolRuns` folds ANY run of >=2 consecutive tool-kind blocks into a
+    /// `.toolGroup` — which means the ORDINARY single-tool-invocation shape
+    /// (one `.toolCall` immediately followed by its own `.toolOut`) is ALREADY
+    /// a 2-block "group", not a lone `.message` row (a genuinely lone tool row
+    /// only occurs for an unpaired/still-streaming `.toolCall`). Reading the
+    /// brief's "omit on merged groups" literally against raw block count would
+    /// suppress the duration for nearly every real tool call. So: show the
+    /// duration when `toolBlocks` is EXACTLY `[.toolCall, .toolOut]` (one
+    /// logical invocation, regardless of whether Task 6 merged it) — that's
+    /// the "trivial"/solo case the brief calls out as an exception. For any
+    /// group with more than 2 blocks (multiple DISTINCT tool calls merged —
+    /// the "N tool calls" header case), omit: summing unrelated durations
+    /// would fabricate a misleading number, and there's no single call the
+    /// number could honestly describe.
+    private func toolDurationText(for row: BlockRowModel) -> String? {
+        guard row.isToolCard else { return nil }
+        let blocks = row.toolBlocks
+        guard blocks.count == 2, blocks[0].kind == .toolCall, blocks[1].kind == .toolOut else { return nil }
+        guard let timing = toolTimingCache[blocks[1].globalBlockIndex],
+              let duration = timing.durationSeconds else { return nil }
+        return TranscriptTurnTiming.formatDuration(duration)
+    }
+
     // MARK: Cross-block selection (Task 9)
 
     /// The shared cross-block selection state. Ordinals index into `rows`
@@ -845,11 +913,32 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // A session switch invalidates every selection ordinal (they index a
             // different rows array now). Clear before rows are rebuilt below.
             clearCrossBlockSelection()
+            // Turn/tool timing (Task 19) is keyed by globalBlockIndex, same as
+            // the expansion sets above — meaningless across a session switch.
+            // Force a recompute below regardless of the new session's block
+            // count (even 0 -> 0 must still recompute against the NEW blocks).
+            turnTimingCache = [:]
+            toolTimingCache = [:]
+            lastTimingComputedBlockCount = -1
         }
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
         allBlocksCache = allBlocks
+
+        // Turn/tool timing (Task 19): recompute once per snapshot, on the same
+        // "did the full stream change" gate the window-maintenance branch below
+        // uses (totalBlockCount), NOT on every apply — most passes (window
+        // widen, font change, find navigation) hand back the SAME full stream.
+        // `TranscriptTurnTiming.compute` is O(blocks), cheap relative to the
+        // coalesce/merge work `apply` already redoes every call, but there's no
+        // reason to redo it when the stream is provably unchanged.
+        if totalBlockCount != lastTimingComputedBlockCount {
+            lastTimingComputedBlockCount = totalBlockCount
+            let timing = TranscriptTurnTiming.compute(blocks: allBlocks)
+            turnTimingCache = timing.turns
+            toolTimingCache = timing.tools
+        }
 
         // Window maintenance on total-count change (live appends) / first apply.
         // T5 always re-pinned to the tail; T7 must PRESERVE a scroll-widened
@@ -1157,6 +1246,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                        lineLimit: CardMetrics.toolBodyTruncationLineLimit,
                        findMatchCount: findMatchCount(forRowID: rowModel.id),
                        renderedBody: renderedBody(for: rowModel),
+                       turnChipText: turnChipText(forRowID: rowModel.id),
+                       toolDurationText: toolDurationText(for: rowModel),
                        onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
                        onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
         // Flash reset/paint. A recycle mid-flash re-raises alpha on the flashing
@@ -2656,6 +2747,8 @@ final class BlockCardCellView: NSTableCellView {
                    lineLimit: Int,
                    findMatchCount: Int = 0,
                    renderedBody: RenderedBody? = nil,
+                   turnChipText: String = "",
+                   toolDurationText: String? = nil,
                    onToggleExpansion: @escaping () -> Void,
                    onToggleShowAll: @escaping () -> Void) {
         // Recycle hygiene (Task 10): drop any find highlight the previous
@@ -2683,7 +2776,7 @@ final class BlockCardCellView: NSTableCellView {
         if row.isToolCard {
             configureToolCard(row: row, block: block, accent: accent, fontSize: fontSize,
                               isExpanded: isExpanded, showAll: showAll, lineLimit: lineLimit,
-                              findMatchCount: findMatchCount,
+                              findMatchCount: findMatchCount, toolDurationText: toolDurationText,
                               onToggleExpansion: onToggleExpansion, onToggleShowAll: onToggleShowAll)
             return
         }
@@ -2727,7 +2820,8 @@ final class BlockCardCellView: NSTableCellView {
         bodyText.isHidden = isEmpty
 
         let header = BlockCardHeader(kind: block.kind, timestamp: block.timestamp,
-                                     accent: Color(nsColor: accent), toolMode: nil)
+                                     accent: Color(nsColor: accent), toolMode: nil,
+                                     turnChipText: turnChipText)
         headerHost?.rootView = header
     }
 
@@ -2739,6 +2833,7 @@ final class BlockCardCellView: NSTableCellView {
                                     showAll: Bool,
                                     lineLimit: Int,
                                     findMatchCount: Int,
+                                    toolDurationText: String?,
                                     onToggleExpansion: @escaping () -> Void,
                                     onToggleShowAll: @escaping () -> Void) {
         headerHeightConstraint?.constant = CardMetrics.headerHeight
@@ -2757,6 +2852,7 @@ final class BlockCardCellView: NSTableCellView {
             summary: headerSummary,
             toolName: isGroup ? nil : block.toolName,
             findMatchCount: findMatchCount,
+            durationText: toolDurationText,
             onToggle: onToggleExpansion)
         let header = BlockCardHeader(kind: block.kind, timestamp: block.timestamp,
                                      accent: Color(nsColor: accent), toolMode: toolMode)
@@ -3194,6 +3290,13 @@ struct BlockCardHeader: View {
         /// itself is unreachable while collapsed — auto-expand is Phase 2). 0
         /// hides the pill. Ignored while expanded (matches highlight in-body).
         var findMatchCount: Int = 0
+        /// Task 19: pre-formatted `"4.8s"`-style duration for a SOLO tool
+        /// invocation (one `.toolCall` + its own `.toolOut` — see
+        /// `BlockTableController.toolDurationText(for:)` for the merged-group
+        /// decision). Nil renders nothing; the controller never passes an empty
+        /// string. Shown/hidden identically whether the card is expanded or
+        /// collapsed (it's header chrome, not body content).
+        var durationText: String? = nil
         var onToggle: () -> Void
     }
 
@@ -3201,6 +3304,15 @@ struct BlockCardHeader: View {
     let timestamp: Date?
     let accent: Color
     let toolMode: ToolMode?
+    /// Task 19: pre-formatted turn-duration chip (`"4.8s · 1 call"` /
+    /// `"4.8s"`), rendered trailing on the SAME line as the role label +
+    /// timestamp — never a new line, so it can never change the header's
+    /// fixed-height band (see `CardMetrics.headerHeight`, a hardcoded
+    /// constant the row-height math uses verbatim; the header's actual
+    /// SwiftUI content is never measured for row height). Empty string
+    /// (the default, and what the controller passes for a non-anchor row or
+    /// a nil-duration turn) renders nothing.
+    var turnChipText: String = ""
 
     var body: some View {
         if let toolMode {
@@ -3219,6 +3331,16 @@ struct BlockCardHeader: View {
                 Text(timestamp, format: .dateTime.hour().minute().second())
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
+            }
+            // Task 19: static turn-duration chip, e.g. "4.8s · 1 call". Same
+            // line, same HStack, trailing — the header's fixed 22pt band never
+            // measures its content (see `turnChipText` doc), so this can only
+            // ever affect layout WITHIN that band, never row height.
+            if !turnChipText.isEmpty {
+                Text(turnChipText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
         }
@@ -3243,6 +3365,17 @@ struct BlockCardHeader: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                // Task 19: solo-invocation duration, subordinate to the
+                // name/summary (smaller, tertiary). Same line as everything
+                // else in this HStack — the fixed-height header band means
+                // this can't affect row height either way (see
+                // `turnChipText`'s doc on `BlockCardHeader`).
+                if let durationText = mode.durationText {
+                    Text("· \(durationText)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 if let timestamp {
                     Text(timestamp, format: .dateTime.hour().minute().second())
                         .font(.system(size: 10))

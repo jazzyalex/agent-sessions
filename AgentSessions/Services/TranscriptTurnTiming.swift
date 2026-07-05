@@ -112,4 +112,37 @@ enum TranscriptTurnTiming {
         let delta = end.timeIntervalSince(start)
         return delta >= 0 ? delta : nil
     }
+
+    // MARK: - Static badge formatting (Phase 3 Task 19)
+
+    /// Pure duration formatter, shared by the turn chip and the per-tool
+    /// duration suffix. Bucket is chosen from the RAW (unrounded) value:
+    /// < 10s → one decimal (`"4.8s"`); 10–59.999...s → whole seconds
+    /// (`"42s"`); >= 60s → minutes + whole seconds (`"1m 12s"`). All
+    /// rounding is `String(format:)`'s standard round-half-to-even-on-the-
+    /// underlying-double behavior — e.g. `9.95` (not exactly representable)
+    /// renders `"9.9s"`, not `"10.0s"` (pinned by
+    /// `TranscriptTurnTimingTests.testFormatDurationRoundingBoundary`).
+    static func formatDuration(_ seconds: Double) -> String {
+        guard seconds >= 60 else {
+            if seconds < 10 {
+                return String(format: "%.1fs", seconds)
+            }
+            return "\(Int(seconds.rounded()))s"
+        }
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let remainderSeconds = totalSeconds % 60
+        return "\(minutes)m \(remainderSeconds)s"
+    }
+
+    /// Assembled turn-chip text: `"4.8s · 1 call"` / `"4.8s"` (0 calls) /
+    /// `""` (nil duration — the caller renders nothing, never an empty chip).
+    /// Pure so the assembly rule is unit-testable independent of the view.
+    static func turnChipText(durationSeconds: Double?, toolCallCount: Int) -> String {
+        guard let durationSeconds else { return "" }
+        let formatted = formatDuration(durationSeconds)
+        guard toolCallCount > 0 else { return formatted }
+        return "\(formatted) · \(toolCallCount) call\(toolCallCount == 1 ? "" : "s")"
+    }
 }

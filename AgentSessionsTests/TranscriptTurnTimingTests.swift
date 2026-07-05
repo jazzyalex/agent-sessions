@@ -231,4 +231,53 @@ final class TranscriptTurnTimingTests: XCTestCase {
         XCTAssertTrue(result.turns.isEmpty)
         XCTAssertTrue(result.tools.isEmpty)
     }
+
+    // MARK: - formatDuration (Phase 3 Task 19 static badges)
+
+    func testFormatDurationSubTenSecondsUsesOneDecimal() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(4.8), "4.8s")
+    }
+
+    func testFormatDurationZeroIsZeroPointZero() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(0), "0.0s")
+    }
+
+    func testFormatDurationTenToFiftyNineIsWholeSeconds() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(42), "42s")
+    }
+
+    func testFormatDurationAtSixtyRollsToMinutes() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(60), "1m 0s")
+    }
+
+    func testFormatDurationOverSixtyIsMinutesAndSeconds() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(72), "1m 12s")
+    }
+
+    /// Pinned rounding boundary (brief explicitly allows either output —
+    /// this test IS the pin): 9.95 is not exactly representable as a Double
+    /// (its nearest binary value sits fractionally BELOW 9.95), so
+    /// `String(format: "%.1f", ...)` — the bucket decision uses the raw
+    /// value, which is < 10 either way — renders "9.9s", not "10.0s".
+    func testFormatDurationRoundingBoundary() {
+        XCTAssertEqual(TranscriptTurnTiming.formatDuration(9.95), "9.9s")
+    }
+
+    // MARK: - turnChipText assembly
+
+    func testTurnChipTextWithDurationAndOneCall() {
+        XCTAssertEqual(TranscriptTurnTiming.turnChipText(durationSeconds: 4.8, toolCallCount: 1), "4.8s · 1 call")
+    }
+
+    func testTurnChipTextWithDurationAndMultipleCalls() {
+        XCTAssertEqual(TranscriptTurnTiming.turnChipText(durationSeconds: 4.8, toolCallCount: 3), "4.8s · 3 calls")
+    }
+
+    func testTurnChipTextOmitsCallsSuffixWhenZero() {
+        XCTAssertEqual(TranscriptTurnTiming.turnChipText(durationSeconds: 4.8, toolCallCount: 0), "4.8s")
+    }
+
+    func testTurnChipTextIsEmptyWhenDurationNil() {
+        XCTAssertEqual(TranscriptTurnTiming.turnChipText(durationSeconds: nil, toolCallCount: 5), "")
+    }
 }
