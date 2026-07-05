@@ -156,4 +156,42 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertEqual(s.count, 80)
         XCTAssertEqual(s, String(repeating: "x", count: 80))
     }
+
+    // MARK: expandedToolBodyOffset (Task 16 fold check)
+
+    private func toolBlock(_ text: String, toolName: String = "shell", index: Int) -> SessionTranscriptBuilder.LogicalBlock {
+        var b = SessionTranscriptBuilder.LogicalBlock(kind: .toolCall, text: text, timestamp: nil,
+            messageID: nil, toolName: toolName, isDelta: false, toolInput: nil,
+            isErrorOutput: false, eventID: "e\(index)", rawJSON: "")
+        b.globalBlockIndex = index
+        return b
+    }
+
+    func testExpandedToolBodyOffsetLoneBlockIsZero() {
+        // A lone block's expandedToolBodyText is block.text verbatim (no
+        // annotation) — its text always starts at offset 0.
+        let blocks = [toolBlock("hello", index: 0)]
+        XCTAssertEqual(BlockCardCellView.expandedToolBodyOffset(blocks: blocks, ownerIndex: 0), 0)
+    }
+
+    func testExpandedToolBodyOffsetMatchesGroupConstruction() {
+        // The offset of each block's OWN text inside expandedToolBodyText must
+        // exactly locate that substring — verifies the sibling helper's
+        // arithmetic mirrors expandedToolBodyText's real construction rather
+        // than drifting from it.
+        let blocks = [toolBlock("first body", index: 0),
+                      toolBlock("second body", index: 1),
+                      toolBlock("third body", index: 2)]
+        let full = BlockCardCellView.expandedToolBodyText(blocks: blocks) as NSString
+        for (i, block) in blocks.enumerated() {
+            let offset = BlockCardCellView.expandedToolBodyOffset(blocks: blocks, ownerIndex: i)
+            let expectedRange = full.range(of: block.text)
+            XCTAssertEqual(offset, expectedRange.location, "block \(i) offset should locate its own text")
+        }
+    }
+
+    func testExpandedToolBodyOffsetOutOfRangeIsZero() {
+        let blocks = [toolBlock("a", index: 0), toolBlock("b", index: 1)]
+        XCTAssertEqual(BlockCardCellView.expandedToolBodyOffset(blocks: blocks, ownerIndex: 5), 0)
+    }
 }

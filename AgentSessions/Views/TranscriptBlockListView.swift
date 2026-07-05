@@ -350,6 +350,21 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Row ids that opted into "Show all N lines" past the >20-line
     /// truncation. Reset whenever `sessionID` changes.
     private(set) var showAllRowIDs: Set<Int> = []
+    /// Row ids `scrollToCurrentFindMatch` auto-expanded to reveal a NAVIGATED
+    /// match (Task 16) — replaces the interim Phase-1 pill-only behavior for a
+    /// collapsed tool card. Cleared (re-collapsing the untouched survivors) on
+    /// an empty-query clear (`applyFind`) and unconditionally on a session
+    /// switch. A row is dropped from this set the moment the user manually
+    /// toggles it (`toggleToolExpansion`), so their explicit choice survives a
+    /// subsequent Esc.
+    private var autoExpandedByFind: Set<Int> = []
+    /// Subset bookkeeping: row ids where the SAME auto-expand also had to set
+    /// `showAllRowIDs` (the match sat past the 20-line truncation fold).
+    /// Tracked separately from `autoExpandedByFind` so the Esc-recollapse never
+    /// strips a `showAllRowIDs` membership the user set manually BEFORE find
+    /// touched that row (collapsing doesn't clear show-all, so a stale prior
+    /// manual show-all can coexist with a since-collapsed row).
+    private var autoShowedAllByFind: Set<Int> = []
 
     /// Full coalesced stream length last seen (drives window re-pinning).
     private var totalBlockCount: Int = 0
@@ -728,6 +743,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         for droppedID in diff.droppedRowIDs {
             expandedToolRowIDs.remove(droppedID)
             showAllRowIDs.remove(droppedID)
+            // Keep the find-auto-expand tracking sets in parity with the
+            // expansion sets they shadow (inert today given id uniqueness, but
+            // avoids a stale id lingering until the next Esc/session switch).
+            autoExpandedByFind.remove(droppedID)
+            autoShowedAllByFind.remove(droppedID)
         }
 
         var anchor = captureScrollAnchor()
@@ -791,6 +811,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             self.sessionID = sessionID
             expandedToolRowIDs.removeAll()
             showAllRowIDs.removeAll()
+            autoExpandedByFind.removeAll()
+            autoShowedAllByFind.removeAll()
             heightCache.removeAll(keepingCapacity: true)
             renderedBodyCache.removeAll()
             loadedBlockRange = nil
@@ -1411,6 +1433,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         } else {
             expandedToolRowIDs.insert(rowID)
         }
+        // Manual toggle overrides find's auto-expand bookkeeping (Task 16): a
+        // row the user explicitly interacted with (expand OR re-collapse) is no
+        // longer "only auto-expanded" — it must survive a subsequent Esc as the
+        // user just now left it, not silently snap back to collapsed. Drop the
+        // show-all half of the bookkeeping too: a manual re-collapse/expand is
+        // a broader override than the narrower toggleShowAll case below.
+        autoExpandedByFind.remove(rowID)
+        autoShowedAllByFind.remove(rowID)
         noteHeightChanged(forRowAt: rowIndex)
     }
 
@@ -1427,6 +1457,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         } else {
             showAllRowIDs.insert(rowID)
         }
+        // Manual show-all toggle overrides find's bookkeeping for this row
+        // (Task 16) — the user just explicitly set its show-all state, so an
+        // Esc must not silently override it back.
+        autoShowedAllByFind.remove(rowID)
         noteHeightChanged(forRowAt: rowIndex)
     }
 
@@ -1770,6 +1804,11 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 findMatchesByRowID = [:]
                 findCurrentOrdinal = 0
                 activeFindSource = .none
+                // Task 16: re-collapse any row find auto-expanded that the user
+                // never manually touched (a manual toggle already dropped it
+                // from these sets, so it survives here). Before the repaint so
+                // the visible-cell pass below reflects the final state.
+                recollapseAutoExpandedFindRows()
                 if hadFind { repaintAllVisibleFind() }
             }
             setConsumed()
@@ -1896,10 +1935,94 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     /// Scroll to the row backing the current match's block, widening the window
     /// first if the block is off-window (parity with Text mode). Flashes the row.
+    ///
+    /// Task 16: before the actual scroll, auto-expand a collapsed tool
+    /// card/group that owns the NAVIGATED match, so the reader lands on
+    /// in-body highlights instead of the Phase-1 interim header pill. Widening
+    /// (if the target is off-window) happens FIRST — `widen` is a no-op when
+    /// already loaded, so this is always safe — so the row exists in `rows`
+    /// by the time the expand check runs; `scrollToBlock` below then either
+    /// no-ops its own widen (already covered) or performs it, unaffected
+    /// either way.
     private func scrollToCurrentFindMatch() {
         guard findMatches.indices.contains(findCurrentOrdinal) else { return }
-        let target = findMatches[findCurrentOrdinal].globalBlockIndex
-        scrollToBlock(target) // widens if off-window, then scrolls + flashes
+        let match = findMatches[findCurrentOrdinal]
+        let target = match.globalBlockIndex
+        widen(toIncludeBlock: target)
+        autoExpandCollapsedMatch(match)
+        scrollToBlock(target) // widens (no-op here) if off-window, then scrolls + flashes
+    }
+
+    /// Auto-expand (Task 16) the collapsed tool row/group that owns `match`,
+    /// so the row it lands on renders in-body highlights rather than a header
+    /// pill. No-ops for a non-tool row, an already-expanded row, or a match
+    /// whose row still isn't loaded (a widen just failed/no-op'd for an
+    /// out-of-bounds target — `scrollToBlock` below will also no-op). No
+    /// animation: a find jump lands instantly, `flashRow` gives confirmation.
+    private func autoExpandCollapsedMatch(_ match: TranscriptDerivedState.BlockMatch) {
+        guard let rowIndex = rowIndex(forBlock: match.globalBlockIndex) else { return }
+        let row = rows[rowIndex]
+        guard row.isToolCard, !expandedToolRowIDs.contains(row.id) else { return }
+
+        clearCrossBlockSelection() // same locked rule as a manual toggle
+        expandedToolRowIDs.insert(row.id)
+        autoExpandedByFind.insert(row.id)
+
+        // Past the truncation fold ⇒ "Show all" is ALSO needed to reveal the
+        // match. Only remember this as FIND's doing when showAll wasn't
+        // already set (a stale prior manual show-all must not be stripped by
+        // find's own Esc-recollapse).
+        let fullBody = renderedBodyText(for: row)
+        let ownerIdx = row.toolBlocks.firstIndex { $0.globalBlockIndex == match.globalBlockIndex } ?? 0
+        let matchOffset = BlockCardCellView.expandedToolBodyOffset(blocks: row.toolBlocks, ownerIndex: ownerIdx)
+            + NSMaxRange(match.rangeInBlockText)
+        if TranscriptFindNavigator.matchExceedsTruncationFold(
+            fullBodyText: fullBody, matchEndOffset: matchOffset, lineLimit: CardMetrics.toolBodyTruncationLineLimit),
+           !showAllRowIDs.contains(row.id) {
+            showAllRowIDs.insert(row.id)
+            autoShowedAllByFind.insert(row.id)
+        }
+
+        // Zero-duration height re-note, pre-scroll, so the row's EXPANDED
+        // height is already settled when scrollToBlock's layoutSubtreeIfNeeded
+        // / scrollRowToVisible run right after (memo Q6) — a 0.15s-animated
+        // noteHeightChanged here would still be mid-flight at that point.
+        if let cell = table?.view(atColumn: 0, row: rowIndex, makeIfNecessary: false) as? BlockCardCellView {
+            configure(cell: cell, forRowModel: rows[rowIndex], ordinal: rowIndex)
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            table?.noteHeightOfRows(withIndexesChanged: IndexSet(integer: rowIndex))
+        }
+        // The row now renders in-body highlights instead of a pill — rebuild
+        // the row-id map so paint/pill lookups reflect the new expanded shape
+        // (same invariant `widen`/`applyPrepend` uphold at every rows change).
+        rebuildFindMatchesByRowIDIfActive()
+    }
+
+    /// Task 16 Esc/clear companion to `autoExpandCollapsedMatch`: re-collapse
+    /// every row find auto-expanded that the reader never manually touched
+    /// (a manual `toggleToolExpansion`/`toggleShowAll` already dropped that
+    /// row from these two sets, so it's simply absent here and stays open).
+    /// Called from `applyFind`'s empty-query clear branch; always clears both
+    /// tracking sets afterward regardless of whether any row survived to be
+    /// collapsed, so a stale id can never leak into the next find session.
+    private func recollapseAutoExpandedFindRows() {
+        guard !autoExpandedByFind.isEmpty || !autoShowedAllByFind.isEmpty else { return }
+        // Re-collapsing changes a row's rendered text and included/excluded
+        // status exactly like a manual toggle — clear any live cross-block
+        // selection so an ordinal can't reference now-different text (same
+        // locked clear-on-change rule `toggleToolExpansion` follows).
+        clearCrossBlockSelection()
+        for rowID in autoExpandedByFind {
+            expandedToolRowIDs.remove(rowID)
+        }
+        for rowID in autoShowedAllByFind {
+            showAllRowIDs.remove(rowID)
+        }
+        autoExpandedByFind.removeAll()
+        autoShowedAllByFind.removeAll()
+        noteAllHeightsChanged()
     }
 
     /// Re-paint find highlights (and pills, via reconfigure) on every visible
@@ -2682,6 +2805,29 @@ final class BlockCardCellView: NSTableCellView {
             let summary = TranscriptToolSummary.summary(toolName: block.toolName, toolInput: block.toolInput)
             return "\u{2022} \(summary)\n\(block.text)"
         }.joined(separator: "\n\n")
+    }
+
+    /// UTF-16 offset, WITHIN `expandedToolBodyText(blocks:)`'s output, where
+    /// `blocks[ownerIndex]`'s own `.text` begins — i.e. every earlier block's
+    /// full annotated contribution + joiner, plus this block's own
+    /// bullet+summary annotation prefix. Lets a caller re-base a
+    /// `BlockMatch.rangeInBlockText` (scoped to that one block's raw text) into
+    /// the group's concatenated coordinate space (Task 16 fold check). Returns 0
+    /// for a lone block (`expandedToolBodyText` returns `block.text` verbatim,
+    /// no annotation, so the block's text already starts at offset 0).
+    static func expandedToolBodyOffset(blocks: [SessionTranscriptBuilder.LogicalBlock], ownerIndex: Int) -> Int {
+        guard blocks.count >= 2, blocks.indices.contains(ownerIndex) else { return 0 }
+        func annotationPrefix(_ block: SessionTranscriptBuilder.LogicalBlock) -> String {
+            let summary = TranscriptToolSummary.summary(toolName: block.toolName, toolInput: block.toolInput)
+            return "\u{2022} \(summary)\n"
+        }
+        var offset = 0
+        for block in blocks[..<ownerIndex] {
+            let annotatedLen = (annotationPrefix(block) as NSString).length + (block.text as NSString).length
+            offset += annotatedLen + 2 // "\n\n" joiner
+        }
+        offset += (annotationPrefix(blocks[ownerIndex]) as NSString).length
+        return offset
     }
 
     private func configureMetaSeparator() {

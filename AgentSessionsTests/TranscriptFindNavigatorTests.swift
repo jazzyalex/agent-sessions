@@ -121,4 +121,39 @@ final class TranscriptFindNavigatorTests: XCTestCase {
         let r = NSRange(location: 0, length: 3)
         XCTAssertNil(TranscriptFindNavigator.renderableRange(r, shape: .nonRenderable))
     }
+
+    // MARK: matchExceedsTruncationFold (Task 16 find-auto-expand)
+
+    func testFoldNotExceededWhenBodyFitsWithinLimit() {
+        // Body has fewer lines than the limit ⇒ nothing is folded regardless
+        // of where the match sits.
+        let body = "line1\nline2\nline3"
+        XCTAssertFalse(TranscriptFindNavigator.matchExceedsTruncationFold(
+            fullBodyText: body, matchEndOffset: (body as NSString).length, lineLimit: 20))
+    }
+
+    func testFoldNotExceededWhenMatchInsideVisiblePrefix() {
+        let body = (1...25).map { "line\($0)" }.joined(separator: "\n")
+        let firstLineEnd = ("line1" as NSString).length
+        XCTAssertFalse(TranscriptFindNavigator.matchExceedsTruncationFold(
+            fullBodyText: body, matchEndOffset: firstLineEnd, lineLimit: 20))
+    }
+
+    func testFoldExceededWhenMatchPastVisiblePrefix() {
+        // 25 lines, limit 20 ⇒ visible prefix is lines 1-20. A match ending on
+        // line 21 is past the fold.
+        let body = (1...25).map { "line\($0)" }.joined(separator: "\n")
+        let visiblePrefixLen = ((1...20).map { "line\($0)" }.joined(separator: "\n") as NSString).length
+        XCTAssertTrue(TranscriptFindNavigator.matchExceedsTruncationFold(
+            fullBodyText: body, matchEndOffset: visiblePrefixLen + 1, lineLimit: 20))
+    }
+
+    func testFoldBoundaryExactlyAtVisibleLenIsNotExceeded() {
+        // A match ending EXACTLY at the visible prefix's length is still
+        // fully inside it (mirrors renderableRange's `<=` semantics).
+        let body = (1...25).map { "line\($0)" }.joined(separator: "\n")
+        let visiblePrefixLen = ((1...20).map { "line\($0)" }.joined(separator: "\n") as NSString).length
+        XCTAssertFalse(TranscriptFindNavigator.matchExceedsTruncationFold(
+            fullBodyText: body, matchEndOffset: visiblePrefixLen, lineLimit: 20))
+    }
 }

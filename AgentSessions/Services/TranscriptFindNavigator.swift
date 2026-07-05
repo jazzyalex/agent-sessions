@@ -119,4 +119,29 @@ enum TranscriptFindNavigator {
             return nil
         }
     }
+
+    // MARK: Find-auto-expand fold check (Task 16)
+
+    /// Whether a match ending at UTF-16 offset `matchEndOffset` inside a tool
+    /// row's rendered (expanded) `fullBodyText` falls beyond the row's
+    /// `lineLimit`-line visible prefix — i.e. auto-expanding the collapsed card
+    /// alone won't make the match visible; "Show all N lines" is also needed.
+    ///
+    /// `fullBodyText` is the row's already-rendered expanded body — a lone
+    /// card's `block.text` or a merged group's bullet+summary-annotated
+    /// concatenation (`BlockCardCellView.expandedToolBodyText`) — so this stays
+    /// a pure string/offset comparison with no knowledge of how that body was
+    /// built. `matchEndOffset` is the match's end position IN THAT STRING's
+    /// coordinate space (for a group, the caller has already re-based the
+    /// match's block-local `rangeInBlockText` by the preceding blocks'
+    /// annotated lengths). Returns false when the body doesn't even exceed
+    /// `lineLimit` lines (nothing is folded).
+    static func matchExceedsTruncationFold(fullBodyText: String,
+                                           matchEndOffset: Int,
+                                           lineLimit: Int) -> Bool {
+        let lines = fullBodyText.components(separatedBy: "\n")
+        guard lines.count > lineLimit else { return false }
+        let visibleLen = (lines.prefix(lineLimit).joined(separator: "\n") as NSString).length
+        return matchEndOffset > visibleLen
+    }
 }
