@@ -96,6 +96,7 @@
 		37D93EDA993018B66B33250E /* UsageDisplayMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0637E0D51C63AE8AB3CCED8 /* UsageDisplayMode.swift */; };
 		395E6D4526FA9B5E4D6B5E96 /* ListScrubSignal.swift in Sources */ = {isa = PBXBuildFile; fileRef = B261B03359A68E3276E36B23 /* ListScrubSignal.swift */; };
 		3A769ECA2EAC3A6A008A7EC2 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = DB2E108A587C47918E9BC53D /* Sparkle */; };
+		AA01F0F00000000000000001 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AA01F0F00000000000000002 /* Markdown */; };
 		3B12369C2D367D5D784EBFB8 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
 		3C0D8FBA8DED2516A91DB1BC /* AppEdition.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4FDB19BD9DB1AD8419CD3A4 /* AppEdition.swift */; };
 		3C5157564143363256F3A419 /* DroidSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A39A36FCB3A36B34E58751E /* DroidSessionDiscovery.swift */; };
@@ -901,6 +902,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3A769ECA2EAC3A6A008A7EC2 /* Sparkle in Frameworks */,
+				AA01F0F00000000000000001 /* Markdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1869,6 +1871,7 @@
 			name = AgentSessions;
 			packageProductDependencies = (
 				DB2E108A587C47918E9BC53D /* Sparkle */,
+				AA01F0F00000000000000002 /* Markdown */,
 			);
 			productName = AgentSessions;
 			productReference = B0000010DA0A000100000001 /* AgentSessions.app */;
@@ -1938,6 +1941,7 @@
 			mainGroup = B00000102A0A000100000001;
 			packageReferences = (
 				3A769EAA2EA090A2008A7EC2 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				AA01F0F00000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown" */,
 			);
 			productRefGroup = B0000010EA0A000100000001 /* Products */;
 			projectDirPath = "";
@@ -2833,6 +2837,14 @@
 				minimumVersion = 2.8.0;
 			};
 		};
+		AA01F0F00000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-markdown.git";
+			requirement = {
+				kind = revision;
+				revision = f339d8afd712d1e2e207719b163d2003f7a91a36;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -2840,6 +2852,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 3A769EAA2EA090A2008A7EC2 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		AA01F0F00000000000000002 /* Markdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA01F0F00000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown" */;
+			productName = Markdown;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
