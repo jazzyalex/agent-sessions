@@ -2911,19 +2911,27 @@ final class SelectableBlockTextView: NSTextView {
     }
 
     /// Strip every find-highlight background attribute over the whole string,
-    /// then RESTORE any markdown inline-code chip background (Task 12). Find
-    /// highlights and the code chip both paint `.backgroundColor`, so a blanket
-    /// removal would wipe the chip; the renderer stamps a `.markdownCodeChip`
-    /// marker (value: the chip color) on those runs, and we re-apply
-    /// `.backgroundColor` from it here. Cheap and idempotent; called before
-    /// re-applying find and on clear/recycle. For a non-markdown row (no chip
-    /// markers) this is exactly the Task 10 behavior.
+    /// then RESTORE any markdown inline-code chip background (Task 12) and any
+    /// fenced-code-block card background (Task 13). Find highlights, the inline
+    /// chip, AND the code-block card all paint `.backgroundColor`, so a blanket
+    /// removal would wipe the chip/card too; the renderer stamps a
+    /// `.markdownCodeChip` marker on inline-code runs and a
+    /// `.markdownCodeBlockBg` marker on fenced-code-block runs (value: the
+    /// respective color), and we re-apply `.backgroundColor` from whichever
+    /// marker is present here. Cheap and idempotent; called before re-applying
+    /// find and on clear/recycle. For a non-markdown row (no markers) this is
+    /// exactly the Task 10 behavior.
     func clearFindHighlights() {
         guard let storage = textStorage, storage.length > 0 else { return }
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
         storage.removeAttribute(.backgroundColor, range: full)
         storage.enumerateAttribute(.markdownCodeChip, in: full) { value, range, _ in
+            if let color = value as? NSColor {
+                storage.addAttribute(.backgroundColor, value: color, range: range)
+            }
+        }
+        storage.enumerateAttribute(.markdownCodeBlockBg, in: full) { value, range, _ in
             if let color = value as? NSColor {
                 storage.addAttribute(.backgroundColor, value: color, range: range)
             }

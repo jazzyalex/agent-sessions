@@ -109,14 +109,65 @@ enum MarkdownBodyRenderer {
                                      traits: [],
                                      extra: [:])
             case let codeBlock as CodeBlock:
-                // Fenced/indented code block. T12 doesn't style it (T13 adds the
-                // fence chrome), but the CODE MUST still render + copy — dropping
-                // it would blank the single most common assistant payload. The
-                // `.code` body appears verbatim in `block.text` (minus the ```
-                // fences), so `appendMappedRun` forward-scans it and records a
-                // segment. Monospaced, no chip.
-                appendMappedRun(codeBlock.code,
-                                attributes: [.font: baseFont, .foregroundColor: NSColor.labelColor])
+                // Fenced/indented code block → dark inset card (Task 13). The
+                // CODE MUST still render + copy — dropping it would blank the
+                // single most common assistant payload. The `.code` body appears
+                // verbatim in `block.text` (minus the ``` fences), so
+                // `appendMappedRun` forward-scans it and records a segment. The
+                // fence's info-string (language) is captured on `codeBlock` but
+                // intentionally NOT rendered/highlighted here (syntax
+                // highlighting is tier-2, out of scope for T13).
+                //
+                // Trailing-newline decision: cmark's `code_block` literal (what
+                // swift-markdown surfaces verbatim as `.code`, straight from
+                // `cmark_node_get_literal` with no swift-markdown-side
+                // post-processing — see CommonMarkConverter.convertCodeBlock)
+                // ALWAYS ends in exactly one `\n`, even for a single-line fence
+                // or an empty body — confirmed empirically against the
+                // checked-out swift-markdown package for `"```\nlet x = 1\n```"`
+                // (→ "let x = 1\n"), a multi-line fence, and an empty fence (→
+                // "\n"). Left as-is, that trailing `\n` renders as a blank line
+                // INSIDE the card before the closing card padding. We trim
+                // EXACTLY one trailing `\n` (never more — a body with a genuine
+                // blank line ends in "\n\n" and must keep one) before handing the
+                // literal to `appendMappedRun`. This is SAFE for the forward
+                // scan: `appendMappedRun` does `sourceNS.range(of: literal)`,
+                // i.e. it searches for the (now one-`\n`-shorter) literal as a
+                // SUBSTRING of the full source — trimming a suffix off the
+                // needle only ever shortens the matched range, it can't cause a
+                // miss or shift the match's START, so the recorded segment still
+                // begins at the same source location and the map stays valid.
+                // The dropped `\n` simply becomes a one-character gap AFTER the
+                // segment (consumed "syntax" in the same sense a list marker or
+                // `**` is), which `renderedRange` already treats correctly as
+                // non-mappable. If the body is ONLY the newline (an empty fence,
+                // `.code == "\n"`), trimming yields "" and `appendMappedRun`
+                // early-returns via its `!literal.isEmpty` guard — also correct
+                // (nothing to render or map).
+                var code = codeBlock.code
+                if code.hasSuffix("\n") { code.removeLast() }
+
+                // ONE `appendMappedRun` call → ONE identity `SourceMapSegment`
+                // over the whole fence body (the interface contract T13
+                // consumes). Attributes here are the uniform per-CHARACTER ones
+                // (font/color/card fill/marker); paragraph style is applied
+                // SEPARATELY below, after the append, as a pure attribute
+                // overlay on the range `appendMappedRun` just wrote — it does
+                // NOT touch `out.length`, the literal, or the scan cursor, so it
+                // cannot perturb the segment or the map.
+                //
+                // The card's `.backgroundColor` shares the attribute find
+                // highlights paint over — see the `.markdownCodeBlockBg` marker
+                // doc (RenderedBody.swift) and `clearFindHighlights` for how a
+                // find-clear restores this card fill instead of stripping it.
+                let codeStart = out.length
+                appendMappedRun(code, attributes: [
+                    .font: baseFont,
+                    .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: MarkdownStyle.codeBlockBackground,
+                    .markdownCodeBlockBg: MarkdownStyle.codeBlockBackground
+                ])
+                applyCodeCardParagraphStyle(over: NSRange(location: codeStart, length: out.length - codeStart))
 
             default:
                 // Any OTHER block T12 doesn't model yet (lists, block quotes,
@@ -279,6 +330,70 @@ enum MarkdownBodyRenderer {
             scanCursor = NSMaxRange(found)
         }
 
+        // MARK: Code-card paragraph styling
+
+        /// Apply the fenced-code-block "card" `NSParagraphStyle` over `range`
+        /// (already-appended text — see the `CodeBlock` case). Every NON-EMPTY
+        /// line in the range gets the head/tail indent (the card's horizontal
+        /// inset), but ONLY the first such line gets `paragraphSpacingBefore`
+        /// and ONLY the last gets `paragraphSpacing` (after). Applying one
+        /// uniform `NSParagraphStyle` with both spacings set over a MULTI-LINE
+        /// run would insert that spacing at EVERY internal paragraph break too
+        /// — verified empirically via `NSLayoutManager` line-fragment
+        /// measurement, a uniform style produces a visibly taller gap between
+        /// every code line, not just top/bottom of the card. Splitting per-line
+        /// (paragraph, in `NSParagraphStyle` terms, means "between `\n`s") keeps
+        /// interior lines tight and only pads the card's outer edge — the
+        /// actual "reads as one card" look the brief asks for.
+        ///
+        /// First pass collects every line's range and clips zero-length ones
+        /// (a leading/trailing/internal blank line in the fence body); the
+        /// edge spacing is then keyed off the first/last NON-EMPTY entry rather
+        /// than the first/last loop iteration — a fence that happens to open
+        /// with a blank line (`code == "\n\nlet x = 1"` after the one-newline
+        /// trim) would otherwise attach `paragraphSpacingBefore` to that empty
+        /// line, which carries zero characters and so is never applied to any
+        /// glyph, silently dropping the card's top padding in that corner case.
+        ///
+        /// This runs strictly AFTER `out.append` in `appendMappedRun`, so it
+        /// only overlays `.paragraphStyle` on already-written characters — it
+        /// cannot affect `out.length`, the scan cursor, or the recorded
+        /// `SourceMapSegment`.
+        mutating func applyCodeCardParagraphStyle(over range: NSRange) {
+            guard range.length > 0 else { return }
+            let text = out.string as NSString
+            var lineRanges: [NSRange] = []
+            var lineStart = range.location
+            let rangeEnd = NSMaxRange(range)
+            while lineStart < rangeEnd {
+                var lineEnd = 0
+                var contentEnd = 0
+                text.getLineStart(nil, end: &lineEnd, contentsEnd: &contentEnd,
+                                   for: NSRange(location: lineStart, length: 0))
+                // Clip to the code range: `getLineStart` walks the FULL string's
+                // line boundaries, which for the run's last line extends past
+                // `rangeEnd` into whatever rendered content follows (the "\n\n"
+                // block separator or a sibling block) — clamp so the style never
+                // paints outside the code card.
+                let clippedContentEnd = min(contentEnd, rangeEnd)
+                let lineRange = NSRange(location: lineStart, length: clippedContentEnd - lineStart)
+                if lineRange.length > 0 { lineRanges.append(lineRange) }
+                if lineEnd <= lineStart { break } // safety: no forward progress
+                lineStart = lineEnd
+            }
+            guard !lineRanges.isEmpty else { return }
+            for (index, lineRange) in lineRanges.enumerated() {
+                let style = NSMutableParagraphStyle()
+                style.headIndent = 11
+                style.firstLineHeadIndent = 11
+                style.tailIndent = -11
+                style.lineBreakMode = .byCharWrapping
+                if index == 0 { style.paragraphSpacingBefore = 6 }
+                if index == lineRanges.count - 1 { style.paragraphSpacing = 6 }
+                out.addAttribute(.paragraphStyle, value: style, range: lineRange)
+            }
+        }
+
         // MARK: Font trait application
 
         /// Return `font` with `traits` merged into its descriptor. Falls back to
@@ -306,9 +421,22 @@ enum MarkdownBodyRenderer {
 /// keyed by `isDark` and rebuilt on an appearance flip, so a baked
 /// `.backgroundColor` chip stays correct without live re-resolution.
 private enum MarkdownStyle {
-    /// Subtle background chip behind inline code. Quaternary label reads as a
-    /// faint fill in both appearances.
+    /// Subtle background chip behind inline code. `.quaternaryLabelColor`
+    /// resolves to a light-on-dark-text tint that is legible against BOTH the
+    /// dark-card fence background and the plain prose background — it is a
+    /// text-relative gray, not a fixed light/dark swatch, so it doesn't need an
+    /// `isDark` branch: quaternary alpha over the underlying control color reads
+    /// as a faint fill in both appearances (spot-checked against
+    /// `.textBackgroundColor` in each).
     static var inlineCodeChip: NSColor { .quaternaryLabelColor }
+    /// Dark inset card behind a fenced code block. Deliberately NOT
+    /// `isDark`-branched: `.underPageBackgroundColor` is itself a dynamic system
+    /// color that resolves to a slightly recessed tone relative to the page
+    /// background in EACH appearance (a soft dark-gray card in dark mode, a
+    /// soft light-gray card in light mode) — exactly the "inset card" look the
+    /// brief asks for, without hand-picking two fixed swatches that could drift
+    /// from the system's own appearance transitions.
+    static var codeBlockBackground: NSColor { .underPageBackgroundColor }
     /// Link text color — the standard control accent.
     static var linkColor: NSColor { .linkColor }
 }

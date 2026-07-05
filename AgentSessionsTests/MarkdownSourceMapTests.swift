@@ -66,6 +66,36 @@ final class MarkdownSourceMapTests: XCTestCase {
         XCTAssertNil(b.renderedRange(forSourceRange: NSRange(location: 2, length: 2)))
     }
 
+    // MARK: Task 13 — fence content stays mappable (⌘F works inside a code card)
+
+    func testFenceContentIsFindableViaSourceMap() {
+        let src = "text before\n```\nneedle here\n```"
+        let b = body(src)
+        let srcNS = src as NSString
+        let needleSrc = srcNS.range(of: "needle")
+        let r = b.renderedRange(forSourceRange: needleSrc)
+        XCTAssertNotNil(r, "fence inner text must be mappable (identity segment)")
+        XCTAssertEqual((b.attributed.string as NSString).substring(with: r!), "needle")
+    }
+
+    func testFenceContentRoundTripsPerCharacterDespiteTrailingNewlineTrim() {
+        // The renderer trims exactly one trailing `\n` off `CodeBlock.code`
+        // before mapping it; every character of the code BODY itself (not the
+        // trimmed newline) must still round-trip per-character like plain text.
+        let src = "```\nlet x = 1\n```"
+        let b = body(src)
+        let srcNS = src as NSString
+        let renderedNS = b.attributed.string as NSString
+        let codeSrcRange = srcNS.range(of: "let x = 1")
+        for offset in 0..<codeSrcRange.length {
+            let srcRange = NSRange(location: codeSrcRange.location + offset, length: 1)
+            guard let r = b.renderedRange(forSourceRange: srcRange) else {
+                return XCTFail("fence body character @\(offset) must stay mappable")
+            }
+            XCTAssertEqual(renderedNS.substring(with: r), srcNS.substring(with: srcRange))
+        }
+    }
+
     // Regression: swift-markdown enables cmark smart punctuation by default,
     // which would rewrite the apostrophe in "don't" to a curly ’ inside
     // Text.string — breaking the forward-scan so prose with quotes/apostrophes/

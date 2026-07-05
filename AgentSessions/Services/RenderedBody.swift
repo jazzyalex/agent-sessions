@@ -9,6 +9,15 @@ extension NSAttributedString.Key {
     /// RESTORE the chip after a find-clear rather than losing it. It is inert to
     /// layout/drawing — purely a bookkeeping marker.
     static let markdownCodeChip = NSAttributedString.Key("AgentSessions.markdownCodeChip")
+
+    /// Same mechanism as `.markdownCodeChip`, applied to a fenced CODE BLOCK's
+    /// card background instead of the inline-code chip (Task 13). Kept as a
+    /// separate key (rather than reusing `.markdownCodeChip`) so a future reader
+    /// can distinguish "this run is an inline chip" from "this run is a
+    /// block-level card" without inspecting geometry — e.g. a chip is a few
+    /// characters, a card spans a whole paragraph run with indent. Both keys are
+    /// restored identically by `clearFindHighlights`.
+    static let markdownCodeBlockBg = NSAttributedString.Key("AgentSessions.markdownCodeBlockBg")
 }
 
 /// One contiguous source→rendered mapping segment. `sourceRange` is UTF-16 into

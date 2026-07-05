@@ -74,14 +74,77 @@ final class MarkdownBodyRendererTests: XCTestCase {
     // MARK: Unmodeled blocks must NEVER render blank (data-loss regression guard)
 
     func testCodeFenceBlockRendersItsCode() {
-        // A fenced code block is the most common assistant payload. T12 doesn't
-        // style the fence, but the code MUST render + be present (not blank).
+        // A fenced code block is the most common assistant payload. The code
+        // MUST render + be present (not blank), regardless of T13's card chrome.
         let src = "Here's the fix:\n\n```swift\nlet x = 1\n```\n\nDone."
         let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
         XCTAssertTrue(b.attributed.string.contains("let x = 1"),
                       "code fence body must render, got: \(b.attributed.string.debugDescription)")
         XCTAssertTrue(b.attributed.string.contains("Done."))
         XCTAssertTrue(b.attributed.string.contains("Here's the fix:"))
+    }
+
+    // MARK: Task 13 — fenced code block dark inset card
+
+    func testCodeFenceCardHasBackgroundAndMonospacedFont() {
+        let src = "```\nlet x = 1\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "let x").location
+        let bg = b.attributed.attribute(.backgroundColor, at: loc, effectiveRange: nil)
+        XCTAssertNotNil(bg, "fence content must carry the code-card background")
+        let f = b.attributed.attribute(.font, at: loc, effectiveRange: nil) as? NSFont
+        XCTAssertTrue(f?.isFixedPitch ?? false, "fence content must stay monospaced")
+    }
+
+    func testCodeFenceCardHasParagraphIndent() {
+        let src = "```\nlet x = 1\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "let x").location
+        let style = b.attributed.attribute(.paragraphStyle, at: loc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertNotNil(style, "fence content must carry a paragraph style for the card indent")
+        XCTAssertGreaterThan(style?.headIndent ?? 0, 0, "card should be indented off the leading edge")
+        XCTAssertGreaterThan(style?.firstLineHeadIndent ?? 0, 0)
+    }
+
+    func testCodeFenceCardCarriesFindRestoreMarker() {
+        // The card background shares `.backgroundColor` with find-highlight
+        // paint; `.markdownCodeBlockBg` lets `clearFindHighlights` restore the
+        // card fill instead of stripping it (parallel to `.markdownCodeChip`).
+        let src = "```\nlet x = 1\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "let x").location
+        let marker = b.attributed.attribute(.markdownCodeBlockBg, at: loc, effectiveRange: nil)
+        XCTAssertNotNil(marker, "fence content must carry the code-block-bg find-restore marker")
+    }
+
+    func testCodeFenceTrimsExactlyOneTrailingNewline() {
+        // cmark's CodeBlock.code literal always ends in exactly one trailing
+        // `\n` (confirmed against the checked-out swift-markdown package).
+        // Left untrimmed it renders as a blank line inside the card before the
+        // next block; a single-line fence followed by prose must NOT show a
+        // blank line between the code and the following text.
+        let src = "```\nlet x = 1\n```\n\nDone."
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        XCTAssertFalse(b.attributed.string.contains("let x = 1\n\n\nDone."),
+                       "must not leave the fence's own trailing newline as an extra blank line")
+        XCTAssertTrue(b.attributed.string.contains("let x = 1\n\nDone."),
+                     "exactly one block-separator blank line between fence and next paragraph, got: \(b.attributed.string.debugDescription)")
+    }
+
+    func testCodeFenceMultiLineDoesNotAddInternalParagraphSpacing() {
+        // Regression: applying ONE uniform NSParagraphStyle (with both
+        // paragraphSpacingBefore and paragraphSpacing set) over a multi-line
+        // fence body would insert that spacing at EVERY internal line break,
+        // not just the card's top/bottom edge. Internal lines must carry a
+        // style with zero spacing-before/after; only the first/last line may
+        // carry non-zero edge spacing.
+        let src = "```\nline1\nline2\nline3\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        let midLoc = s.range(of: "line2").location
+        let style = b.attributed.attribute(.paragraphStyle, at: midLoc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(style?.paragraphSpacingBefore ?? -1, 0, "interior fence line must not carry top edge spacing")
+        XCTAssertEqual(style?.paragraphSpacing ?? -1, 0, "interior fence line must not carry bottom edge spacing")
     }
 
     func testBulletListRendersItemText() {
@@ -114,5 +177,36 @@ final class MarkdownBodyRendererTests: XCTestCase {
         let b = MarkdownBodyRenderer.render("a \\* b", baseFont: font, isDark: true)
         XCTAssertTrue(b.attributed.string.contains("a * b"),
                       "escaped asterisk must render as literal '*', got: \(b.attributed.string.debugDescription)")
+    }
+
+    // MARK: Task 13 — find-clear restores the code-block card background
+
+    func testClearFindHighlightsRestoresCodeBlockCardBackground() {
+        // The card's `.backgroundColor` and a find highlight's `.backgroundColor`
+        // share the same attribute key. `applyFindHighlights` starts every call
+        // with `clearFindHighlights()`, and a plain find-clear (e.g. closing the
+        // find bar) must leave the card fill intact rather than stripping it to
+        // nothing — parallel to the Task 12 inline-code-chip guarantee.
+        let src = "```\nlet x = 1\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let textView = SelectableBlockTextView()
+        textView.textStorage?.setAttributedString(b.attributed)
+
+        let s = b.attributed.string as NSString
+        // Read the background AT THE MATCHED characters (where find paints), not
+        // at the start of the fence — the highlight only covers the match range.
+        let matchRange = s.range(of: "x")
+        let matchLoc = matchRange.location
+        let originalBG = textView.textStorage?.attribute(.backgroundColor, at: matchLoc, effectiveRange: nil) as? NSColor
+        XCTAssertNotNil(originalBG, "precondition: fence content must start with the card background")
+
+        // Simulate a find pass highlighting the "x" then clearing it.
+        textView.applyFindHighlights(all: [matchRange], current: matchRange)
+        let duringFindBG = textView.textStorage?.attribute(.backgroundColor, at: matchLoc, effectiveRange: nil) as? NSColor
+        XCTAssertNotEqual(duringFindBG, originalBG, "find highlight should visually override the card fill while active")
+
+        textView.clearFindHighlights()
+        let restoredBG = textView.textStorage?.attribute(.backgroundColor, at: matchLoc, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(restoredBG, originalBG, "clearing find must restore the code-block card background, not strip it")
     }
 }
