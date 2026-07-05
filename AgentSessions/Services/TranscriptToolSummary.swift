@@ -111,7 +111,10 @@ enum TranscriptToolSummary {
 
         if let arr = raw as? [Any] {
             let parts = arr.compactMap { $0 as? String }
-            let filtered = parts.filter { !isShellWrapperToken($0) }
+            // Drop only the LEADING run of wrapper tokens; stop at the first
+            // non-wrapper token and keep everything after it verbatim. A wrapper
+            // token appearing later (e.g. `grep -c TODO`) is a real argument.
+            let filtered = Array(parts.drop(while: { isShellWrapperToken($0) }))
             let joined = (filtered.isEmpty ? parts : filtered).joined(separator: " ")
             return joined.isEmpty ? nil : joined
         }

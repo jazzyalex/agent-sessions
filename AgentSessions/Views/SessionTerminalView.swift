@@ -410,6 +410,27 @@ struct SessionTerminalView: View {
             }
             transcriptFocusToken &+= 1
         }
+        .onChange(of: derivedState.isComputing) { _, computing in
+            // Off-window event jumps depend on `derivedState.snapshot`'s anchor
+            // map. If a deeplink/image/unified-search jump fires while the
+            // detached compute is still in flight, `jumpToEventID` can't resolve
+            // the anchor and stashes `pendingEventJumpID` (see jumpToEventID's
+            // off-window branch). Terminal's `body` never reads the snapshot, so
+            // @Observable never re-invalidates when the compute publishes, and the
+            // applyRebuild retry path only re-fires on Terminal's OWN rebuilds —
+            // so nothing re-drove the pending jump. Reading `isComputing` here is
+            // what makes @Observable track the snapshot and re-fire this closure
+            // when it lands. Mirrors TranscriptPlainView's Rich-mode handler.
+            //
+            // Only `pendingEventJumpID` is snapshot-dependent. `pendingUserPromptIndex`
+            // (reads userLineIndices) and `pendingFirstPromptJump` (reads
+            // userLineIndices/widen) are populated by applyRebuild, so its own
+            // retry path already covers them — don't re-fire those here.
+            guard !computing, let pending = pendingEventJumpID else { return }
+            if jumpToEventID(pending) {
+                pendingEventJumpID = nil
+            }
+        }
         .onChange(of: session.events.count) { _, _ in
             let debounce = Self.liveTailDebounce(isActive: NSApp.isActive)
             rebuildLines(priority: .utility, debounceNanoseconds: debounce)

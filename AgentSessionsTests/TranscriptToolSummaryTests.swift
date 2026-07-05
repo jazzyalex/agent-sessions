@@ -76,6 +76,37 @@ final class TranscriptToolSummaryTests: XCTestCase {
         XCTAssertEqual(s, "echo hi && echo bye")
     }
 
+    func testArrayCommandDropsLeadingBashLc() {
+        let s = TranscriptToolSummary.summary(
+            toolName: "shell",
+            toolInput: #"{"command":["bash","-lc","npm test"]}"#)
+        XCTAssertEqual(s, "npm test")
+    }
+
+    func testArrayCommandDropsLeadingShC() {
+        let s = TranscriptToolSummary.summary(
+            toolName: "shell",
+            toolInput: #"{"command":["sh","-c","ls -la"]}"#)
+        XCTAssertEqual(s, "ls -la")
+    }
+
+    func testArrayCommandKeepsNonLeadingWrapperToken() {
+        // Regression: -c after a non-wrapper token is a real argument (grep -c),
+        // not a shell wrapper, so it must be preserved.
+        let s = TranscriptToolSummary.summary(
+            toolName: "shell",
+            toolInput: #"{"command":["grep","-c","TODO","notes.txt"]}"#)
+        XCTAssertEqual(s, "grep -c TODO notes.txt")
+    }
+
+    func testArrayCommandDropsOnlyLeadingWrapperRun() {
+        // Leading `zsh -lc` is dropped; the inner `-c` between args is kept.
+        let s = TranscriptToolSummary.summary(
+            toolName: "shell",
+            toolInput: #"{"command":["zsh","-lc","x","-c","y"]}"#)
+        XCTAssertEqual(s, "x -c y")
+    }
+
     func testPatternFallback() {
         // `pattern` only wins when there is no `file_path`/`path` present —
         // path/file_path is higher priority per the binding order.
