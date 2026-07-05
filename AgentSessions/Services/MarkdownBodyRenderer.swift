@@ -169,10 +169,28 @@ enum MarkdownBodyRenderer {
                 ])
                 applyCodeCardParagraphStyle(over: NSRange(location: codeStart, length: out.length - codeStart))
 
+            case let list as UnorderedList:
+                // Task 14: bullet list. `listItems` (from `ListItemContainer`)
+                // enumerates the list's `ListItem` children in source order;
+                // 0-based `offset` becomes the 1-based bullet — irrelevant for
+                // an unordered marker (always "•") but shared plumbing with the
+                // ordered case below via `appendListItems`.
+                appendListItems(Array(list.listItems), markerFor: { _ in "•" }, depth: 0)
+
+            case let list as OrderedList:
+                // Task 14: numbered list. CommonMark lets a list start at any
+                // number (`3. foo` → `startIndex == 3`, confirmed against the
+                // checked-out swift-markdown package); each subsequent marker
+                // increments from there, so the Nth item (0-based `offset`) is
+                // numbered `startIndex + offset`, NOT a plain 1-based position.
+                let start = list.startIndex
+                appendListItems(Array(list.listItems), markerFor: { offset in "\(start + UInt(offset))." }, depth: 0)
+
             default:
-                // Any OTHER block T12 doesn't model yet (lists, block quotes,
-                // list items, tables, HTML blocks). CRITICAL: no block node
-                // conforms to `PlainTextConvertibleMarkup` (only inline types do)
+                // Any OTHER block not modeled yet (block quotes, tables, HTML
+                // blocks — lists gained dedicated cases in T14). CRITICAL: no
+                // block node conforms to `PlainTextConvertibleMarkup` (only
+                // inline types do)
                 // and there is no blanket `extension Markup`, so a
                 // `block.plainText` cast is always nil — flattening that way would
                 // render the block BLANK (silent data loss). Instead RECURSE over
@@ -209,6 +227,125 @@ enum MarkdownBodyRenderer {
                     }
                 }
             }
+        }
+
+        // MARK: List rendering (Task 14)
+
+        /// Render every `ListItem` in a bullet/numbered list: RENDERED-ONLY
+        /// marker (`"•\t"` / `"N.\t"`) + the item's own content (mapped
+        /// normally), indented by `depth`. `markerFor` returns the bare glyph
+        /// (no tab) for the item at 0-based `offset`; the tab is appended here
+        /// so both call sites (bullet vs. numbered) share one indent/tab-stop
+        /// path instead of duplicating it.
+        ///
+        /// Items are joined by a single rendered-only `"\n"` (a TIGHT list,
+        /// matching CommonMark's normalized `ListItem`/`Paragraph` shape —
+        /// confirmed empirically that even a "loose" source list with blank
+        /// lines between `- a` / `- b` still yields exactly one `Paragraph`
+        /// per `ListItem`, so there's no loose-vs-tight distinction to carry
+        /// here). The list itself gets NO leading/trailing separator beyond
+        /// that — surrounding `appendBlocks`/`appendUnmodeledBlockChildren`
+        /// already inserts the standard `"\n\n"` before/after the whole list
+        /// as a sibling block.
+        mutating func appendListItems(_ items: [ListItem], markerFor: (Int) -> String, depth: Int) {
+            for (offset, item) in items.enumerated() {
+                let itemStart = out.length
+                // Marker is RENDERED-ONLY: appended directly to `out`, never
+                // through `appendMappedRun`, so it contributes no
+                // `SourceMapSegment` and cannot perturb `scanCursor`. It is a
+                // gap in SOURCE coverage exactly like consumed `**`/backtick
+                // syntax — `renderedRange` already tolerates that (see the
+                // `SourceMapSegment` doc in RenderedBody.swift: "a gap in
+                // rendered coverage = inserted glyphs").
+                out.append(NSAttributedString(string: markerFor(offset) + "\t", attributes: [
+                    .font: proseFont,
+                    .foregroundColor: NSColor.labelColor
+                ]))
+                // `appendListItemChildren` returns where THIS item's own
+                // (marker + direct paragraph) content ends — which may be
+                // SHORTER than `out.length` after the call if a nested
+                // sub-list followed. That nested range was already styled at
+                // `depth + 1` by its own recursive `appendListItems` call;
+                // styling `[itemStart, out.length)` here (the naive "whole
+                // item" range) would `addAttribute` OVER that already-written
+                // sub-range and clobber its deeper indent with this shallower
+                // one, since attribute application always wins for whatever
+                // ran LAST. Scoping to `[itemStart, ownContentEnd)` — this
+                // item's marker + direct text only — keeps every depth's style
+                // confined to the range it authored and never touched again.
+                let ownContentEnd = appendListItemChildren(item, depth: depth)
+                applyListItemParagraphStyle(over: NSRange(location: itemStart, length: ownContentEnd - itemStart), depth: depth)
+                if offset < items.count - 1 {
+                    out.append(NSAttributedString(string: "\n"))
+                }
+            }
+        }
+
+        /// Render one `ListItem`'s block children. A `ListItem` normally holds
+        /// exactly one `Paragraph` (the item's own text) optionally followed by
+        /// a NESTED `UnorderedList`/`OrderedList` (confirmed against the
+        /// checked-out swift-markdown package for `"- a\n  - b"`: the sub-list
+        /// is a SIBLING block after the `Paragraph`, inside the same
+        /// `ListItem` — not a grandchild of the `Text` leaf). The nested list
+        /// recurses through `appendListItems` at `depth + 1`, preceded by a
+        /// single rendered-only `"\n"` so it starts its own line without the
+        /// full `"\n\n"` block-separator gap (it's part of THIS item, not a
+        /// sibling block of it). Any other child shape (a block quote inside a
+        /// list item, etc.) falls back to the existing `appendBlock`/inline
+        /// paths so nothing is silently dropped — same discipline as
+        /// `appendUnmodeledBlockChildren`.
+        ///
+        /// Returns `out.length` measured immediately BEFORE any nested
+        /// sub-list is appended (i.e. right after this item's own marker +
+        /// direct paragraph text) — see the caller comment above for why that
+        /// boundary, not the post-recursion `out.length`, is what must be
+        /// paragraph-styled at THIS depth.
+        @discardableResult
+        mutating func appendListItemChildren(_ item: ListItem, depth: Int) -> Int {
+            var ownContentEnd = out.length
+            for child in item.blockChildren {
+                switch child {
+                case let paragraph as Paragraph:
+                    appendInlineChildren(paragraph.inlineChildren.map { $0 as Markup },
+                                         font: proseFont,
+                                         traits: [],
+                                         extra: [:])
+                    ownContentEnd = out.length
+                case let nested as UnorderedList:
+                    out.append(NSAttributedString(string: "\n"))
+                    appendListItems(Array(nested.listItems), markerFor: { _ in "•" }, depth: depth + 1)
+                case let nested as OrderedList:
+                    out.append(NSAttributedString(string: "\n"))
+                    let start = nested.startIndex
+                    appendListItems(Array(nested.listItems), markerFor: { offset in "\(start + UInt(offset))." }, depth: depth + 1)
+                default:
+                    appendBlock(child)
+                    ownContentEnd = out.length
+                }
+            }
+            return ownContentEnd
+        }
+
+        /// Apply the list-item indent `NSParagraphStyle` over `range` (already
+        /// appended — marker + item content). Mirrors
+        /// `applyCodeCardParagraphStyle`: runs strictly AFTER the content is in
+        /// `out`, so it only overlays `.paragraphStyle` on existing characters
+        /// — it cannot affect `out.length`, `scanCursor`, or any recorded
+        /// `SourceMapSegment`. `headIndent`/`firstLineHeadIndent` scale by
+        /// `depth` (one level ≈ one marker-column's worth of indent) so a
+        /// wrapped line of item text — or an entire nested sub-list — lines up
+        /// under the marker rather than the leading edge; the matching tab
+        /// stop at the same offset is what makes the `"\t"` after the marker
+        /// glyph land text at that indent instead of a default 28pt stop.
+        mutating func applyListItemParagraphStyle(over range: NSRange, depth: Int) {
+            guard range.length > 0 else { return }
+            let indent: CGFloat = 20 * CGFloat(depth + 1)
+            let style = NSMutableParagraphStyle()
+            style.headIndent = indent
+            style.firstLineHeadIndent = indent - 20
+            style.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+            style.lineBreakMode = .byWordWrapping
+            out.addAttribute(.paragraphStyle, value: style, range: range)
         }
 
         // MARK: Inline level

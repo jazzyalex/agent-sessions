@@ -118,4 +118,68 @@ final class MarkdownSourceMapTests: XCTestCase {
             XCTAssertEqual(renderedNS.substring(with: r), srcNS.substring(with: NSRange(location: i, length: 1)))
         }
     }
+
+    // MARK: Task 14 — list marker glyphs are rendered-only gaps; item text stays mapped
+
+    // The marker ("•\t" / "N.\t") is a RENDERED-ONLY glyph with no source
+    // segment — like a fence's trimmed trailing newline or consumed "**"
+    // syntax, it must never shift the mapping of the item text that follows
+    // it. Every character of each item's own TEXT (not the "- "/"1. " source
+    // syntax, which IS consumed) must round-trip per-character.
+    func testBulletListItemTextRoundTripsPerCharacter() {
+        let src = "- first item\n- second item"
+        let b = body(src)
+        let srcNS = src as NSString
+        let renderedNS = b.attributed.string as NSString
+        for word in ["first item", "second item"] {
+            let wordSrc = srcNS.range(of: word)
+            for offset in 0..<wordSrc.length {
+                let srcRange = NSRange(location: wordSrc.location + offset, length: 1)
+                guard let r = b.renderedRange(forSourceRange: srcRange) else {
+                    return XCTFail("list item character @\(offset) of \(word.debugDescription) must stay mappable")
+                }
+                XCTAssertEqual(renderedNS.substring(with: r), srcNS.substring(with: srcRange))
+            }
+        }
+    }
+
+    func testOrderedListItemTextRoundTripsPerCharacter() {
+        let src = "1. one\n2. two"
+        let b = body(src)
+        let srcNS = src as NSString
+        let renderedNS = b.attributed.string as NSString
+        for word in ["one", "two"] {
+            let wordSrc = srcNS.range(of: word)
+            for offset in 0..<wordSrc.length {
+                let srcRange = NSRange(location: wordSrc.location + offset, length: 1)
+                guard let r = b.renderedRange(forSourceRange: srcRange) else {
+                    return XCTFail("ordered list item character @\(offset) of \(word.debugDescription) must stay mappable")
+                }
+                XCTAssertEqual(renderedNS.substring(with: r), srcNS.substring(with: srcRange))
+            }
+        }
+    }
+
+    func testNestedListItemTextStaysMappableAndMonotonic() {
+        // "- a\n  - b": the nested item's marker is a SECOND rendered-only gap
+        // stacked after the outer item's. The scan cursor must stay monotonic
+        // across both, so "b" (which appears later in BOTH source and
+        // rendered order) still maps correctly and "a" still maps to its own,
+        // earlier, distinct location.
+        let src = "- a\n  - b"
+        let b = body(src)
+        let srcNS = src as NSString
+        let renderedNS = b.attributed.string as NSString
+        let aSrc = srcNS.range(of: "a")
+        let bSrc = srcNS.range(of: "b")
+        guard let aR = b.renderedRange(forSourceRange: aSrc) else {
+            return XCTFail("outer list item 'a' must stay mappable")
+        }
+        guard let bR = b.renderedRange(forSourceRange: bSrc) else {
+            return XCTFail("nested list item 'b' must stay mappable")
+        }
+        XCTAssertEqual(renderedNS.substring(with: aR), "a")
+        XCTAssertEqual(renderedNS.substring(with: bR), "b")
+        XCTAssertLessThan(aR.location, bR.location, "outer item must map before the nested item it contains")
+    }
 }

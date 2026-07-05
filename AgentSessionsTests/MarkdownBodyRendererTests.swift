@@ -148,7 +148,8 @@ final class MarkdownBodyRendererTests: XCTestCase {
     }
 
     func testBulletListRendersItemText() {
-        // Unordered list is unstyled in T12 but its item text must not vanish.
+        // Task 14 adds marker+indent styling, but the item text itself must
+        // still render regardless (the T12 data-loss guarantee still holds).
         let src = "- first item\n- second item"
         let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
         XCTAssertTrue(b.attributed.string.contains("first item"),
@@ -161,6 +162,77 @@ final class MarkdownBodyRendererTests: XCTestCase {
         let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
         XCTAssertTrue(b.attributed.string.contains("alpha"))
         XCTAssertTrue(b.attributed.string.contains("beta"))
+    }
+
+    // MARK: Task 14 — bullet + numbered list markers, indent, nesting
+
+    func testBulletListMarkersAndText() {
+        let src = "- first\n- second"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let s = b.attributed.string
+        XCTAssertTrue(s.contains("first"))
+        XCTAssertTrue(s.contains("second"))
+        XCTAssertTrue(s.contains("•"), "unordered list must render a bullet marker glyph")
+    }
+
+    func testListItemTextIsFindable() {
+        // The marker glyph is rendered-only (no source segment); a find match
+        // on the item's SOURCE text must still resolve to the correct
+        // rendered range past the marker — proves the marker's rendered-side
+        // gap doesn't shift the source map.
+        let md = "- alpha\n- beta"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let betaSrc = (md as NSString).range(of: "beta")
+        let r = b.renderedRange(forSourceRange: betaSrc)
+        XCTAssertNotNil(r)
+        XCTAssertEqual((b.attributed.string as NSString).substring(with: r!), "beta")
+    }
+
+    func testOrderedListNumbers() {
+        let src = "1. one\n2. two"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        XCTAssertTrue(b.attributed.string.contains("1."))
+        XCTAssertTrue(b.attributed.string.contains("2."))
+    }
+
+    func testOrderedListRespectsCustomStartIndex() {
+        // CommonMark lets an ordered list start at any number; markers must
+        // continue from `startIndex`, not restart at 1.
+        let src = "3. one\n4. two"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        XCTAssertTrue(b.attributed.string.contains("3."))
+        XCTAssertTrue(b.attributed.string.contains("4."))
+        XCTAssertFalse(b.attributed.string.contains("1."), "must not renumber from 1 when the source starts at 3")
+    }
+
+    func testNestedListBothLevelsRenderAndIndentDeeper() {
+        // "- a\n  - b": swift-markdown nests the sub-list as a sibling block
+        // of the outer item's Paragraph (confirmed against the checked-out
+        // package), not a grandchild of the Text leaf. Both "a" and "b" must
+        // render, and "b" (depth 1) must carry a strictly deeper headIndent
+        // than "a" (depth 0).
+        let src = "- a\n  - b"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        XCTAssertTrue(b.attributed.string.contains("a"))
+        XCTAssertTrue(b.attributed.string.contains("b"))
+        let aLoc = s.range(of: "a").location
+        let bLoc = s.range(of: "b").location
+        let aStyle = b.attributed.attribute(.paragraphStyle, at: aLoc, effectiveRange: nil) as? NSParagraphStyle
+        let bStyle = b.attributed.attribute(.paragraphStyle, at: bLoc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertNotNil(aStyle)
+        XCTAssertNotNil(bStyle)
+        XCTAssertGreaterThan(bStyle!.headIndent, aStyle!.headIndent,
+                              "nested item must indent deeper than its parent")
+    }
+
+    func testListItemTextCarriesIndentParagraphStyle() {
+        let src = "- item one"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "item one").location
+        let style = b.attributed.attribute(.paragraphStyle, at: loc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertNotNil(style, "list item text must carry a paragraph style for the marker indent")
+        XCTAssertGreaterThan(style?.headIndent ?? 0, 0, "list item should be indented off the leading edge")
     }
 
     func testBlockQuoteRendersText() {
