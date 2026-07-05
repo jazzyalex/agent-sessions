@@ -72,6 +72,13 @@ enum MarkdownBodyRenderer {
         /// scan for the next `Text` leaf starts here, guaranteeing monotonic,
         /// non-overlapping segments even when the same literal recurs.
         var scanCursor: Int = 0
+        /// Source ranges whose rendered form is NOT find-highlightable (Task 15:
+        /// table cells). `renderedRange` returns nil for any find match that
+        /// intersects one of these, so the match falls back to the header
+        /// pill/count instead of trying to paint an in-cell highlight — see
+        /// `RenderedBody.renderedRange` (it consults this list FIRST, before the
+        /// segment lookup). Populated only by the `Table` handler.
+        var unmappable: [NSRange] = []
 
         init(source: String, baseFont: NSFont) {
             self.sourceNS = source as NSString
@@ -185,6 +192,12 @@ enum MarkdownBodyRenderer {
                 // numbered `startIndex + offset`, NOT a plain 1-based position.
                 let start = list.startIndex
                 appendListItems(Array(list.listItems), markerFor: { offset in "\(start + UInt(offset))." }, depth: 0)
+
+            case let table as Table:
+                // Task 15: GFM table → real `NSTextTable` (borders + padding),
+                // the AgentsView-parity moment. Highest risk / lowest frequency,
+                // so it ships last.
+                appendTable(table)
 
             default:
                 // Any OTHER block not modeled yet (block quotes, tables, HTML
@@ -346,6 +359,182 @@ enum MarkdownBodyRenderer {
             style.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
             style.lineBreakMode = .byWordWrapping
             out.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+
+        // MARK: Table rendering (Task 15)
+
+        /// Render a GFM `Table` as a real `NSTextTable` (TextKit's native table
+        /// layout), so it displays with column borders and measures correctly.
+        ///
+        /// ## Why `NSTextTable`, not a monospaced ASCII grid
+        ///
+        /// The acceptance gate is "measures via the `NSLayoutManager.usedRect`
+        /// path and does not clip" (the Phase-1 ShowAll bug class). The
+        /// controller already routes EVERY markdown body through
+        /// `measuredHeight(of:width:)` (a throwaway `NSLayoutManager` +
+        /// `usedRect`), NOT `boundingRect` — verified in
+        /// `TranscriptBlockListView.measuredHeight`/`markdownCardHeight`. Empirical
+        /// probe of that exact path on a 3-row `NSTextTable`: `usedRect` reports
+        /// the full multi-row table height (≈5.9× a single prose line — three
+        /// rows + borders + padding), so the row height the controller computes
+        /// matches what actually lays out. `NSTextTable` is therefore safe here;
+        /// the memo's R2 caution ("tables mismeasure under `boundingRect`") is
+        /// exactly why markdown rows use the layout-manager path, and this handler
+        /// simply relies on that already-established routing. No plain-grid
+        /// fallback is needed.
+        ///
+        /// ## Find / source-map: cell text is UNMAPPABLE (→ pill), by design
+        ///
+        /// Each cell's inline content is walked through the normal inline
+        /// recursion so it RENDERS and COPIES ("copy what you see": cells join
+        /// with `\n`, which is how `NSTextTable` paragraphs read on the
+        /// pasteboard). That recursion may incidentally forward-scan-match a
+        /// cell's literal and record a `SourceMapSegment` — but we then record
+        /// the WHOLE table's cell-text source span as one `unmappable` range, and
+        /// `RenderedBody.renderedRange` consults `unmappableSourceRanges` FIRST,
+        /// so ANY find match inside the table returns nil and falls back to the
+        /// header pill/count (no in-cell paint). This is the intended behavior and
+        /// the simpler of the brief's two options: rather than compute each cell's
+        /// exact source range (which would need the UTF-8→UTF-16 remap this file
+        /// deliberately avoids — see the source-map doc comment), we bracket the
+        /// table with the forward-scan cursor. `scanCursor` is the same monotonic
+        /// UTF-16 offset the segment scan uses; capturing it before the first cell
+        /// and after the last yields `[start, end)` covering exactly the cell-text
+        /// region in source, robust for Unicode by construction. Any table match
+        /// lands in that span → nil → pill.
+        mutating func appendTable(_ table: Table) {
+            let columnCount = max(1, table.maxColumnCount)
+            let textTable = NSTextTable()
+            textTable.numberOfColumns = columnCount
+            // Let columns size to content up to the container width, matching how
+            // the row measures (percentage-of-container content width).
+            textTable.setContentWidth(100, type: .percentageValueType)
+
+            let alignments = table.columnAlignments
+
+            // Bracket the whole table's cell text as one unmappable source span
+            // using the forward-scan cursor (UTF-16, robust) — see the doc above.
+            let sourceStart = scanCursor
+
+            // Header row (row 0): bold cells.
+            let headerCells = Array(table.head.cells)
+            for (col, cell) in headerCells.enumerated() {
+                appendTableCell(cell, table: textTable, row: 0, column: col,
+                                alignments: alignments, bold: true)
+            }
+            // Pad a short header row out to columnCount so the grid is rectangular
+            // (GFM guarantees rows are padded, but head can be the max — belt and
+            // suspenders against an empty trailing column).
+            for col in headerCells.count..<columnCount {
+                appendEmptyTableCell(table: textTable, row: 0, column: col, alignments: alignments)
+            }
+
+            // Body rows (row 1…): normal weight.
+            for (bodyIndex, row) in table.body.rows.enumerated() {
+                let rowIndex = bodyIndex + 1
+                let cells = Array(row.cells)
+                for (col, cell) in cells.enumerated() where col < columnCount {
+                    appendTableCell(cell, table: textTable, row: rowIndex, column: col,
+                                    alignments: alignments, bold: false)
+                }
+                for col in cells.count..<columnCount {
+                    appendEmptyTableCell(table: textTable, row: rowIndex, column: col, alignments: alignments)
+                }
+            }
+
+            let sourceEnd = scanCursor
+            if sourceEnd > sourceStart {
+                unmappable.append(NSRange(location: sourceStart, length: sourceEnd - sourceStart))
+            }
+        }
+
+        /// Append one table cell: its inline content (rendered + copyable) inside
+        /// an `NSTextTableBlock` paragraph with a thin border + padding. The cell
+        /// text is emitted through the normal inline recursion (so nested
+        /// emphasis/code/links render), then a trailing `\n` closes the cell's
+        /// paragraph — `NSTextTable` places one paragraph per cell, so the newline
+        /// is what makes the block a distinct cell rather than merging with the
+        /// next. Header cells force `.bold` via the inline traits.
+        mutating func appendTableCell(_ cell: Table.Cell,
+                                      table: NSTextTable,
+                                      row: Int, column: Int,
+                                      alignments: [Table.ColumnAlignment?],
+                                      bold: Bool) {
+            let cellStart = out.length
+            // Explicit `[Markup]` (not the lazy inferred `LazyMapSequence`): the
+            // annotation forces eager evaluation so `.isEmpty` and the
+            // `[Markup]` parameter below both typecheck.
+            let inlines: [Markup] = cell.inlineChildren.map { $0 as Markup }
+            if inlines.isEmpty {
+                // An empty cell still needs a paragraph so the block occupies its
+                // grid slot; emit a zero-width placeholder that carries the style.
+                out.append(NSAttributedString(string: ""))
+            } else {
+                // Header cells are bold via the inline `traits` path (mirrors the
+                // Heading case): `appendInline` applies `applying(traits, to:font)`
+                // per Text leaf, merging the `.bold` symbolic trait into proseFont.
+                appendInlineChildren(inlines,
+                                     font: proseFont,
+                                     traits: bold ? .bold : [],
+                                     extra: [:])
+            }
+            // Close the cell paragraph. This rendered-only newline carries no
+            // source segment (like a list marker), so it never shifts the map.
+            out.append(NSAttributedString(string: "\n"))
+            applyTableCellStyle(over: NSRange(location: cellStart, length: out.length - cellStart),
+                                table: table, row: row, column: column, alignments: alignments)
+        }
+
+        /// Append a rendered-only empty cell (padding a short row out to the
+        /// table's column count). No inline content, no source consumed — just an
+        /// `NSTextTableBlock` paragraph so the grid stays rectangular.
+        mutating func appendEmptyTableCell(table: NSTextTable,
+                                           row: Int, column: Int,
+                                           alignments: [Table.ColumnAlignment?]) {
+            let cellStart = out.length
+            out.append(NSAttributedString(string: "\n"))
+            applyTableCellStyle(over: NSRange(location: cellStart, length: out.length - cellStart),
+                                table: table, row: row, column: column, alignments: alignments)
+        }
+
+        /// Build the `NSTextTableBlock` for `(row, column)` and stamp its
+        /// paragraph style (block + column alignment) over `range` — the cell
+        /// content already appended. Runs strictly AFTER the append, so it only
+        /// overlays `.paragraphStyle`; it cannot touch `out.length`, the scan
+        /// cursor, or any recorded segment (same discipline as the code-card and
+        /// list-indent styling).
+        func applyTableCellStyle(over range: NSRange,
+                                 table: NSTextTable,
+                                 row: Int, column: Int,
+                                 alignments: [Table.ColumnAlignment?]) {
+            guard range.length > 0 else { return }
+            // Known limitation: GFM cell spans (colspan/rowspan) are flattened to
+            // 1×1 — a spanned cell renders as a normal cell followed by empty
+            // placeholder cell(s). Safe (no crash, no text loss — cmark emits the
+            // spanned-over cells as empty nodes) and vanishingly rare in
+            // transcript prose; honoring spans is deferred.
+            let block = NSTextTableBlock(table: table,
+                                         startingRow: row, rowSpan: 1,
+                                         startingColumn: column, columnSpan: 1)
+            block.setBorderColor(MarkdownStyle.tableBorder)
+            block.setWidth(1, type: .absoluteValueType, for: .border)
+            block.setWidth(5, type: .absoluteValueType, for: .padding)
+
+            let style = NSMutableParagraphStyle()
+            style.textBlocks = [block]
+            style.lineBreakMode = .byWordWrapping
+            // Per-column alignment from GFM `columnAlignments` (nil → left).
+            style.alignment = Self.nsAlignment(alignments.indices.contains(column) ? alignments[column] : nil)
+            out.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+
+        /// Map a GFM column alignment to an `NSTextAlignment` (default left).
+        static func nsAlignment(_ a: Table.ColumnAlignment?) -> NSTextAlignment {
+            switch a {
+            case .center: return .center
+            case .right: return .right
+            case .left, .none: return .left
+            }
         }
 
         // MARK: Inline level
@@ -548,7 +737,7 @@ enum MarkdownBodyRenderer {
             RenderedBody(attributed: NSAttributedString(attributedString: out),
                          segments: segments,
                          renderedLength: out.length,
-                         unmappableSourceRanges: [])
+                         unmappableSourceRanges: unmappable)
         }
     }
 }
@@ -576,4 +765,9 @@ private enum MarkdownStyle {
     static var codeBlockBackground: NSColor { .underPageBackgroundColor }
     /// Link text color — the standard control accent.
     static var linkColor: NSColor { .linkColor }
+    /// Thin cell border for GFM tables (Task 15). `.separatorColor` is a dynamic
+    /// system color that resolves to a hairline divider tone in BOTH appearances
+    /// (a faint light line on dark, a faint dark line on light), matching the
+    /// system's own table/list separators without hand-picking two swatches.
+    static var tableBorder: NSColor { .separatorColor }
 }

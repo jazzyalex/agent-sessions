@@ -281,4 +281,119 @@ final class MarkdownBodyRendererTests: XCTestCase {
         let restoredBG = textView.textStorage?.attribute(.backgroundColor, at: matchLoc, effectiveRange: nil) as? NSColor
         XCTAssertEqual(restoredBG, originalBG, "clearing find must restore the code-block card background, not strip it")
     }
+
+    // MARK: Task 15 — GFM tables (NSTextTable), cells unmappable → pill
+
+    func testTableCellsRenderedAndUnmappable() {
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let s = b.attributed.string
+        // All four cell texts must render (present + copyable).
+        XCTAssertTrue(s.contains("a"), "header cell 'a' must render, got: \(s.debugDescription)")
+        XCTAssertTrue(s.contains("b"), "header cell 'b' must render")
+        XCTAssertTrue(s.contains("1"), "body cell '1' must render")
+        XCTAssertTrue(s.contains("2"), "body cell '2' must render")
+        // A find match inside a table cell is unmappable → renderedRange nil
+        // (the header pill/count is the fallback, no in-cell paint).
+        let cellSrc = (md as NSString).range(of: "1")
+        XCTAssertNil(b.renderedRange(forSourceRange: cellSrc),
+                     "a match inside a table cell must be unmappable (nil → pill)")
+        XCTAssertFalse(b.unmappableSourceRanges.isEmpty,
+                       "table cells must register at least one unmappable source range")
+    }
+
+    func testTableEveryCellMatchIsUnmappable() {
+        // Not just the "1" cell — every cell's source text must fall inside the
+        // unmappable table span so no table match ever tries to paint.
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        for needle in ["a", "b", "1", "2"] {
+            let r = (md as NSString).range(of: needle)
+            XCTAssertNil(b.renderedRange(forSourceRange: r),
+                         "cell '\(needle)' match must be unmappable (nil → pill)")
+        }
+    }
+
+    func testTableHeaderCellsAreBold() {
+        let md = "| Name | Age |\n|---|---|\n| x | 1 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        let headerLoc = s.range(of: "Name").location
+        XCTAssertNotEqual(headerLoc, NSNotFound, "header text must be present")
+        let f = b.attributed.attribute(.font, at: headerLoc, effectiveRange: nil) as? NSFont
+        XCTAssertNotNil(f)
+        XCTAssertTrue(f!.fontDescriptor.symbolicTraits.contains(.bold),
+                      "table header cell text must be bold")
+    }
+
+    func testTableCellsCarryTextTableParagraphStyle() {
+        // Each cell paragraph must carry an NSTextBlock (the NSTextTable cell) —
+        // this is what gives the table its real grid layout + borders and what
+        // makes the layout-manager measurement account for the full table height.
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "1").location
+        let style = b.attributed.attribute(.paragraphStyle, at: loc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertNotNil(style, "table cell must carry a paragraph style")
+        XCTAssertFalse(style?.textBlocks.isEmpty ?? true,
+                       "table cell paragraph must carry an NSTextTableBlock")
+        XCTAssertTrue(style?.textBlocks.first is NSTextTableBlock,
+                      "cell's text block must be an NSTextTableBlock")
+    }
+
+    func testTableColumnAlignmentRightApplied() {
+        // GFM `|---:|` = right alignment; the cell paragraph style must reflect it.
+        let md = "| L | R |\n|:---|---:|\n| a | b |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        let rLoc = s.range(of: "b").location // right-aligned column cell
+        let style = b.attributed.attribute(.paragraphStyle, at: rLoc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(style?.alignment, .right, "right-aligned GFM column must produce .right alignment")
+    }
+
+    func testTableMeasuresTallerThanSingleLine() {
+        // The acceptance gate: a multi-row table must MEASURE (via the same
+        // NSLayoutManager `usedRect` path the controller uses for markdown rows)
+        // taller than a single line of prose — otherwise the row clips (the
+        // Phase-1 ShowAll bug class). This measures the rendered attributed
+        // string exactly as `TranscriptBlockListView.measuredHeight(of:width:)`.
+        let md = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let single = MarkdownBodyRenderer.render("one line", baseFont: font, isDark: true)
+        let width: CGFloat = 600
+        let tableH = Self.measuredHeight(of: b.attributed, width: width)
+        let singleH = Self.measuredHeight(of: single.attributed, width: width)
+        XCTAssertGreaterThan(tableH, singleH * 2,
+                             "a 3-row table must measure well beyond a single line (no clip); table=\(tableH) single=\(singleH)")
+    }
+
+    func testTableDoesNotBreakPrecedingAndFollowingProse() {
+        // A table between two paragraphs must not swallow or corrupt the
+        // surrounding prose — both must still render and remain findable.
+        let md = "intro para\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\noutro para"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        XCTAssertTrue(b.attributed.string.contains("intro para"))
+        XCTAssertTrue(b.attributed.string.contains("outro para"))
+        // Prose outside the table stays mappable (find still paints there).
+        let outroSrc = (md as NSString).range(of: "outro para")
+        XCTAssertNotNil(b.renderedRange(forSourceRange: outroSrc),
+                        "prose after a table must remain find-mappable")
+    }
+
+    /// Mirror of `TranscriptBlockListView.measuredHeight(of:width:)` — the
+    /// controller's markdown-row measurement path (throwaway NSLayoutManager +
+    /// `usedRect`, `lineFragmentPadding = 0`). Kept local so the table
+    /// measurement assertion exercises the SAME geometry the row height uses,
+    /// without reaching into the (private) view method.
+    private static func measuredHeight(of attributed: NSAttributedString, width: CGFloat) -> CGFloat {
+        guard attributed.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: attributed)
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        let manager = NSLayoutManager()
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        manager.ensureLayout(for: container)
+        return ceil(manager.usedRect(for: container).height)
+    }
 }
