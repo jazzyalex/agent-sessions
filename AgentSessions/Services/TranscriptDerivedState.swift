@@ -16,7 +16,7 @@ final class TranscriptDerivedState {
         var reviewCardsEnabled: Bool
     }
 
-    struct Key: Equatable, Sendable {
+    struct Key: Hashable, Sendable {
         var sessionID: String
         var eventCount: Int
         var fileSizeBytes: Int
@@ -53,10 +53,14 @@ final class TranscriptDerivedState {
     private(set) var isComputing = false
     private var computeTask: Task<Void, Never>?
 
-    // Find-match memo (query -> matches for the current snapshot key)
-    private var cachedFindQuery: String?
-    private var cachedFindKey: Key?
-    private var cachedFindMatches: [BlockMatch] = []
+    /// Find-match memo, keyed by (snapshot key, query). Bounded to a few entries
+    /// so alternating between two queries (⌘F nav vs. unified search) doesn't
+    /// thrash a single-slot cache into a miss on every call.
+    private struct FindCacheKey: Hashable {
+        var snapshotKey: Key?
+        var query: String
+    }
+    private let findMatchesCache = LRUCache<FindCacheKey, [BlockMatch]>(maxEntries: 4)
 
     /// No-op if key unchanged (same dedupe discipline as shouldSkipRebuild).
     func update(session: Session, settings: DerivedSettings) {
@@ -72,7 +76,7 @@ final class TranscriptDerivedState {
                 guard let self else { return }
                 self.snapshot = snap
                 self.isComputing = false
-                self.cachedFindQuery = nil   // block content changed
+                self.findMatchesCache.removeAll()   // block content changed
             }
         }
     }
@@ -139,11 +143,10 @@ final class TranscriptDerivedState {
     func findMatches(query: String) -> [BlockMatch] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
-        if q == cachedFindQuery, cachedFindKey == snapshot.key { return cachedFindMatches }
+        let cacheKey = FindCacheKey(snapshotKey: snapshot.key, query: q)
+        if let cached = findMatchesCache.get(cacheKey) { return cached }
         let matches = Self.computeFindMatches(blocks: snapshot.blocks, query: q)
-        cachedFindQuery = q
-        cachedFindKey = snapshot.key
-        cachedFindMatches = matches
+        findMatchesCache.set(cacheKey, matches)
         return matches
     }
 

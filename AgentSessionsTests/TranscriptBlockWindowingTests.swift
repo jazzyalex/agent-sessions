@@ -106,6 +106,26 @@ final class TranscriptBlockWindowingTests: XCTestCase {
         XCTAssertFalse(diff.canSplice)
     }
 
+    // MARK: prependDiff — degenerate boundaryNewIndex < 0 (defensive gap)
+
+    func testPrependAnchorAtNewStartFallsBackToReload() {
+        // old.count >= 2, so anchorOldIndex = 1 (old[1].id is the anchor). If the
+        // anchor is somehow found at new[0] (boundaryNewIndex = anchorNewIndex - 1
+        // = -1), there's no boundary row to inspect. This shape isn't reachable via
+        // the current sole caller (the anchor-suffix match above would fail first
+        // in practice), but the function must still degrade safely rather than
+        // falling through with a bogus canSplice: true. Construct it directly by
+        // making new == old[1...] (old[1] anchors at new[0], and the anchor-suffix
+        // match trivially holds).
+        let old = [messageRow(5), messageRow(6), messageRow(7)]
+        let new = [messageRow(6), messageRow(7), messageRow(8)]
+        let diff = BlockTableController.prependDiff(old: old, new: new)
+        // Safe shape: not spliceable, no phantom inserts/reload, caller reloads.
+        XCTAssertFalse(diff.canSplice)
+        XCTAssertEqual(diff.insertedCount, 0)
+        XCTAssertFalse(diff.reloadBoundaryRow)
+    }
+
     // MARK: extendedTailRange — live-append window maintenance
 
     func testExtendedTailRangePreservesWidenedLowerBound() {
@@ -163,5 +183,23 @@ final class TranscriptBlockWindowingTests: XCTestCase {
             userBlockIndices: [3, 7, 12],
             preambleUserBlockIndexes: [])
         XCTAssertEqual(index, 3)
+    }
+
+    // MARK: shouldInvalidateForWidth — heightCache width-bucket invalidation gate
+
+    func testShouldInvalidateForWidthSameBucketNoInvalidation() {
+        // Sub-pixel churn that rounds to the same 1pt bucket must NOT invalidate
+        // (heightCache entries keyed by that bucket are still valid).
+        XCTAssertFalse(BlockTableController.shouldInvalidateForWidth(oldBucket: 400, newBucket: 400))
+    }
+
+    func testShouldInvalidateForWidthDifferentBucketInvalidates() {
+        XCTAssertTrue(BlockTableController.shouldInvalidateForWidth(oldBucket: 400, newBucket: 401))
+    }
+
+    func testShouldInvalidateForWidthNilOldBucketAlwaysInvalidates() {
+        // No prior measurement yet (first layout pass) must always invalidate so
+        // the cache gets seeded rather than comparing against a bogus sentinel.
+        XCTAssertTrue(BlockTableController.shouldInvalidateForWidth(oldBucket: nil, newBucket: 400))
     }
 }

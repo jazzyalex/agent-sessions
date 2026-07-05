@@ -49,4 +49,36 @@ final class TranscriptWindowTests: XCTestCase {
         XCTAssertEqual(newerToEnd.upperBlock, 999) // clamped at totalBlocks-1
         XCTAssertTrue(newerToEnd.coversBottom(totalBlocks: 1000))
     }
+
+    // MARK: widenedLowerBound — shared widen-for-jump formula (was duplicated
+    // inline in TranscriptBlockListView.widen(toIncludeBlock:) and
+    // SessionTerminalView.widenWindowForJump; both now call this).
+
+    func testWidenedLowerBoundSubtractsBlockTargetFromTarget() {
+        // Plain case: target well below upper, target - blockTarget stays positive.
+        XCTAssertEqual(TranscriptWindow.widenedLowerBound(target: 500, upperBound: 999, blockTarget: 400), 100)
+    }
+
+    func testWidenedLowerBoundClampsAtZero() {
+        // target - blockTarget would go negative ⇒ clamp to 0.
+        XCTAssertEqual(TranscriptWindow.widenedLowerBound(target: 100, upperBound: 999, blockTarget: 400), 0)
+    }
+
+    func testWidenedLowerBoundUsesUpperWhenTargetExceedsIt() {
+        // target > upperBound ⇒ min(target, upperBound) pins to upperBound first.
+        XCTAssertEqual(TranscriptWindow.widenedLowerBound(target: 2000, upperBound: 999, blockTarget: 400), 599)
+    }
+
+    func testWidenedLowerBoundGuaranteesTargetInsideResultingWindow() {
+        // The documented invariant: for ANY target below the window, a single
+        // call's lower bound is at most blockTarget above target (or 0), so
+        // lower...upper always contains target.
+        let upper = 999
+        let blockTarget = 400
+        for target in stride(from: 0, through: upper, by: 137) {
+            let lower = TranscriptWindow.widenedLowerBound(target: target, upperBound: upper, blockTarget: blockTarget)
+            XCTAssertLessThanOrEqual(lower, target, "target \(target) must be >= lower \(lower)")
+            XCTAssertLessThanOrEqual(target, upper, "target \(target) must be <= upper \(upper)")
+        }
+    }
 }

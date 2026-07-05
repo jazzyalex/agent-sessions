@@ -1127,7 +1127,8 @@ struct SessionTerminalView: View {
                 return
             }
             let upper = min(blocks.count - 1, currentUpper ?? (blocks.count - 1))
-            let lower = max(0, min(targetBlock, upper) - FeatureFlags.transcriptWindowBlockTarget)
+            let lower = TranscriptWindow.widenedLowerBound(target: targetBlock, upperBound: upper,
+                                                            blockTarget: FeatureFlags.transcriptWindowBlockTarget)
             let result = Self.buildRebuildResult(session: sessionSnapshot,
                                                  blocks: blocks,
                                                  blockRange: lower...upper,

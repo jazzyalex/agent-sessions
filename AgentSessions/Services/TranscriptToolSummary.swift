@@ -59,7 +59,7 @@ enum TranscriptToolSummary {
         var i = 0
         while i < rows.count {
             let row = rows[i]
-            guard case .message(let block) = row.content, isToolKind(block.kind) else {
+            guard case .message(let block) = row.content, block.kind.isTool else {
                 result.append(row)
                 i += 1
                 continue
@@ -67,7 +67,7 @@ enum TranscriptToolSummary {
 
             var runBlocks: [SessionTranscriptBuilder.LogicalBlock] = [block]
             var j = i + 1
-            while j < rows.count, case .message(let nextBlock) = rows[j].content, isToolKind(nextBlock.kind) {
+            while j < rows.count, case .message(let nextBlock) = rows[j].content, nextBlock.kind.isTool {
                 runBlocks.append(nextBlock)
                 j += 1
             }
@@ -81,10 +81,6 @@ enum TranscriptToolSummary {
         }
 
         return result
-    }
-
-    private static func isToolKind(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind) -> Bool {
-        kind == .toolCall || kind == .toolOut
     }
 
     // MARK: - JSON helpers

@@ -49,4 +49,17 @@ struct TranscriptWindow: Equatable, Sendable {
         return TranscriptWindow(lowerBlock: lowerBlock,
                                 upperBlock: min(totalBlocks - 1, upperBlock + target))
     }
+
+    /// Lower bound for widening the loaded window DOWN to include `target`,
+    /// given the (already-resolved) new `upperBound`. Shared by
+    /// `TranscriptBlockListView.BlockTableController.widen(toIncludeBlock:)` and
+    /// `SessionTerminalView.widenWindowForJump` — both computed this identically
+    /// inline before extraction; this is a byte-identical move, not a rewrite.
+    /// The formula guarantees `target` lands inside the resulting window for ANY
+    /// distance below the current window — the new lower is at most
+    /// `blockTarget` above `target` (or 0), so a single call always suffices; no
+    /// loop is needed.
+    static func widenedLowerBound(target: Int, upperBound: Int, blockTarget: Int) -> Int {
+        max(0, min(target, upperBound) - blockTarget)
+    }
 }

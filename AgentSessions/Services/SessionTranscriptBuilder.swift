@@ -765,4 +765,14 @@ struct SessionTranscriptBuilder {
         return String(s[..<end]) + "…"
     }
 }
+
+/// Single source of truth for "is this block kind rendered as a tool card,"
+/// previously duplicated as `BlockRowModel.isToolCard`'s inline kind check and
+/// `TranscriptToolSummary.isToolKind` (private static func over the same two
+/// cases). Both now delegate here.
+extension SessionTranscriptBuilder.LogicalBlock.Kind {
+    var isTool: Bool {
+        self == .toolCall || self == .toolOut
+    }
+}
 // swiftlint:enable type_body_length

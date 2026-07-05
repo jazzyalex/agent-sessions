@@ -3,12 +3,14 @@ import Foundation
 /// Pure cross-block selection math for Rich-mode transcript blocks.
 ///
 /// `blockOrdinal` is an index into the CURRENT row-text array (visible/loaded
-/// order), NOT `globalBlockIndex` — the table layer owns that mapping. On ANY
-/// change to the rows array (prepend/load-older, session switch, a collapse
-/// toggle that changes rendered text, font/mode change) the table layer CLEARS
-/// the active selection, because the ordinals would otherwise silently
-/// misindex. That "clear on any rows change" rule keeps this struct free of
-/// row-identity bookkeeping.
+/// order), NOT `globalBlockIndex` — the table layer owns that mapping. On any
+/// change to the rows array that reorders or removes existing ordinals (not
+/// pure appends) — prepend/load-older, session switch, a collapse toggle that
+/// changes rendered text, font/mode change — the table layer CLEARS the active
+/// selection, because the ordinals would otherwise silently misindex. A pure
+/// append (`.appendOnly`) preserves every existing ordinal, so it deliberately
+/// does NOT clear. That "clear on any reordering/removal" rule keeps this
+/// struct free of row-identity bookkeeping.
 ///
 /// Locked P1 decisions encoded here:
 /// - Collapsed tool cards contribute NOTHING to selection (`excludedBlockOrdinals`).

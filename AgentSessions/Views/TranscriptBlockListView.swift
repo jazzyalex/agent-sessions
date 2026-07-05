@@ -41,7 +41,7 @@ struct BlockRowModel: Identifiable, Equatable {
     var isToolCard: Bool {
         switch content {
         case .toolGroup: return true
-        case .message(let b): return b.kind == .toolCall || b.kind == .toolOut
+        case .message(let b): return b.kind.isTool
         }
     }
 
@@ -352,9 +352,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private(set) var loadedBlockRange: ClosedRange<Int>?
 
     // Height cache keyed by (rowID, widthBucket, fontSizeBucket). Width changes
-    // invalidate the whole cache (bucket differs); font changes likewise.
+    // invalidate the whole cache only when the BUCKET differs; font changes
+    // likewise invalidate via the bucket embedded in HeightKey.
     private var heightCache: [HeightKey: CGFloat] = [:]
-    private var lastMeasuredWidth: CGFloat = -1
+    private var lastMeasuredWidthBucket: Int?
 
     private var frameObserver: NSObjectProtocol?
     private var observedClipView: NSClipView?
@@ -1001,6 +1002,17 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                     insertedCount = boundaryNewIndex
                     reloadBoundaryRow = (boundaryRow != oldFirst)
                 }
+            } else {
+                // boundaryNewIndex < 0 ⇒ anchorNewIndex == 0, i.e. old[1] (the
+                // anchor) landed at the very start of `new`, leaving no slot for
+                // old[0]'s boundary row at all. Not reachable via the current sole
+                // caller (whose window-widen math always leaves room above the
+                // anchor), but this shape can't be expressed as a pure top-insert
+                // either way — degrade to the same safe "reload everything" result
+                // the other non-spliceable branches return, rather than falling
+                // through with a bogus canSplice: true.
+                return PrependDiff(insertedCount: 0, reloadBoundaryRow: false,
+                                   droppedRowIDs: [], canSplice: false)
             }
         } else {
             // Single old row anchored on itself as the last row; nothing above it
@@ -1121,6 +1133,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func fontBucket(_ size: CGFloat) -> Int { Int((size * 2).rounded()) }
 
+    /// Pure predicate: whether a width change should invalidate `heightCache`.
+    /// `heightCache` is keyed by `widthBucket`, so sub-pixel width churn that
+    /// rounds to the SAME bucket leaves every cached height still valid — only
+    /// an actual bucket change can stale an entry. `oldBucket == nil` (no prior
+    /// measurement yet) always invalidates so the first layout pass seeds it.
+    static func shouldInvalidateForWidth(oldBucket: Int?, newBucket: Int) -> Bool {
+        oldBucket != newBucket
+    }
+
     /// The exact text `BlockCardCellView` renders in the body for this row —
     /// height measurement MUST match this, not the plain `row.bodyText`,
     /// because a `.toolGroup`'s expanded body is the bullet+summary-annotated
@@ -1203,9 +1224,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     // MARK: Width change handling
 
     private func handleWidthChangeIfNeeded() {
-        let width = currentBodyWidth()
-        guard width != lastMeasuredWidth else { return }
-        lastMeasuredWidth = width
+        let bucket = widthBucket(currentBodyWidth())
+        guard Self.shouldInvalidateForWidth(oldBucket: lastMeasuredWidthBucket, newBucket: bucket) else { return }
+        lastMeasuredWidthBucket = bucket
         // Width invalidation: the cache key includes the width bucket, so stale
         // entries simply miss; clear to bound memory, then re-note heights.
         heightCache.removeAll(keepingCapacity: true)
@@ -1342,15 +1363,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     // MARK: Widen-for-jump + scroll-to-block (Task 7 primitives)
 
     /// Extend the loaded window DOWN so it covers `targetBlock`, mirroring
-    /// `SessionTerminalView.widenWindowForJump`: new lower =
-    /// `max(0, min(target, upper) - transcriptWindowBlockTarget)`. Rows are
+    /// `SessionTerminalView.widenWindowForJump` — both call the shared
+    /// `TranscriptWindow.widenedLowerBound` for the new lower bound. Rows are
     /// rebuilt and spliced with the viewport pinned (no jump). Task 8 wires the
     /// external intent; this only exposes the controller primitive.
     ///
-    /// The mirror formula guarantees the target lands inside the window for ANY
-    /// distance below the current window — the new lower is at most
-    /// `blockTarget` above the target (or 0), so a single call always suffices;
-    /// no loop is needed.
+    /// See `TranscriptWindow.widenedLowerBound` for why a single call always
+    /// suffices (no loop needed) for any distance below the current window.
     func widen(toIncludeBlock targetBlock: Int) {
         guard let range = loadedBlockRange else { return }
         guard targetBlock >= 0, targetBlock < allBlocksCache.count else { return }
@@ -1358,7 +1377,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard targetBlock < range.lowerBound || targetBlock > range.upperBound else { return }
 
         let upper = max(range.upperBound, targetBlock)
-        let lower = max(0, min(targetBlock, upper) - FeatureFlags.transcriptWindowBlockTarget)
+        let lower = TranscriptWindow.widenedLowerBound(target: targetBlock, upperBound: upper,
+                                                       blockTarget: FeatureFlags.transcriptWindowBlockTarget)
         let newRange = lower...min(upper, max(0, allBlocksCache.count - 1))
         loadedBlockRange = newRange
 
@@ -1870,12 +1890,21 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return row.bodyText
     }
 
+    /// True for a row that contributes nothing to selection: a meta separator,
+    /// or a tool card that's currently collapsed. Shared by `excludedOrdinals()`
+    /// (builds the full set) and `hasCopyableSelection()` (inlines this same
+    /// test over just the selection span, without building the set — see that
+    /// function's perf note).
+    private func isExcludedFromSelection(_ row: BlockRowModel) -> Bool {
+        if row.isMeta { return true }
+        return row.isToolCard && !expandedToolRowIDs.contains(row.id)
+    }
+
     /// Ordinals that contribute nothing: collapsed tool cards and meta rows.
     private func excludedOrdinals() -> Set<Int> {
         var set = Set<Int>()
         for (i, row) in rows.enumerated() {
-            if row.isMeta { set.insert(i); continue }
-            if row.isToolCard && !expandedToolRowIDs.contains(row.id) { set.insert(i) }
+            if isExcludedFromSelection(row) { set.insert(i) }
         }
         return set
     }
@@ -2120,14 +2149,10 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let lower = max(0, lo.blockOrdinal)
         let upper = min(hi.blockOrdinal, rows.count - 1)
         guard lower <= upper else { return false }
-        // Inline the exclusion test (meta / collapsed tool card) instead of
-        // building the full excluded-ordinals set — O(span) with early exit,
-        // no allocation.
+        // Walk just the span and test the shared predicate — O(span) with early
+        // exit, no allocation (vs. building the full excluded-ordinals set).
         for ordinal in lower...upper {
-            let row = rows[ordinal]
-            if row.isMeta { continue }
-            if row.isToolCard && !expandedToolRowIDs.contains(row.id) { continue }
-            return true
+            if !isExcludedFromSelection(rows[ordinal]) { return true }
         }
         return false
     }
