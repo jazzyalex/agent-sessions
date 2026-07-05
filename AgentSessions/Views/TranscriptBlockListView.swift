@@ -52,6 +52,14 @@ struct BlockRowModel: Identifiable, Equatable {
         return false
     }
 
+    /// True for a user/assistant prose message — the ONLY rows that get markdown
+    /// rendering (Task 12). Tool cards, tool groups, errors, and meta rows keep
+    /// their existing plain-string bodies untouched.
+    var isMarkdownMessage: Bool {
+        if case .message(let b) = content { return b.kind == .user || b.kind == .assistant }
+        return false
+    }
+
     /// The individual blocks backing this row (1 for `.message`, N for
     /// `.toolGroup`) — used to render per-call summary lines when a group is
     /// expanded.
@@ -357,6 +365,38 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private var heightCache: [HeightKey: CGFloat] = [:]
     private var lastMeasuredWidthBucket: Int?
 
+    // MARK: Markdown render cache (Task 12)
+
+    /// Cache of rendered markdown bodies for user/assistant rows, keyed by
+    /// `RenderKey` (eventID + textHash + fontBucket + isDark). eventID keeps the
+    /// key stable across window prepend/widen (globalBlockIndex shifts); textHash
+    /// catches a streaming delta; fontBucket + isDark match the two axes that
+    /// change the baked attributed string. Bounded so a long session doesn't grow
+    /// it without limit; cleared on session switch, font change, and appearance
+    /// flip (colors are baked at render time). 400 ≈ several screens of messages.
+    private let renderedBodyCache = LRUCache<RenderKey, RenderedBody>(maxEntries: 400)
+
+    /// The effective-appearance dark flag used to key + bake markdown renders.
+    /// Read from the controller's own table view (its `effectiveAppearance` is
+    /// the one the cells resolve dynamic colors against); falls back to the app's
+    /// effective appearance before the table is attached.
+    private var effectiveAppearanceIsDark: Bool {
+        let appearance = table?.effectiveAppearance ?? NSApp.effectiveAppearance
+        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// KVO on the table view's own `effectiveAppearance` — the view-local signal
+    /// that fires for BOTH a system dark/light flip AND the app's explicit
+    /// appearance override (both propagate down to the table's effective
+    /// appearance). Cheaper and more correct than a distributed notification: no
+    /// cross-process hop, and it reflects exactly the appearance the cells
+    /// resolve colors against. Torn down in `tearDown`.
+    private var appearanceObservation: NSKeyValueObservation?
+    /// Last dark flag we rendered against, so an appearance callback that doesn't
+    /// actually flip our effective appearance is a cheap no-op (KVO can fire for
+    /// unrelated appearance-graph churn).
+    private var lastRenderedIsDark: Bool?
+
     private var frameObserver: NSObjectProtocol?
     private var observedClipView: NSClipView?
 
@@ -525,6 +565,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         table.delegate = self
         installWidthObserver(on: scroll)
         installScrollObserver(on: scroll)
+        installAppearanceObserver(on: table)
     }
 
     func tearDown() {
@@ -536,6 +577,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             NotificationCenter.default.removeObserver(scrollObserver)
             self.scrollObserver = nil
         }
+        appearanceObservation?.invalidate()
+        appearanceObservation = nil
         observedClipView = nil
         stopAutoScroll()
         table?.dataSource = nil
@@ -577,6 +620,36 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func handleScrollPositionChanged() {
         updateNearBottomFlag()
         maybeScheduleLoadOlder()
+    }
+
+    // MARK: Appearance change (Task 12)
+
+    /// KVO the table view's `effectiveAppearance`. Markdown bodies bake resolved
+    /// colors (the inline-code chip) at render time and are cached keyed by
+    /// `isDark`, so a dark/light flip must drop the render cache and re-render
+    /// visible cells. Seeds `lastRenderedIsDark` so the first real flip is
+    /// detected; unrelated appearance-graph churn that doesn't change our dark
+    /// flag is a no-op.
+    private func installAppearanceObserver(on table: NSTableView) {
+        lastRenderedIsDark = effectiveAppearanceIsDark
+        appearanceObservation = table.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            // KVO may deliver off the main actor in theory; hop to main for UI.
+            DispatchQueue.main.async { self?.handleEffectiveAppearanceChanged() }
+        }
+    }
+
+    private func handleEffectiveAppearanceChanged() {
+        let isDark = effectiveAppearanceIsDark
+        guard isDark != lastRenderedIsDark else { return }
+        lastRenderedIsDark = isDark
+        // Baked colors are stale for the new appearance → drop the render cache
+        // (and heights, since a re-render produces new RenderedBody identities the
+        // height cache keys don't distinguish). Re-render visible cells and
+        // re-note heights so every row picks up the new-appearance render.
+        renderedBodyCache.removeAll()
+        heightCache.removeAll(keepingCapacity: true)
+        reconfigureVisibleRows()
+        noteAllHeightsChanged()
     }
 
     /// Sticky-bottom: within ~1 row height of the content bottom ⇒ follow tail.
@@ -719,6 +792,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             expandedToolRowIDs.removeAll()
             showAllRowIDs.removeAll()
             heightCache.removeAll(keepingCapacity: true)
+            renderedBodyCache.removeAll()
             loadedBlockRange = nil
             // Fresh session opens at the tail (see tailWindowRange seed) → the
             // sticky-follow flag must start true so the first append(s) track the
@@ -774,9 +848,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let windowed = Self.slice(allBlocks, to: loadedBlockRange)
         let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: windowed))
 
-        // Font change forces a full re-measure + re-render of bodies.
+        // Font change forces a full re-measure + re-render of bodies. The
+        // RenderKey embeds fontBucket so stale entries would already miss, but
+        // clear to bound memory (old-size renders are now dead).
         if fontChanged {
             heightCache.removeAll(keepingCapacity: true)
+            renderedBodyCache.removeAll()
         }
 
         // Follow-tail stickiness. Refresh the sticky flag from a live measurement
@@ -1057,6 +1134,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                        showAll: showAllRowIDs.contains(rowModel.id),
                        lineLimit: CardMetrics.toolBodyTruncationLineLimit,
                        findMatchCount: findMatchCount(forRowID: rowModel.id),
+                       renderedBody: renderedBody(for: rowModel),
                        onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
                        onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
         // Flash reset/paint. A recycle mid-flash re-raises alpha on the flashing
@@ -1172,6 +1250,17 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                             toolState: toolState)
         if let cached = heightCache[key] { return cached }
 
+        // Markdown message rows measure the RENDERED attributed string (same one
+        // the cell displays), not the raw block text — the syntax-stripped,
+        // proportional-font layout is a different height than the monospaced
+        // source. `renderedBody(for:)` returns nil for every non-markdown row, so
+        // this branch is user/assistant-only and tool/meta paths are unchanged.
+        if row.isMarkdownMessage, let body = renderedBody(for: row) {
+            let h = markdownCardHeight(body: body, width: width)
+            heightCache[key] = h
+            return h
+        }
+
         let h: CGFloat
         switch toolState {
         case .notApplicable:
@@ -1215,6 +1304,58 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             bodyHeight = ceil(bounding.height)
         }
 
+        let content = CardMetrics.headerHeight
+            + (bodyHeight > 0 ? CardMetrics.headerToBodyGap + bodyHeight : 0)
+            + CardMetrics.bodyBottomInset
+        return max(CardMetrics.minCardHeight, content)
+    }
+
+    // MARK: Markdown rendering + measurement (Task 12)
+
+    /// Cache-backed rendered markdown body for a user/assistant row, or `nil` for
+    /// any row that is NOT a markdown message (tool card, tool group, error,
+    /// meta) — those keep their existing plain-string path. The key is stable
+    /// across window shifts (eventID) and invalidates on streaming edits
+    /// (textHash), font change (fontBucket), and appearance flip (isDark).
+    func renderedBody(for row: BlockRowModel) -> RenderedBody? {
+        guard row.isMarkdownMessage else { return nil }
+        let block = row.primaryBlock
+        let isDark = effectiveAppearanceIsDark
+        let key = RenderKey(eventID: block.eventID,
+                            textHash: block.text.hashValue,
+                            fontBucket: fontBucket(fontSize),
+                            isDark: isDark)
+        if let cached = renderedBodyCache.get(key) { return cached }
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let body = MarkdownBodyRenderer.render(block.text, baseFont: font, isDark: isDark)
+        renderedBodyCache.set(key, body)
+        return body
+    }
+
+    /// Height of `attributed` laid out at `width` via a throwaway TextKit stack
+    /// with `lineFragmentPadding = 0` (matching the body text view's container),
+    /// so the measured height equals what the cell lays out. The attributed
+    /// string measured here MUST be the SAME one the cell displays — the
+    /// controller measures `renderedBody.attributed` and the cell sets that exact
+    /// object into `bodyText.textStorage` (attribute parity; the Phase-1 ShowAll
+    /// bug class where a differently-attributed measure string clipped the body).
+    static func measuredHeight(of attributed: NSAttributedString, width: CGFloat) -> CGFloat {
+        guard attributed.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: attributed)
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        let manager = NSLayoutManager()
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        manager.ensureLayout(for: container)
+        return ceil(manager.usedRect(for: container).height)
+    }
+
+    /// Card height for a markdown row: header band + measured markdown body +
+    /// insets, mirroring `computeHeight`'s chrome math but measuring the rendered
+    /// attributed string instead of a monospaced plain string.
+    private func markdownCardHeight(body: RenderedBody, width: CGFloat) -> CGFloat {
+        let bodyHeight = Self.measuredHeight(of: body.attributed, width: width)
         let content = CardMetrics.headerHeight
             + (bodyHeight > 0 ? CardMetrics.headerToBodyGap + bodyHeight : 0)
             + CardMetrics.bodyBottomInset
@@ -1806,6 +1947,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// prefix; collapsed cards, merged groups, and meta rows are non-renderable.
     private func findRowShape(for row: BlockRowModel) -> TranscriptFindNavigator.RowShape {
         if row.isMeta { return .nonRenderable }
+        // A user/assistant prose row renders as markdown: its body string is the
+        // syntax-stripped rendered text, so a match range in block.text must map
+        // through the render's source map (a range over consumed syntax → pill).
+        // `renderedBody(for:)` is nil only if the row isn't markdown, which the
+        // `isMarkdownMessage` guard already excludes — the `?? .message` is a
+        // defensive fallback, not an expected path.
+        if row.isMarkdownMessage {
+            return renderedBody(for: row).map { .markdownMessage($0) } ?? .message
+        }
         if !row.isToolCard { return .message }
         // Tool card / group.
         guard expandedToolRowIDs.contains(row.id) else { return .nonRenderable }
@@ -1886,6 +2036,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 return lines.prefix(CardMetrics.toolBodyTruncationLineLimit).joined(separator: "\n")
             }
             return full
+        }
+        // Markdown message: copy the RENDERED (syntax-stripped) text the cell
+        // actually shows, so a copy of a bold word yields the word, not `**word**`
+        // — and it matches the text length the cell's textStorage holds, keeping
+        // cross-block selection ranges honest.
+        if row.isMarkdownMessage, let body = renderedBody(for: row) {
+            return body.attributed.string
         }
         return row.bodyText
     }
@@ -2375,6 +2532,7 @@ final class BlockCardCellView: NSTableCellView {
                    showAll: Bool,
                    lineLimit: Int,
                    findMatchCount: Int = 0,
+                   renderedBody: RenderedBody? = nil,
                    onToggleExpansion: @escaping () -> Void,
                    onToggleShowAll: @escaping () -> Void) {
         // Recycle hygiene (Task 10): drop any find highlight the previous
@@ -2407,7 +2565,8 @@ final class BlockCardCellView: NSTableCellView {
             return
         }
 
-        // Ordinary message card — unchanged from Task 5.
+        // Ordinary message card (user/assistant/error) — Task 5 chrome, plus
+        // Task 12 markdown for user/assistant bodies.
         headerHeightConstraint?.constant = CardMetrics.headerHeight
         // isHidden does NOT relax constraints in AppKit: the showAll chain
         // (showAll.top == bodyText.bottom, height, bottom <= card.bottom-inset)
@@ -2417,13 +2576,30 @@ final class BlockCardCellView: NSTableCellView {
         showAllHeightConstraint?.constant = 0
         showAllHost?.isHidden = true
 
-        bodyText.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        bodyText.textColor = .labelColor
-        bodyText.string = row.bodyText
         bodyText.textContainer?.widthTracksTextView = true
         bodyText.isHidden = false
 
-        let isEmpty = row.bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isEmpty: Bool
+        if let renderedBody {
+            // Markdown message: set the RENDERED attributed string (the exact
+            // object the controller measured, so height parity holds — the
+            // Phase-1 ShowAll bug class). No plain `bodyText.string` assignment,
+            // no monospaced-font override: the attributed runs carry their own
+            // fonts (proportional prose, monospaced inline code).
+            bodyText.textColor = .labelColor // insertion/caret default for selection
+            if let storage = bodyText.textStorage {
+                storage.setAttributedString(renderedBody.attributed)
+            }
+            isEmpty = renderedBody.attributed.length == 0
+        } else {
+            // Non-markdown message (error card): plain monospaced string, exactly
+            // as Task 5 did.
+            bodyText.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            bodyText.textColor = .labelColor
+            bodyText.string = row.bodyText
+            isEmpty = row.bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
         bodyTopConstraint?.constant = isEmpty ? 0 : CardMetrics.headerToBodyGap
         bodyText.isHidden = isEmpty
 
@@ -2734,12 +2910,24 @@ final class SelectableBlockTextView: NSTextView {
         storage.endEditing()
     }
 
-    /// Strip every find-highlight background attribute over the whole string.
-    /// Cheap and idempotent; called before re-applying and on clear/recycle.
+    /// Strip every find-highlight background attribute over the whole string,
+    /// then RESTORE any markdown inline-code chip background (Task 12). Find
+    /// highlights and the code chip both paint `.backgroundColor`, so a blanket
+    /// removal would wipe the chip; the renderer stamps a `.markdownCodeChip`
+    /// marker (value: the chip color) on those runs, and we re-apply
+    /// `.backgroundColor` from it here. Cheap and idempotent; called before
+    /// re-applying find and on clear/recycle. For a non-markdown row (no chip
+    /// markers) this is exactly the Task 10 behavior.
     func clearFindHighlights() {
         guard let storage = textStorage, storage.length > 0 else { return }
+        let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
-        storage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: storage.length))
+        storage.removeAttribute(.backgroundColor, range: full)
+        storage.enumerateAttribute(.markdownCodeChip, in: full) { value, range, _ in
+            if let color = value as? NSColor {
+                storage.addAttribute(.backgroundColor, value: color, range: range)
+            }
+        }
         storage.endEditing()
     }
 

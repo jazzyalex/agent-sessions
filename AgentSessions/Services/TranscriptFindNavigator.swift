@@ -79,6 +79,11 @@ enum TranscriptFindNavigator {
         /// Ordinary message row (user/assistant/error). `bodyText.string ==
         /// block.text`, so a match range maps directly.
         case message
+        /// A user/assistant message rendered as markdown (Task 12). The body
+        /// string is the RENDERED plain text (syntax stripped), so a match range
+        /// in block.text maps through the body's source map — a range that spans
+        /// consumed syntax is non-mappable and falls back to the pill.
+        case markdownMessage(RenderedBody)
         /// A single expanded tool card, NOT truncated: `bodyText.string ==
         /// block.text`, so the range maps directly (same as `message`).
         case expandedSingleToolFull
@@ -102,6 +107,11 @@ enum TranscriptFindNavigator {
         switch shape {
         case .message, .expandedSingleToolFull:
             return range
+        case .markdownMessage(let body):
+            // The rendered body ≠ block.text (syntax was consumed), so map the
+            // match range through the source map. A range crossing consumed
+            // syntax (or landing in an unmappable region) returns nil → pill.
+            return body.renderedRange(forSourceRange: range)
         case .expandedSingleToolTruncated(let visibleLen):
             // Fully inside the visible prefix ⇒ paintable; otherwise hidden.
             return NSMaxRange(range) <= visibleLen ? range : nil
