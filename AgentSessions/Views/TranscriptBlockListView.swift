@@ -139,6 +139,17 @@ struct TranscriptBlockListView: NSViewRepresentable {
     /// Terminal-mode detectors) with the `.reviewSummary` accent instead of the
     /// raw block text. When false, every row renders exactly as before.
     var reviewCardsEnabled: Bool = true
+    /// Parity C3 (linkify): mirrors `SessionTerminalView`'s own AppStorage reads,
+    /// threaded from `TranscriptPlainView`/`UnifiedTranscriptView`. When true and
+    /// `TranscriptLinkifier.mightContainFileLink` passes its cheap pre-filter,
+    /// a row's rendered body gets `.link`/`.underlineStyle` attributes over each
+    /// resolved file-path match; a click opens the resolved path via
+    /// `IDEOpener.open(...)` with `ideTarget`/`ideBinaryOverridePath`.
+    var linkificationEnabled: Bool = true
+    var sessionCwd: String? = nil
+    var repoRootPath: String? = nil
+    var ideTarget: IDEOpener.Target = .systemDefault
+    var ideBinaryOverridePath: String = ""
     /// Task 8: external jump intents, token-based so a re-render (e.g. a mode
     /// switch back to Rich) never replays a stale intent — the controller only
     /// acts when the incoming token differs from the last one it consumed.
@@ -255,7 +266,12 @@ struct TranscriptBlockListView: NSViewRepresentable {
             sessionID: session.id,
             imagesByBlockIndex: inlineImagesEnabled ? imagesByBlockIndex : [:],
             inlineImagesEnabled: inlineImagesEnabled,
-            reviewCardsEnabled: reviewCardsEnabled)
+            reviewCardsEnabled: reviewCardsEnabled,
+            linkificationEnabled: linkificationEnabled,
+            sessionCwd: sessionCwd,
+            repoRootPath: repoRootPath,
+            ideTarget: ideTarget,
+            ideBinaryOverridePath: ideBinaryOverridePath)
 
         // Task 8: external jump intents. Resolved here (not stashed as raw
         // tokens on the coordinator ctor) because resolution needs the CURRENT
@@ -349,7 +365,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
 /// Owns the AppKit table: row models, height cache, recycling, scroll-anchor
 /// discipline, and the loaded window range. Deliberately holds only plain
 /// values from the snapshot — never `TranscriptDerivedState`.
-final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
     private weak var table: NSTableView?
     private weak var scroll: NSScrollView?
 
@@ -374,6 +390,36 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// switch. Included in `RenderKey`/`HeightKey` (below) so a pref flip
     /// invalidates exactly the cached renders/heights that depend on it.
     private var reviewCardsEnabled: Bool = true
+
+    /// Parity C3 (linkify): plain values handed in by `apply` every pass,
+    /// mirroring `SessionTerminalView`'s own AppStorage reads. Linkify runs
+    /// against the RENDERED body text (never affects height/RenderedBody
+    /// identity — `.link`/`.underlineStyle` are attributes layered on top of an
+    /// already-measured string) so these do NOT need to be in `RenderKey`/
+    /// `HeightKey`; a gate/cwd/repoRoot change instead reconfigures visible
+    /// rows directly (see `apply`'s linkify-input-changed branch below).
+    private var linkificationEnabled: Bool = true
+    private var sessionCwd: String?
+    private var repoRootPath: String?
+    private var ideTarget: IDEOpener.Target = .systemDefault
+    private var ideBinaryOverridePath: String = ""
+
+    /// Per-row cache of resolved link attributes, keyed by row id. Mirrors
+    /// `SessionTerminalView.Coordinator.lineLinkCache`: recomputing
+    /// `TranscriptLinkifier.matches` + `resolve` on every scroll-into-view
+    /// reconfigure would be wasted work for a row whose text/cwd/repoRoot
+    /// haven't changed since the last computation. Cleared on session switch
+    /// (row ids are meaningless across sessions) and pruned opportunistically.
+    private struct CachedRowLinks {
+        let text: String
+        let sessionCwd: String?
+        let repoRootPath: String?
+        let links: [(range: NSRange, payload: String)]
+    }
+    // Bounded so a long/tool-heavy session can't accumulate an entry per row
+    // forever (Terminal's lineLinkCache prunes; this caps instead). 512 >> a
+    // loaded window, so hits stay warm during normal scrolling.
+    private let rowLinkCache = LRUCache<Int, CachedRowLinks>(maxEntries: 512)
 
     /// Session identity last seen — the reset seam for all per-row expansion
     /// state below. Nil until the first `apply`.
@@ -909,7 +955,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                sessionID: String,
                imagesByBlockIndex: [Int: [InlineSessionImage]] = [:],
                inlineImagesEnabled: Bool = false,
-               reviewCardsEnabled: Bool = true) {
+               reviewCardsEnabled: Bool = true,
+               linkificationEnabled: Bool = true,
+               sessionCwd: String? = nil,
+               repoRootPath: String? = nil,
+               ideTarget: IDEOpener.Target = .systemDefault,
+               ideBinaryOverridePath: String = "") {
         guard let table else { return }
 
         let fontChanged = fontSize != self.fontSize
@@ -970,6 +1021,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // (the incoming `imagesByBlockIndex` param below re-establishes it).
             self.imagesByBlockIndex = [:]
             lastImageMapSignature = 0
+            // Linkify (Task C3): row-keyed cache is meaningless across a session
+            // switch (row ids are reused by a different session's blocks).
+            rowLinkCache.removeAll()
         }
 
         // Inline images (Task C1). Applied AFTER the session-switch reset so a
@@ -997,6 +1051,25 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             renderedBodyCache.removeAll()
         }
         self.reviewCardsEnabled = reviewCardsEnabled
+
+        // Linkify (Task C3). Gate/cwd/repoRoot/IDE-target changes don't affect
+        // measured height or the cached RenderedBody (links are attributes
+        // layered on the already-rendered string), so no height/render cache
+        // invalidation is needed — just a reconfigure of visible cells so the
+        // new gate/resolution takes effect immediately, and a link-cache clear
+        // so stale (cwd/repoRoot-resolved) payloads aren't served from a row id
+        // whose underlying text happens to be unchanged.
+        let linkInputsChanged = linkificationEnabled != self.linkificationEnabled
+            || sessionCwd != self.sessionCwd
+            || repoRootPath != self.repoRootPath
+        self.linkificationEnabled = linkificationEnabled
+        self.sessionCwd = sessionCwd
+        self.repoRootPath = repoRootPath
+        self.ideTarget = ideTarget
+        self.ideBinaryOverridePath = ideBinaryOverridePath
+        if linkInputsChanged {
+            rowLinkCache.removeAll()
+        }
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
@@ -1053,13 +1126,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let diff = Self.classifyChange(old: rows, new: newRows)
 
         switch diff {
-        case .identical where !fontChanged && !sourceChanged && !imagesChanged:
+        case .identical where !fontChanged && !sourceChanged && !imagesChanged && !linkInputsChanged:
             return
         case .identical:
-            // Same rows, but font/source/image-map changed → re-render visible
-            // cells and re-measure all heights (the image row's reserved height
-            // may have appeared/changed under an otherwise-stable row set — the
-            // common case, since the async image scan lands after rows settle).
+            // Same rows, but font/source/image-map/link-inputs changed →
+            // re-render visible cells and re-measure all heights (the image
+            // row's reserved height may have appeared/changed under an
+            // otherwise-stable row set — the common case, since the async image
+            // scan lands after rows settle; a link-inputs-only change doesn't
+            // affect height but reconfigure is cheap and correct either way).
             rows = newRows
             reconfigureVisibleRows()
             noteAllHeightsChanged()
@@ -1296,6 +1371,37 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+    // MARK: NSTextViewDelegate (Task C3 — linkify click)
+
+    /// A body's `.link` attribute is the private `asfile://open...` payload
+    /// `TranscriptLinkifier.linkPayload` produced; decode it and open the
+    /// resolved path in the user's configured IDE (`ideTarget`/
+    /// `ideBinaryOverridePath` — same plain values `apply` stores every pass).
+    /// `true` claims the click (no further AppKit link handling); `false` for
+    /// anything undecodable so the click falls through as an ordinary click —
+    /// e.g. still lands in the selection/drag path, never silently eaten.
+    /// Returning early here does NOT interfere with `SelectableBlockTextView`'s
+    /// own `mouseDown`/`mouseDragged` overrides: AppKit calls this delegate
+    /// method from ITS OWN link-tracking (`NSTextView` intercepts a
+    /// non-dragging mouse-up over a `.link` run before this fires), so a normal
+    /// drag that never lands on a link glyph never reaches this method at all.
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        let payload: String? = {
+            if let value = link as? String { return value }
+            if let value = link as? URL { return value.absoluteString }
+            return nil
+        }()
+        guard let payload, let decoded = TranscriptLinkifier.decodePayload(payload) else {
+            return false
+        }
+        IDEOpener.open(path: decoded.path,
+                       line: decoded.line,
+                       column: decoded.column,
+                       target: ideTarget,
+                       binaryOverride: ideBinaryOverridePath)
+        return true
+    }
+
     // MARK: NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -1342,6 +1448,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                        accentOverride: accentOverride,
                        onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
                        onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
+
+        // Linkify (Task C3): applied AFTER `cell.configure` has set the body
+        // string/attributed-string on `bodyText.textStorage`, directly against
+        // the RENDERED text (`cell.bodyText.string` — for a markdown row that's
+        // `renderedBody.attributed.string`, never the markdown source; for a
+        // plain/tool/review row it's exactly `bodyText.string`). Matches are in
+        // rendered-space, so no source-map translation is needed or correct
+        // here. Meta rows and hidden/empty bodies have nothing to linkify.
+        if !rowModel.isMeta, !cell.bodyText.isHidden, let storage = cell.bodyText.textStorage, storage.length > 0 {
+            applyLinkAttributes(rowID: rowModel.id, text: cell.bodyText.string, to: storage)
+        }
+
         // Flash reset/paint. A recycle mid-flash re-raises alpha on the flashing
         // row and forces every other row back to base — so the pulse can never
         // get stuck on a recycled cell.
@@ -1612,6 +1730,76 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private func reviewSummary(for row: BlockRowModel) -> String? {
         guard case .message(let block) = row.content, row.isMarkdownMessage else { return nil }
         return Self.reviewSummary(for: block, source: source, enabled: reviewCardsEnabled)
+    }
+
+    // MARK: Linkify (Task C3)
+
+    /// Pure resolution step (no cache, no controller state) — the exact
+    /// three-call pipeline `SessionTerminalView.Coordinator.linkAttributes(for:
+    /// sessionCwd:repoRootPath:)` uses: `mightContainFileLink` pre-filter →
+    /// `matches` → `resolve` → `linkPayload`. Factored out (mirroring
+    /// `reviewSummary(for:source:enabled:)`'s static/instance split) so the
+    /// resolve-against-cwd/repoRoot behavior is unit-testable without a table,
+    /// cell, or controller instance. `text` must be the RENDERED/displayed
+    /// string (markdown-stripped for a markdown body); returned ranges are
+    /// UTF-16 offsets into that same string.
+    static func computeLinkAttributes(in text: String,
+                                      sessionCwd: String?,
+                                      repoRootPath: String?) -> [(range: NSRange, payload: String)] {
+        guard TranscriptLinkifier.mightContainFileLink(in: text) else { return [] }
+        return TranscriptLinkifier.matches(in: text).compactMap { match -> (range: NSRange, payload: String)? in
+            guard let resolved = TranscriptLinkifier.resolve(path: match.path,
+                                                             sessionCwd: sessionCwd,
+                                                             repoRoot: repoRootPath) else {
+                return nil
+            }
+            let payload = TranscriptLinkifier.linkPayload(path: resolved, line: match.line, column: match.column)
+            return (range: match.range, payload: payload)
+        }
+    }
+
+    /// Cache-backed wrapper over `computeLinkAttributes` keyed by row id.
+    /// Mirrors `SessionTerminalView.Coordinator.linkAttributes(for:sessionCwd:
+    /// repoRootPath:)`'s cache shape — recomputing matches/resolve on every
+    /// scroll-into-view reconfigure would be wasted work for a row whose text/
+    /// cwd/repoRoot haven't changed since the last computation. Returns `[]`
+    /// immediately when the gate is off (the pre-filter check itself lives in
+    /// `computeLinkAttributes`).
+    private func linkAttributes(for rowID: Int, text: String) -> [(range: NSRange, payload: String)] {
+        guard linkificationEnabled else { return [] }
+
+        if let cached = rowLinkCache.get(rowID),
+           cached.text == text,
+           cached.sessionCwd == sessionCwd,
+           cached.repoRootPath == repoRootPath {
+            return cached.links
+        }
+
+        let links = Self.computeLinkAttributes(in: text, sessionCwd: sessionCwd, repoRootPath: repoRootPath)
+        rowLinkCache.set(rowID, CachedRowLinks(text: text, sessionCwd: sessionCwd, repoRootPath: repoRootPath, links: links))
+        return links
+    }
+
+    /// Layer `.link`/`.underlineStyle` attributes onto `storage` for every
+    /// resolved match in `text` — `text` MUST be `storage.string` (or an
+    /// identical copy), since match ranges are UTF-16 offsets into the RENDERED
+    /// string, never source-mapped. Orthogonal to find highlights (`.backgroundColor`)
+    /// and the markdown inline-code chip (also `.backgroundColor` + a private
+    /// marker key) — `.link`/`.underlineStyle` don't collide with either, and
+    /// `SelectableBlockTextView.clearFindHighlights` only ever touches
+    /// `.backgroundColor`, so a find-clear can never strip a link. A no-op when
+    /// linkify is gated off or the row has no resolvable matches.
+    private func applyLinkAttributes(rowID: Int, text: String, to storage: NSTextStorage) {
+        let links = linkAttributes(for: rowID, text: text)
+        guard !links.isEmpty else { return }
+        let fullLen = storage.length
+        for link in links {
+            guard NSMaxRange(link.range) <= fullLen else { continue }
+            storage.addAttributes([
+                .link: link.payload,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: link.range)
+        }
     }
 
     // MARK: Markdown rendering + measurement (Task 12)
@@ -3267,6 +3455,13 @@ final class BlockCardCellView: NSTableCellView {
         // The controller re-applies the correct range immediately after if this
         // row participates in a live cross-block selection.
         if !coordinatorActive { bodyText.setSelectedRange(NSRange(location: 0, length: 0)) }
+        // Linkify (Task C3): the controller doubles as this body's
+        // NSTextViewDelegate solely for `textView(_:clickedOnLink:at:)` — it
+        // already owns the plain-value IDE target/override the click handler
+        // needs. Re-stamped every configure pass (idempotent, cheap) rather
+        // than once at cell-build time so a recycled cell always points at the
+        // CURRENT controller instance.
+        bodyText.delegate = controller
     }
 
     /// Paint this row's portion of a live cross-block selection.

@@ -598,6 +598,43 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var richHasInlineImages: Bool = false
     @State private var richInlineImagesTask: Task<Void, Never>?
 
+    // Linkify (Task C3): mirrors SessionTerminalView's own AppStorage reads so
+    // Rich mode clicks resolve/open files identically to Terminal mode. Plain
+    // values threaded into TranscriptBlockListView every render — the block
+    // view never reads AppStorage itself.
+    @AppStorage(PreferencesKey.Transcript.enableLinkification) private var transcriptLinkificationEnabled: Bool = true
+    @AppStorage(PreferencesKey.Transcript.preferredIDETarget) private var transcriptPreferredIDETargetRaw: String = IDEOpener.Target.systemDefault.rawValue
+    @AppStorage(PreferencesKey.Transcript.ideBinaryOverridePath) private var transcriptIDEBinaryOverridePath: String = ""
+
+    private var transcriptPreferredIDETarget: IDEOpener.Target {
+        IDEOpener.Target(rawValue: transcriptPreferredIDETargetRaw) ?? .systemDefault
+    }
+
+    /// Mirrors `SessionTerminalView.repoRootPath(from:)` exactly (that copy is
+    /// private to that file, which stays read-only for this port) — walks up
+    /// from `cwd` looking for a `.git` directory, nil if none found within 12
+    /// levels or `cwd` is empty/nil.
+    private static func repoRootPath(from cwd: String?) -> String? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        let fm = FileManager.default
+        var url = URL(fileURLWithPath: cwd)
+
+        for _ in 0..<12 {
+            let dotGitURL = url.appendingPathComponent(".git", isDirectory: false)
+            if fm.fileExists(atPath: dotGitURL.path) {
+                return url.path
+            }
+            let parent = url.deletingLastPathComponent()
+            if parent.path == url.path { break }
+            url = parent
+        }
+        return nil
+    }
+
+    private func sessionRepoRootPath(for session: Session) -> String? {
+        Self.repoRootPath(from: session.cwd)
+    }
+
     private var viewMode: SessionViewMode {
         // Prefer persisted view mode when valid; otherwise derive from legacy renderModeRaw.
         if let m = SessionViewMode(rawValue: viewModeRaw) {
@@ -1112,6 +1149,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             imagesByBlockIndex: richInlineImagesByBlockIndex,
             inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && richHasInlineImages,
             reviewCardsEnabled: transcriptReviewCardsEnabled,
+            linkificationEnabled: transcriptLinkificationEnabled,
+            sessionCwd: session.cwd,
+            repoRootPath: sessionRepoRootPath(for: session),
+            ideTarget: transcriptPreferredIDETarget,
+            ideBinaryOverridePath: transcriptIDEBinaryOverridePath,
             firstPromptJumpToken: richFirstPromptJumpToken,
             eventJumpToken: richEventJumpToken,
             eventJumpID: richEventJumpID,
