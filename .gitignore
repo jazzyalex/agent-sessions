@@ -91,3 +91,6 @@ __pycache__/
 
 # stray local artifact (kept out of release clean-tree gate)
 docs/assets/geo-test-2.pdf
+
+# Local competitor/reference source (never shipped; excluded from remote)
+.reference/

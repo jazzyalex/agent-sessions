@@ -588,6 +588,18 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
+    // Session (.blocks) role-visibility filters — parity with Terminal's role
+    // toggles. Persisted as a comma-joined raw string; the live Set is seeded
+    // from it on appear and written back on every toggle. Threaded into
+    // `TranscriptBlockListView`, which filters rows (and find matches) by kind.
+    @AppStorage("SessionRoleFilters") private var sessionRoleFilterRaw: String = "user,assistant,tools,errors"
+    @State private var activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)
+    // Role ▲▼ jump-navigation intent (token bump = jump request; role+direction
+    // tell the block controller which occurrence to scroll to).
+    @State private var roleJumpToken: Int = 0
+    @State private var roleJumpRole: TranscriptRoleFilter? = nil
+    @State private var roleJumpDirection: Int = 1
+
     // Inline session images for Rich (.blocks) mode — mirrors SessionTerminalView's
     // own inline-image machinery, but ONLY driven while Rich is the active view
     // mode (Terminal keeps and runs its own). Off-main mapping + 650ms debounce +
@@ -785,6 +797,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .frame(maxWidth: .infinity)
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
+                if viewMode == .blocks {
+                    sessionRoleFilterBar(session: session)
+                    Divider()
+                }
                 ZStack {
                     if viewMode == .blocks {
                         blocksTranscriptView(session: session)
@@ -812,6 +828,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     contentVersion: transcriptContentVersion(for: session)
                 )
                 isNearTranscriptTop = true
+                loadRoleFilters()
                 refreshRichInlineImages(session: session)
             }
             .onDisappear {
@@ -1102,6 +1119,159 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
     }
 
+    // MARK: - Session role filter (parity with Terminal's role toggles)
+
+    private func loadRoleFilters() {
+        let parsed = Set(sessionRoleFilterRaw
+            .split(separator: ",")
+            .compactMap { TranscriptRoleFilter(rawValue: String($0)) })
+        activeRoleFilters = parsed.isEmpty ? Set(TranscriptRoleFilter.allCases) : parsed
+    }
+
+    private func persistRoleFilters() {
+        sessionRoleFilterRaw = TranscriptRoleFilter.allCases
+            .filter { activeRoleFilters.contains($0) }
+            .map(\.rawValue)
+            .joined(separator: ",")
+    }
+
+    private func toggleRoleFilter(_ role: TranscriptRoleFilter) {
+        if activeRoleFilters.contains(role) {
+            activeRoleFilters.remove(role)
+        } else {
+            activeRoleFilters.insert(role)
+        }
+        persistRoleFilters()
+    }
+
+    private var allRoleFiltersActive: Bool {
+        activeRoleFilters.count == TranscriptRoleFilter.allCases.count
+    }
+
+    private func roleFilterLabel(_ role: TranscriptRoleFilter) -> String {
+        switch role {
+        case .user: return "You"
+        case .assistant: return "Agent"
+        case .tools: return "Tools"
+        case .errors: return "Errors"
+        }
+    }
+
+    /// Swatch color mirrors the card accent for the same kind (see
+    /// `BlockTableController.accentColor`) so the chip reads as the thing it
+    /// filters. `.assistant` uses the session's agent-brand accent.
+    private func roleFilterAccent(_ role: TranscriptRoleFilter, source: SessionSource) -> Color {
+        switch role {
+        case .user: return TranscriptColorSystem.semanticAccent(.user)
+        case .assistant: return TranscriptColorSystem.agentBrandAccent(source: source)
+        case .tools: return TranscriptColorSystem.semanticAccent(.toolCall)
+        case .errors: return TranscriptColorSystem.semanticAccent(.error)
+        }
+    }
+
+    /// Number of blocks of the given role in the current snapshot — drives the
+    /// ▲▼ jump-nav enabled state. Reading `derivedState.snapshot` here tracks the
+    /// dependency so the chevrons enable/disable as the snapshot lands.
+    private func roleOccurrenceCount(_ role: TranscriptRoleFilter) -> Int {
+        let snap = derivedState.snapshot
+        switch role {
+        case .user: return snap.userBlockIndices.count
+        case .tools: return snap.toolBlockIndices.count
+        case .errors: return snap.errorBlockIndices.count
+        case .assistant: return snap.blocks.reduce(0) { $0 + ($1.kind == .assistant ? 1 : 0) }
+        }
+    }
+
+    private func jumpRole(_ role: TranscriptRoleFilter, direction: Int) {
+        roleJumpRole = role
+        roleJumpDirection = direction
+        roleJumpToken &+= 1
+    }
+
+    private func roleJumpChevron(_ system: String, role: TranscriptRoleFilter,
+                                 direction: Int, enabled: Bool, help: String) -> some View {
+        Button(action: { jumpRole(role, direction: direction) }) {
+            Image(systemName: system)
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 14, height: 11)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? Color.secondary : Color.secondary.opacity(0.3))
+        .disabled(!enabled)
+        .help(help)
+    }
+
+    private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource) -> some View {
+        let isOn = activeRoleFilters.contains(role)
+        // A role's occurrences are reachable when it's shown (explicitly on, or
+        // the "no filter" empty-set state) and it actually has ≥1 block.
+        let shown = activeRoleFilters.isEmpty || isOn
+        let navEnabled = shown && roleOccurrenceCount(role) > 0
+        let label = roleFilterLabel(role)
+        return HStack(spacing: 4) {
+            Button(action: { toggleRoleFilter(role) }) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(roleFilterAccent(role, source: source).opacity(isOn ? 1.0 : 0.3))
+                        .frame(width: 9, height: 9)
+                    Text(label)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(isOn ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isOn ? Color.secondary.opacity(0.12) : Color.clear)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isOn ? "Hide \(label) blocks" : "Show \(label) blocks")
+
+            HStack(spacing: 1) {
+                roleJumpChevron("chevron.up", role: role, direction: -1,
+                                enabled: navEnabled, help: "Previous \(label)")
+                roleJumpChevron("chevron.down", role: role, direction: 1,
+                                enabled: navEnabled, help: "Next \(label)")
+            }
+        }
+    }
+
+    private func sessionRoleFilterBar(session: Session) -> some View {
+        HStack(spacing: 10) {
+            Button(action: {
+                activeRoleFilters = Set(TranscriptRoleFilter.allCases)
+                persistRoleFilters()
+            }) {
+                Text("All")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(allRoleFiltersActive ? Color.accentColor : Color.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(allRoleFiltersActive ? Color.accentColor.opacity(0.6) : Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show all block types")
+
+            ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
+                sessionRoleFilterChip(role, source: session.source)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
     private func blocksTranscriptView(session: Session) -> some View {
         TranscriptBlockListView(
             derivedState: derivedState,
@@ -1133,7 +1303,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             unifiedFindReset: richUnifiedFindReset,
             unifiedFindAllowAutoScroll: richUnifiedFindAllowAutoScroll,
             unifiedMatchCount: $richUnifiedMatchesCount,
-            unifiedCurrentIndex: $richUnifiedCurrentIndex
+            unifiedCurrentIndex: $richUnifiedCurrentIndex,
+            activeRoleFilters: activeRoleFilters,
+            roleJumpToken: roleJumpToken,
+            roleJumpRole: roleJumpRole,
+            roleJumpDirection: roleJumpDirection
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

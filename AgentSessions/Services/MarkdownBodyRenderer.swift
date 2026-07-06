@@ -104,17 +104,24 @@ enum MarkdownBodyRenderer {
         mutating func appendBlock(_ block: Markup) {
             switch block {
             case let heading as Heading:
-                let size = baseFont.pointSize + CGFloat(max(0, 7 - heading.level)) * 2
-                let headingFont = NSFont.boldSystemFont(ofSize: size)
+                // Gentle em ramp off the prose (1em) size — h1 1.35em tapering
+                // to 1.0em by h4 — reads as clear hierarchy without the flat
+                // per-level bump this replaced, which pushed H1 to 25pt on a
+                // 13pt base and read as a billboard, not a heading.
+                let headingFont = NSFont.boldSystemFont(ofSize: proseFont.pointSize * MarkdownStyle.headingEmRatio(for: heading.level))
+                let start = out.length
                 appendInlineChildren(heading.inlineChildren.map { $0 as Markup },
                                      font: headingFont,
                                      traits: .bold,
                                      extra: [:])
+                applyProseParagraphStyle(from: start, isHeading: true)
             case let paragraph as Paragraph:
+                let start = out.length
                 appendInlineChildren(paragraph.inlineChildren.map { $0 as Markup },
                                      font: proseFont,
                                      traits: [],
                                      extra: [:])
+                applyProseParagraphStyle(from: start, isHeading: false)
             case let codeBlock as CodeBlock:
                 // Fenced/indented code block → dark inset card (Task 13). The
                 // CODE MUST still render + copy — dropping it would blank the
@@ -167,12 +174,25 @@ enum MarkdownBodyRenderer {
                 // highlights paint over — see the `.markdownCodeBlockBg` marker
                 // doc (RenderedBody.swift) and `clearFindHighlights` for how a
                 // find-clear restores this card fill instead of stripping it.
+                // Resolve the card fill ONCE and reuse the same instance for both
+                // `.backgroundColor` and the `.markdownCodeBlockBg` find-restore
+                // marker. `codeBlockBackground` is a hand-rolled `NSColor(name:
+                // nil) { ... }` dynamic color (needed for the two-shade-per-
+                // appearance card fill), and each access constructs a NEW
+                // instance — two separately-resolved instances are not `==`, so
+                // `clearFindHighlights`' `value as? NSColor` restore would
+                // "succeed" but produce a color that fails equality against the
+                // original in tests (and, worse, could resolve to visually
+                // different output if the closure ever became appearance-history
+                // -dependent). Binding once guarantees find-clear restores the
+                // EXACT instance that was originally painted.
+                let codeCardFill = MarkdownStyle.codeBlockBackground
                 let codeStart = out.length
                 appendMappedRun(code, attributes: [
                     .font: baseFont,
-                    .foregroundColor: NSColor.labelColor,
-                    .backgroundColor: MarkdownStyle.codeBlockBackground,
-                    .markdownCodeBlockBg: MarkdownStyle.codeBlockBackground
+                    .foregroundColor: MarkdownStyle.codeBlockText,
+                    .backgroundColor: codeCardFill,
+                    .markdownCodeBlockBg: codeCardFill
                 ])
                 applyCodeCardParagraphStyle(over: NSRange(location: codeStart, length: out.length - codeStart))
 
@@ -194,10 +214,39 @@ enum MarkdownBodyRenderer {
                 appendListItems(Array(list.listItems), markerFor: { offset in "\(start + UInt(offset))." }, depth: 0)
 
             case let table as Table:
-                // Task 15: GFM table → real `NSTextTable` (borders + padding),
-                // the AgentsView-parity moment. Highest risk / lowest frequency,
-                // so it ships last.
+                // Task 15: GFM table → real `NSTextTable` (borders + padding).
+                // Highest risk / lowest frequency, so it ships last.
                 appendTable(table)
+
+            case let blockQuote as BlockQuote:
+                // Blockquotes previously fell through to the generic unmodeled-
+                // block recursion with NO styling at all — plain paragraph text,
+                // indistinguishable from a normal quote-less paragraph. A quoted
+                // block reads best with a left accent + indent + de-emphasized
+                // text (a well-established quoting convention, not something
+                // specific to any one reference app). NSAttributedString has no
+                // left-BORDER primitive (only headIndent/firstLineHeadIndent,
+                // which shift text but paint no rule), so we approximate the bar
+                // with a leading "▎" glyph — reads as an accent stripe without
+                // attempting custom glyph/border drawing (out of scope). The bar
+                // is RENDERED-ONLY (appended directly, not through
+                // `appendMappedRun`), so it contributes no source segment and
+                // cannot perturb the map — same discipline as the list marker
+                // glyph.
+                //
+                // Recurses over the quote's own block children (usually a single
+                // Paragraph) via `appendUnmodeledBlockChildren` so nested
+                // structure (multi-paragraph quotes) still renders and maps
+                // correctly; the secondary-color + indent style is then overlaid
+                // on the WHOLE quote range, mirroring the code-card/list-item
+                // post-hoc styling pattern.
+                let quoteStart = out.length
+                out.append(NSAttributedString(string: "▎ ", attributes: [
+                    .font: proseFont,
+                    .foregroundColor: MarkdownStyle.blockquoteText
+                ]))
+                appendUnmodeledBlockChildren(blockQuote)
+                applyBlockquoteStyle(over: NSRange(location: quoteStart, length: out.length - quoteStart))
 
             default:
                 // Any OTHER block not modeled yet (block quotes, tables, HTML
@@ -358,7 +407,53 @@ enum MarkdownBodyRenderer {
             style.firstLineHeadIndent = indent - 20
             style.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
             style.lineBreakMode = .byWordWrapping
+            style.lineSpacing = MarkdownStyle.proseLineSpacing
             out.addAttribute(.paragraphStyle, value: style, range: range)
+        }
+
+        /// Apply prose line-height to a paragraph/heading's rendered range. Like
+        /// the list/fence styles it runs AFTER the text is in `out`, overlaying
+        /// only `.paragraphStyle` — never touching `out.length`/`scanCursor`/
+        /// segments, so the source map is unaffected. NSAttributedString adds no
+        /// inter-line spacing by default (unlike web's line-height), which reads
+        /// cramped; a small `lineSpacing` restores comfortable rhythm, and
+        /// headings get space above for section hierarchy.
+        mutating func applyProseParagraphStyle(from start: Int, isHeading: Bool) {
+            guard out.length > start else { return }
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = MarkdownStyle.proseLineSpacing
+            style.lineBreakMode = .byWordWrapping
+            if isHeading { style.paragraphSpacingBefore = MarkdownStyle.headingSpacingBefore }
+            out.addAttribute(.paragraphStyle, value: style,
+                             range: NSRange(location: start, length: out.length - start))
+        }
+
+        /// Apply the blockquote's indent + secondary-text-color styling over
+        /// `range` (the "▎ " bar glyph + the quote's already-appended child
+        /// content). Runs strictly AFTER the append — like every other
+        /// paragraph-style overlay in this file it only adds `.paragraphStyle`/
+        /// `.foregroundColor` attributes on existing characters, so it cannot
+        /// affect `out.length`, `scanCursor`, or any recorded `SourceMapSegment`.
+        ///
+        /// `.foregroundColor` is applied here (rather than threaded through
+        /// `extra` down the block-recursion chain that renders the quote's
+        /// child paragraphs) because `appendBlock`/`appendUnmodeledBlockChildren`
+        /// don't plumb an inherited color parameter — overlaying post-hoc over
+        /// the whole quote range is the same "style what's already rendered"
+        /// approach already used for code cards and list indents, and avoids
+        /// widening those functions' signatures for a single caller.
+        mutating func applyBlockquoteStyle(over range: NSRange) {
+            guard range.length > 0 else { return }
+            let style = NSMutableParagraphStyle()
+            // Comfortable horizontal inset off the leading edge (no vertical/
+            // block padding primitive in NSAttributedString, but the "▎" bar
+            // glyph plus this indent together read as a quoted block).
+            style.headIndent = MarkdownStyle.blockquoteIndent
+            style.firstLineHeadIndent = MarkdownStyle.blockquoteIndent
+            style.lineSpacing = MarkdownStyle.proseLineSpacing
+            style.lineBreakMode = .byWordWrapping
+            out.addAttribute(.paragraphStyle, value: style, range: range)
+            out.addAttribute(.foregroundColor, value: MarkdownStyle.blockquoteText, range: range)
         }
 
         // MARK: Table rendering (Task 15)
@@ -482,7 +577,7 @@ enum MarkdownBodyRenderer {
             // source segment (like a list marker), so it never shifts the map.
             out.append(NSAttributedString(string: "\n"))
             applyTableCellStyle(over: NSRange(location: cellStart, length: out.length - cellStart),
-                                table: table, row: row, column: column, alignments: alignments)
+                                table: table, row: row, column: column, alignments: alignments, isHeader: row == 0)
         }
 
         /// Append a rendered-only empty cell (padding a short row out to the
@@ -494,7 +589,7 @@ enum MarkdownBodyRenderer {
             let cellStart = out.length
             out.append(NSAttributedString(string: "\n"))
             applyTableCellStyle(over: NSRange(location: cellStart, length: out.length - cellStart),
-                                table: table, row: row, column: column, alignments: alignments)
+                                table: table, row: row, column: column, alignments: alignments, isHeader: row == 0)
         }
 
         /// Build the `NSTextTableBlock` for `(row, column)` and stamp its
@@ -506,7 +601,8 @@ enum MarkdownBodyRenderer {
         func applyTableCellStyle(over range: NSRange,
                                  table: NSTextTable,
                                  row: Int, column: Int,
-                                 alignments: [Table.ColumnAlignment?]) {
+                                 alignments: [Table.ColumnAlignment?],
+                                 isHeader: Bool) {
             guard range.length > 0 else { return }
             // Known limitation: GFM cell spans (colspan/rowspan) are flattened to
             // 1×1 — a spanned cell renders as a normal cell followed by empty
@@ -518,7 +614,20 @@ enum MarkdownBodyRenderer {
                                          startingColumn: column, columnSpan: 1)
             block.setBorderColor(MarkdownStyle.tableBorder)
             block.setWidth(1, type: .absoluteValueType, for: .border)
-            block.setWidth(5, type: .absoluteValueType, for: .padding)
+            // Comfortable cell padding, a touch more room horizontally than
+            // vertically (columns need breathing room more than rows do); set
+            // edges individually since the two axes differ (the old 5pt-all-edges
+            // approximation read cramped).
+            block.setWidth(MarkdownStyle.tableCellHorizontalPadding, type: .absoluteValueType, for: .padding, edge: .minX)
+            block.setWidth(MarkdownStyle.tableCellHorizontalPadding, type: .absoluteValueType, for: .padding, edge: .maxX)
+            block.setWidth(MarkdownStyle.tableCellVerticalPadding, type: .absoluteValueType, for: .padding, edge: .minY)
+            block.setWidth(MarkdownStyle.tableCellVerticalPadding, type: .absoluteValueType, for: .padding, edge: .maxY)
+            // Header row gets a subtle fill so it's visibly distinct from body
+            // rows at a glance — the owner specifically called out that the old
+            // renderer's tables lacked this distinction.
+            if isHeader {
+                block.backgroundColor = MarkdownStyle.tableHeaderBackground
+            }
 
             let style = NSMutableParagraphStyle()
             style.textBlocks = [block]
@@ -580,16 +689,26 @@ enum MarkdownBodyRenderer {
                                      extra: extra)
 
             case let code as InlineCode:
-                // Inline code keeps the monospaced identity (baseFont), plus a
-                // subtle chip background. Its literal is the `.code` string; map
-                // it forward-scan like any other preserved text.
+                // Inline code keeps the monospaced identity, sized down a notch
+                // off baseFont for a tighter, chip-like scale (a plain same-size
+                // monospace run read as oversized next to prose). A real chip
+                // would want a border + rounded corners, but
+                // `NSAttributedString.backgroundColor` can't draw either — the
+                // smaller font plus a modestly-more-defined fill is the closest
+                // tasteful approximation without custom glyph drawing (out of
+                // scope). Its literal is the `.code` string; map it forward-scan
+                // like any other preserved text.
+                // Inline code is distinguished by its MONOSPACE font against the
+                // proportional prose — NO background chip. Backticked spans in
+                // agent messages are frequent and often arbitrary (an email, a
+                // bare number, a whole error line), so a per-span background reads
+                // as random gray boxes; the monospace face alone marks it as a
+                // literal without the visual noise. (Find highlighting still uses
+                // `.backgroundColor` on a match; with no chip there's nothing to
+                // clash with or restore.)
                 var attrs = extra
-                attrs[.font] = baseFont
+                attrs[.font] = NSFont(descriptor: baseFont.fontDescriptor, size: baseFont.pointSize * MarkdownStyle.inlineCodeFontScale) ?? baseFont
                 attrs[.foregroundColor] = NSColor.labelColor
-                attrs[.backgroundColor] = MarkdownStyle.inlineCodeChip
-                // Marker so a find-highlight clear can restore this chip instead
-                // of stripping it (find and the chip share `.backgroundColor`).
-                attrs[.markdownCodeChip] = MarkdownStyle.inlineCodeChip
                 appendMappedRun(code.code, attributes: attrs)
 
             case let link as Link:
@@ -710,12 +829,16 @@ enum MarkdownBodyRenderer {
             guard !lineRanges.isEmpty else { return }
             for (index, lineRange) in lineRanges.enumerated() {
                 let style = NSMutableParagraphStyle()
-                style.headIndent = 11
-                style.firstLineHeadIndent = 11
-                style.tailIndent = -11
+                // Comfortable card padding: horizontal inset on every line via
+                // head/tail indent, vertical inset via the first/last line's
+                // paragraph spacing (see the doc above for why that has to be
+                // split per-line rather than one uniform style).
+                style.headIndent = MarkdownStyle.codeCardHorizontalPadding
+                style.firstLineHeadIndent = MarkdownStyle.codeCardHorizontalPadding
+                style.tailIndent = -MarkdownStyle.codeCardHorizontalPadding
                 style.lineBreakMode = .byCharWrapping
-                if index == 0 { style.paragraphSpacingBefore = 6 }
-                if index == lineRanges.count - 1 { style.paragraphSpacing = 6 }
+                if index == 0 { style.paragraphSpacingBefore = MarkdownStyle.codeCardVerticalPadding }
+                if index == lineRanges.count - 1 { style.paragraphSpacing = MarkdownStyle.codeCardVerticalPadding }
                 out.addAttribute(.paragraphStyle, value: style, range: lineRange)
             }
         }
@@ -746,34 +869,106 @@ enum MarkdownBodyRenderer {
 /// `NSColor`s so the same instance resolves per appearance; the render cache is
 /// keyed by `isDark` and rebuilt on an appearance flip, so a baked
 /// `.backgroundColor` chip stays correct without live re-resolution.
+///
+/// These tokens are Agent Sessions' OWN palette — tuned for readability against
+/// AgentsView as a UX-pattern reference (hierarchy, a distinct code card, a
+/// visibly distinct table header, restrained inline chips), NOT as a color
+/// spec to copy. No AgentsView hex value (its Catppuccin-derived `#1e1e2e` /
+/// `#0d0d14` / `#cdd6f4`) appears here; every color below is either a system
+/// semantic color (already appearance-correct by definition) or a hand-rolled
+/// alpha wash resolved per-appearance the same way `inlineCodeChip` always has.
 private enum MarkdownStyle {
-    /// Very faint background hint behind inline code. Inline code already reads
-    /// as distinct because prose is the PROPORTIONAL system font while inline
-    /// code is MONOSPACED — so the chip is only a light reinforcement, not the
-    /// primary signal. `.quaternaryLabelColor` was too heavy on code-dense
-    /// messages (many backtick spans → a wall of gray that hurt readability).
-    /// The faintest system tint (`quinaryLabelColor`) isn't exposed in Swift, so
-    /// this is a hand-rolled appearance-aware fill: a barely-there wash (~5–6%)
-    /// that resolves per the drawing appearance.
+    /// Tasteful middle ground for the inline-code chip: distinct enough to read
+    /// as a chip (the owner disliked the old near-invisible ~5% wash) without
+    /// becoming the heavy gray box the owner also rejected earlier. Inline code
+    /// already reads as distinct because prose is proportional and code is
+    /// monospaced — this is reinforcement, not the primary signal — so the bump
+    /// stays modest (~9–10%) rather than matching a bordered-chip look we can't
+    /// actually draw (`.backgroundColor` can't paint a border or radius).
     static var inlineCodeChip: NSColor {
         NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return isDark ? NSColor(white: 1.0, alpha: 0.06) : NSColor(white: 0.0, alpha: 0.05)
+            return isDark ? NSColor(white: 1.0, alpha: 0.10) : NSColor(white: 0.0, alpha: 0.09)
         }
     }
-    /// Dark inset card behind a fenced code block. Deliberately NOT
-    /// `isDark`-branched: `.underPageBackgroundColor` is itself a dynamic system
-    /// color that resolves to a slightly recessed tone relative to the page
-    /// background in EACH appearance (a soft dark-gray card in dark mode, a
-    /// soft light-gray card in light mode) — exactly the "inset card" look the
-    /// brief asks for, without hand-picking two fixed swatches that could drift
-    /// from the system's own appearance transitions.
-    static var codeBlockBackground: NSColor { .underPageBackgroundColor }
+    /// Relative size of the inline-code font vs. `baseFont` — a tighter,
+    /// chip-like scale-down so an inline code run reads as a smaller inset
+    /// element rather than same-size monospace competing with the surrounding
+    /// prose; 0.9x stays comfortably legible while still reading smaller.
+    static let inlineCodeFontScale: CGFloat = 0.9
+
+    /// Fenced-code-block card fill: a restrained, genuinely dark editor-style
+    /// card in BOTH appearances — the distinctive "this is code" signal the old
+    /// flat/adaptive-gray treatment lacked — built from our own neutral dark
+    /// tone (not a copied Catppuccin swatch) and tuned slightly lighter in dark
+    /// mode so the card still reads as recessed against a dark chat background.
+    static var codeBlockBackground: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            // A SUBTLE inset — NOT a heavy near-black slab. Light-gray in light
+            // mode, a gently-recessed tone in dark mode: enough to read as a
+            // code block without a black box dominating the transcript.
+            return isDark ? NSColor(calibratedWhite: 0.22, alpha: 1.0) : NSColor(calibratedWhite: 0.94, alpha: 1.0)
+        }
+    }
+    /// Code-card text uses the standard label color — with a subtle (not dark)
+    /// card fill, normal text contrast reads correctly in both appearances.
+    static var codeBlockText: NSColor { .labelColor }
     /// Link text color — the standard control accent.
     static var linkColor: NSColor { .linkColor }
+    /// Line spacing between wrapped lines of prose/list text. A comfortable
+    /// reading rhythm — NSAttributedString adds no inter-line spacing by
+    /// default (unlike web line-height), which reads cramped without it.
+    static let proseLineSpacing: CGFloat = 7
+    /// Heading rhythm: gentle spacing above a heading so it reads as section
+    /// hierarchy rather than just larger inline text.
+    static let headingSpacingBefore: CGFloat = 11
+    static let headingSpacingAfter: CGFloat = 5
+
+    /// Heading font-size ramp, expressed as a ratio of the prose (1em) size —
+    /// H1 noticeably larger, tapering down to body size by H4, so hierarchy
+    /// reads as gentle emphasis rather than a billboard.
+    static func headingEmRatio(for level: Int) -> CGFloat {
+        switch level {
+        case 1: return 1.35
+        case 2: return 1.2
+        case 3: return 1.1
+        default: return 1.0
+        }
+    }
+
+    /// Fenced-code-block card padding (Task 13 restyle): horizontal inset via
+    /// head/tail indent, vertical inset via first/last-line paragraph spacing.
+    static let codeCardHorizontalPadding: CGFloat = 14
+    static let codeCardVerticalPadding: CGFloat = 8
+
     /// Thin cell border for GFM tables (Task 15). `.separatorColor` is a dynamic
     /// system color that resolves to a hairline divider tone in BOTH appearances
     /// (a faint light line on dark, a faint dark line on light), matching the
     /// system's own table/list separators without hand-picking two swatches.
     static var tableBorder: NSColor { .separatorColor }
+    /// Table cell padding — comfortable spacing without the cramped 5pt-all-edges
+    /// approximation; a touch more room horizontally than vertically, matching
+    /// how a normal table's row height vs. column gutter reads.
+    static let tableCellHorizontalPadding: CGFloat = 8
+    static let tableCellVerticalPadding: CGFloat = 5
+    /// Header row fill: a subtle system-derived wash that makes the header band
+    /// visibly distinct from body rows without hand-picking an inset-panel hex.
+    /// Same hand-rolled-appearance-aware-alpha technique as `inlineCodeChip`
+    /// (there is no bordered system token for "table header fill"), kept a
+    /// notch stronger than the inline-code chip since it must read at a glance
+    /// across a whole row, not just a few characters.
+    static var tableHeaderBackground: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return isDark ? NSColor(white: 1.0, alpha: 0.08) : NSColor(white: 0.0, alpha: 0.05)
+        }
+    }
+    /// Blockquote text: the system's own "secondary" semantic label color —
+    /// already appearance-correct by definition, matching how the rest of the
+    /// app dims de-emphasized text.
+    static var blockquoteText: NSColor { .secondaryLabelColor }
+    /// Blockquote horizontal indent off the leading edge (paired with the "▎"
+    /// bar glyph — see `applyBlockquoteStyle`).
+    static let blockquoteIndent: CGFloat = 14
 }

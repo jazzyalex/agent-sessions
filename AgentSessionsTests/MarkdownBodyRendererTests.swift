@@ -29,13 +29,16 @@ final class MarkdownBodyRendererTests: XCTestCase {
         XCTAssertTrue(b.attributed.string.contains("two"))
     }
 
-    func testInlineCodeMonospacedChip() {
+    func testInlineCodeIsMonospacedWithNoBackgroundChip() {
         let b = MarkdownBodyRenderer.render("call `foo()` now", baseFont: font, isDark: true)
         XCTAssertEqual(b.attributed.string, "call foo() now")
-        // the code run carries a background color chip attribute
         let codeLoc = (b.attributed.string as NSString).range(of: "foo()").location
+        // Inline code is marked by the monospaced font, NOT a background chip
+        // (backgrounds on arbitrary backticked spans read as random gray boxes).
+        let f = b.attributed.attribute(.font, at: codeLoc, effectiveRange: nil) as? NSFont
+        XCTAssertTrue(f?.isFixedPitch ?? false, "inline code must stay monospaced")
         let bg = b.attributed.attribute(.backgroundColor, at: codeLoc, effectiveRange: nil)
-        XCTAssertNotNil(bg)
+        XCTAssertNil(bg, "inline code must NOT carry a background chip")
     }
 
     func testStrongAttributeApplied() {
@@ -324,6 +327,124 @@ final class MarkdownBodyRendererTests: XCTestCase {
         XCTAssertNotNil(f)
         XCTAssertTrue(f!.fontDescriptor.symbolicTraits.contains(.bold),
                       "table header cell text must be bold")
+    }
+
+    // MARK: Element restyle — code block, table header, heading ramp, inline
+    // code, blockquote (own palette, not a copy of any reference app's colors)
+
+    func testCodeFenceCardUsesSubtleInsetWithAdaptiveText() {
+        // Restyle (#2): the code card is a SUBTLE inset — light-gray in light
+        // mode, a gently-recessed tone in dark mode — with the standard adaptive
+        // label color, NOT the old near-black slab with fixed off-white text.
+        // The fill and text are dynamic colors, so resolve each against a
+        // specific appearance rather than reading them context-free.
+        let src = "```\nlet x = 1\n```"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let loc = (b.attributed.string as NSString).range(of: "let x").location
+        let bg = b.attributed.attribute(.backgroundColor, at: loc, effectiveRange: nil) as? NSColor
+        let fg = b.attributed.attribute(.foregroundColor, at: loc, effectiveRange: nil) as? NSColor
+        XCTAssertNotNil(bg)
+        XCTAssertNotNil(fg)
+
+        func brightness(_ color: NSColor, in appearanceName: NSAppearance.Name) -> CGFloat {
+            var out: CGFloat = -1
+            NSAppearance(named: appearanceName)!.performAsCurrentDrawingAppearance {
+                out = color.usingColorSpace(.deviceRGB)!.brightnessComponent
+            }
+            return out
+        }
+
+        // Fill: light inset in light mode (NOT a dark slab); recessed-but-not-black
+        // in dark mode (NOT a bright panel).
+        XCTAssertGreaterThan(brightness(bg!, in: .aqua), 0.85,
+                             "light-mode code fill should be a light inset, not a dark slab")
+        let darkFill = brightness(bg!, in: .darkAqua)
+        XCTAssertGreaterThan(darkFill, 0.12, "dark-mode code fill should be recessed, not pure black")
+        XCTAssertLessThan(darkFill, 0.40, "dark-mode code fill should stay a subtle inset, not a bright panel")
+
+        // Text adapts (standard label): dark in light mode, light in dark mode —
+        // not a fixed off-white independent of appearance.
+        XCTAssertLessThan(brightness(fg!, in: .aqua), 0.4, "code text should be dark in light mode")
+        XCTAssertGreaterThan(brightness(fg!, in: .darkAqua), 0.6, "code text should be light in dark mode")
+    }
+
+    func testTableHeaderCellHasDistinctBackground() {
+        // The owner specifically called out that tables lacked a visibly
+        // distinct header row; the restyle gives header (row 0) cells a fill
+        // that body-row cells do NOT carry.
+        let md = "| Name | Age |\n|---|---|\n| x | 1 |"
+        let b = MarkdownBodyRenderer.render(md, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        let headerLoc = s.range(of: "Name").location
+        let bodyLoc = s.range(of: "x").location
+        let headerStyle = b.attributed.attribute(.paragraphStyle, at: headerLoc, effectiveRange: nil) as? NSParagraphStyle
+        let bodyStyle = b.attributed.attribute(.paragraphStyle, at: bodyLoc, effectiveRange: nil) as? NSParagraphStyle
+        let headerBlock = headerStyle?.textBlocks.first as? NSTextTableBlock
+        let bodyBlock = bodyStyle?.textBlocks.first as? NSTextTableBlock
+        XCTAssertNotNil(headerBlock?.backgroundColor, "header cell must carry a background fill")
+        XCTAssertNil(bodyBlock?.backgroundColor, "body cell must NOT carry the header fill")
+    }
+
+    func testHeadingSizeRampDescendsFromH1ToH3() {
+        // AgentsView-inspired gentle em ramp: H1 > H2 > H3 > body, tapering off
+        // rather than a flat per-level bump that once pushed H1 to 25pt.
+        let h1 = MarkdownBodyRenderer.render("# one", baseFont: font, isDark: true)
+        let h2 = MarkdownBodyRenderer.render("## two", baseFont: font, isDark: true)
+        let h3 = MarkdownBodyRenderer.render("### three", baseFont: font, isDark: true)
+        let body = MarkdownBodyRenderer.render("plain", baseFont: font, isDark: true)
+        let f1 = (h1.attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
+        let f2 = (h2.attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
+        let f3 = (h3.attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
+        let fBody = (body.attributed.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
+        XCTAssertNotNil(f1); XCTAssertNotNil(f2); XCTAssertNotNil(f3); XCTAssertNotNil(fBody)
+        XCTAssertGreaterThan(f1!, f2!, "H1 must be larger than H2")
+        XCTAssertGreaterThan(f2!, f3!, "H2 must be larger than H3")
+        XCTAssertGreaterThan(f3!, fBody!, "H3 must still be larger than body prose")
+    }
+
+    func testInlineCodeFontIsSmallerThanBody() {
+        // Restyle: inline code is sized down a notch off baseFont for a
+        // tighter, chip-like scale rather than same-size monospace.
+        let b = MarkdownBodyRenderer.render("call `foo()` now", baseFont: font, isDark: true)
+        let codeLoc = (b.attributed.string as NSString).range(of: "foo()").location
+        let codeFont = b.attributed.attribute(.font, at: codeLoc, effectiveRange: nil) as? NSFont
+        XCTAssertNotNil(codeFont)
+        XCTAssertLessThan(codeFont!.pointSize, font.pointSize, "inline code font should be smaller than the base/body font")
+    }
+
+    func testBlockquoteTextCarriesSecondaryColorAndIndent() {
+        // Blockquotes previously fell through the generic unmodeled-block path
+        // with NO styling. The restyle gives them a secondary text color and an
+        // indent (approximating a left border, which NSAttributedString can't
+        // draw natively).
+        let src = "> quoted line"
+        let b = MarkdownBodyRenderer.render(src, baseFont: font, isDark: true)
+        let s = b.attributed.string as NSString
+        let loc = s.range(of: "quoted line").location
+        XCTAssertNotEqual(loc, NSNotFound)
+        let fg = b.attributed.attribute(.foregroundColor, at: loc, effectiveRange: nil) as? NSColor
+        XCTAssertEqual(fg, NSColor.secondaryLabelColor, "blockquote text should use the secondary label color")
+        let style = b.attributed.attribute(.paragraphStyle, at: loc, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertGreaterThan(style?.headIndent ?? 0, 0, "blockquote should be indented off the leading edge")
+    }
+
+    func testFindHighlightOnInlineCodeClearsToNoBackground() {
+        // Inline code has no background chip, so a find match paints a highlight
+        // and clearing it must return the run to NO background (nothing to
+        // restore), not leave a stray fill behind.
+        let b = MarkdownBodyRenderer.render("call `foo()` now", baseFont: font, isDark: true)
+        let textView = SelectableBlockTextView()
+        textView.textStorage?.setAttributedString(b.attributed)
+        let s = b.attributed.string as NSString
+        let matchRange = s.range(of: "foo")
+        XCTAssertNil(textView.textStorage?.attribute(.backgroundColor, at: matchRange.location, effectiveRange: nil),
+                     "inline code starts with no background")
+        textView.applyFindHighlights(all: [matchRange], current: matchRange)
+        XCTAssertNotNil(textView.textStorage?.attribute(.backgroundColor, at: matchRange.location, effectiveRange: nil),
+                        "find highlight paints a background")
+        textView.clearFindHighlights()
+        XCTAssertNil(textView.textStorage?.attribute(.backgroundColor, at: matchRange.location, effectiveRange: nil),
+                     "clearing find leaves inline code with no background")
     }
 
     func testTableCellsCarryTextTableParagraphStyle() {

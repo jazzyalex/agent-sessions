@@ -1,5 +1,30 @@
 import SwiftUI
 import AppKit
+import AVFoundation
+
+// MARK: - Role filter
+
+/// The four visibility filters restored to the Session (block) view — the
+/// block-space equivalent of `SessionTerminalView`'s `RoleToggle`. Each block's
+/// `LogicalBlock.Kind` maps to exactly one filter (or none, for `.meta`, which
+/// is always shown). Filtering is applied at ROW EMISSION so the underlying
+/// block array — and thus the `globalBlockIndex == array position` invariant the
+/// windowing/find/anchor math depends on — is never disturbed.
+enum TranscriptRoleFilter: String, CaseIterable, Hashable {
+    case user, assistant, tools, errors
+
+    /// The filter that governs a block of the given kind, or `nil` for kinds
+    /// that are never filterable (`.meta` — always visible).
+    static func governing(_ kind: SessionTranscriptBuilder.LogicalBlock.Kind) -> TranscriptRoleFilter? {
+        switch kind {
+        case .user: return .user
+        case .assistant: return .assistant
+        case .toolCall, .toolOut: return .tools
+        case .error: return .errors
+        case .meta: return nil
+        }
+    }
+}
 
 // MARK: - Row model
 
@@ -197,6 +222,18 @@ struct TranscriptBlockListView: NSViewRepresentable {
     @Binding var unifiedMatchCount: Int
     @Binding var unifiedCurrentIndex: Int
 
+    /// Active role-visibility filters (Session-view parity with Terminal's role
+    /// toggles), owned by `TranscriptPlainView` and threaded here. Default = all
+    /// shown. An empty set is treated as "no filter" by the controller.
+    var activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)
+
+    /// Role ▲▼ jump-navigation intent (Terminal parity): a token bump requests a
+    /// jump to the next/prev occurrence of `roleJumpRole` in `roleJumpDirection`
+    /// (+1 next / -1 prev), resolved by the controller relative to the viewport.
+    var roleJumpToken: Int = 0
+    var roleJumpRole: TranscriptRoleFilter? = nil
+    var roleJumpDirection: Int = 1
+
     func makeCoordinator() -> BlockTableController { BlockTableController() }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -245,7 +282,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
         context.coordinator.seedConsumedJumpTokens(
             firstPromptJumpToken: firstPromptJumpToken,
             eventJumpToken: eventJumpToken,
-            userPromptIndexJumpToken: userPromptIndexJumpToken)
+            userPromptIndexJumpToken: userPromptIndexJumpToken,
+            roleJumpToken: roleJumpToken)
         context.coordinator.seedConsumedFindTokens(
             findToken: findToken,
             unifiedFindToken: unifiedFindToken)
@@ -271,7 +309,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             sessionCwd: sessionCwd,
             repoRootPath: repoRootPath,
             ideTarget: ideTarget,
-            ideBinaryOverridePath: ideBinaryOverridePath)
+            ideBinaryOverridePath: ideBinaryOverridePath,
+            activeRoleFilters: activeRoleFilters)
 
         // Task 8: external jump intents. Resolved here (not stashed as raw
         // tokens on the coordinator ctor) because resolution needs the CURRENT
@@ -297,6 +336,11 @@ struct TranscriptBlockListView: NSViewRepresentable {
             userPromptIndex: userPromptIndexJump,
             userBlockIndices: snapshot.userBlockIndices,
             isSnapshotComputing: derivedState.isComputing)
+
+        context.coordinator.handleRoleJumpIntent(
+            token: roleJumpToken,
+            role: roleJumpRole,
+            direction: roleJumpDirection)
 
         // Find (Task 10). Whole-session matches come from the derived state's
         // per-query cache (keyed by query + snapshot key, so a live-append that
@@ -365,14 +409,35 @@ struct TranscriptBlockListView: NSViewRepresentable {
 /// Owns the AppKit table: row models, height cache, recycling, scroll-anchor
 /// discipline, and the loaded window range. Deliberately holds only plain
 /// values from the snapshot — never `TranscriptDerivedState`.
-final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
+final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, AVSpeechSynthesizerDelegate {
     private weak var table: NSTableView?
     private weak var scroll: NSScrollView?
+
+    // MARK: Speech (context-menu "Speak" / "Stop Speaking")
+    // Shared across all rows (mirrors SessionTerminalView's coordinator-owned
+    // synthesizer); a per-row synthesizer would be wrong since cells recycle.
+    private lazy var speechSynthesizer: AVSpeechSynthesizer = {
+        let synth = AVSpeechSynthesizer()
+        synth.delegate = self
+        return synth
+    }()
+    private let speechQueue = DispatchQueue(label: "com.agentsessions.blocklist.speech")
+    /// Whether an utterance is currently being spoken — drives the "Stop
+    /// Speaking" menu item's enabled state. Written on main from the delegate.
+    private(set) var isSpeaking = false
 
     // Current display state.
     private(set) var rows: [BlockRowModel] = []
     private var fontSize: CGFloat = 13
     private var source: SessionSource = .codex
+
+    /// Active role-visibility filters (restored Session-view parity with
+    /// Terminal's role toggles). Default = all shown. Applied at row emission
+    /// (see `applyingRoleFilter`) AND to find matches (so the total count and
+    /// navigation stay consistent with what's visible). An EMPTY set means "no
+    /// filter" (show everything) — matching Terminal's empty-set semantics — so
+    /// unchecking every chip never blanks the transcript.
+    private var activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)
 
     /// Inline images per row id (== user block's globalBlockIndex). Plain value
     /// snapshot handed in by `apply`; the controller never retains derivedState
@@ -629,6 +694,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// Re-checked on every subsequent `updateNSView` intent pass.
     private var pendingUserPromptIndex: Int?
 
+    /// Last `roleJumpToken` this controller has acted on (role ▲▼ jump-nav).
+    private var lastConsumedRoleJumpToken: Int = 0
+
     // MARK: Find state (Task 10)
 
     /// Whole-session matches for the active query (from
@@ -873,7 +941,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         loadedBlockRange = newRange
 
         let windowed = Self.slice(allBlocksCache, to: newRange)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: windowed))
+        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
+        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
         applyPrepend(newRows: newRows)
     }
 
@@ -960,13 +1029,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                sessionCwd: String? = nil,
                repoRootPath: String? = nil,
                ideTarget: IDEOpener.Target = .systemDefault,
-               ideBinaryOverridePath: String = "") {
+               ideBinaryOverridePath: String = "",
+               activeRoleFilters: Set<TranscriptRoleFilter> = Set(TranscriptRoleFilter.allCases)) {
         guard let table else { return }
 
         let fontChanged = fontSize != self.fontSize
         let sourceChanged = source != self.source
         self.fontSize = fontSize
         self.source = source
+        self.activeRoleFilters = activeRoleFilters
 
         // Session switch: all per-row expansion state is keyed by
         // globalBlockIndex, which is meaningless across sessions (a different
@@ -1106,7 +1177,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         self.totalBlockCount = totalBlockCount
 
         let windowed = Self.slice(allBlocks, to: loadedBlockRange)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: windowed))
+        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
+        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
 
         // Font change forces a full re-measure + re-render of bodies. The
         // RenderKey embeds fontBucket so stale entries would already miss, but
@@ -1210,6 +1282,23 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// into `.toolGroup` rows before diffing/rendering.
     static func rowModels(from blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>) -> [BlockRowModel] {
         blocks.map { BlockRowModel(id: $0.globalBlockIndex, content: .message($0)) }
+    }
+
+    /// Apply the active role-visibility filter to a windowed block slice,
+    /// preserving each surviving block's `globalBlockIndex` (the filter drops
+    /// whole blocks; it never renumbers, so the row ids the find/anchor maps key
+    /// on stay valid). An empty set OR the full set means "show everything" — the
+    /// common all-shown path returns the slice verbatim with no extra filtering.
+    /// `.meta` blocks are always kept (they have no governing filter).
+    static func applyingRoleFilter(_ blocks: ArraySlice<SessionTranscriptBuilder.LogicalBlock>,
+                                   activeRoles: Set<TranscriptRoleFilter>) -> [SessionTranscriptBuilder.LogicalBlock] {
+        if activeRoles.isEmpty || activeRoles.count == TranscriptRoleFilter.allCases.count {
+            return Array(blocks)
+        }
+        return blocks.filter { block in
+            guard let role = TranscriptRoleFilter.governing(block.kind) else { return true }
+            return activeRoles.contains(role)
+        }
     }
 
     // MARK: Change classification
@@ -2055,7 +2144,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         loadedBlockRange = newRange
 
         let windowed = Self.slice(allBlocksCache, to: newRange)
-        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: windowed))
+        let filtered = Self.applyingRoleFilter(windowed, activeRoles: activeRoleFilters)
+        let newRows = TranscriptToolSummary.mergeToolRuns(Self.rowModels(from: filtered[...]))
 
         // A widen re-slices the window and shifts ordinals — invalidate any live
         // cross-block selection before the rows swap.
@@ -2110,10 +2200,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// coordinator.
     func seedConsumedJumpTokens(firstPromptJumpToken: Int,
                                 eventJumpToken: Int,
-                                userPromptIndexJumpToken: Int) {
+                                userPromptIndexJumpToken: Int,
+                                roleJumpToken: Int = 0) {
         lastConsumedFirstPromptJumpToken = firstPromptJumpToken
         lastConsumedEventJumpToken = eventJumpToken
         lastConsumedUserPromptIndexJumpToken = userPromptIndexJumpToken
+        lastConsumedRoleJumpToken = roleJumpToken
     }
 
     /// Route the toolbar "jump to first user prompt" intent into Rich mode.
@@ -2259,6 +2351,46 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         scrollToBlock(userBlockIndices[userPromptIndex])
     }
 
+    // MARK: - Role jump-navigation (▲▼ next/prev occurrence of a role)
+
+    /// The next occurrence in `indices` (ascending, all `globalBlockIndex`)
+    /// relative to `currentTop`, stepping `direction` (+1 next / -1 prev) and
+    /// WRAPPING at the ends. `nil` only when `indices` is empty. Pure + testable.
+    /// - next: the first index strictly greater than `currentTop`; wraps to the
+    ///   first. With no `currentTop` (nothing visible yet), next = first.
+    /// - prev: the last index strictly less than `currentTop`; wraps to the last.
+    ///   With no `currentTop`, prev = last.
+    static func roleJumpTarget(indices: [Int], currentTop: Int?, direction: Int) -> Int? {
+        guard !indices.isEmpty else { return nil }
+        let sorted = indices.sorted()
+        guard let top = currentTop else {
+            return direction >= 0 ? sorted.first : sorted.last
+        }
+        if direction >= 0 {
+            return sorted.first(where: { $0 > top }) ?? sorted.first
+        } else {
+            return sorted.last(where: { $0 < top }) ?? sorted.last
+        }
+    }
+
+    /// Handle a role ▲▼ jump intent: compute the target block for `role` relative
+    /// to the current viewport top and scroll to it. Indices are derived from
+    /// `allBlocksCache` (position == `globalBlockIndex`), so this stays in sync
+    /// with whatever the snapshot currently holds and needs no external list.
+    func handleRoleJumpIntent(token: Int, role: TranscriptRoleFilter?, direction: Int) {
+        guard token != lastConsumedRoleJumpToken else { return }
+        lastConsumedRoleJumpToken = token
+        guard let role, !allBlocksCache.isEmpty else { return }
+
+        let indices = allBlocksCache.enumerated().compactMap { offset, block in
+            TranscriptRoleFilter.governing(block.kind) == role ? offset : nil
+        }
+        guard let target = Self.roleJumpTarget(indices: indices,
+                                               currentTop: firstVisibleBlockIndex(),
+                                               direction: direction) else { return }
+        scrollToBlock(target)
+    }
+
     // MARK: - Find (Task 10)
 
     /// Apply a find request. Called from `updateNSView` with the whole-session
@@ -2278,11 +2410,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     @discardableResult
     func applyFind(source: FindSource,
                    query: String,
-                   matches: [TranscriptDerivedState.BlockMatch],
+                   matches rawMatches: [TranscriptDerivedState.BlockMatch],
                    token: Int,
                    direction: Int,
                    reset: Bool,
                    shouldJump: Bool) -> (current: Int, total: Int) {
+        // Only navigate/count matches the active role filter leaves visible.
+        let matches = matchesUnderActiveRoleFilter(rawMatches)
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let consumed = (source == .unified) ? lastConsumedUnifiedFindToken : lastConsumedLocalFindToken
         func setConsumed() {
@@ -2355,8 +2489,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// when it survives, clamping otherwise) and re-paints. No scroll — the
     /// reader stays put. Returns the refreshed (current, total) counts.
     @discardableResult
-    func refreshFindAfterRowsChanged(matches: [TranscriptDerivedState.BlockMatch]) -> (current: Int, total: Int) {
+    func refreshFindAfterRowsChanged(matches rawMatches: [TranscriptDerivedState.BlockMatch]) -> (current: Int, total: Int) {
         guard !findQuery.isEmpty else { return (0, 0) }
+        // Re-apply the active role filter: a filter toggle routes through here
+        // (rows changed under an active query) and must re-derive which matches
+        // remain visible before reconciling the current ordinal + total.
+        let matches = matchesUnderActiveRoleFilter(rawMatches)
         // Fast no-op guard: unchanged whole-session matches AND unchanged rows
         // fingerprint ⇒ nothing to reconcile or repaint (keeps the common
         // `updateNSView` pass cheap). A widen/prepend/append/toggle changes the
@@ -2399,6 +2537,59 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         guard !findQuery.isEmpty else { return }
         rebuildFindMatchesByRowID()
         lastFindRowsFingerprint = rowsFingerprint()
+    }
+
+    // MARK: Speech (context-menu actions, shared synthesizer)
+
+    /// Speak the given text (selection or whole block), replacing any utterance
+    /// already in flight. No-op for blank text. Mirrors SessionTerminalView.
+    func speak(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let utterance = AVSpeechUtterance(string: trimmed)
+        utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier) ?? AVSpeechSynthesisVoice()
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.volume = 1.0
+        speechQueue.async { [weak self] in
+            guard let self else { return }
+            if self.speechSynthesizer.isSpeaking {
+                self.speechSynthesizer.stopSpeaking(at: .immediate)
+            }
+            self.speechSynthesizer.speak(utterance)
+        }
+    }
+
+    func stopSpeaking() {
+        speechQueue.async { [weak self] in
+            self?.speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { [weak self] in self?.isSpeaking = true }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { [weak self] in self?.isSpeaking = false }
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { [weak self] in self?.isSpeaking = false }
+    }
+
+    /// Keep only matches whose block is currently visible under the active role
+    /// filter, so the find total + navigation ordinals never count or jump to a
+    /// block the filter has hidden (which would have no row to scroll to). Uses
+    /// `allBlocksCache`, indexed by `globalBlockIndex == array position`.
+    private func matchesUnderActiveRoleFilter(_ matches: [TranscriptDerivedState.BlockMatch]) -> [TranscriptDerivedState.BlockMatch] {
+        if activeRoleFilters.isEmpty || activeRoleFilters.count == TranscriptRoleFilter.allCases.count {
+            return matches
+        }
+        return matches.filter { m in
+            guard m.globalBlockIndex >= 0, m.globalBlockIndex < allBlocksCache.count else { return false }
+            guard let role = TranscriptRoleFilter.governing(allBlocksCache[m.globalBlockIndex].kind) else { return true }
+            return activeRoleFilters.contains(role)
+        }
     }
 
     /// Map each match to the row id that renders it, so per-cell paint/pill is an
@@ -3735,6 +3926,67 @@ final class SelectableBlockTextView: NSTextView {
             }
         }
         return super.validateUserInterfaceItem(item)
+    }
+
+    // MARK: Context menu (parity with SessionTerminalView's transcript menu)
+
+    /// Custom right-click menu: Copy · Copy Block · Speak · Stop Speaking —
+    /// restoring the affordances the retired Terminal view had. Each block card
+    /// is its own text view, so "the block" is simply this view's full string
+    /// (no charIndex→block mapping needed, unlike Terminal's single big view).
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu(title: "Transcript")
+        menu.autoenablesItems = false
+
+        let crossBlockActive = selectionController?.isCrossBlockSelectionActive ?? false
+        let hasSelection = selectedRange().length > 0 || crossBlockActive
+
+        // "Copy" routes through the overridden copy(_:), which assembles a
+        // cross-block selection when one is active and otherwise copies this
+        // row's local selection.
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.isEnabled = hasSelection
+        menu.addItem(copyItem)
+
+        let copyBlockItem = NSMenuItem(title: "Copy Block", action: #selector(copyBlockText(_:)), keyEquivalent: "")
+        copyBlockItem.target = self
+        copyBlockItem.isEnabled = !string.isEmpty
+        menu.addItem(copyBlockItem)
+
+        menu.addItem(.separator())
+
+        let speakItem = NSMenuItem(title: "Speak", action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
+        speakItem.target = self
+        speakItem.isEnabled = selectedRange().length > 0 || !string.isEmpty
+        menu.addItem(speakItem)
+
+        let stopItem = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeakingAction(_:)), keyEquivalent: "")
+        stopItem.target = self
+        stopItem.isEnabled = selectionController?.isSpeaking ?? false
+        menu.addItem(stopItem)
+
+        return menu
+    }
+
+    /// Copy this block's full rendered text (what the card shows), independent of
+    /// any selection.
+    @objc private func copyBlockText(_ sender: Any?) {
+        guard !string.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: .string)
+    }
+
+    /// Speak the current selection if any, else the whole block.
+    @objc private func speakSelectionOrBlock(_ sender: Any?) {
+        let sel = selectedRange()
+        let text = sel.length > 0 ? (string as NSString).substring(with: sel) : string
+        selectionController?.speak(text)
+    }
+
+    @objc private func stopSpeakingAction(_ sender: Any?) {
+        selectionController?.stopSpeaking()
     }
 
     // MARK: Mouse routing

@@ -202,4 +202,100 @@ final class TranscriptBlockWindowingTests: XCTestCase {
         // the cache gets seeded rather than comparing against a bogus sentinel.
         XCTAssertTrue(BlockTableController.shouldInvalidateForWidth(oldBucket: nil, newBucket: 400))
     }
+
+    // MARK: Role filter (Session-view parity with Terminal's role toggles)
+
+    func testRoleFilterGoverningMapsEveryKind() {
+        XCTAssertEqual(TranscriptRoleFilter.governing(.user), .user)
+        XCTAssertEqual(TranscriptRoleFilter.governing(.assistant), .assistant)
+        XCTAssertEqual(TranscriptRoleFilter.governing(.toolCall), .tools)
+        XCTAssertEqual(TranscriptRoleFilter.governing(.toolOut), .tools)
+        XCTAssertEqual(TranscriptRoleFilter.governing(.error), .errors)
+        // Meta is never filterable — always visible.
+        XCTAssertNil(TranscriptRoleFilter.governing(.meta))
+    }
+
+    private func mixedBlocks() -> [SessionTranscriptBuilder.LogicalBlock] {
+        [block(0, kind: .user),
+         block(1, kind: .assistant),
+         block(2, kind: .toolCall),
+         block(3, kind: .toolOut),
+         block(4, kind: .error),
+         block(5, kind: .meta)]
+    }
+
+    func testRoleFilterAllActiveReturnsEverythingUnfiltered() {
+        let blocks = mixedBlocks()
+        let out = BlockTableController.applyingRoleFilter(blocks[...],
+                                                          activeRoles: Set(TranscriptRoleFilter.allCases))
+        XCTAssertEqual(out.map(\.globalBlockIndex), [0, 1, 2, 3, 4, 5])
+    }
+
+    func testRoleFilterEmptySetTreatedAsNoFilter() {
+        // Empty set means "no filter" (matches Terminal) — unchecking every chip
+        // must never blank the transcript.
+        let blocks = mixedBlocks()
+        let out = BlockTableController.applyingRoleFilter(blocks[...], activeRoles: [])
+        XCTAssertEqual(out.map(\.globalBlockIndex), [0, 1, 2, 3, 4, 5])
+    }
+
+    func testRoleFilterToolsOnlyKeepsToolAndMetaBlocks() {
+        let blocks = mixedBlocks()
+        let out = BlockTableController.applyingRoleFilter(blocks[...], activeRoles: [.tools])
+        // toolCall(2), toolOut(3) kept; meta(5) always kept; user/assistant/error dropped.
+        XCTAssertEqual(out.map(\.globalBlockIndex), [2, 3, 5])
+    }
+
+    func testRoleFilterErrorsOnlyKeepsErrorAndMeta() {
+        let blocks = mixedBlocks()
+        let out = BlockTableController.applyingRoleFilter(blocks[...], activeRoles: [.errors])
+        XCTAssertEqual(out.map(\.globalBlockIndex), [4, 5])
+    }
+
+    func testRoleFilterPreservesGlobalIndexOnSurvivors() {
+        // Filtering drops whole blocks but must NEVER renumber survivors — the
+        // row ids the find/anchor maps key on are globalBlockIndex.
+        let blocks = mixedBlocks()
+        let out = BlockTableController.applyingRoleFilter(blocks[...], activeRoles: [.user, .assistant])
+        XCTAssertEqual(out.map(\.globalBlockIndex), [0, 1, 5]) // user, assistant, meta
+        XCTAssertEqual(out.map(\.kind), [.user, .assistant, .meta])
+    }
+
+    // MARK: Role jump-navigation (▲▼ next/prev occurrence, wrapping)
+
+    func testRoleJumpNextPicksFirstIndexStrictlyAfterTop() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: 5, direction: 1), 9)
+    }
+
+    func testRoleJumpPrevPicksLastIndexStrictlyBeforeTop() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: 5, direction: -1), 2)
+    }
+
+    func testRoleJumpNextWrapsPastLastToFirst() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: 9, direction: 1), 2)
+    }
+
+    func testRoleJumpPrevWrapsBeforeFirstToLast() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: 2, direction: -1), 9)
+    }
+
+    func testRoleJumpNoViewportNextIsFirstPrevIsLast() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: nil, direction: 1), 2)
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [2, 5, 9], currentTop: nil, direction: -1), 9)
+    }
+
+    func testRoleJumpEmptyIndicesReturnsNil() {
+        XCTAssertNil(BlockTableController.roleJumpTarget(indices: [], currentTop: 3, direction: 1))
+    }
+
+    func testRoleJumpSingleOccurrenceWrapsToItself() {
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [7], currentTop: 7, direction: 1), 7)
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [7], currentTop: 7, direction: -1), 7)
+    }
+
+    func testRoleJumpUnsortedIndicesHandled() {
+        // Indices are derived by enumeration so they're ascending in practice,
+        // but the helper sorts defensively.
+        XCTAssertEqual(BlockTableController.roleJumpTarget(indices: [9, 2, 5], currentTop: 3, direction: 1), 5)
+    }
 }

@@ -5,6 +5,34 @@ decision if one was made. Newest on top.
 
 ---
 
+## Transcript (Session view)
+
+### Semantic filters (Plan / Code / Diff / Review) in the Session view
+- **First, validate demand — do NOT build on assumption.** The old Terminal view
+  had semantic toggles alongside the role toggles; when Terminal was retired only
+  the role filters (You/Agent/Tools/Errors) were restored (2026-07-06). Before
+  porting semantic filters, confirm they're actually used/wanted — check whether
+  anyone relied on "show only code / only diffs / only plans / only reviews", vs.
+  role filters + ⌘F covering the real need. If demand is thin, close as WON'T-DO.
+- **Where:** filter bar lives in
+  [TranscriptPlainView.swift](../AgentSessions/Views/TranscriptPlainView.swift)
+  (`sessionRoleFilterBar`); block filtering in
+  [TranscriptBlockListView.swift](../AgentSessions/Views/TranscriptBlockListView.swift)
+  (`TranscriptRoleFilter`, `applyingRoleFilter`, `matchesUnderActiveRoleFilter`).
+  Terminal reference: `SessionTerminalView.swift` `SemanticKind` +
+  `semanticFilteredLines` (per-LINE `line.semanticKind`).
+- **Why deferred / why it's harder than roles:** roles map 1:1 to
+  `LogicalBlock.Kind`, so filtering is a clean block-level predicate. Semantic
+  kinds were computed **per line** in Terminal (a single assistant block mixes
+  prose + code fences + diffs). Blocks carry no per-block semantic label, so this
+  needs either (a) a new per-block semantic classification pass, or (b) sub-block
+  (per-run) filtering — both materially larger and with more regression surface in
+  the perf-sensitive windowed list. Est. 3–5× the role-filter work.
+- **Decision (2026-07-06):** deferred; owner asked to backlog AND to verify need
+  before committing to the port. Related: [[project_transcript_redesign_phase01_state]].
+
+---
+
 ## QM / Runway
 
 ### Runway overflow "+X sessions" undercount (`withPendingRows`)
