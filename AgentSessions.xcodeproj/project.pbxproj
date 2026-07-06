@@ -409,6 +409,7 @@
 		F0001909B140D84305F63FA1 /* codex_052_raw.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = ABFD9C178275CA23FCE6B3DE /* codex_052_raw.jsonl */; };
 		F0D3CE42B2AF00A7DFDAFC76 /* test-store.db in Resources */ = {isa = PBXBuildFile; fileRef = B0E8FC80B896F4902702739B /* test-store.db */; };
 		F140B0EC7815B6EA4A50A5AC /* ClaudeDesktopSessionTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03F1997EA4954198AFE36B04 /* ClaudeDesktopSessionTitles.swift */; };
+		F1696BEF69F57D5A2B610FD9 /* TranscriptBlockListReviewCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C279B7BBD37A8636171EB93 /* TranscriptBlockListReviewCardTests.swift */; };
 		F2B4B7640DFFB2F641D497EA /* AntigravityResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CD97A89CCCDCA326CCE023 /* AntigravityResumeTypes.swift */; };
 		F2C6B688E1EC6DFAD5F87726 /* SessionArchiveManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */; };
 		F45D0033901B8FEE986C0D59 /* FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495C9F72C10641EC9FE0B216 /* FilterEngine.swift */; };
@@ -478,6 +479,7 @@
 		0943932CC38105FCE675A57B /* CodexLiveStatusDot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CodexLiveStatusDot.swift; sourceTree = SOURCE_ROOT; };
 		0AA81B3C81B142CCF423565C /* codex_050_legacy.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_050_legacy.jsonl; path = Resources/Fixtures/codex_050_legacy.jsonl; sourceTree = SOURCE_ROOT; };
 		0AC81660281801462B1C3784 /* CopilotResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CopilotResume/CopilotResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
+		0C279B7BBD37A8636171EB93 /* TranscriptBlockListReviewCardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptBlockListReviewCardTests.swift; sourceTree = SOURCE_ROOT; };
 		0DDD967AC4CCB8C88A1752E1 /* ImageBrowserViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserViewModel.swift; sourceTree = SOURCE_ROOT; };
 		0F0FF569592BFE502A97E9AE /* ProgressThrottler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ProgressThrottler.swift; sourceTree = SOURCE_ROOT; };
 		1074E2B1681C2BEB28D59B2F /* Base64ImageDataURLScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/Base64ImageDataURLScanner.swift; sourceTree = SOURCE_ROOT; };
@@ -1414,6 +1416,7 @@
 				3BF6CDF19503CE380FABF2E9 /* MarkdownSourceMapTests.swift */,
 				4846FF09EC7708BA5451D532 /* MarkdownBodyRendererTests.swift */,
 				1116C1BDB5B78A25018D8CDD /* TranscriptTurnTimingTests.swift */,
+				0C279B7BBD37A8636171EB93 /* TranscriptBlockListReviewCardTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2455,6 +2458,7 @@
 				A9C8BC064D4751AA08618B32 /* MarkdownSourceMapTests.swift in Sources */,
 				F79D27EA10496F0F666DC94B /* MarkdownBodyRendererTests.swift in Sources */,
 				834955216AABF3A188B6D2FB /* TranscriptTurnTimingTests.swift in Sources */,
+				F1696BEF69F57D5A2B610FD9 /* TranscriptBlockListReviewCardTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

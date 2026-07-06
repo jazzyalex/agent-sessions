@@ -133,6 +133,12 @@ struct TranscriptBlockListView: NSViewRepresentable {
     /// at least one mapped image. When false, no image row renders and its
     /// measured height contribution is zero (parity with the pre-image layout).
     var inlineImagesEnabled: Bool = false
+    /// Parity C2: mirrors `@AppStorage(PreferencesKey.Transcript.enableReviewCards)`
+    /// from the parent (`TranscriptPlainView`). When true, a Codex `.user`/
+    /// `.assistant` review block renders its cleaned summary (reusing the
+    /// Terminal-mode detectors) with the `.reviewSummary` accent instead of the
+    /// raw block text. When false, every row renders exactly as before.
+    var reviewCardsEnabled: Bool = true
     /// Task 8: external jump intents, token-based so a re-render (e.g. a mode
     /// switch back to Rich) never replays a stale intent — the controller only
     /// acts when the incoming token differs from the last one it consumed.
@@ -248,7 +254,8 @@ struct TranscriptBlockListView: NSViewRepresentable {
             source: session.source,
             sessionID: session.id,
             imagesByBlockIndex: inlineImagesEnabled ? imagesByBlockIndex : [:],
-            inlineImagesEnabled: inlineImagesEnabled)
+            inlineImagesEnabled: inlineImagesEnabled,
+            reviewCardsEnabled: reviewCardsEnabled)
 
         // Task 8: external jump intents. Resolved here (not stashed as raw
         // tokens on the coordinator ctor) because resolution needs the CURRENT
@@ -360,6 +367,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// invalidates the height cache (the image row's reserved height changes)
     /// and reconfigures visible cells, while an unchanged map is a cheap no-op.
     private var lastImageMapSignature: Int = 0
+
+    /// Parity C2: mirrors `TranscriptPlainView`'s `transcriptReviewCardsEnabled`
+    /// AppStorage read. Plain value handed in by `apply` every pass; a toggle
+    /// flips review-card detection on/off for every row without a session
+    /// switch. Included in `RenderKey`/`HeightKey` (below) so a pref flip
+    /// invalidates exactly the cached renders/heights that depend on it.
+    private var reviewCardsEnabled: Bool = true
 
     /// Session identity last seen — the reset seam for all per-row expansion
     /// state below. Nil until the first `apply`.
@@ -894,7 +908,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                source: SessionSource,
                sessionID: String,
                imagesByBlockIndex: [Int: [InlineSessionImage]] = [:],
-               inlineImagesEnabled: Bool = false) {
+               inlineImagesEnabled: Bool = false,
+               reviewCardsEnabled: Bool = true) {
         guard let table else { return }
 
         let fontChanged = fontSize != self.fontSize
@@ -970,6 +985,18 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         self.inlineImagesEnabled = inlineImagesEnabled
         lastImageMapSignature = imageSignature
         if imagesChanged { heightCache.removeAll(keepingCapacity: true) }
+
+        // Review cards (Task C2). A pref toggle changes what `reviewSummary(for:)`
+        // returns for every review row (summary text <-> raw block text), which
+        // affects both the measured height and the rendered body — invalidate
+        // both caches so every row re-renders under the new gate. `renderedBody`
+        // is keyed by (eventID, textHash, ...), not by this flag, so it must be
+        // cleared explicitly rather than relying on a cache-key miss.
+        if reviewCardsEnabled != self.reviewCardsEnabled {
+            heightCache.removeAll(keepingCapacity: true)
+            renderedBodyCache.removeAll()
+        }
+        self.reviewCardsEnabled = reviewCardsEnabled
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
@@ -1289,6 +1316,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// the exact same expansion/show-all/callback wiring. `ordinal` is the row's
     /// index into `rows` — the coordinate space the selection coordinator uses.
     private func configure(cell: BlockCardCellView, forRowModel rowModel: BlockRowModel, ordinal: Int) {
+        // Review cards (Task C2): a detected review row substitutes the cleaned
+        // summary for the raw block text (plain, never markdown) and recolors
+        // the accent bar with `.reviewSummary` — same override Terminal mode
+        // applies via SemanticKind.reviewSummary. nil for every non-review row,
+        // so this is a no-op there.
+        let reviewText = reviewSummary(for: rowModel)
+        let accentOverride: NSColor? = reviewText != nil
+            ? TranscriptColorSystem.semanticAccent(.reviewSummary)
+            : nil
         cell.configure(row: rowModel,
                        fontSize: fontSize,
                        source: source,
@@ -1302,6 +1338,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                        inlineImages: inlineImages(for: rowModel),
                        sessionID: sessionID ?? "",
                        imageContentWidth: currentBodyWidth(),
+                       overrideBodyText: reviewText,
+                       accentOverride: accentOverride,
                        onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
                        onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
         // Flash reset/paint. A recycle mid-flash re-raises alpha on the flashing
@@ -1457,7 +1495,15 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let h: CGFloat
         switch toolState {
         case .notApplicable:
-            h = Self.computeHeight(text: row.bodyText, width: width, fontSize: fontSize)
+            // Review cards (Task C2): a detected review row is a markdown
+            // message whose `renderedBody(for:)` is intentionally nil (its
+            // summary is derived, plain-text-only — see that function's doc),
+            // so it falls through to this plain-text measurement path. Measure
+            // the SAME summary string `configure` displays, not the raw
+            // block.text, or the reserved height would mismatch the rendered
+            // plain string (clip / extra whitespace).
+            let text = reviewSummary(for: row) ?? row.bodyText
+            h = Self.computeHeight(text: text, width: width, fontSize: fontSize)
         case .collapsed:
             h = CardMetrics.toolCardCollapsedHeight
         case .expandedTruncated:
@@ -1523,15 +1569,64 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return max(CardMetrics.minCardHeight, content)
     }
 
+    // MARK: Review cards (Task C2 parity)
+
+    /// Pure, deterministic detection of a review card's cleaned summary text.
+    /// Reuses the two Codex-only Terminal-mode detectors' EXACT logic:
+    /// - `.user` block: `TerminalBuilder.reviewDisplayTextIfNeeded` (private to
+    ///   that file) — a `<user_action>`/`<action>review</action>` marker with a
+    ///   `<results>` payload, replicated verbatim here since that function isn't
+    ///   accessible across files.
+    /// - `.assistant` block: `InternalPayloadFormatter.parseReviewCard(...)`,
+    ///   called directly (that one IS `static`, not private) — its
+    ///   `.summaryText` is the Terminal-mode review card's rendered text.
+    /// Returns `nil` for a non-review block, when `enabled` is false, or for a
+    /// non-Codex source (both detectors are Codex-only), so a normal user/
+    /// assistant row is completely unaffected and still markdown-renders.
+    static func reviewSummary(for block: SessionTranscriptBuilder.LogicalBlock,
+                              source: SessionSource,
+                              enabled: Bool) -> String? {
+        guard enabled, source == .codex else { return nil }
+        switch block.kind {
+        case .user:
+            let text = block.text
+            guard text.contains("<user_action>"),
+                  text.contains("<action>review</action>") else { return nil }
+            guard let start = text.range(of: "<results>"),
+                  let end = text.range(of: "</results>", range: start.upperBound..<text.endIndex) else {
+                return "Review"
+            }
+            let results = String(text[start.upperBound..<end.lowerBound])
+            let trimmed = results.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Review" : "Review\n" + trimmed
+        case .assistant:
+            return InternalPayloadFormatter.parseReviewCard(rawText: block.text, source: source)?.summaryText
+        case .toolCall, .toolOut, .error, .meta:
+            return nil
+        }
+    }
+
+    /// Row-level convenience over `reviewSummary(for:source:enabled:)` — nil for
+    /// any row that isn't a plain user/assistant message (tool cards/groups and
+    /// meta rows are never review candidates).
+    private func reviewSummary(for row: BlockRowModel) -> String? {
+        guard case .message(let block) = row.content, row.isMarkdownMessage else { return nil }
+        return Self.reviewSummary(for: block, source: source, enabled: reviewCardsEnabled)
+    }
+
     // MARK: Markdown rendering + measurement (Task 12)
 
     /// Cache-backed rendered markdown body for a user/assistant row, or `nil` for
     /// any row that is NOT a markdown message (tool card, tool group, error,
-    /// meta) — those keep their existing plain-string path. The key is stable
-    /// across window shifts (eventID) and invalidates on streaming edits
-    /// (textHash), font change (fontBucket), and appearance flip (isDark).
+    /// meta) — those keep their existing plain-string path. Also `nil` for a
+    /// detected review row: its summary is DERIVED text (≠ block.text) that
+    /// renders PLAIN (Task C2 spec), never markdown, and is never source-mapped
+    /// for find. The key is stable across window shifts (eventID) and
+    /// invalidates on streaming edits (textHash), font change (fontBucket), and
+    /// appearance flip (isDark).
     func renderedBody(for row: BlockRowModel) -> RenderedBody? {
         guard row.isMarkdownMessage else { return nil }
+        guard reviewSummary(for: row) == nil else { return nil }
         let block = row.primaryBlock
         let isDark = effectiveAppearanceIsDark
         let key = RenderKey(eventID: block.eventID,
@@ -2284,6 +2379,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// prefix; collapsed cards, merged groups, and meta rows are non-renderable.
     private func findRowShape(for row: BlockRowModel) -> TranscriptFindNavigator.RowShape {
         if row.isMeta { return .nonRenderable }
+        // Review cards (Task C2): the displayed summary is DERIVED text (≠
+        // block.text) with no source map back to the raw JSON/tag payload — a
+        // match range in block.text (found by the whole-session scan, which
+        // always scans raw block.text) cannot be translated into the rendered
+        // summary's coordinate space. Non-renderable, same as a collapsed tool
+        // card or merged group: the match still counts toward the pill, it just
+        // never paints in-body. Must be checked BEFORE `isMarkdownMessage`
+        // below, since a review row IS a markdown message row by kind but
+        // deliberately has no `renderedBody` (see that function's guard).
+        if reviewSummary(for: row) != nil { return .nonRenderable }
         // A user/assistant prose row renders as markdown: its body string is the
         // syntax-stripped rendered text, so a match range in block.text must map
         // through the render's source map (a range over consumed syntax → pill).
@@ -2373,6 +2478,14 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 return lines.prefix(CardMetrics.toolBodyTruncationLineLimit).joined(separator: "\n")
             }
             return full
+        }
+        // Review cards (Task C2): the cell displays the cleaned summary (plain
+        // text), not the raw block text or a markdown render — copy/selection
+        // must match exactly, or cross-block selection ranges (computed from
+        // this string's length) would desync from what `configure` actually put
+        // in the text view's storage.
+        if let reviewText = reviewSummary(for: row) {
+            return reviewText
         }
         // Markdown message: copy the RENDERED (syntax-stripped) text the cell
         // actually shows, so a copy of a bold word yields the word, not `**word**`
@@ -2900,6 +3013,8 @@ final class BlockCardCellView: NSTableCellView {
                    inlineImages: [InlineSessionImage] = [],
                    sessionID: String = "",
                    imageContentWidth: CGFloat = 0,
+                   overrideBodyText: String? = nil,
+                   accentOverride: NSColor? = nil,
                    onToggleExpansion: @escaping () -> Void,
                    onToggleShowAll: @escaping () -> Void) {
         // Recycle hygiene (Task 10): drop any find highlight the previous
@@ -2917,7 +3032,11 @@ final class BlockCardCellView: NSTableCellView {
         }
 
         let block = row.primaryBlock
-        let accent = Self.accentColor(kind: block.kind, source: source)
+        // Review cards (Task C2): the controller passes `.reviewSummary` here
+        // whenever `reviewSummary(for:)` detected a review row — overrides the
+        // normal kind-based accent (Terminal mode applies the same override via
+        // SemanticKind.reviewSummary).
+        let accent = accentOverride ?? Self.accentColor(kind: block.kind, source: source)
 
         cardBackground.isHidden = false
         metaSeparator.isHidden = true
@@ -2963,12 +3082,16 @@ final class BlockCardCellView: NSTableCellView {
             }
             isEmpty = renderedBody.attributed.length == 0
         } else {
-            // Non-markdown message (error card): plain monospaced string, exactly
-            // as Task 5 did.
+            // Non-markdown message: plain monospaced string. Either an error
+            // card (Task 5), or — when `overrideBodyText` is non-nil — a
+            // detected review row's cleaned summary (Task C2): the summary is
+            // DERIVED text (≠ block.text), so it renders PLAIN, never markdown,
+            // exactly like this existing plain-text path.
+            let displayText = overrideBodyText ?? row.bodyText
             bodyText.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
             bodyText.textColor = .labelColor
-            bodyText.string = row.bodyText
-            isEmpty = row.bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            bodyText.string = displayText
+            isEmpty = displayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
         bodyTopConstraint?.constant = isEmpty ? 0 : CardMetrics.headerToBodyGap

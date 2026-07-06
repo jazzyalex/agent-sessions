@@ -1111,6 +1111,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             fontSize: CGFloat(transcriptFontSize),
             imagesByBlockIndex: richInlineImagesByBlockIndex,
             inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && richHasInlineImages,
+            reviewCardsEnabled: transcriptReviewCardsEnabled,
             firstPromptJumpToken: richFirstPromptJumpToken,
             eventJumpToken: richEventJumpToken,
             eventJumpID: richEventJumpID,
