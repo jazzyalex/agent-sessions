@@ -588,6 +588,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
+    // Inline session images for Rich (.blocks) mode — mirrors SessionTerminalView's
+    // own inline-image machinery, but ONLY driven while Rich is the active view
+    // mode (Terminal keeps and runs its own). Off-main mapping + 650ms debounce +
+    // signature hash live in `refreshRichInlineImages(session:)`. Gated by the same RAW
+    // AppStorage key the Terminal path uses.
+    @AppStorage("InlineSessionImageThumbnailsEnabled") private var inlineSessionImageThumbnailsEnabled: Bool = true
+    @State private var richInlineImagesByBlockIndex: [Int: [InlineSessionImage]] = [:]
+    @State private var richHasInlineImages: Bool = false
+    @State private var richInlineImagesTask: Task<Void, Never>?
+
     private var viewMode: SessionViewMode {
         // Prefer persisted view mode when valid; otherwise derive from legacy renderModeRaw.
         if let m = SessionViewMode(rawValue: viewModeRaw) {
@@ -769,6 +779,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     contentVersion: transcriptContentVersion(for: session)
                 )
                 isNearTranscriptTop = true
+                refreshRichInlineImages(session: session)
+            }
+            .onDisappear {
+                richInlineImagesTask?.cancel()
+                richInlineImagesTask = nil
             }
             .onChange(of: session.id) { _, _ in
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -779,6 +794,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     contentVersion: transcriptContentVersion(for: session)
                 )
                 isNearTranscriptTop = true
+                refreshRichInlineImages(session: session)
+            }
+            .onChange(of: session.events.count) { _, _ in
+                refreshRichInlineImages(session: session)
+            }
+            .onChange(of: inlineSessionImageThumbnailsEnabled) { _, _ in
+                refreshRichInlineImages(session: session)
             }
             .onChange(of: renderKey) { oldValue, newValue in
                 transcriptTrace("renderKey changed id=\(sessionID ?? "nil") old=\(oldValue) new=\(newValue)")
@@ -806,6 +828,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             }
             .onChange(of: viewModeRaw) { _, _ in
                 syncRenderModeWithViewMode()
+                // Switching INTO Rich must kick the (previously skipped) inline
+                // image scan; switching OUT clears it and cancels any in-flight
+                // scan so we never double-run alongside Terminal's own refresh.
+                refreshRichInlineImages(session: session)
                 rebuild(session: session)
             }
             .onChange(of: searchState.query) { _, newValue in
@@ -1025,11 +1051,66 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     /// Rich mode: NSTableView-backed block cards over the derived block stream.
+    /// Rich-mode counterpart of `SessionTerminalView.refreshInlineImages()`.
+    /// Off-main mapping (`Task.detached(.utility)`), 650ms debounce, signature
+    /// hash, gated by the `InlineSessionImageThumbnailsEnabled` pref. Only run
+    /// while Rich (`.blocks`) is the active view mode so we never double-scan
+    /// alongside Terminal's own refresh. Mutates the published dict on the main
+    /// actor; the block list reads it as a plain value prop.
+    private func refreshRichInlineImages(session: Session) {
+        richInlineImagesTask?.cancel()
+        richInlineImagesTask = nil
+
+        // Only Rich mode consumes these; skip the scan entirely otherwise (and
+        // when the pref is off / the source can't carry inline images).
+        guard viewMode == .blocks, inlineSessionImageThumbnailsEnabled else {
+            richHasInlineImages = false
+            richInlineImagesByBlockIndex = [:]
+            return
+        }
+
+        guard !session.events.isEmpty else {
+            richHasInlineImages = false
+            richInlineImagesByBlockIndex = [:]
+            return
+        }
+
+        switch session.source {
+        case .codex, .claude, .opencode, .antigravity, .copilot, .openclaw:
+            break
+        default:
+            richHasInlineImages = false
+            richInlineImagesByBlockIndex = [:]
+            return
+        }
+
+        let sessionSnapshot = session
+        richHasInlineImages = false
+        richInlineImagesByBlockIndex = [:]
+
+        richInlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot] in
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+
+            let out = SessionInlineImageMapper.imagesByUserBlockIndex(
+                for: sessionSnapshot, shouldCancel: { Task.isCancelled })
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                richHasInlineImages = !out.isEmpty
+                richInlineImagesByBlockIndex = out
+            }
+        }
+    }
+
     private func blocksTranscriptView(session: Session) -> some View {
         TranscriptBlockListView(
             derivedState: derivedState,
             session: session,
             fontSize: CGFloat(transcriptFontSize),
+            imagesByBlockIndex: richInlineImagesByBlockIndex,
+            inlineImagesEnabled: inlineSessionImageThumbnailsEnabled && richHasInlineImages,
             firstPromptJumpToken: richFirstPromptJumpToken,
             eventJumpToken: richEventJumpToken,
             eventJumpID: richEventJumpID,

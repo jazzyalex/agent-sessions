@@ -249,6 +249,7 @@
 		A3C610591762D812570A3471 /* ClaudeUsageSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC634024CF768951D08698DC /* ClaudeUsageSnapshotStoreTests.swift */; };
 		A3FE988DA89DB85892EE3C51 /* SessionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000114A0A000100000001 /* SessionEvent.swift */; };
 		A58656799124497ABF30B977 /* AnalyticsColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46836E5B412F42D6B157696B /* AnalyticsColors.swift */; };
+		A6181F78682F0A5A838C94E4 /* InlineImageThumbnailGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 759556107E9363A4AD558677 /* InlineImageThumbnailGridView.swift */; };
 		A6E88B46DC1595DBEFE72086 /* codex_051_usage.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 2504736A9D5ED08AB6B8B1FE /* codex_051_usage.jsonl */; };
 		A777E2BDD3F0424AF4448E2B /* ClaudeProbeProjectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAF2FBE83AB906E7AE27B14 /* ClaudeProbeProjectTests.swift */; };
 		A84DC21DD4029749BF8BBD57 /* PreferencesView+Copilot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19FAC728A9C11A666680AF44 /* PreferencesView+Copilot.swift */; };
@@ -618,6 +619,7 @@
 		6DBBB788F08F961FAB1C65FA /* CodexOAuthUsageFetcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift; sourceTree = SOURCE_ROOT; };
 		745A17FD96B668F4B790EC9E /* ColorHex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ColorHex.swift; sourceTree = SOURCE_ROOT; };
 		7474A9AC95B3E3F43FEDC572 /* CrashReportingService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashReportingService.swift; sourceTree = SOURCE_ROOT; };
+		759556107E9363A4AD558677 /* InlineImageThumbnailGridView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/InlineImageThumbnailGridView.swift; sourceTree = SOURCE_ROOT; };
 		766062A5F7093B1C287501F0 /* ToolTextBlockNormalizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ToolTextBlockNormalizer.swift; sourceTree = SOURCE_ROOT; };
 		76B8E4F7C43F96D506B253AD /* ClaudeRunwayLogIO.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeRunwayLogIO.swift; sourceTree = SOURCE_ROOT; };
 		76F169690CB4AB0CCCD6119C /* CopilotTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CopilotResume/CopilotTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
@@ -1588,6 +1590,7 @@
 				A87D9748A4FB1DC0944131E2 /* HermesTranscriptView.swift */,
 				B2144D71F6D8C52F0C5524B0 /* TranscriptBlockListView.swift */,
 				D08E626D5410489B595FF4D1 /* TranscriptSelectionCoordinator.swift */,
+				759556107E9363A4AD558677 /* InlineImageThumbnailGridView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -2347,6 +2350,7 @@
 				F718C00FBAA8210177D3C655 /* RenderedBody.swift in Sources */,
 				A00457B84FF6B860C15CAFD2 /* MarkdownBodyRenderer.swift in Sources */,
 				BCD9EB551B80A30C9AA5F207 /* TranscriptTurnTiming.swift in Sources */,
+				A6181F78682F0A5A838C94E4 /* InlineImageThumbnailGridView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

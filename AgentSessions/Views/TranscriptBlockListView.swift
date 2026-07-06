@@ -123,6 +123,16 @@ struct TranscriptBlockListView: NSViewRepresentable {
     let derivedState: TranscriptDerivedState
     let session: Session
     let fontSize: CGFloat
+    /// Inline session images keyed by the target `.user` block's
+    /// `globalBlockIndex` — which equals `BlockRowModel.id`, so the cell does a
+    /// direct lookup with no translation. Computed off-main by the parent
+    /// (`TranscriptPlainView.refreshRichInlineImages`) and handed here as a plain
+    /// value; the controller stores it verbatim and never retains the parent.
+    var imagesByBlockIndex: [Int: [InlineSessionImage]] = [:]
+    /// Master gate for the inline-image row: the pref is on AND the session has
+    /// at least one mapped image. When false, no image row renders and its
+    /// measured height contribution is zero (parity with the pre-image layout).
+    var inlineImagesEnabled: Bool = false
     /// Task 8: external jump intents, token-based so a re-render (e.g. a mode
     /// switch back to Rich) never replays a stale intent — the controller only
     /// acts when the incoming token differs from the last one it consumed.
@@ -236,7 +246,9 @@ struct TranscriptBlockListView: NSViewRepresentable {
             totalBlockCount: snapshot.totalBlockCount,
             fontSize: fontSize,
             source: session.source,
-            sessionID: session.id)
+            sessionID: session.id,
+            imagesByBlockIndex: inlineImagesEnabled ? imagesByBlockIndex : [:],
+            inlineImagesEnabled: inlineImagesEnabled)
 
         // Task 8: external jump intents. Resolved here (not stashed as raw
         // tokens on the coordinator ctor) because resolution needs the CURRENT
@@ -338,6 +350,16 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
     private(set) var rows: [BlockRowModel] = []
     private var fontSize: CGFloat = 13
     private var source: SessionSource = .codex
+
+    /// Inline images per row id (== user block's globalBlockIndex). Plain value
+    /// snapshot handed in by `apply`; the controller never retains derivedState
+    /// or the parent view. Empty when the pref is off or the session has none.
+    private var imagesByBlockIndex: [Int: [InlineSessionImage]] = [:]
+    private var inlineImagesEnabled: Bool = false
+    /// Signature of `imagesByBlockIndex` last applied, so a changed image map
+    /// invalidates the height cache (the image row's reserved height changes)
+    /// and reconfigures visible cells, while an unchanged map is a cheap no-op.
+    private var lastImageMapSignature: Int = 0
 
     /// Session identity last seen — the reset seam for all per-row expansion
     /// state below. Nil until the first `apply`.
@@ -629,6 +651,12 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         var widthBucket: Int
         var fontBucket: Int
         var toolState: ToolRowHeightState
+        /// Inline-image count contributing to this row's reserved image-row
+        /// height (0 for non-image / non-user rows). Part of the key so a row
+        /// that gains/loses images re-measures rather than serving a stale
+        /// height — belt-and-suspenders with the `heightCache` clear on image-map
+        /// change in `apply`.
+        var imageCount: Int = 0
     }
 
     private enum ToolRowHeightState: Hashable {
@@ -864,7 +892,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                totalBlockCount: Int,
                fontSize: CGFloat,
                source: SessionSource,
-               sessionID: String) {
+               sessionID: String,
+               imagesByBlockIndex: [Int: [InlineSessionImage]] = [:],
+               inlineImagesEnabled: Bool = false) {
         guard let table else { return }
 
         let fontChanged = fontSize != self.fontSize
@@ -920,7 +950,26 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             turnTimingCache = [:]
             toolTimingCache = [:]
             lastTimingComputedBlockCount = -1
+            // Inline images (Task C1) are keyed by globalBlockIndex too — drop the
+            // previous session's map + signature so the new session starts clean
+            // (the incoming `imagesByBlockIndex` param below re-establishes it).
+            self.imagesByBlockIndex = [:]
+            lastImageMapSignature = 0
         }
+
+        // Inline images (Task C1). Applied AFTER the session-switch reset so a
+        // switch that zeroed the signature above correctly treats the new
+        // session's incoming map as changed. A changed image map (async scan
+        // landing, gate flip) alters the image-row's reserved height, so
+        // invalidate the height cache; the diff switch below then reconfigures
+        // visible cells even when the row set itself is unchanged. Signature is
+        // cheap (count + per-row id/count), so an unchanged map is a no-op.
+        let imageSignature = Self.imageMapSignature(imagesByBlockIndex, enabled: inlineImagesEnabled)
+        let imagesChanged = imageSignature != lastImageMapSignature
+        self.imagesByBlockIndex = imagesByBlockIndex
+        self.inlineImagesEnabled = inlineImagesEnabled
+        lastImageMapSignature = imageSignature
+        if imagesChanged { heightCache.removeAll(keepingCapacity: true) }
 
         // Retain the full stream so scroll-driven widening can re-slice it
         // without waiting for the next SwiftUI update pass.
@@ -977,11 +1026,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         let diff = Self.classifyChange(old: rows, new: newRows)
 
         switch diff {
-        case .identical where !fontChanged && !sourceChanged:
+        case .identical where !fontChanged && !sourceChanged && !imagesChanged:
             return
         case .identical:
-            // Same rows, but font/source changed → re-render visible cells and
-            // re-measure all heights.
+            // Same rows, but font/source/image-map changed → re-render visible
+            // cells and re-measure all heights (the image row's reserved height
+            // may have appeared/changed under an otherwise-stable row set — the
+            // common case, since the async image scan lands after rows settle).
             rows = newRows
             reconfigureVisibleRows()
             noteAllHeightsChanged()
@@ -1248,6 +1299,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                        renderedBody: renderedBody(for: rowModel),
                        turnChipText: turnChipText(forRowID: rowModel.id),
                        toolDurationText: toolDurationText(for: rowModel),
+                       inlineImages: inlineImages(for: rowModel),
+                       sessionID: sessionID ?? "",
+                       imageContentWidth: currentBodyWidth(),
                        onToggleExpansion: { [weak self] in self?.toggleToolExpansion(rowID: rowModel.id) },
                        onToggleShowAll: { [weak self] in self?.toggleShowAll(rowID: rowModel.id) })
         // Flash reset/paint. A recycle mid-flash re-raises alpha on the flashing
@@ -1353,15 +1407,41 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         return .expandedShowAll
     }
 
+    /// Inline images to render below this row's body, or `[]`. Non-empty only
+    /// for a `.user`-kind message row that has a mapped image AND the gate is on.
+    /// A row's id is its user block's `globalBlockIndex`, the exact key the
+    /// mapper produces — so this is a direct dictionary hit, no translation.
+    private func inlineImages(for row: BlockRowModel) -> [InlineSessionImage] {
+        guard inlineImagesEnabled, !row.isToolCard, !row.isMeta else { return [] }
+        guard case .message(let block) = row.content, block.kind == .user else { return [] }
+        return imagesByBlockIndex[row.id] ?? []
+    }
+
+    /// Reserved height of the image grid appended below a row's body (0 when the
+    /// row has no inline images). The image grid lays out at the SAME content
+    /// width the body uses (`width`), so the reserved height equals exactly what
+    /// `InlineImageThumbnailGridView` draws into — no clip.
+    private func inlineImageRowHeight(for row: BlockRowModel, width: CGFloat) -> CGFloat {
+        let count = inlineImages(for: row).count
+        guard count > 0 else { return 0 }
+        return InlineImageThumbnailGridView.height(imageCount: count, width: width)
+    }
+
     private func measuredHeight(for row: BlockRowModel, width: CGFloat) -> CGFloat {
         if row.isMeta { return CardMetrics.metaSeparatorHeight }
 
         let toolState = toolRowHeightState(for: row)
+        let imageCount = inlineImages(for: row).count
         let key = HeightKey(rowID: row.id,
                             widthBucket: widthBucket(width),
                             fontBucket: fontBucket(fontSize),
-                            toolState: toolState)
+                            toolState: toolState,
+                            imageCount: imageCount)
         if let cached = heightCache[key] { return cached }
+
+        // Reserved space for the inline-image grid below the body (0 for every
+        // non-image / non-user row — identical to the pre-image layout there).
+        let imageHeight = inlineImageRowHeight(for: row, width: width)
 
         // Markdown message rows measure the RENDERED attributed string (same one
         // the cell displays), not the raw block text — the syntax-stripped,
@@ -1369,7 +1449,7 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // source. `renderedBody(for:)` returns nil for every non-markdown row, so
         // this branch is user/assistant-only and tool/meta paths are unchanged.
         if row.isMarkdownMessage, let body = renderedBody(for: row) {
-            let h = markdownCardHeight(body: body, width: width)
+            let h = markdownCardHeight(body: body, width: width) + imageHeight
             heightCache[key] = h
             return h
         }
@@ -1389,8 +1469,28 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             let text = renderedBodyText(for: row)
             h = Self.computeHeight(text: text, width: width, fontSize: fontSize)
         }
-        heightCache[key] = h
-        return h
+        let total = h + imageHeight
+        heightCache[key] = total
+        return total
+    }
+
+    /// Cheap order-independent signature of the inline-image map + gate, so
+    /// `apply` can detect a changed map (async scan landing / gate flip) without
+    /// deep-comparing the whole dictionary. Combines the gate, entry count, and
+    /// each (rowID, imageCount, first-image id) — enough to catch a scan result
+    /// arriving, a row gaining/losing images, or the pref toggling off (which
+    /// zeroes the map upstream).
+    static func imageMapSignature(_ map: [Int: [InlineSessionImage]], enabled: Bool) -> Int {
+        guard enabled, !map.isEmpty else { return enabled ? 1 : 0 }
+        var acc = 2 // distinct from the empty/disabled sentinels
+        for (rowID, images) in map {
+            var h = Hasher()
+            h.combine(rowID)
+            h.combine(images.count)
+            if let first = images.first { h.combine(first.id) }
+            acc ^= h.finalize() // XOR: order-independent over dictionary iteration
+        }
+        return acc
     }
 
     /// First `lineLimit` lines of `text`, joined back with newlines. Pure,
@@ -1485,6 +1585,29 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
         // entries simply miss; clear to bound memory, then re-note heights.
         heightCache.removeAll(keepingCapacity: true)
         noteAllHeightsChanged()
+        // A width change can reflow the image grid (column count → row count →
+        // total height). The row's re-measured height above is correct, but each
+        // visible image cell's own `imageGridHeightConstraint` is only refreshed
+        // by a reconfigure — so re-drive the grid on visible image rows to keep
+        // the constraint's reserved height in sync with the reflowed layout.
+        reconfigureVisibleImageRows()
+    }
+
+    /// Re-run `configure` on the visible rows that carry inline images, so their
+    /// `imageGridHeightConstraint` tracks a width-driven column/row reflow. Scoped
+    /// to image rows to avoid the cost of re-rendering every visible markdown body
+    /// on a plain width change (non-image rows already re-measure without a
+    /// reconfigure, matching the existing width-change discipline).
+    private func reconfigureVisibleImageRows() {
+        guard inlineImagesEnabled, let table else { return }
+        let visible = table.rows(in: table.visibleRect)
+        guard visible.length > 0 else { return }
+        for row in visible.lowerBound..<visible.upperBound where rows.indices.contains(row) {
+            guard !inlineImages(for: rows[row]).isEmpty else { continue }
+            if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? BlockCardCellView {
+                configure(cell: cell, forRowModel: rows[row], ordinal: row)
+            }
+        }
     }
 
     private func noteAllHeightsChanged() {
@@ -2621,10 +2744,14 @@ final class BlockCardCellView: NSTableCellView {
     private var headerHost: NSHostingView<BlockCardHeader>?
     private var showAllHost: NSHostingView<ShowAllRow>?
     private let metaSeparator = DynamicFillView()
+    /// Inline-image grid (Task C1), a sibling BELOW `showAllHost`. Native AppKit
+    /// (no hosting view) so it recycles cleanly and cancels its own decodes.
+    private let imageGrid = InlineImageThumbnailGridView()
 
     private var bodyTopConstraint: NSLayoutConstraint?
     private var headerHeightConstraint: NSLayoutConstraint?
     private var showAllHeightConstraint: NSLayoutConstraint?
+    private var imageGridHeightConstraint: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2675,6 +2802,11 @@ final class BlockCardCellView: NSTableCellView {
         cardBackground.addSubview(showAll)
         showAllHost = showAll
 
+        // Inline-image grid: below the show-all row, above the card's bottom
+        // inset. Hidden with zero height by default (every non-image row).
+        imageGrid.isHidden = true
+        cardBackground.addSubview(imageGrid)
+
         // Thin separator for `.meta` rows — hidden unless configure() selects
         // meta mode.
         metaSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -2695,6 +2827,9 @@ final class BlockCardCellView: NSTableCellView {
 
         let showAllHeight = showAll.heightAnchor.constraint(equalToConstant: CardMetrics.showAllRowHeight)
         showAllHeightConstraint = showAllHeight
+
+        let imageGridHeight = imageGrid.heightAnchor.constraint(equalToConstant: 0)
+        imageGridHeightConstraint = imageGridHeight
 
         NSLayoutConstraint.activate([
             cardBackground.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -2729,6 +2864,19 @@ final class BlockCardCellView: NSTableCellView {
             showAll.bottomAnchor.constraint(lessThanOrEqualTo: cardBackground.bottomAnchor,
                                             constant: -CardMetrics.bodyBottomInset),
 
+            // Image grid sits directly below the (usually zero-height) show-all
+            // row and matches the body's content width. Its height is driven by
+            // configure(); the <= bottom constraint keeps it inside the card's
+            // reserved height (measuredHeight adds the same grid height).
+            imageGrid.leadingAnchor.constraint(equalTo: accentBar.trailingAnchor,
+                                               constant: CardMetrics.contentLeadingInset),
+            imageGrid.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor,
+                                                constant: -CardMetrics.contentTrailingInset),
+            imageGrid.topAnchor.constraint(equalTo: showAll.bottomAnchor),
+            imageGridHeight,
+            imageGrid.bottomAnchor.constraint(lessThanOrEqualTo: cardBackground.bottomAnchor,
+                                              constant: -CardMetrics.bodyBottomInset),
+
             metaSeparator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: CardMetrics.contentLeadingInset),
             metaSeparator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -CardMetrics.contentTrailingInset),
             metaSeparator.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -2749,6 +2897,9 @@ final class BlockCardCellView: NSTableCellView {
                    renderedBody: RenderedBody? = nil,
                    turnChipText: String = "",
                    toolDurationText: String? = nil,
+                   inlineImages: [InlineSessionImage] = [],
+                   sessionID: String = "",
+                   imageContentWidth: CGFloat = 0,
                    onToggleExpansion: @escaping () -> Void,
                    onToggleShowAll: @escaping () -> Void) {
         // Recycle hygiene (Task 10): drop any find highlight the previous
@@ -2756,6 +2907,10 @@ final class BlockCardCellView: NSTableCellView {
         // controller re-applies the correct highlights right after configure for
         // rows that participate in the active query.
         bodyText.clearFindHighlights()
+        // Inline-image hygiene (Task C1): reset the grid up front so a recycled
+        // cell that WAS an image row shows no stale image and leaks no decode
+        // Task. Re-populated below only for a user message row with images.
+        resetImageGrid()
         if row.isMeta {
             configureMetaSeparator()
             return
@@ -2823,6 +2978,40 @@ final class BlockCardCellView: NSTableCellView {
                                      accent: Color(nsColor: accent), toolMode: nil,
                                      turnChipText: turnChipText)
         headerHost?.rootView = header
+
+        // Inline images below the body (user rows only; the controller passes a
+        // non-empty array only for a `.user` row with mapped images and the gate
+        // on). Height is reserved by the controller's `measuredHeight`, so the
+        // grid draws into space the card already accounts for — no clip.
+        if block.kind == .user, !inlineImages.isEmpty {
+            imageGrid.isHidden = false
+            // Reserve EXACTLY the height the controller measured for this row, so
+            // the card's reserved space and the grid's own height agree (no clip,
+            // no over-reserve). The controller passes its `currentBodyWidth()`;
+            // fall back to the card's own content width only if it wasn't supplied
+            // (e.g. a direct configure before layout settles).
+            let width = imageContentWidth > 0 ? imageContentWidth : imageGridContentWidth()
+            imageGridHeightConstraint?.constant = InlineImageThumbnailGridView.height(
+                imageCount: inlineImages.count, width: width)
+            imageGrid.configure(images: inlineImages, sessionID: sessionID)
+        }
+    }
+
+    /// Content width the image grid lays out at — card width minus chrome. Used
+    /// only as a fallback when the controller didn't supply its measured width.
+    private func imageGridContentWidth() -> CGFloat {
+        let cardWidth = cardBackground.bounds.width > 0 ? cardBackground.bounds.width : bounds.width
+        return max(1, cardWidth - CardMetrics.horizontalChrome)
+    }
+
+    /// Cancel any in-flight image decode, clear tiles, hide the grid, and zero
+    /// its reserved height. Called from `configure` (up front) and
+    /// `prepareForReuse` so a recycled cell never shows a stale image or leaks a
+    /// decode Task.
+    private func resetImageGrid() {
+        imageGrid.reset()
+        imageGrid.isHidden = true
+        imageGridHeightConstraint?.constant = 0
     }
 
     private func configureToolCard(row: BlockRowModel,
@@ -2991,6 +3180,9 @@ final class BlockCardCellView: NSTableCellView {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // Inline-image recycle safety: cancel the decode Task and drop tiles so
+        // a recycled cell never paints a stale image or races a late decode.
+        resetImageGrid()
         bodyText.string = ""
         // Drop any cross-block selection highlight and detach the ordinal so a
         // recycled cell can never paint a stale selection or misroute a mouse
