@@ -747,14 +747,20 @@ enum MarkdownBodyRenderer {
 /// keyed by `isDark` and rebuilt on an appearance flip, so a baked
 /// `.backgroundColor` chip stays correct without live re-resolution.
 private enum MarkdownStyle {
-    /// Subtle background chip behind inline code. `.quaternaryLabelColor`
-    /// resolves to a light-on-dark-text tint that is legible against BOTH the
-    /// dark-card fence background and the plain prose background — it is a
-    /// text-relative gray, not a fixed light/dark swatch, so it doesn't need an
-    /// `isDark` branch: quaternary alpha over the underlying control color reads
-    /// as a faint fill in both appearances (spot-checked against
-    /// `.textBackgroundColor` in each).
-    static var inlineCodeChip: NSColor { .quaternaryLabelColor }
+    /// Very faint background hint behind inline code. Inline code already reads
+    /// as distinct because prose is the PROPORTIONAL system font while inline
+    /// code is MONOSPACED — so the chip is only a light reinforcement, not the
+    /// primary signal. `.quaternaryLabelColor` was too heavy on code-dense
+    /// messages (many backtick spans → a wall of gray that hurt readability).
+    /// The faintest system tint (`quinaryLabelColor`) isn't exposed in Swift, so
+    /// this is a hand-rolled appearance-aware fill: a barely-there wash (~5–6%)
+    /// that resolves per the drawing appearance.
+    static var inlineCodeChip: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return isDark ? NSColor(white: 1.0, alpha: 0.06) : NSColor(white: 0.0, alpha: 0.05)
+        }
+    }
     /// Dark inset card behind a fenced code block. Deliberately NOT
     /// `isDark`-branched: `.underPageBackgroundColor` is itself a dynamic system
     /// color that resolves to a slightly recessed tone relative to the page
