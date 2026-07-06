@@ -584,7 +584,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var showTimestamps: Bool = false
     @AppStorage("TranscriptFontSize") private var transcriptFontSize: Double = 13
     @AppStorage("TranscriptRenderMode") private var renderModeRaw: String = TranscriptRenderMode.terminal.rawValue
-    @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.terminal.rawValue
+    @AppStorage("SessionViewMode") private var viewModeRaw: String = SessionViewMode.blocks.rawValue
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
@@ -636,12 +636,10 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private var viewMode: SessionViewMode {
-        // Prefer persisted view mode when valid; otherwise derive from legacy renderModeRaw.
-        if let m = SessionViewMode(rawValue: viewModeRaw) {
-            return m
-        }
-        let legacy = TranscriptRenderMode(rawValue: renderModeRaw) ?? .normal
-        return SessionViewMode.from(legacy)
+        // Resolve through the shared migration function so a persisted "terminal"
+        // (old Terminal-backed Session view, removed from the UI in C4a) always
+        // lands on .blocks (the new Session view) instead of an unreachable state.
+        resolveViewMode(viewModeRaw: viewModeRaw, renderModeRaw: renderModeRaw)
     }
 
     /// Keep the legacy TranscriptRenderMode preference in sync with SessionViewMode
@@ -788,9 +786,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                     .background(Color(NSColor.controlBackgroundColor))
                 Divider()
                 ZStack {
-                    if viewMode == .terminal {
-                        terminalTranscriptView(session: session)
-                    } else if viewMode == .blocks {
+                    if viewMode == .blocks {
                         blocksTranscriptView(session: session)
                     } else {
                         plainTranscriptView(session: session)
@@ -1050,41 +1046,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func updateTopProximity(_ isNearTop: Bool) {
         isNearTranscriptTop = isNearTop
-    }
-
-    private func terminalTranscriptView(session: Session) -> some View {
-        SessionTerminalView(
-            session: session,
-            derivedState: derivedState,
-            unifiedQuery: unifiedFreeText,
-            unifiedFindToken: terminalUnifiedFindToken,
-            unifiedFindDirection: terminalUnifiedFindDirection,
-            unifiedFindReset: terminalUnifiedFindResetFlag,
-            unifiedAllowMatchAutoScroll: terminalUnifiedAllowMatchAutoScroll,
-            unifiedExternalMatchCount: $terminalUnifiedMatchesCount,
-            unifiedExternalTotalMatchCount: $terminalUnifiedTotalMatchesCount,
-            unifiedExternalCurrentMatchIndex: $terminalUnifiedCurrentIndex,
-            findQuery: findQuery,
-            findToken: terminalFindToken,
-            findDirection: terminalFindDirection,
-            findReset: terminalFindResetFlag,
-            allowMatchAutoScroll: terminalAllowMatchAutoScroll,
-            scrollToBottomToken: tailUpdateState.scrollToBottomToken,
-            onBottomProximityChange: updateBottomProximity,
-            onTopProximityChange: updateTopProximity,
-            onRenderComplete: { id in
-                if pendingFirstRenderSessionID == id {
-                    pendingFirstRenderSessionID = nil
-                }
-            },
-            jumpToken: terminalJumpToken,
-            roleNavToken: terminalRoleNavToken,
-            roleNavRole: terminalRoleNavRole,
-            roleNavDirection: terminalRoleNavDirection,
-            externalMatchCount: $terminalFindMatchesCount,
-            externalTotalMatchCount: $terminalFindTotalMatchesCount,
-            externalCurrentMatchIndex: $terminalFindCurrentIndex
-        )
     }
 
     /// Rich mode: NSTableView-backed block cards over the derived block stream.
@@ -1407,11 +1368,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private var viewModeMenu: some View {
         Menu {
             viewModeMenuButton(.blocks,
-                               title: "Rich",
-                               help: "Structured cards with collapsible tool calls.")
-            viewModeMenuButton(.terminal,
                                title: "Session",
-                               help: "Terminal-inspired output with colorized commands and tool output.")
+                               help: "Structured cards with collapsible tool calls.")
             viewModeMenuButton(.transcript,
                                title: "Text",
                                help: "Merged chat and tools.")
@@ -1446,8 +1404,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private var viewModeMenuTitle: String {
         switch viewMode {
-        case .blocks: return "Rich"
-        case .terminal: return "Session"
+        case .blocks: return "Session"
+        case .terminal: return "Session" // unreachable post-migration; resolves to .blocks
         case .transcript: return "Text"
         case .json: return "JSON"
         }
@@ -1503,18 +1461,19 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         shortcutButton(action: { navigateNextMatch(direction: 1) }, key: "g", modifiers: .command)
         shortcutButton(action: {
             // Use the live `viewMode` (not the legacy renderModeRaw round-trip) so
-            // Rich mode — which has no distinct TranscriptRenderMode of its own —
-            // is correctly identified and cycled instead of collapsing to Text.
+            // Session (.blocks) — which has no distinct TranscriptRenderMode of its
+            // own — is correctly identified and cycled instead of collapsing to Text.
+            // Terminal has been removed from the UI (C4a): it's dropped from the
+            // rotation entirely, and `viewMode` never resolves to `.terminal` (the
+            // migration folds it into `.blocks`), so `.terminal` can't appear here.
             let current = viewMode
             let next: SessionViewMode
             switch current {
             case .blocks:
-                next = .terminal
-            case .terminal:
                 next = .transcript
             case .transcript:
                 next = .json
-            case .json:
+            case .json, .terminal:
                 next = .blocks
             }
             viewModeRaw = next.rawValue
