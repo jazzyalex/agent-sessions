@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.1/AgentSessions-4.1.dmg"><b>Download Agent Sessions 4.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.2/AgentSessions-4.2.dmg"><b>Download Agent Sessions 4.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.0** — Watch your Codex and Claude quota burn down per session with the new **Session Runway**, recover hidden Codex Desktop **side chats** (`#side`), and find & restore archived Claude Code sessions in one searchable local view. [See what's new ↓](#whats-new-in-40)
+> **New in 4.2** — A brand-new transcript: assistant replies in real **Markdown**, collapsible tool calls, inline images, and clickable file paths, plus role filters (You / Agent / Tools / Errors) with jump-to-next navigation and a right-click menu. [See what's new ↓](#whats-new-in-42)
 
 ## Overview
 
@@ -72,19 +72,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.1
+## What's New in 4.2
 
-**TL;DR** - The Instant release. 4.1 is a top-to-bottom performance pass: transcripts open instantly (even massive ones), sorting and search are instant, scrolling is smooth, and the app is dramatically quieter when idle.
+**TL;DR** - The redesigned transcript. 4.2 rebuilds the session transcript from the ground up as a clean, readable Session view — structured cards with real Markdown, collapsible tool calls, inline images, and clickable file paths — plus role filters with jump-to-next navigation and a right-click menu.
 
-**Highlights:** Opening a session now paints the newest content immediately and finishes the rest in the background — the multi-second freeze on large histories is gone. Sorting re-orders in place (~7s → ~0.5s on big lists), full-text search hits a background-built SQLite index instead of re-scanning files (with live scanning for freshly-changed sessions so results are never stale), and live-session probing, HUD rebuilds, and indexing are gated so idle CPU and "Using Significant Energy" pressure drop sharply.
+**Highlights:** The transcript is no longer a raw terminal dump. Assistant replies render as proper Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy expandable cards, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and each turn and tool call carries a duration badge. Filter a session to just You, Agent, Tools, or Errors and step through occurrences with the ▲▼ controls, and right-click any message for Copy, Copy Block, or Speak.
 
-New in 4.1:
-- **Instant transcript open** — two-stage rendering paints the tail of the session first; jumps to older content (search hits, deep links, first prompt) load the needed portion on demand.
-- **Instant sort & smooth scrolling** — in-place re-ordering, row rendering diet, and scrub-stall fixes across the session list, transcript, and HUD.
-- **Indexed search** — the FTS corpus builds in the background; selecting a result from a search-filtered list auto-jumps to the first match.
-- **Quieter idle** — deduplicated rebuilds and gated probing across the Quota Meter, Cockpit, and indexers.
+New in 4.2:
+- **Redesigned transcript (Session view)** — block-based cards, rich Markdown rendering, collapsible tool calls, inline images, review summaries, clickable file paths, and turn/tool duration badges.
+- **Role filters + jump navigation** — show only You / Agent / Tools / Errors, and jump to the next or previous occurrence of each.
+- **Right-click menu** — Copy, Copy Block, and Speak on any message.
+- **Quota Meter smile** — the meter smiles when your pace is on track to fit the 5-hour window.
 
-Previous release — 4.0: Quota Meter with **Session Runway** (live per-session burn-rate bars), Codex Side Chats, the Antigravity provider, archived Claude session restore, and Claude dynamic workflow nesting. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.1: The Instant release — instant transcript open, instant sort, indexed full-text search, and much quieter idle. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -138,7 +138,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.1/AgentSessions-4.1.dmg)
+1. [Download AgentSessions-4.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.2/AgentSessions-4.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

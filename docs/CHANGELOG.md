@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Highlights
+- **A brand-new transcript.** The session transcript is rebuilt as a clean, readable **Session view** — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.
+- **Filter and navigate a session.** Focus the transcript on just **You**, **Agent**, **Tools**, or **Errors**, and use the ▲▼ controls beside each to jump to the next or previous occurrence. Right-click any message for **Copy**, **Copy Block**, or **Speak**.
+
+### Improvements
+- Quota Meter now **smiles** when your current pace is on track to fit within the 5-hour window.
+
+### Bug Fixes
+- Search: fixed a rare crash while the full-text search index was building in the background.
 
 ## [4.1] - 2026-07-03
 ### Highlights
