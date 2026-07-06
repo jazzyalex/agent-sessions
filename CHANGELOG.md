@@ -4,36 +4,235 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Removed
-- Git Inspector (feature-flagged since v2.5, off by default) — unused in practice; recoverable from git history.
+## [4.2] - 2026-07-06
+### Highlights
+- **A brand-new transcript.** The session transcript is rebuilt as a clean, readable **Session view** — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.
+- **Filter and navigate a session.** Focus the transcript on just **You**, **Agent**, **Tools**, or **Errors**, and use the ▲▼ controls beside each to jump to the next or previous occurrence. Right-click any message for **Copy**, **Copy Block**, or **Speak**.
+
+### Improvements
+- Quota Meter now **smiles** when your current pace is on track to fit within the 5-hour window.
+
+### Bug Fixes
+- Search: fixed a rare crash while the full-text search index was building in the background.
+
+## [4.1] - 2026-07-03
+### Highlights
+- **The Instant release.** This release is a top-to-bottom performance program: transcripts open instantly, sorting is instant, search is indexed, scrolling is smooth, and the app is dramatically quieter when idle.
+- **Transcripts open instantly** — even monster sessions. Opening a session paints the newest content immediately and completes the rest in the background; the multi-second (sometimes 30s+) beachball on large histories is gone. Jumping to older content (search hits, deep links, first prompt) loads the needed portion on demand.
+- **Instant sort and smoother lists** — clicking a sort column re-orders in place instead of re-running the whole pipeline (~7s → ~0.5s on large histories), fast scrolling no longer stutters, and scrubbing the list no longer stalls the transcript or the HUD.
+- **Indexed full-text search** — the search corpus is now ingested into the SQLite FTS index in the background, so searches hit the index instead of re-scanning files; recently-changed sessions are still scanned live so results are never stale. Selecting a result from a search-filtered list auto-jumps to the first match.
+- **Quieter when idle** — live-session probing, HUD rebuilds, and indexing are now gated and deduplicated; idle CPU and "Using Significant Energy" pressure are sharply reduced.
+
+### Improvements
+- Session list: row rendering diet — shared date formatting, precomputed pills, and memoized project names keep scrolling smooth at large row counts.
+- Transcript: live-tail rebuilds are throttled while the app is inactive and catch up instantly on activation.
+
+### Bug Fixes
+- Transcript: Antigravity and GitHub Copilot sessions now render inline images that were previously detected but never displayed.
+- Session list: toggling "Hide zero-message sessions", "Hide low-message sessions", or housekeeping visibility now refreshes OpenClaw and Antigravity results immediately instead of waiting for an unrelated refresh.
+- Session list: archived-pill behavior is pinned for switch-branch Claude Desktop sessions.
+- Quota Meter: the Session Runway overflow label now always reads "+N sessions" instead of splitting into burn/idle "bursts".
+
+## [4.0] - 2026-06-28
+### Highlights
+- **Quota Meter — now with Session Runway.** See at a glance how much of your Codex and Claude 5h and weekly limits is left and when it resets. New in 4.0, **Session Runway** adds live per-session burn-rate bars, so you can spot which active session is eating your quota fastest before it costs you the window. (Formerly "Limits Cockpit.")
+- **Codex Side Chats** — recover Codex Desktop side chats as searchable rows with a distinct `side` badge and parent context; filter with `#side` (and `#side phrase`), and Copy Session ID copies the parent thread ID.
+- **Antigravity provider** (replaces Gemini CLI) — discovers Antigravity CLI session transcripts, resumes via `agy --conversation <id>` (with `--continue` fallback), tracks live sessions, and shows local screenshots in the transcript and image browser.
+- **Restore archived Claude sessions** — Agent Sessions surfaces archived Claude Code sessions (an `archived` pill and an archived-only filter) and restores them in place, within its searchable local history. Because the app is otherwise read-only, restore is an explicit opt-in that's off by default — Agent Sessions only writes to Claude's files once you enable it.
+- **Claude dynamic workflows** — Claude Code's Workflow tool spawns subagents dynamically at runtime; those workflow subagents now nest under the session that launched them with a `workflow` badge and a fan-out marker on the parent, instead of cluttering the list as standalone rows.
+
+### Features
+- **Codex reset credits** — when Codex grants a free "reset your usage now" credit, the Quota Meter and menu bar now surface it and show when it expires, so you can see how many resets you have banked and how long they last.
+- **Transcript identity strip** — a compact strip showing session identity, `side`/`sub` labels, and parent context, so the transcript stays identifiable even when the session list loses focus.
+
+### Bug Fixes
+- Unified Window: fixed hangs on large Codex histories — the session list no longer stalls diffing full transcript payloads, the Project column no longer re-parses raw transcript JSON during layout, and returning to the app caches hierarchy state instead of rebuilding it.
+- Claude usage: OAuth/Web refreshes now preserve a recent hard-probe 5h limit and reset time when the soft snapshot only reports weekly quota.
+- Claude usage: projected-exhaustion alerts now use fractional usage, so small real burns are not missed.
+- Claude usage: Claude Code 2.x `/usage` quota gaps and rate-limit responses are treated as unavailable data instead of false 0% readings.
+- Claude usage: hard refresh now finds Homebrew `tmux` from GUI launches, stale credentials point to `claude /login`, and built-in `~/.local` updater installs are recognized by the per-agent update action.
+
+### Improvements
+- Quota Meter: moved the cockpit-display settings (5h run-out projection token, Session Runway text size) to the Agent Cockpit Settings tab.
+- Quota Meter: removed the active/idle session color dots and counters from the header; the All/active/idle filter pills remain in the Full and Compact cockpit views.
+- Quota Meter: added toolbar Runway/view controls and a Standard / Enlarged size option.
+- Session list: the Claude agent filter is now a segmented pill matching Codex, and Claude Desktop rows show their Desktop session name.
+- Unified Window: collapsed hierarchy state now persists across relaunches.
+- Website: replaced the GitHub Pages landing page with the redesigned product page (updated Antigravity positioning, Quota Meter copy, and production download metadata).
+- Agent-format maintenance: re-verified all supported session formats against current CLI builds (Codex, Claude, Antigravity, Copilot, OpenCode, Hermes, OpenClaw, Cursor, Pi) and updated parser/format coverage where formats changed.
+
+## [3.9.3] - 2026-06-12
+- Transcript toolbar: Markdown export now writes embedded session images into a sibling assets folder and references image attachments so exported transcripts keep visible images.
+- Transcript toolbar: Markdown export now creates a human-readable document with session metadata, role sections, and collapsible tool details instead of dumping terminal/UI formatting.
+- Transcript toolbar: Export now writes the selected session transcript in terminal mode instead of saving an empty Markdown file.
+- Dock: Hide Dock icon can now rely on a pinned Agent Cockpit as the app's reopen path, so hiding the Dock no longer forces the menu bar item on when Cockpit is pinned.
+- Quota Meter: 5h run-out tokens now expire based on the last actual burn observation rather than passive refreshes, hide when the 5h reset will arrive before the projected run-out, Claude projections use fractional usage changes when available, Cockpit auto-expands when width fallback would otherwise hide an active projection, run-out tokens are easier to read in the Cockpit, and Limit Alerts diagnostics now show the current 5h projection and notification delivery state without leaving stale active ETAs behind.
+- Settings: Standardized visible app copy on Settings instead of mixing Settings and Preferences labels.
+- Limit Alerts: Low-limit and projected-runout notifications now share one clearer message with percent remaining, fresh burn ETA when available, and reset timing, while Settings shows a plain readiness verdict before detailed diagnostics.
+
+## [3.9.2] - 2026-06-10
+### Improvements
+- Limit Alerts and Predictions: Added freshness-aware Codex and Claude run-out predictions, earlier Cockpit ETA markers, and separate notification controls for predicted exhaustion versus low-threshold warnings.
+- Onboarding: Replaced the Agent Cockpit slide in fresh-install and update tours with a Quota Meter slide covering prediction markers and Limit Alerts.
+- Quota Meter: Refreshes visible Codex and Claude non-tmux usage sources every 60 seconds, keeps Claude OAuth/Web cache and retry freshness within a 3-minute ceiling, repaints reset countdowns without requiring hover, shows a compact 5h projected run-out token in Cockpit, and warns with an ETA when fresh usage burn rate projects a limit exhaustion before reset.
+- Quota Meter: Cockpit 5h run-out tokens now show fresh before-reset ETAs beyond the last-hour alert window, so visible usage velocity can surface earlier than notification warnings.
+- Limit Alerts: Added a dedicated Preferences pane with source/freshness diagnostics, split predicted run-out alerts from low-threshold alerts, and gates prediction on fresh usage data while ignoring stale snapshots.
+- Dock: Added a Hide Dock Icon command to the Dock tile right-click menu.
+- Menu bar: Turning off the menu bar item now stays off across relaunches by clearing Hide Dock icon instead of letting the safety path re-enable the menu bar.
+
+## [3.9.1] - 2026-06-05
+### Bug Fixes
+- Menu bar: Kept the live status label visible instead of collapsing it to a generic stack icon when usage or session counts exceed a narrow width threshold.
+- Menu bar: Hide Dock icon now launches as a UIElement-capable app and clears stale Dock recent-app entries when switching hidden, preventing macOS from leaving a visible Dock icon behind.
+
+## [3.9] - 2026-06-04
+### Features
+- Quota Meter: Added a small always-on Codex and Claude usage window for MacBook users who want 5h and weekly limit visibility without spending menu bar space or opening the full Agent Cockpit.
+- Usage Tracking: Added shared Codex and Claude limit notifications for approaching or exhausted 5h and weekly limits, with per-provider and per-warning controls plus a 5h reset alert.
+- Unified Window: Added View menu commands to collapse or expand all visible session hierarchy groups.
+- Unified Window: Added a persistent Transcript Window toggle so the transcript pane can be hidden for list-focused browsing.
+
+### Improvements
+- Quota Meter: Shows Codex and Claude on separate rows, adapts reset times to the available width, and keeps controls out of the way until hover.
+- Menu bar: Restored the Dock icon automatically when Hide Dock icon is enabled but macOS cannot fit the menu bar item, keeping the app reachable.
+- Unified Window: Added a Saved-only suffix to the session count when the saved-session filter is active.
+- Agent formats: Preserved empty Hermes session metadata records during parsing and added explicit compatibility verdicts to agent-support monitoring reports.
+- Agent formats: Added real-session prebump drivers for OpenCode, OpenClaw, Cursor, and Hermes, and refreshed verified coverage for the 2026-06-02 Codex, Claude, Copilot, OpenCode, OpenClaw, Cursor, Hermes, and Pi binaries.
+- Agent formats: Added an official Cursor CLI latest-version source and expanded Cursor Desktop agent-window monitoring with fresh chat metadata evidence.
+- Agent formats: Refreshed Claude 2.1.161, Gemini 0.45.0, and Copilot 1.0.59 format coverage from fresh real-session probes.
+
+### Bug Fixes
+- Unified Window: Fixed session-list scroll position jumping back to the top during live-session refreshes.
+- Unified Window: Kept Collapse All and Expand All scoped to visible hierarchy groups and preserved the parent selection when a selected child row is collapsed.
+
+## [3.8.2] - 2026-05-28
+- Agent formats: Added Hermes 0.15 state database support, Pi prebump validation, OpenClaw trajectory-file exclusion, and refreshed verified format coverage for current Codex, Claude, Gemini, Copilot, OpenCode, OpenClaw, Hermes, and Pi binaries.
+- Session list: Fixed the toolbar Saved filter so it toggles saved-only sessions even when the Save column is hidden.
+- Image Browser: Fixed a crash when opening from the menu bar while multiple enabled agents expose the same raw session ID.
+
+## [3.8.1] - 2026-05-27
+### Highlights
+- Resume workflows can now open every supported CLI agent in Warp or WarpPreview, using Warp terminal tab configs for new tabs.
+- Terminal selection is now shared across agents, dynamically shows installed terminal apps, and migrates older per-agent iTerm preferences.
+
+## [3.8] - 2026-05-12
+### Features
+- Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.
+- Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.
+
+### Bug Fixes
+- Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.
+- Session list: Codex Desktop and Claude Desktop projectless chats now show `Codex Desktop Chats` and `Claude Desktop Chats` for easier filtering and identification.
+- Session list: Codex Desktop and Claude Desktop worktree sessions now keep the parent project name while showing the worktree as a subtle second line.
+- Session list: Codex Desktop worktree rows now recover parent project names from explicit git origin metadata instead of deriving them from matching worktree name prefixes, and remain compatible with older Codex state database schemas that do not yet include git origin columns.
+- Sessions/Search: Restored Codex Desktop sessions with old rollout dates now sort by fresh activity, are picked up when their files change, and remain searchable even before full-text indexing has warmed or when only non-large transcripts are available.
+- Analytics: Chart coloring now derives from the actual enabled agent data, preventing mismatches or crashes when newer providers appear in the dataset.
+
+### Improvements
+- Menu bar: Added Show/Hide Dock Icon and Quit commands, with a separator before Quit and safer Dock/menu-bar preference synchronization.
+- Preferences: Moved About above the agent-specific panes in the sidebar so product details stay grouped with general app settings.
+
+## [3.7.1] - 2026-05-01
+### Bug Fixes
+- Claude: Standard `~/.claude` transcripts launched from Claude Desktop now persist Desktop origin metadata and show the `desk` pill instead of the CLI pill.
+- Session list: Claude Desktop rows keep the `desk` pill even when cached rows have not yet hydrated generic surface metadata.
+
+## [3.7] - 2026-05-01
+### Features
+- Claude: Desktop local-agent transcripts under Claude's Application Support directory are now discovered, enriched with Desktop metadata, and shown with the `desk` surface pill.
+
+### Improvements
+- Session list: Claude rows now use the same Agent-column `cli` and `desk` surface pills as Codex rows.
+- Indexing: Session origin metadata now has generic originator/source/surface fields so non-Codex providers can use desktop or IDE surface labels without reusing Codex-specific columns.
+
+## [3.6.7] - 2026-04-29
+### Bug Fixes
+- Menu bar: Preferences changes now update the status item immediately without requiring relaunch.
+- Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.
+
+### Features
+- Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.
+- Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.
+- Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/<project>/chats/session-*.jsonl`.
+- Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
+
+### Improvements
+- Menu bar: Agent Cockpit and Agent Sessions commands now switch between Open and Hide based on window visibility.
+- Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
+- Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
+- Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.
+- Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.
+- Monitoring: Updated agent format checks for Claude 2.1.123 metadata, Gemini 0.40 JSONL sessions, Copilot 1.0.39 `system.message`, OpenCode 1.14.29, and OpenClaw 2026.4.26.
+
+## [3.6.6] - 2026-04-29
+- Onboarding: Update tours now start with a random pair of Power Tips, fresh-install onboarding keeps the two highest-value tips with a full-tour link, and Help includes a Power Tips item for reopening the multi-slide tips tour.
+- Onboarding: Added a Power Tips slide for update and fresh-install tours, highlighting Hide Dock icon and Agent Cockpit.
+- Session list: Archived Codex Desktop sessions now show the existing `desk` surface pill in italic.
+- Claude: Generated `ai-title` metadata now improves Sessions-list titles when no explicit `/rename` title exists.
+- Monitoring: Added Hermes session-format checks for `~/.hermes/sessions/session_*.json` and removed Droid from the active monitoring set.
+- Gemini: Added support for Gemini CLI 0.40 JSONL session files under `~/.gemini/tmp/<project>/chats/session-*.jsonl`.
+- Monitoring: Updated agent format checks for Claude 2.1.123 metadata, Gemini 0.40 JSONL sessions, Copilot 1.0.39 `system.message`, OpenCode 1.14.29, and OpenClaw 2026.4.26.
+- Session view: Added a floating top up-arrow that jumps directly to the first real user prompt.
+- Session view: User prompt blocks now use a softer gray background in light mode while preserving the previous prompt text color.
+- Transcripts: JSON-style tool outputs now render simple results, entries, files, grouped search matches, accessibility trees, error envelopes, suggestions, and trailing hints as readable transcript text instead of raw pretty-printed JSON.
+- Session view: Reduced first-click transcript loading stalls by avoiding duplicate selected-session parses, deferring nonessential transcript cache/inline-image/probe work, and cutting synchronous terminal linkification work during first paint.
+
+## [3.6.5] - 2026-04-28
+- Indexing: Launch and manual session refreshes now use the interactive indexing profile instead of the active-window capped profile, avoiding slow full catch-up scans after an index reset.
+- Codex: Subagent session pills now show provider-reported reasoning effort in their hover tooltip when Codex records `turn_context.payload.effort`.
+- Crash Reports: Improved `.ips` parsing so pretty-printed macOS diagnostic payloads include exception details, timestamps, and top frames in exported reports.
+- Codex: Fixed Resume in Terminal by keeping the launched command as plain `codex resume`; Cockpit live tracking remains handled by independent process/iTerm discovery instead of a resume-command wrapper.
+- Codex: VS Code-surface sessions no longer offer Codex CLI resume commands when they cannot hydrate useful CLI content.
+- Codex: Desktop-originated Codex subagent rows now keep the `desk` Agent-column badge while showing the subagent marker in the session title.
+
+## [3.6.4] - 2026-04-27
+- Codex: Local rollout sessions from Codex CLI, Codex Desktop, and the Codex VS Code extension now stay in one Codex corpus with row-level surface labels.
+- Codex: Session titles can now fall back to the local Codex `state_*.sqlite` thread metadata when `session_index.jsonl` has no rename.
+
+## [3.6.3] - 2026-04-24
+- Preferences: Removed Droid from the Settings sidebar as part of the ongoing provider de-emphasis, while keeping legacy Droid session support available.
+- Session list: Updated Hermes and OpenClaw accent colors to separate them more clearly from Claude in agent-name styling.
+- Hermes: Added local Hermes session discovery, transcript browsing, analytics inclusion, and resume/copy-resume actions in Unified Sessions.
+- Hermes: Fixed local session decoding and Unified search/filter integration so newly enabled Hermes sessions appear in Unified, search deeply by transcript text, retain meaningful titles for long prompts, and copy the correct resume ID.
+- Hermes: Hermes sessions now preserve recorded `cwd` metadata for search/path filtering without probing the filesystem during indexing.
+- Hermes: The Project column now shows the session origin from Hermes `platform` metadata, such as `cli`, `telegram`, or `cron`.
+- OpenClaw: The Project column now shows derived session origin, such as `telegram`, `cron`, or `tui`.
+- Session list: Subagent fallback markers now appear in the Session column instead of the CLI Agent column, so unresolved subagents no longer read as `s Codex`, `s Claude`, or `s OpenCode`.
+
+## [3.6.2] - 2026-04-19
 
 ### Added
-- Documentation and website copy now position Agent Sessions as a local-history hub for CLI tools, desktop apps, and app-bundled agents, with dedicated full HTML SEO guides for Codex rollout history, Cursor Agent transcripts, Hermes `state.db` sessions, and OpenClaw JSONL history.
-- Local-history guide pages now reuse the main product-page header style and show unframed agent-specific marketing screenshots.
-- README agent names and product-page guide cards now link directly to local-history guides.
-- Product page supported-agent card now wraps long agent names cleanly instead of overflowing.
-- Product page now moves the main Sessions screenshot above Agent Cockpit, switches between light/dark screenshots, and removes WarpPreview from visible page copy.
-- Product page now shows the plain menu bar status strip instead of the expanded menu bar dropdown.
-- Product page now uses light-mode menu bar and Analytics screenshots with dark-mode fallbacks.
-- Product page now captions the menu bar status strip consistently with the other screenshots.
-- Product page now includes light/dark Image Browser screenshots for visual session outputs.
-- Product page headline now focuses on session management for Codex, Claude, OpenCode, Cursor, Copilot, Pi, and Gemini.
-- Product page now uses a full dark-mode page theme and dark-mode Saved Sessions plus refreshed Image Browser screenshots.
-- README and product-page copy now use the same local session-management positioning, updated screenshots, and cleaner mobile/header presentation.
-- Fresh-session validator for `scripts/agent_watch.py`: weekly staleness
-  detection (`evidence.sample_freshness`) across all 7 agents and a new
-  opt-in `--mode prebump` path with per-agent drivers for codex, claude,
-  gemini, droid, and copilot. New recommendation `run_prebump_validator`
-  blocks auto-downgrade to `bump_verified_version` when the newest local
-  sample predates the installed CLI binary. Hybrid env-var-first auth
-  with credential-copy hygiene gates (64 KiB / mode 0600 / 90-day
-  warning). Copilot driver enforces a fail-closed sandbox-leak assertion
-  overridable only via `--allow-real-home` per run.
+- OpenCode: Renamed session titles (set via `/rename`) are now persisted as custom session titles, matching Claude and Codex behavior.
+
+### Fixed
+- Session list hierarchy now nests older Codex role subagent sessions that record only `source.subagent` when a same-workspace parent can be inferred, even after multi-hour gaps.
+- Resume launch AppleScript now receives commands via `osascript` argv instead of source interpolation, reducing script-injection surface.
+- Transcript rendering now uses a bounded transcript cache and preloads Whole Session Raw/Pretty content outside `body` to reduce memory spikes and UI stutter on large sessions.
+- Claude OAuth shared cache writes now apply restrictive POSIX permissions on cache directory and files.
+- IndexDB bootstrap now configures `busy_timeout` and runs schema/bootstrap migration steps inside a single transaction for safer concurrent startup.
+
+## [3.6.1] - 2026-04-13
+
+### Added
+- Cursor resume: Unified Sessions now supports launching Cursor CLI resume directly with automatic `--continue` fallback, plus Copy Resume Command support for Cursor sessions.
+- OpenClaw: Deleted sessions now shown by default with a badge indicating removal.
+- Monitoring: Fresh-session validator v1 — detects and flags staleness traps in the weekly agent_watch dispatch.
+
+### Fixed
+- OpenClaw: Eliminated full-rescan on every app launch; incremental refresh now used consistently.
+- Monitoring: Excluded OpenClaw backup paths from weekly probe to avoid false positives.
+- Cursor: Guarded against non-string role values in schema fingerprinting to prevent crashes on unexpected transcript shapes.
+- Monitoring: Removed spurious `exit_code` field from stdout in the no-db-found path.
+
+### Maintenance
+- Droid support deprecated; histories remain importable for legacy use.
+- Cursor added to agent_watch weekly monitoring with SQLite probe and schema fingerprinting.
+- Agent version bumps: Claude 2.1.104, Copilot 1.0.24, OpenClaw 2026.4.10.
 
 ## [3.6] - 2026-04-09
 
 ### Added
-- Cursor: Cursor IDE/CLI added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.
+- Cursor: Cursor CLI sessions added as 8th session provider — imports JSONL agent transcripts and SQLite chat databases from `~/.cursor/`. Supports session browsing, search, transcript viewing, subagent hierarchy, and resume command. No Cockpit support in this release.
 - Discoverability: New-provider detection banner appears in the sessions view when a newly supported agent is found on disk but not yet enabled, prompting users to turn it on.
 - Onboarding: Update tour now auto-generates a slide for newly available providers, so users see what's new without digging into preferences.
 - Session sources: `versionIntroduced` and `featureDescription` metadata added to session source model for use in discoverability and onboarding flows.
@@ -71,8 +270,8 @@ All notable changes to this project will be documented in this file.
 - Performance: Analytics indexing work is decoupled from routine provider refresh paths so Unified/Cockpit stay responsive when Analytics is idle.
 - Performance: Core session indexing now uses a lower-impact foreground execution profile, reduced focused-session monitor cadence, and no longer cancels in-flight refreshes when the app deactivates.
 - Unified toolbar: Refresh indicator now explicitly represents core session indexing (not analytics), with clearer status/help copy to distinguish it from Analytics index builds.
-- Performance: Automatic core refresh monitors now pause while the app is foreground/active and resume in background, reducing sustained CPU and avoiding near-continuous "indexing" status during active Unified use.
-- Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic "refreshing" message.
+- Performance: Automatic core refresh monitors now pause while the app is foreground/active and resume in background, reducing sustained CPU and avoiding near-continuous “indexing” status during active Unified use.
+- Unified footer: Core indexing status now shows live session progress (`X/Y` and `%`) instead of a generic “refreshing” message.
 - Unified filters: Toggling agent pills in the toolbar is now filter-only and no longer auto-triggers index refreshes.
 - Indexing UX: Background monitor refreshes now surface as lightweight syncing status, while launch/manual indexing keeps stable progress messaging.
 - Indexing reliability: Core indexers now persist their own per-source file-stat baselines and restore them on startup, preventing large false re-sync runs after restart when only a few sessions changed.
@@ -83,9 +282,10 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Analytics: Build lifecycle UI now includes not-built, building, canceled, failed, and stale states with visible progress details (percent, sessions processed, source progress, and indexed date span).
 - Session list: Subagent sessions now show an `s` indicator in flat list view so they are identifiable without the hierarchy expanded. The indicator is hidden in hierarchy view where nesting already conveys subagent status.
-- Agent Cockpit: Limits bar now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
+- Agent Cockpit: Quota Meter now auto-expands the detail panel when any quota indicator is amber/red and reset times no longer fit inline, so constrained usage is always visible without a hover.
 - Codex: Session custom titles are now parsed from `session_index.jsonl` (`thread_name` field) using a lock-protected mtime/size/path cache and tail-read for large files.
 - Copilot: Session custom titles are now parsed from `workspace.yaml` (`name` field), gated to directory-based layouts to prevent cross-session contamination.
+- OpenCode: Stored session titles, including names set with `/rename`, now populate custom session titles for SQLite and JSON-backed sessions.
 - Claude: Custom session titles set via the `/rename` CLI command are now reliably restored after relaunch.
 
 ### Fixed
@@ -663,6 +863,7 @@ All notable changes to this project will be documented in this file.
 - Transcript: Rename view mode buttons to Session/Text/JSON, align them with HIG-style leading padding, and space the session ID control.
 - Menu Bar: When usage data is stale, reset indicators now show “n/a” instead of an incorrect countdown.
 - Claude Usage: Refresh usage automatically after wake when the usage strip or menu bar label is visible.
+- Claude Usage: Keep a timed retry active while Cockpit, footer, or menu usage surfaces are visible after OAuth failures so limits refresh without waiting for a Claude terminal prompt to update credentials.
 - Menu Bar: Show an updating spinner next to reset indicators while probes run.
 - Search: Unified Search now accepts quoted repo/path filters with spaces.
 - Claude/Codex Usage: Add a conservative startup sweep for probe tmux servers and harden cleanup/timeouts to avoid orphaned CLI processes after stalled probes or restarts.
