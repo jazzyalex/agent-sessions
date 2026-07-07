@@ -2239,6 +2239,11 @@ actor CodexStatusService {
     // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.
     // Returns diagnostics; merges snapshot on success.
     func forceProbeNow() async -> CodexProbeDiagnostics {
+        if Self.shouldSuppressStatusProbe(currentAuthState) {
+            os_log("Codex: suppressing hard /status probe (auth state %{public}@)",
+                   log: log, type: .info, String(describing: currentAuthState))
+            return CodexProbeDiagnostics(success: false, exitCode: 126, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probe suppressed: signed out or CLI not installed")
+        }
         guard !FeatureFlags.disableCodexProbes else {
             return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
         }

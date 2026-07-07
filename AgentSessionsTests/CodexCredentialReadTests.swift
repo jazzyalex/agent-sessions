@@ -2,6 +2,10 @@ import XCTest
 @testable import AgentSessions
 
 final class CodexCredentialReadTests: XCTestCase {
+    override func tearDown() {
+        unsetenv("AS_TEST_CODEX_AUTH_PATH")
+        super.tearDown()
+    }
     func testMissingFileIsAbsent() {
         setenv("AS_TEST_CODEX_AUTH_PATH", "/nonexistent/authXYZ.json", 1)
         XCTAssertEqual(CodexOAuthCredentials().resolveRead(), .absent)

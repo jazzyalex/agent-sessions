@@ -39,4 +39,13 @@ final class CodexAuthClassifierTests: XCTestCase {
         XCTAssertEqual(c.classify(cliStatus: .signedIn, creds: .present(tok()), lastFetch: nil, binaryPresent: true, now: t0.addingTimeInterval(5)), .ok)
         XCTAssertEqual(c.classify(cliStatus: .signedOut, creds: .absent, lastFetch: nil, binaryPresent: true, now: t0.addingTimeInterval(65)), .unknown)
     }
+    func testSuccessfulFetchOverridesAbsentCreds() {
+        // auth.json deleted without logout: disk .absent, but a cached fetch still succeeds.
+        let c = CodexAuthClassifier()
+        let t0 = Date(timeIntervalSince1970: 400)
+        XCTAssertEqual(c.classify(cliStatus: .unknown, creds: .absent,
+                                  lastFetch: .ok(CodexUsageSnapshot()), binaryPresent: true, now: t0), .ok)
+        XCTAssertEqual(c.classify(cliStatus: .unknown, creds: .absent,
+                                  lastFetch: .ok(CodexUsageSnapshot()), binaryPresent: true, now: t0.addingTimeInterval(120)), .ok)
+    }
 }

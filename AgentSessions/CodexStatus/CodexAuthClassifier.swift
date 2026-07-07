@@ -15,6 +15,10 @@ final class CodexAuthClassifier {
         // Verified 401 with a token present ⇒ expired (regardless of CLI status).
         if hasToken, case .unauthorized? = lastFetch { firstMissAt = nil; return .expired }
 
+        // A successful fetch proves the account works even if the creds file was
+        // just removed (the fetcher may still be serving a cached token).
+        if case .ok? = lastFetch { firstMissAt = nil; return .ok }
+
         // Deterministic: binary genuinely absent AND no token anywhere → not installed.
         if !binaryPresent && !hasToken { firstMissAt = nil; return .cliNotInstalled }
 
