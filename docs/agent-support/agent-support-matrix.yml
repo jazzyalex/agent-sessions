@@ -1,6 +1,6 @@
-agent_sessions_version: 3.9.3
-as_of_commit: 8cb5c6ca
-as_of_date: 2026-06-24
+agent_sessions_version: 4.2
+as_of_commit: c62d81aa
+as_of_date: 2026-07-07
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -29,24 +29,25 @@ notes:
   - "2026-06-24 full format check: bumped Codex 0.136.0->0.142.0, Claude 2.1.161->2.1.190, OpenCode 1.15.13->1.17.9, Copilot 1.0.59->1.0.64, and Pi 0.78.0->0.80.1 from fresh real-session evidence. Pi remains supports_installed_only because upstream is 0.80.2. Antigravity 1.0.11 and OpenClaw 2026.6.9 initially remained blocked by stale/failed prebump evidence; Cursor 2026.6.24 and Hermes 0.17.0 remained upstream candidates pending latest-build validation."
   - "2026-06-26 session-format follow-up: bumped Codex 0.142.0->0.142.2, Claude 2.1.190->2.1.193 (additive user.origin object), and OpenCode 1.17.9->1.17.11 (additive part.compaction type plus message.assistant error/variant and part.text metadata/synthetic keys). Baseline fixtures updated; both parsers preserve unknown families via metadata/default branches, so no parser/UI change. Codex monitoring_broken was a transient codex_status_capture.sh timeout (exit 124), not format drift — fresh 0.142.2 prebump scripts/probe_scan_output/agent_watch/20260626-205841Z-prebump/report.json matched baseline. Antigravity prebump rerun with --allow-real-home stays blocked (antigravity_no_brain_artifact), verified held at 1.0.9. Weekly report scripts/probe_scan_output/agent_watch/20260626-205030Z/report.json reports matches_baseline=True with no unknown types/keys for Codex, Claude, and OpenCode."
   - "2026-06-26 CLI refresh follow-up: updated Copilot->1.0.65 (brew), OpenClaw->2026.6.10 (npm), Cursor->2026.06.24 (install script), and Pi->0.80.2 (npm), then bumped verified Copilot 1.0.64->1.0.65, Cursor 2026.6.2->2026.6.24, and Pi 0.80.1->0.80.2 (OpenClaw already at 2026.6.10). Fresh prebump matched baseline for Copilot (GITHUB_TOKEN forwarded), Pi, and OpenClaw (--allow-real-home). Cursor 2026.06.24 added a roleless turn_ended line ({type, status}) that the role-based fingerprinter buckets under assistant; covered by adding a turn_ended line to the cursor small fixture (parser already handles roleless lines via its fallback branch). Final weekly report scripts/probe_scan_output/agent_watch/20260626-210811Z/report.json reports supports_latest for Codex, Copilot, OpenClaw, Pi, and Hermes, and matches_baseline=True with no unknown types/keys for Cursor."
+  - "2026-07-07 weekly format check: bumped Codex 0.142.2->0.142.5 and Claude 2.1.193->2.1.202 (fresh weekly evidence, no schema drift), OpenCode 1.17.11->1.17.13 and Pi 0.80.2->0.80.3 (prebump matched baseline), and Antigravity 1.0.12->1.0.14 and OpenClaw 2026.6.10->2026.6.11 (prebump matched baseline with --allow-real-home after sandbox auth failed). All six matched baseline with no unknown types/keys; no parser, fixture, or UI changes needed. Copilot 1.0.68, Hermes 0.18.0, and Cursor 2026.7.1 remain upstream candidates not yet installed locally. Weekly report scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json; prebump reports 20260707-195618Z-prebump (opencode/pi) and 20260707-200058Z-prebump (antigravity/openclaw)."
   - "2026-06-24 targeted follow-up: updated OpenClaw 2026.6.9->2026.6.10 after openclaw doctor --fix and a fresh local-agent prebump matched baseline; updated Hermes 0.15.1->0.17.0 after hermes update and a fresh state.db prebump matched baseline. Final weekly report scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json reports supports_latest for OpenClaw and Hermes. Antigravity 1.0.11 is current but remains blocked because agy -p answers without creating a monitored brain markdown artifact. Cursor remains verified at installed 2026.6.2 because cursor-agent update and cursor-agent --print are blocked by headless authentication."
 agents:
   codex_cli:
-    max_verified_version: "0.142.2"
+    max_verified_version: "0.142.5"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.193"
+    max_verified_version: "2.1.202"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/large.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl"
   antigravity:
-    max_verified_version: "1.0.12"
+    max_verified_version: "1.0.14"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
@@ -61,7 +62,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.17.11"
+    max_verified_version: "1.17.13"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -88,7 +89,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
       - "Resources/Fixtures/stage0/agents/hermes/schema_drift.json"
   openclaw:
-    max_verified_version: "2026.6.10"
+    max_verified_version: "2026.6.11"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
@@ -104,7 +105,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.80.2"
+    max_verified_version: "0.80.3"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
     unsupported_surfaces:

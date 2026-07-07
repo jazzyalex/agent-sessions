@@ -9,6 +9,50 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "4.2"
+    as_of_date_utc: "2026-07-07"
+    as_of_commit: "c62d81aa"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.142.5"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.202"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json"]
+      antigravity:
+        sessions:
+          max_verified_version: "1.0.14"
+          evidence: ["Resources/Fixtures/stage0/agents/antigravity/small.md", "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl", "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260707-200058Z-prebump/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.65"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.17.13"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json", "scripts/probe_scan_output/agent_watch/20260707-195618Z-prebump/report.json"]
+      hermes:
+        sessions:
+          max_verified_version: "0.17.0"
+          evidence: ["Resources/Fixtures/stage0/agents/hermes/small.json", "Resources/Fixtures/stage0/agents/hermes/large.json", "Resources/Fixtures/stage0/agents/hermes/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.6.11"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260707-200058Z-prebump/report.json"]
+      cursor:
+        sessions:
+          max_verified_version: "2026.6.24"
+          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json"]
+      pi:
+        sessions:
+          max_verified_version: "0.80.3"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
+          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260707-195618Z-prebump/report.json"]
+    notes:
+      - "2026-07-07 weekly format check (report scripts/probe_scan_output/agent_watch/20260707-195510Z/report.json): all active agents matched baseline with no unknown types/keys. Bumped Codex 0.142.2->0.142.5 and Claude 2.1.193->2.1.202 from fresh weekly evidence; OpenCode 1.17.11->1.17.13 and Pi 0.80.2->0.80.3 from prebump (scripts/probe_scan_output/agent_watch/20260707-195618Z-prebump/report.json, fresh_matches_baseline=True); Antigravity 1.0.12->1.0.14 and OpenClaw 2026.6.10->2026.6.11 from real-home prebump (scripts/probe_scan_output/agent_watch/20260707-200058Z-prebump/report.json, fresh_matches_baseline=True) after the sandboxed prebump failed on missing auth (antigravity: authentication failed/timed out; openclaw: no OpenAI provider key). No parser, fixture, or UI changes were needed."
+      - "Held at unchanged verified versions: Copilot 1.0.65 (upstream 1.0.68 not installed; weekly schema_diff shows no unknown types/keys), Hermes 0.17.0 (upstream 0.18.0 not installed), Cursor 2026.6.24 (upstream 2026.7.1 not installed)."
   - agent_sessions_version: "3.9.3"
     as_of_date_utc: "2026-06-26"
     as_of_commit: "4eec6a8d"
