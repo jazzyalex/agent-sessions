@@ -1369,7 +1369,7 @@ struct AgentCockpitHUDView: View {
             }
         }
         .buttonStyle(HUDIconButtonStyle(isOn: showModePopover, tint: nil))
-        .help("Switch Agent Cockpit view: Full, Compact, or Quota Meter.")
+        .help("Switch Agent Cockpit view: Full, Compact, or Quota Meter (⇧⌘M cycles).")
         .popover(isPresented: $showModePopover, arrowEdge: .bottom) {
             HUDCockpitModePopover(
                 selectedRaw: hudDisplayModeRaw,
@@ -4298,47 +4298,44 @@ private struct HUDCockpitModePopover: View {
     let selectedRaw: String
     let onSelect: (AgentCockpitHUDDisplayMode) -> Void
 
+    private var selection: AgentCockpitHUDDisplayMode {
+        AgentCockpitHUDDisplayMode(rawValue: selectedRaw) ?? .full
+    }
+
+    // Mirrors HUDRunwayVisibilityPopover's layout exactly: one segmented
+    // picker instead of a row list, so a single click selects the mode.
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Cockpit view")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .kerning(0.4)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
 
-            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
-                let isSelected = mode.rawValue == selectedRaw
-                Button {
-                    onSelect(mode)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: mode.systemImage)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 18)
-                        Text(mode.title)
-                            .font(.system(size: 12, weight: .medium))
-                        Spacer(minLength: 12)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .opacity(isSelected ? 1 : 0)
-                    }
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-                    )
-                    .contentShape(Rectangle())
+            Picker("", selection: Binding(
+                get: { selection },
+                set: { onSelect($0) }
+            )) {
+                ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
+                    Text(mode.shortLabel).tag(mode)
                 }
-                .buttonStyle(.plain)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text("⇧⌘M cycles Full → Compact → Meter while the cockpit is focused.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(8)
-        .frame(width: 200)
+        .padding(12)
+        .frame(width: 236)
     }
 }
 
