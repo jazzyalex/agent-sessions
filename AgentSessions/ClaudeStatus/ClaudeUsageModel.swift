@@ -47,6 +47,11 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var loginRequired: Bool = false
     @Published var setupRequired: Bool = false
     @Published var setupHint: String? = nil
+    // Task 9b auth-verdict surfaces, fed by ClaudeAuthClassifier via the
+    // availability handler. `authStatus` carries the headline/remediation;
+    // `showAuthBanner` mirrors `state.isAlarming` (signed out / expired / no CLI).
+    @Published var authStatus: UsageAuthStatus?
+    @Published var showAuthBanner: Bool = false
     @Published var isUpdating: Bool = false
     @Published var lastSuccessAt: Date? = nil
     @Published var dataIsStale: Bool = false
@@ -167,6 +172,23 @@ final class ClaudeUsageModel: ObservableObject {
         return ClaudeUsageMode(rawValue: raw) ?? .auto
     }
 
+    /// Applies a service-availability update to the published surfaces. Extracted
+    /// from the availability handler closure so the Task 9b auth-verdict mapping
+    /// is unit-testable without a subprocess/network. The auth fields are only
+    /// written when the emit actually carries a verdict, so legacy tmux/probe
+    /// emits (authState == nil) don't disturb the banner.
+    func applyAvailability(_ availability: ClaudeServiceAvailability) {
+        cliUnavailable = availability.cliUnavailable
+        tmuxUnavailable = availability.tmuxUnavailable
+        loginRequired = availability.loginRequired
+        setupRequired = availability.setupRequired
+        setupHint = availability.setupHint
+        if let state = availability.authState {
+            authStatus = UsageAuthStatus.make(provider: .claude, state: state)
+            showAuthBanner = state.isAlarming
+        }
+    }
+
     private func start() {
         guard !AppRuntime.isRunningTests else { return }
         let model = self
@@ -182,11 +204,7 @@ final class ClaudeUsageModel: ObservableObject {
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates.
                 await Task.yield()
-                model.cliUnavailable = availability.cliUnavailable
-                model.tmuxUnavailable = availability.tmuxUnavailable
-                model.loginRequired = availability.loginRequired
-                model.setupRequired = availability.setupRequired
-                model.setupHint = availability.setupHint
+                model.applyAvailability(availability)
             }
         }
 
@@ -579,4 +597,8 @@ struct ClaudeServiceAvailability {
     var loginRequired: Bool = false
     var setupRequired: Bool = false
     var setupHint: String? = nil
+    /// Full auth verdict (Task 9b). Carries states the legacy bools can't
+    /// express (notably `.expired`); `nil` means "no auth update in this emit"
+    /// so existing constructions and callers that don't classify stay valid.
+    var authState: UsageAuthState? = nil
 }

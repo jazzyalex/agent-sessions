@@ -67,6 +67,10 @@ actor ClaudeUsageSourceManager {
     /// gates the tmux fallback so a signed-out account never spawns a hanging probe.
     private var currentAuthState: UsageAuthState = .unknown
 
+    /// Single long-lived classifier instance — it is STATEFUL (debounces the
+    /// `signedOut` verdict across polls), so it must never be re-created per call.
+    private let authClassifier = ClaudeAuthClassifier()
+
     /// The tmux `/usage` probe hangs on a login screen when the account is signed
     /// out or the CLI is absent, so it must never run in those states.
     static func shouldSuppressTmuxFallback(_ state: UsageAuthState) -> Bool {
@@ -275,9 +279,12 @@ actor ClaudeUsageSourceManager {
             }
 
             publish(snapshot)
+            // Success is authoritative on its own — do NOT run the classifier here
+            // (it would spend a subprocess and could debounce-flip a good login).
             currentAuthState = .ok
             availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
-                                                           loginRequired: false, setupRequired: false, setupHint: nil))
+                                                           loginRequired: false, setupRequired: false, setupHint: nil,
+                                                           authState: .ok))
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 
@@ -398,6 +405,63 @@ actor ClaudeUsageSourceManager {
         if mode != .tmuxOnly && mode != .webOnly {
             scheduleOAuthRetry()
         }
+
+        // Compute + publish the auth verdict on every failure — including the
+        // serve-stale / degraded paths above — so a signed-out user is detected
+        // even while cached data is still being displayed. `was401` distinguishes
+        // an expired-but-present token from a genuinely absent one.
+        await classifyAndPublishAuthState(was401: reason.contains("401"))
+    }
+
+    /// The second (and only other) writer of `currentAuthState` besides the
+    /// OAuth-success `.ok` path. Runs on failed/degraded polls: a verified 401
+    /// while a token still exists is an `.expired` session; a 401 after the
+    /// token vanished — or any other failure — defers to the stateful classifier.
+    /// Then it publishes the verdict and tears down a live tmux fallback if the
+    /// new state is one the probe must never run in (signed out / CLI missing).
+    private func classifyAndPublishAuthState(was401: Bool) async {
+        // Token evidence (cheap, no subprocess): keychain read + creds-file check.
+        let keychain = await tokenResolver.resolveKeychainRead()
+        let credsFilePresentToken = await tokenResolver.credsFileHasToken()
+        let hasToken: Bool = {
+            if case .found = keychain { return true }
+            return credsFilePresentToken
+        }()
+
+        let state: UsageAuthState
+        if was401 && hasToken {
+            // A verified 401 with a token still present = expired credentials.
+            state = .expired
+        } else {
+            // Non-401 failure, or a 401 after the token vanished (really signed
+            // out): run the full stateful classifier for a debounced verdict.
+            let cliStatus = await CLIAuthStatusProbe.probeClaudeAuthStatus()
+            let override = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
+            let binaryPresent = ClaudeCLIEnvironment().resolveBinary(customPath: override) != nil
+            state = authClassifier.classify(
+                ClaudeAuthInputs(cliStatus: cliStatus,
+                                 keychain: keychain,
+                                 credsFilePresentToken: credsFilePresentToken,
+                                 binaryPresent: binaryPresent),
+                now: Date()
+            )
+        }
+
+        currentAuthState = state
+        if Self.shouldSuppressTmuxFallback(state), usingTmuxFallback {
+            await deactivateTmuxFallback()
+        }
+
+        // Keep the legacy bools coherent with the verdict so current UI stays in
+        // sync while the full auth banner (authState) rolls out.
+        availabilityHandler?(ClaudeServiceAvailability(
+            cliUnavailable: state == .cliNotInstalled,
+            tmuxUnavailable: false,
+            loginRequired: state == .signedOut,
+            setupRequired: false,
+            setupHint: nil,
+            authState: state
+        ))
     }
 
     private func scheduleOAuthRetry() {

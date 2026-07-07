@@ -109,6 +109,14 @@ actor ClaudeOAuthTokenResolver {
         await runSecurityCommand(service: "Claude Code-credentials")
     }
 
+    /// Whether `~/.claude/.credentials.json` currently holds a usable token.
+    /// Feeds the auth-health classifier's `credsFilePresentToken` input. Reuses
+    /// the private `resolveFromCredentialsFile` read/parse so token extraction
+    /// lives in exactly one place (mirrors `resolveKeychainRead` for keychain).
+    func credsFileHasToken() -> Bool {
+        resolveFromCredentialsFile() != nil
+    }
+
     static func classifyKeychain(exitCode: Int32?, timedOut: Bool, stdout: String?) -> KeychainRead {
         if timedOut { return .unreadable }
         switch exitCode {
