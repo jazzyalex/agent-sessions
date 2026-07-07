@@ -142,6 +142,8 @@ enum CodexLimitsSource: String, Equatable {
 @MainActor
 final class CodexUsageModel: ObservableObject {
     static let shared = CodexUsageModel()
+    /// Task 10: shared one-shot signed-out notifier (see `AuthStatusNotifier.swift`).
+    static let authNotifier = AuthStatusNotifier.shared
 
     @Published var fiveHourRemainingPercent: Int = 0
     @Published var fiveHourResetText: String = ""
@@ -547,8 +549,12 @@ final class CodexUsageModel: ObservableObject {
     /// Pure mapping from an auth verdict to the two published surfaces. Kept
     /// separate and internal so it is unit-testable with no subprocess/network.
     func applyAuthState(_ state: UsageAuthState) {
-        authStatus = UsageAuthStatus.make(provider: .codex, state: state)
+        let s = UsageAuthStatus.make(provider: .codex, state: state)
+        authStatus = s
         showAuthBanner = state.isAlarming
+        if !AppRuntime.isRunningTests {
+            Task { await Self.authNotifier.onStatus(s, provider: .codex) }
+        }
     }
 
     /// Gathers the classifier's IO inputs off the main actor. A successful

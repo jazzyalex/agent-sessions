@@ -34,6 +34,8 @@ struct ClaudeUsageSnapshot: Equatable {
 @MainActor
 final class ClaudeUsageModel: ObservableObject {
     static let shared = ClaudeUsageModel()
+    /// Task 10: shared one-shot signed-out notifier (see `AuthStatusNotifier.swift`).
+    static let authNotifier = AuthStatusNotifier.shared
 
     @Published var sessionRemainingPercent: Int = 0
     @Published var sessionResetText: String = ""
@@ -186,6 +188,9 @@ final class ClaudeUsageModel: ObservableObject {
         if let state = availability.authState {
             authStatus = UsageAuthStatus.make(provider: .claude, state: state)
             showAuthBanner = state.isAlarming
+            if !AppRuntime.isRunningTests {
+                Task { await Self.authNotifier.onStatus(UsageAuthStatus.make(provider: .claude, state: state), provider: .claude) }
+            }
         }
     }
 
