@@ -249,6 +249,7 @@
 		9FFD45BF7DBBF7F2C4BBEB13 /* PiResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B8EE5C41DFBD89E0EAD5976 /* PiResumeCommandBuilder.swift */; };
 		A00457B84FF6B860C15CAFD2 /* MarkdownBodyRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A047A92B44E789AEC825C2D6 /* MarkdownBodyRenderer.swift */; };
 		A00C5D82ECF78816C5F23742 /* ClaudeRunwayTokenActivityParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 389079ECB645543E0ECC7212 /* ClaudeRunwayTokenActivityParser.swift */; };
+		A04EC5C01C18611179B60046 /* ClaudeAuthClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520EA2A47376978BF4DA3B70 /* ClaudeAuthClassifier.swift */; };
 		A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */; };
 		A3C610591762D812570A3471 /* ClaudeUsageSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC634024CF768951D08698DC /* ClaudeUsageSnapshotStoreTests.swift */; };
 		A3FBC9D1215900A5DB1DBDAF /* UsageAuthStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44D1929C2B6C30D94E20497 /* UsageAuthStatus.swift */; };
@@ -367,6 +368,7 @@
 		CLC000010000000000000003 /* claude_usage_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000003 /* claude_usage_capture.sh */; };
 		CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000004 /* ClaudeUsageStripView.swift */; };
 		D00B6A91ECAF450F6CFD9C2D /* SearchIngestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76C57B79C5527E50719ADBB /* SearchIngestTests.swift */; };
+		D0CFF111B559BC4E97E66549 /* ClaudeAuthClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE85475F0B2EEDB639B0F200 /* ClaudeAuthClassifierTests.swift */; };
 		D1279A32A63675F7592613C1 /* OpenCodeResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F7F485EB415C40F4533771 /* OpenCodeResumeCoordinator.swift */; };
 		D1A70AA26A84E5A96A46FF1A /* PlanParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68930CCDC4EBA0C325FB9DEE /* PlanParser.swift */; };
 		D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9C4C1F0A1B24C7DA0D1E2F3 /* ResumeHealthCheck.swift */; };
@@ -588,6 +590,7 @@
 		4FDF7F775847439915BB0C6C /* PreferencesView+Layout.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "PreferencesView+Layout.swift"; path = "AgentSessions/Views/Preferences/PreferencesView+Layout.swift"; sourceTree = SOURCE_ROOT; };
 		5138EDB01FF036310A5A28AC /* ToolTextBlockNormalizerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ToolTextBlockNormalizerTests.swift; sourceTree = SOURCE_ROOT; };
 		51D4C7236AF88FD7A139C43B /* HermesCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Hermes/HermesCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
+		520EA2A47376978BF4DA3B70 /* ClaudeAuthClassifier.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeAuthClassifier.swift; sourceTree = SOURCE_ROOT; };
 		52343E9958A54E9987227D4A /* AnalyticsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsData.swift; sourceTree = "<group>"; };
 		527A1A8682B82A8E04DEE8E5 /* CoreSessionMetaTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/CoreSessionMetaTests.swift; sourceTree = SOURCE_ROOT; };
 		52D41C7E29CA7A68BEC72BA4 /* AppearanceHostingView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/AppearanceHostingView.swift; sourceTree = SOURCE_ROOT; };
@@ -885,6 +888,7 @@
 		FBB289E92C36F110C2431FEF /* RenderedBody.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/RenderedBody.swift; sourceTree = SOURCE_ROOT; };
 		FD4DB1D386011AE92EE08483 /* StarredSessionsStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/StarredSessionsStore.swift; sourceTree = SOURCE_ROOT; };
 		FE67A3FD2DFC511CF301F796 /* AntigravityResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/AntigravityResume/AntigravityResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
+		FE85475F0B2EEDB639B0F200 /* ClaudeAuthClassifierTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeAuthClassifierTests.swift; sourceTree = SOURCE_ROOT; };
 		FF31F563529F4552B7B205FD /* UpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdaterController.swift; path = AgentSessions/Update/UpdaterController.swift; sourceTree = SOURCE_ROOT; };
 		FF4F664364626B00C234240A /* CursorTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CursorResume/CursorTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
 		GEM000010000000000000001 /* AntigravitySessionDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AntigravitySessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
@@ -1254,6 +1258,7 @@
 			isa = PBXGroup;
 			children = (
 				130EBDD6828E6908D270443F /* ClaudeDesktopSessionTitles.swift */,
+				520EA2A47376978BF4DA3B70 /* ClaudeAuthClassifier.swift */,
 			);
 			name = ClaudeStatus;
 			sourceTree = "<group>";
@@ -1443,6 +1448,7 @@
 				7B3029ABE34406658CE5BB26 /* OrphanSweepEscalationTests.swift */,
 				F971741FC16E09106844B759 /* UsageAuthStatusTests.swift */,
 				10B180483734CCCEA78309FB /* KeychainResultTests.swift */,
+				FE85475F0B2EEDB639B0F200 /* ClaudeAuthClassifierTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2381,6 +2387,7 @@
 				BCD9EB551B80A30C9AA5F207 /* TranscriptTurnTiming.swift in Sources */,
 				A6181F78682F0A5A838C94E4 /* InlineImageThumbnailGridView.swift in Sources */,
 				A3FBC9D1215900A5DB1DBDAF /* UsageAuthStatus.swift in Sources */,
+				A04EC5C01C18611179B60046 /* ClaudeAuthClassifier.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2491,6 +2498,7 @@
 				89C4E31B44D938CD0190CA9E /* OrphanSweepEscalationTests.swift in Sources */,
 				9921F07DD723B6756A736C7D /* UsageAuthStatusTests.swift in Sources */,
 				DEDB1FAC1D16EEA550415653 /* KeychainResultTests.swift in Sources */,
+				D0CFF111B559BC4E97E66549 /* ClaudeAuthClassifierTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
