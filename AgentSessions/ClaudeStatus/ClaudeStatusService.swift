@@ -776,6 +776,17 @@ actor ClaudeStatusService {
         tmuxCleanupRetryCounts.removeAll(keepingCapacity: false)
     }
 
+    enum OrphanSweepAction: Equatable { case retryKillServer, escalateSIGKILL, giveUp }
+
+    /// A managed (`as-cc-`) probe whose server is still alive after the retry cap
+    /// must be SIGKILLed rather than skipped forever (fixes multi-day orphan leak).
+    static func orphanSweepAction(isManagedLabel: Bool, attempts: Int,
+                                  maxAttempts: Int, serverAlive: Bool) -> OrphanSweepAction {
+        guard serverAlive else { return .giveUp }
+        if attempts < maxAttempts { return .retryKillServer }
+        return isManagedLabel ? .escalateSIGKILL : .giveUp
+    }
+
     private func runQueuedTmuxCleanupPass() async -> Bool {
         guard tmuxCleanupNextIndex < tmuxCleanupPendingLabels.count else {
             clearTmuxCleanupQueue()
@@ -796,8 +807,42 @@ actor ClaudeStatusService {
                 skipped += 1
                 continue
             }
-            if (tmuxCleanupRetryCounts[label] ?? 0) >= Self.tmuxCleanupMaxKillAttemptsPerLabel {
-                skipped += 1
+            let priorAttempts = tmuxCleanupRetryCounts[label] ?? 0
+            if priorAttempts >= Self.tmuxCleanupMaxKillAttemptsPerLabel {
+                let capSocketState = tmuxSocketState(for: label)
+                let isManaged = Self.tmuxCleanupPlanner.isManagedProbeLabel(label)
+                switch Self.orphanSweepAction(isManagedLabel: isManaged,
+                                               attempts: priorAttempts,
+                                               maxAttempts: Self.tmuxCleanupMaxKillAttemptsPerLabel,
+                                               serverAlive: capSocketState != .stale) {
+                case .giveUp:
+                    if capSocketState == .stale {
+                        removeTmuxSocketFiles(label: label)
+                        tmuxCleanupRetryCounts.removeValue(forKey: label)
+                        staleRemoved += 1
+                    } else {
+                        skipped += 1
+                    }
+                case .escalateSIGKILL:
+                    // Retry cap exhausted but the probe server is still alive and managed
+                    // by us: SIGKILL the underlying processes instead of skipping forever.
+                    let fallbackPIDs = managedProbePIDs(for: label)
+                    for pid in fallbackPIDs {
+                        await terminateProcessGroup(pid: pid)
+                    }
+                    if tmuxSocketState(for: label) != .live {
+                        removeTmuxSocketFiles(label: label)
+                        tmuxCleanupRetryCounts.removeValue(forKey: label)
+                        staleRemoved += 1
+                    } else {
+                        tmuxCleanupRetryCounts[label, default: 0] += 1
+                        skipped += 1
+                    }
+                case .retryKillServer:
+                    // Unreachable once attempts >= maxAttempts, but fall back to a normal
+                    // retry rather than silently dropping the label.
+                    liveCandidates.append(label)
+                }
                 continue
             }
             let socketState = tmuxSocketState(for: label)
