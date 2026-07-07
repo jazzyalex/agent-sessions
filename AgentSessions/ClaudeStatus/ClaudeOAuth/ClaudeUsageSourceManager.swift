@@ -63,6 +63,16 @@ actor ClaudeUsageSourceManager {
     private let store: ClaudeUsageSnapshotStore
     private var tmuxAdapter: ClaudeTmuxUsageFallbackAdapter?
 
+    /// Current auth verdict for this provider. Fed by ClaudeUsageModel/Task 9;
+    /// gates the tmux fallback so a signed-out account never spawns a hanging probe.
+    private var currentAuthState: UsageAuthState = .unknown
+
+    /// The tmux `/usage` probe hangs on a login screen when the account is signed
+    /// out or the CLI is absent, so it must never run in those states.
+    static func shouldSuppressTmuxFallback(_ state: UsageAuthState) -> Bool {
+        state == .signedOut || state == .cliNotInstalled
+    }
+
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
         self.store = store
     }
@@ -265,6 +275,9 @@ actor ClaudeUsageSourceManager {
             }
 
             publish(snapshot)
+            currentAuthState = .ok
+            availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
+                                                           loginRequired: false, setupRequired: false, setupHint: nil))
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 
@@ -581,6 +594,11 @@ actor ClaudeUsageSourceManager {
     // MARK: - Tmux Fallback
 
     private func activateTmuxFallback(reason: String) async {
+        if Self.shouldSuppressTmuxFallback(currentAuthState) {
+            os_log("ClaudeOAuth: suppressing tmux fallback (auth state %{public}@)",
+                   log: log, type: .info, String(describing: currentAuthState))
+            return
+        }
         guard tmuxAdapter == nil else { return }
         os_log("ClaudeOAuth: activating tmux fallback: %{public}@", log: log, type: .info, reason)
         usingTmuxFallback = true
@@ -624,6 +642,18 @@ actor ClaudeUsageSourceManager {
         await adapter.stop()
         tmuxAdapter = nil
         usingTmuxFallback = false
+    }
+
+    /// Called by the auth classifier (Task 9) whenever its verdict changes. Tears
+    /// down a live tmux fallback the moment we transition into a suppressed state
+    /// (signed out / CLI missing) so a signed-out account never keeps a hanging
+    /// probe running in the background.
+    func updateAuthState(_ state: UsageAuthState) async {
+        let previous = currentAuthState
+        currentAuthState = state
+        if Self.shouldSuppressTmuxFallback(state), !Self.shouldSuppressTmuxFallback(previous), usingTmuxFallback {
+            await deactivateTmuxFallback()
+        }
     }
 
     // MARK: - Diagnostics
