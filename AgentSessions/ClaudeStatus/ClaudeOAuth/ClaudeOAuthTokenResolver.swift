@@ -3,6 +3,15 @@ import os.log
 
 private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "ClaudeOAuth")
 
+/// Result of a keychain read via the `security` CLI, distinguishing "token
+/// absent" from "keychain unreadable / timed out" so callers (e.g. the
+/// auth-health classifier) never conflate the two into a false "signed out".
+enum KeychainRead: Equatable {
+    case found(String)
+    case notFound
+    case unreadable
+}
+
 // MARK: - OAuth Token Resolver
 //
 // Resolves a Claude OAuth access token from three sources, in priority order:
@@ -86,11 +95,32 @@ actor ClaudeOAuthTokenResolver {
     /// `security` tool rather than AgentSessions, which is more expected for
     /// power users. After "Always Allow", access is completely silent.
     private func resolveFromKeychainCLI() async -> String? {
-        let result = await runSecurityCommand(service: "Claude Code-credentials")
-        return result.flatMap { extractToken(fromJSON: $0) }
+        guard case .found(let raw) = await runSecurityCommand(service: "Claude Code-credentials") else {
+            return nil
+        }
+        return extractToken(fromJSON: raw)
     }
 
-    private func runSecurityCommand(service: String) async -> String? {
+    /// Exposes the raw keychain read outcome (found / not found / unreadable)
+    /// for the auth-health classifier, which — unlike the token-resolution
+    /// path above — needs to distinguish "no token" from "couldn't read the
+    /// keychain" instead of collapsing both to nil.
+    func resolveKeychainRead() async -> KeychainRead {
+        await runSecurityCommand(service: "Claude Code-credentials")
+    }
+
+    static func classifyKeychain(exitCode: Int32?, timedOut: Bool, stdout: String?) -> KeychainRead {
+        if timedOut { return .unreadable }
+        switch exitCode {
+        case .some(0):
+            let t = stdout?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? .notFound : .found(t)
+        case .some(44): return .notFound          // errSecItemNotFound
+        default: return .unreadable
+        }
+    }
+
+    private func runSecurityCommand(service: String) async -> KeychainRead {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", service, "-w"]
@@ -103,7 +133,7 @@ actor ClaudeOAuthTokenResolver {
         do { try process.run() } catch {
             os_log("ClaudeOAuth: security command failed to launch: %{public}@",
                    log: log, type: .error, error.localizedDescription)
-            return nil
+            return .unreadable
         }
 
         // Poll without blocking — process runs fast
@@ -113,12 +143,18 @@ actor ClaudeOAuthTokenResolver {
             try? await Task.sleep(nanoseconds: 100_000_000)
             iterations += 1
         }
-        if process.isRunning { process.terminate(); return nil }
 
-        guard process.terminationStatus == 0 else { return nil }
+        let timedOut = process.isRunning
+        if timedOut { process.terminate() }
 
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let exitCode: Int32? = timedOut ? nil : process.terminationStatus
+        var output: String?
+        if exitCode == 0 {
+            let data = stdout.fileHandleForReading.readDataToEndOfFile()
+            output = String(data: data, encoding: .utf8)
+        }
+
+        return Self.classifyKeychain(exitCode: exitCode, timedOut: timedOut, stdout: output)
     }
 
     /// Extract OAuth access token from a string that is either:
