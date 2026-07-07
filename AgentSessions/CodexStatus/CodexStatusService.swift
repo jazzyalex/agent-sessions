@@ -3,9 +3,12 @@ import Darwin
 import SwiftUI
 import AppKit
 @preconcurrency import UserNotifications
+import os.log
 #if os(macOS)
 import IOKit.ps
 #endif
+
+private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "CodexStatus")
 
 // MARK: - Codex Usage Tracking Architecture Documentation
 //
@@ -1592,6 +1595,17 @@ actor CodexStatusService {
     }()
     private let codexRPCProbe = CodexCLIRPCProbe()
     private var lastStatusProbe: Date? = nil
+
+    /// Current Codex auth verdict (fed by Task 9). Gates the /status tmux probe
+    /// so a signed-out account never spawns the hanging login-screen probe.
+    private var currentAuthState: UsageAuthState = .unknown
+
+    /// The `codex /status` tmux probe hangs on a login screen when signed out or
+    /// the CLI is absent, so it must never run in those states.
+    static func shouldSuppressStatusProbe(_ state: UsageAuthState) -> Bool {
+        state == .signedOut || state == .cliNotInstalled
+    }
+
     private var lastAppliedSourceFilePath: String? = nil
     private var lastAppliedSourceFileMTime: Date? = nil
     private var lastAppliedEventTimestamp: Date? = nil
@@ -2150,6 +2164,12 @@ actor CodexStatusService {
 
     // MARK: - Optional tmux /status probe
     private func maybeProbeStatusViaTMUX(userInitiated: Bool) async {
+        if Self.shouldSuppressStatusProbe(currentAuthState) {
+            os_log("Codex: suppressing /status tmux probe (auth state %{public}@)",
+                   log: log, type: .info, String(describing: currentAuthState))
+            return
+        }
+
         // Probes are strictly secondary: only run when we have NO recent local sessions.
         // With fresh server data (post Nov 24, 2025), "stale" just means "data is old",
         // not "data is inaccurate". We probe to get current usage when user hasn't used Codex recently.
@@ -2207,6 +2227,13 @@ actor CodexStatusService {
         // Persist auto-probe cooldown separately from UI freshness so a successful
         // probe does not make old data appear freshly updated for the whole window.
         setCodexAutoProbeCooldown(until: now.addingTimeInterval(automaticProbeCooldownSeconds))
+    }
+
+    /// Called by the auth classifier (Task 9) whenever its verdict changes. Codex has
+    /// no live tmux fallback adapter to tear down (unlike Claude) — a currently running
+    /// probe is a one-shot — so updating the state is enough to prevent the NEXT probe.
+    func updateAuthState(_ state: UsageAuthState) {
+        currentAuthState = state
     }
 
     // Hard-probe entry point: forces a tmux /status probe regardless of staleness or prefs.
