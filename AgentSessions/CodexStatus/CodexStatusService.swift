@@ -173,7 +173,20 @@ final class CodexUsageModel: ObservableObject {
     @Published var resetCredits: [CodexResetCredit] = []
     @Published var resetCreditsLastFetch: Date? = nil
 
+    // MARK: - Auth health (Task 9b)
+    /// Published Codex auth verdict. `nil` until the first poll computes one.
+    /// Drives the sign-in / expired / not-installed banner copy.
+    @Published var authStatus: UsageAuthStatus?
+    /// True when `authStatus.state` is alarming (signed out / expired / CLI not
+    /// installed) and the loud banner should be shown.
+    @Published var showAuthBanner: Bool = false
+
     private var service: CodexStatusService?
+    /// Single long-lived Codex auth classifier. STATEFUL (debounces the
+    /// signed-out verdict), so it MUST be exactly one instance living in one
+    /// isolation domain — the main actor. `classify` runs here; the async/IO
+    /// inputs are gathered off-main first (see `gatherAuthInputs`).
+    private let authClassifier = CodexAuthClassifier()
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var isEnabled: Bool = false
@@ -415,7 +428,17 @@ final class CodexUsageModel: ObservableObject {
                 model.cliUnavailable = unavailable
             }
         }
-        let service = CodexStatusService(updateHandler: handler, availabilityHandler: availabilityHandler)
+        // Fired once per poll with that poll's fetch result. Hops to the main
+        // actor to run the single classifier + publish, then feeds the verdict
+        // back to the service (short-circuit) — see `handleAuthFetchResult`.
+        let authFetchResultHandler: @Sendable (CodexUsageFetchResult) -> Void = { result in
+            Task { @MainActor in
+                await model.handleAuthFetchResult(result)
+            }
+        }
+        let service = CodexStatusService(updateHandler: handler,
+                                         availabilityHandler: availabilityHandler,
+                                         authFetchResultHandler: authFetchResultHandler)
         self.service = service
         Task.detached {
             await service.start()
@@ -494,6 +517,55 @@ final class CodexUsageModel: ObservableObject {
         // "usage updated" hook and runs on every poll. The fetcher's own long
         // cooldown gates the network, so calling it here is cheap.
         refreshResetCredits()
+    }
+
+    // MARK: - Auth health computation (Task 9b)
+
+    private struct AuthInputs {
+        let cliStatus: CLIAuthStatus
+        let creds: CodexCredentialRead
+        let binaryPresent: Bool
+    }
+
+    /// Computes and publishes the Codex auth verdict for one completed poll,
+    /// using that poll's `CodexUsageFetchResult`. Async/IO inputs are gathered
+    /// OFF the main actor; the stateful, single-instance `classify` and the
+    /// publishing both run here on the main actor; then the verdict is pushed to
+    /// the service so it can short-circuit the /status tmux probe when signed
+    /// out. Invoked once per poll by the service's `authFetchResultHandler`.
+    func handleAuthFetchResult(_ fetchResult: CodexUsageFetchResult) async {
+        let inputs = await Self.gatherAuthInputs(fetchResult: fetchResult)
+        let state = authClassifier.classify(cliStatus: inputs.cliStatus,
+                                            creds: inputs.creds,
+                                            lastFetch: fetchResult,
+                                            binaryPresent: inputs.binaryPresent,
+                                            now: Date())
+        applyAuthState(state)
+        await service?.updateAuthState(state)
+    }
+
+    /// Pure mapping from an auth verdict to the two published surfaces. Kept
+    /// separate and internal so it is unit-testable with no subprocess/network.
+    func applyAuthState(_ state: UsageAuthState) {
+        authStatus = UsageAuthStatus.make(provider: .codex, state: state)
+        showAuthBanner = state.isAlarming
+    }
+
+    /// Gathers the classifier's IO inputs off the main actor. A successful
+    /// fetch is authoritative on its own: `classify` returns `.ok` from the
+    /// `lastFetch == .ok` path *before* it reads creds/binary/cliStatus, so on a
+    /// healthy poll we skip ALL IO — no auth-file read, no `which` login-shell,
+    /// and no (up to 5s) `codex login status` subprocess. The placeholder inputs
+    /// below are never consulted by `classify` in the `.ok` case.
+    private nonisolated static func gatherAuthInputs(fetchResult: CodexUsageFetchResult) async -> AuthInputs {
+        if case .ok = fetchResult {
+            return AuthInputs(cliStatus: .unknown, creds: .absent, binaryPresent: false)
+        }
+        let creds = CodexOAuthCredentials().resolveRead()
+        let override = UserDefaults.standard.string(forKey: CodexResumeSettings.Keys.binaryOverride)
+        let binaryPresent = CodexCLIEnvironment().resolveBinary(customPath: override) != nil
+        let cliStatus = await CLIAuthStatusProbe.probeCodexLoginStatus()
+        return AuthInputs(cliStatus: cliStatus, creds: creds, binaryPresent: binaryPresent)
     }
 
     private static func alertFreshness(source: CodexLimitsSource?, eventTimestamp: Date?, now: Date = Date()) -> UsageLimitAlertFreshness {
@@ -1571,6 +1643,10 @@ actor CodexStatusService {
 
     private nonisolated let updateHandler: @Sendable (CodexUsageSnapshot) -> Void
     private nonisolated let availabilityHandler: @Sendable (Bool) -> Void
+    /// Fired exactly once per poll with that poll's OAuth fetch result so the
+    /// auth classifier (owned by `CodexUsageModel`) can compute a verdict. Defaults
+    /// to a no-op for the short-lived/fallback services that don't drive UI state.
+    private nonisolated let authFetchResultHandler: @Sendable (CodexUsageFetchResult) -> Void
 
     private var process: Process?
     private var stdinPipe: Pipe?
@@ -1624,9 +1700,11 @@ actor CodexStatusService {
     private var didRunMenuBarOrphanCleanup: Bool = false
 
     init(updateHandler: @escaping @Sendable (CodexUsageSnapshot) -> Void,
-         availabilityHandler: @escaping @Sendable (Bool) -> Void) {
+         availabilityHandler: @escaping @Sendable (Bool) -> Void,
+         authFetchResultHandler: @escaping @Sendable (CodexUsageFetchResult) -> Void = { _ in }) {
         self.updateHandler = updateHandler
         self.availabilityHandler = availabilityHandler
+        self.authFetchResultHandler = authFetchResultHandler
     }
 
     static func cleanupOrphansOnLaunch() async {
@@ -2069,7 +2147,13 @@ actor CodexStatusService {
     /// Primary chain for authoritative limits. JSONL is deliberately excluded here and
     /// remains a fallback-only source handled by the log parsing path.
     private func fetchPreferredRateLimits(oauthSuccessCooldown: TimeInterval) async -> CodexUsageSnapshot? {
-        if let snap = await codexOAuthFetcher.fetchUsage(cooldownSuccess: oauthSuccessCooldown) {
+        // Exactly ONE OAuth fetch per poll. `fetchUsageResult` shares cooldown
+        // state with the old `fetchUsage`, so this is the single call: the
+        // classifier gets the typed result, and non-`.ok` cases fall through to
+        // the CLI-RPC probe exactly like the old `nil` return did.
+        let fetchResult = await codexOAuthFetcher.fetchUsageResult(cooldownSuccess: oauthSuccessCooldown)
+        authFetchResultHandler(fetchResult)
+        if case .ok(let snap) = fetchResult {
             return snap
         }
         if let snap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: oauthSuccessCooldown) {
