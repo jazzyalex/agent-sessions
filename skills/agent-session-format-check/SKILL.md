@@ -47,6 +47,23 @@ legacy severity model, cadence, and escalation workflow that feed into this skil
    - `compatibility.latest_real_session_failure` when a prebump attempt failed
    - `severity` and `recommendation` only as legacy escalation fields
 
+3. **Usage / limits reading (Codex + Claude) — always verify every weekly run.**
+   These drift independently of session schema (see §2), so a clean schema does
+   **not** imply healthy usage reading. Each agent's
+   `results.<agent>.weekly.probes` is a **list**; for every relevant entry confirm
+   `ok == true` and `exit_code == 0`:
+   - Codex — `label == "codex_status_probe"` (parse `codex_status_json`): the
+     active CLI status channel (`five_hour`, `weekly` percent-left). The passive
+     channel is the session JSONL `token_count` / `rate_limits` events, covered by
+     the schema fingerprint above.
+   - Claude — `label == "claude_usage_probe"` (parse `claude_usage_json`): the
+     **authenticated** `/usage` reading (`session_5h`, `week_all_models`,
+     `week_opus`). Also `label == "claude_status"` (parse `claude_status_json`):
+     status.claude.com indicator/incidents.
+   A failed or unparsed usage probe is a usage-format or auth regression even when
+   versions match and the session schema is clean — never skip it, and report each
+   probe's `ok` explicitly rather than collapsing it into the compatibility verdict.
+
 Interpretation:
 - `supports_latest`: latest known build is covered by
   `evidence.fresh_evidence_source == "latest_prebump_report"` and
@@ -135,7 +152,8 @@ Usage and limits tracking can drift **independently** of session schema. Monitor
 - **Passive channel:** session JSONL `token_count` / `rate_limits` event structure.
 - **Active channel (weekly):** `codex_status_capture.sh` output schema — parsed as
   `codex_status_json` by `agent_watch.py`.
-- Check: does `report.json → results.codex.probes[codex_status_probe].ok` return `true`?
+- Check: in `results.codex.weekly.probes` (a list), the entry with
+  `label == "codex_status_probe"` returns `ok == true` and `exit_code == 0`.
   If not, investigate whether Codex changed its status output format.
 
 ### Claude
@@ -143,8 +161,11 @@ Usage and limits tracking can drift **independently** of session schema. Monitor
   `claude_usage_json`.
 - **Context probe:** `./scripts/claude-status --json` records status.claude.com
   indicator/incidents (parsed as `claude_status_json`).
-- Check: `results.claude.probes[claude_usage_probe].ok` — if `false`, the usage API
-  response format may have changed, or authentication may be required.
+- Check: in `results.claude.weekly.probes` (a list), the entry with
+  `label == "claude_usage_probe"` returns `ok == true` — if `false`, the usage API
+  response format may have changed, or authentication may be required. The
+  `label == "claude_status"` entry (parse `claude_status_json`) reports
+  status.claude.com indicator/incidents.
 - If probe health fails (`parsing_failed`, auth required, etc.), treat as **high severity**
   because the UI can break.
 

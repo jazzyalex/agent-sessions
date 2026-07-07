@@ -32,7 +32,8 @@ Key fields per agent in the report:
 - `severity` / `recommendation` — action needed?
 - `evidence.schema_matches_baseline` — does the session format still match fixtures?
 - `evidence.sample_freshness.is_stale` — does the sample predate the installed CLI?
-- `probes[*].ok` — did usage/status probes succeed?
+- `weekly.probes[*].ok` — did the Codex/Claude usage & status probes succeed? Verify
+  `codex_status_probe`, `claude_usage_probe`, and `claude_status` every run (SKILL.md §1 step 3, §2)
 - `weekly.discovery_path_contract` — does the storage layout still match expectations?
 
 ## Full auto-update workflow
@@ -44,6 +45,10 @@ Use this prompt in a new session to run the complete cycle:
 This triggers the following automated sequence:
 
 1. **Weekly scan** — `./scripts/agent_watch.py --mode weekly`
+   - **Usage/limits check (always):** confirm `results.codex.weekly.probes`
+     (`codex_status_probe`) and `results.claude.weekly.probes` (`claude_usage_probe`,
+     `claude_status`) all report `ok=true` / `exit_code=0`. A failed usage probe is a
+     regression even when the session schema is clean — report each explicitly.
 2. **Triage results** by severity:
    - `low` + `bump_verified_version` → safe to bump (if sample is fresh)
    - `medium` + `run_prebump_validator` → sample is stale, run prebump first
