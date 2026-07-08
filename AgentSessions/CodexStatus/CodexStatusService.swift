@@ -192,10 +192,12 @@ final class CodexUsageModel: ObservableObject {
 
     /// Throttle for the success-path authoritative status probe. Holds the last
     /// `CLIAuthStatus` and when it was taken; re-probed at most every
-    /// `cliStatusReprobeInterval` (120s). `nil` until the first success-path
-    /// probe, in which case the throttle returns `.unknown` (→ `.ok`).
+    /// `cliStatusReprobeInterval` (15 min). Kept long to minimize auth-endpoint
+    /// traffic — the failure path detects a genuinely-unusable token promptly;
+    /// this only adds the "signed out but cached token still fetches" warning.
+    /// `nil` until the first success-path probe (→ `.unknown` → `.ok`).
     private var cliStatusCache: (status: CLIAuthStatus, at: Date)?
-    private static let cliStatusReprobeInterval: TimeInterval = 120
+    private static let cliStatusReprobeInterval: TimeInterval = 15 * 60
 
     /// Monotonic verdict generation for the reentrancy guard (I2). Bumped at the
     /// start of each `handleAuthFetchResult`; the captured value gates the

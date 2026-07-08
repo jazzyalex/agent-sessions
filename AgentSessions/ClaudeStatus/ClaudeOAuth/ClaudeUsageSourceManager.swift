@@ -46,12 +46,14 @@ actor ClaudeUsageSourceManager {
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
     // Authoritative CLI-status re-probe throttle on the SUCCESS path: at most
-    // one `claude auth status` subprocess per this interval. A live CLI logout
-    // is surfaced within one poll of the next re-probe (≤120s late) instead of
-    // waiting out the 10-min OAuth token cache while the stale token keeps
-    // fetching. The probe never false-fires, so trusting a `.signedOut` from it
-    // immediately (no debounce) is safe.
-    private static let cliStatusReprobeInterval: TimeInterval = 120
+    // one `claude auth status` subprocess per this interval. Kept deliberately
+    // long (15 min) to minimize auth-endpoint traffic — the failure path already
+    // detects a genuinely-unusable token promptly; this success-path probe only
+    // adds the "CLI signed out but the cached token still fetches" proactive
+    // warning, which does not need to be fast. A live logout is surfaced within
+    // one poll of the next re-probe (≤15 min late). The probe never false-fires,
+    // so trusting a `.signedOut` from it immediately (no debounce) is safe.
+    private static let cliStatusReprobeInterval: TimeInterval = 15 * 60
 
 #if DEBUG
     nonisolated static var refreshIntervalForTesting: TimeInterval {
