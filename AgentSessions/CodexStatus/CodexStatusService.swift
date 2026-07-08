@@ -177,11 +177,11 @@ final class CodexUsageModel: ObservableObject {
 
     // MARK: - Auth health (Task 9b)
     /// Published Codex auth verdict. `nil` until the first poll computes one.
-    /// Drives the sign-in / expired / not-installed banner copy.
+    /// Drives the sign-in / expired / not-installed banner copy. Every live
+    /// surface (usage strip, menu bar, cockpit footer/HUD) reads
+    /// `authStatus?.state.isAlarming` directly, so this is the single published
+    /// auth surface — the old `showAuthBanner` mirror was dead and was removed.
     @Published var authStatus: UsageAuthStatus?
-    /// True when `authStatus.state` is alarming (signed out / expired / CLI not
-    /// installed) and the loud banner should be shown.
-    @Published var showAuthBanner: Bool = false
 
     private var service: CodexStatusService?
     /// Single long-lived Codex auth classifier. STATEFUL (debounces the
@@ -196,6 +196,16 @@ final class CodexUsageModel: ObservableObject {
     /// probe, in which case the throttle returns `.unknown` (→ `.ok`).
     private var cliStatusCache: (status: CLIAuthStatus, at: Date)?
     private static let cliStatusReprobeInterval: TimeInterval = 120
+
+    /// Monotonic verdict generation for the reentrancy guard (I2). Bumped at the
+    /// start of each `handleAuthFetchResult`; the captured value gates the
+    /// publish + `updateAuthState`, so a slower older poll can never clobber a
+    /// verdict from a newer one that started later.
+    private var authGeneration: UInt64 = 0
+    /// Whether the PREVIOUS poll's fetch was `.ok`. A failure→success transition
+    /// invalidates `cliStatusCache` so a stale `.signedOut` can't linger up to
+    /// `cliStatusReprobeInterval` (120s) after a re-login (F5).
+    private var previousAuthFetchWasOK: Bool = false
 
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
@@ -544,6 +554,22 @@ final class CodexUsageModel: ObservableObject {
     /// the service so it can short-circuit the /status tmux probe when signed
     /// out. Invoked once per poll by the service's `authFetchResultHandler`.
     func handleAuthFetchResult(_ fetchResult: CodexUsageFetchResult) async {
+        // Reentrancy guard (I2): overlapping polls (periodic + manual /
+        // hidden→visible) can finish out of order across the `await`s below, and a
+        // stale verdict could clobber a newer one. Capture a monotonic generation
+        // up front; drop the publish + `updateAuthState` at the end if a newer
+        // computation has since started. Only the newest-started poll can publish.
+        authGeneration &+= 1
+        let generation = authGeneration
+
+        // F5 recovery: on a fetch failure→success transition, drop the throttled
+        // CLI-status cache so a stale `.signedOut` can't linger up to
+        // `cliStatusReprobeInterval` (120s) after a re-login. Done synchronously
+        // before any `await`, so it is atomic w.r.t. other main-actor code.
+        let fetchIsOK: Bool = { if case .ok = fetchResult { return true } else { return false } }()
+        if fetchIsOK, !previousAuthFetchWasOK { cliStatusCache = nil }
+        previousAuthFetchWasOK = fetchIsOK
+
         let inputs = await Self.gatherAuthInputs(fetchResult: fetchResult)
         var state = authClassifier.classify(cliStatus: inputs.cliStatus,
                                             creds: inputs.creds,
@@ -563,15 +589,21 @@ final class CodexUsageModel: ObservableObject {
         // Require corroboration from on-disk credentials — override to
         // `.signedOut` only when the probe says signed-out AND the OAuth creds
         // are actually absent. A present token + a parser hiccup stays `.ok`.
+        // The creds read is a synchronous FileManager read; it runs OFF the main
+        // actor via `readCodexCredentials` (this repo is main-thread-stall
+        // sensitive), preserving the two-signal (probe `.signedOut` AND creds
+        // `.absent`) override semantics.
         if case .ok = fetchResult, state == .ok {
             let cli = await throttledCodexAuthStatus()
             if Self.successPathState(cli: cli) == .signedOut,
-               CodexOAuthCredentials().resolveRead() == .absent {
+               await Self.readCodexCredentials() == .absent {
                 state = .signedOut
             }
         }
+        // Drop a stale verdict: a newer poll began while we awaited above.
+        guard generation == authGeneration else { return }
         applyAuthState(state)
-        await service?.updateAuthState(state)
+        await service?.updateAuthState(state, generation: generation)
     }
 
     /// Throttled authoritative `codex login status` probe for the SUCCESS path.
@@ -610,8 +642,15 @@ final class CodexUsageModel: ObservableObject {
     /// separate and internal so it is unit-testable with no subprocess/network.
     func applyAuthState(_ state: UsageAuthState) {
         let s = UsageAuthStatus.make(provider: .codex, state: state)
-        authStatus = s
-        showAuthBanner = state.isAlarming
+        // F7: `applyAuthState` runs every poll but the verdict rarely changes.
+        // Guard the publish so an unchanged status doesn't fire a needless
+        // `objectWillChange` (and the SwiftUI invalidation it triggers) each
+        // poll. The notifier call stays OUTSIDE the guard: it is a stateful
+        // one-shot that dedupes internally, so its per-poll semantics are
+        // preserved regardless of whether the published surface changed.
+        if authStatus != s {
+            authStatus = s
+        }
         if !AppRuntime.isRunningTests {
             Task { await Self.authNotifier.onStatus(s, provider: .codex) }
         }
@@ -637,6 +676,15 @@ final class CodexUsageModel: ObservableObject {
         let binaryPresent = CLIBinaryPresence.codexInstalled(overridePath: override)
         let cliStatus = await CLIAuthStatusProbe.probeCodexLoginStatus()
         return AuthInputs(cliStatus: cliStatus, creds: creds, binaryPresent: binaryPresent)
+    }
+
+    /// Off-main result-typed read of the on-disk Codex auth file for the
+    /// success-path override's credential-agreement gate (I7b). `resolveRead()`
+    /// is a synchronous FileManager read; running it inside this `nonisolated
+    /// async` helper keeps it off the main actor (this repo is main-thread-stall
+    /// sensitive), mirroring how `gatherAuthInputs` reads creds off-main.
+    private nonisolated static func readCodexCredentials() async -> CodexCredentialRead {
+        CodexOAuthCredentials().resolveRead()
     }
 
     private static func alertFreshness(source: CodexLimitsSource?, eventTimestamp: Date?, now: Date = Date()) -> UsageLimitAlertFreshness {
@@ -1745,12 +1793,54 @@ actor CodexStatusService {
 
     /// Current Codex auth verdict (fed by Task 9). Gates the /status tmux probe
     /// so a signed-out account never spawns the hanging login-screen probe.
+    /// This value is fed back fire-and-forget and can be ≥1 poll STALE, so the
+    /// probe methods additionally consult the authoritative throttled probe
+    /// below before spawning (I1).
     private var currentAuthState: UsageAuthState = .unknown
+    /// Highest verdict generation applied to `currentAuthState` (I2). Drops a
+    /// stale write when polls resolve out of order.
+    private var currentAuthStateGeneration: UInt64 = 0
 
-    /// The `codex /status` tmux probe hangs on a login screen when signed out or
-    /// the CLI is absent, so it must never run in those states.
+    /// Throttle cache for the authoritative `codex login status` probe used to
+    /// gate the /status tmux probe (I1). Mirrors the success-path throttle on
+    /// `CodexUsageModel` but lives on the actor so the probe methods can consult
+    /// it without hopping to the main actor. `.unknown` until the first probe;
+    /// re-probed at most once per `cliLoginStatusReprobeInterval`.
+    private var cliLoginStatusCache: (status: CLIAuthStatus, at: Date)?
+    private static let cliLoginStatusReprobeInterval: TimeInterval = 120
+
+    /// The `codex /status` tmux probe hangs on a login screen when signed out,
+    /// the session is expired, or the CLI is absent, so it must never run in
+    /// those states. I3 adds `.expired`: an expired-token re-auth prompt hangs
+    /// the probe exactly like a signed-out login screen.
     static func shouldSuppressStatusProbe(_ state: UsageAuthState) -> Bool {
-        state == .signedOut || state == .cliNotInstalled
+        state == .signedOut || state == .expired || state == .cliNotInstalled
+    }
+
+    /// Authoritative-probe suppression (I1). The `codex login status` probe
+    /// never reports a false `.signedOut` (see `CLIAuthStatusProbe`), so a
+    /// definitive signed-out or missing-binary answer is safe for IMMEDIATE
+    /// suppression — no debounce, regardless of a possibly-stale
+    /// `currentAuthState`. (Expired tokens aren't visible to `login status`;
+    /// those are caught by the `UsageAuthState`-based guard above.)
+    static func shouldSuppressStatusProbe(cliStatus: CLIAuthStatus) -> Bool {
+        cliStatus == .signedOut || cliStatus == .cliMissing
+    }
+
+    /// Throttled authoritative `codex login status` probe (I1). Re-probes at
+    /// most once per `cliLoginStatusReprobeInterval`; between probes returns the
+    /// cached value. An empty cache (first call, e.g. cold start) forces a real
+    /// probe, so the very first probe attempt is gated on an authoritative
+    /// verdict rather than a stale `currentAuthState`. The subprocess is bounded
+    /// (5s) and runs off-main via the `nonisolated` static probe.
+    private func throttledCodexLoginStatus() async -> CLIAuthStatus {
+        let now = Date()
+        if CodexUsageModel.shouldReprobe(lastAt: cliLoginStatusCache?.at, now: now, interval: Self.cliLoginStatusReprobeInterval) {
+            let status = await CLIAuthStatusProbe.probeCodexLoginStatus()
+            cliLoginStatusCache = (status, now)
+            return status
+        }
+        return cliLoginStatusCache?.status ?? .unknown
     }
 
     private var lastAppliedSourceFilePath: String? = nil
@@ -2371,6 +2461,26 @@ actor CodexStatusService {
             }
         }
 
+        // Authoritative pre-spawn gate (I1). `currentAuthState` is fed back
+        // fire-and-forget and can be ≥1 poll STALE, so a freshly signed-out user
+        // with no data reaches here via the `needsProbeOverride` path (which
+        // bypasses cooldown + visibility) with `currentAuthState` still
+        // `.unknown` → the hang-prone /status probe would spawn. Consult the
+        // throttled authoritative probe (bounded 5s, never a false signed-out)
+        // right before spawning; suppress on a definitive signed-out / missing
+        // CLI regardless of `currentAuthState`.
+        let liveCLIStatus = await throttledCodexLoginStatus()
+        if Self.shouldSuppressStatusProbe(cliStatus: liveCLIStatus) {
+            os_log("Codex: suppressing /status tmux probe (authoritative CLI status %{public}@)",
+                   log: log, type: .info, String(describing: liveCLIStatus))
+            // Deliberately do NOT set `lastStatusProbe` here: we never spawned the
+            // tmux probe, and the authoritative subprocess is already throttled to
+            // once per `cliLoginStatusReprobeInterval` (120s). Leaving
+            // `lastStatusProbe` untouched lets a real probe fire promptly after a
+            // re-login instead of waiting out the 30m/4h probe cooldown.
+            return
+        }
+
         let tmuxSnap = await runCodexStatusViaTMUX()
         // Set cooldown timestamp unconditionally so a failed probe doesn't allow
         // an immediate retry on the next tick.
@@ -2387,7 +2497,13 @@ actor CodexStatusService {
     /// Called by the auth classifier (Task 9) whenever its verdict changes. Codex has
     /// no live tmux fallback adapter to tear down (unlike Claude) — a currently running
     /// probe is a one-shot — so updating the state is enough to prevent the NEXT probe.
-    func updateAuthState(_ state: UsageAuthState) {
+    func updateAuthState(_ state: UsageAuthState, generation: UInt64) {
+        // Reentrancy guard (I2): polls resolving out of order can arrive here in
+        // a different order than they started. Drop a write from an older
+        // generation so a stale verdict never clobbers a newer one. Equal is
+        // allowed (idempotent) so a lone in-flight verdict still applies.
+        guard generation >= currentAuthStateGeneration else { return }
+        currentAuthStateGeneration = generation
         currentAuthState = state
     }
 
@@ -2401,6 +2517,16 @@ actor CodexStatusService {
         }
         guard !FeatureFlags.disableCodexProbes else {
             return CodexProbeDiagnostics(success: false, exitCode: 127, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probes disabled by feature flag")
+        }
+        // Authoritative pre-spawn gate (I1): `currentAuthState` above can be
+        // ≥1 poll stale, so also consult the throttled authoritative probe
+        // (bounded 5s, never a false signed-out) before spawning the hang-prone
+        // /status probe.
+        let liveCLIStatus = await throttledCodexLoginStatus()
+        if Self.shouldSuppressStatusProbe(cliStatus: liveCLIStatus) {
+            os_log("Codex: suppressing hard /status probe (authoritative CLI status %{public}@)",
+                   log: log, type: .info, String(describing: liveCLIStatus))
+            return CodexProbeDiagnostics(success: false, exitCode: 126, scriptPath: "(not run)", workdir: CodexProbeConfig.probeWorkingDirectory(), codexBin: nil, tmuxBin: nil, timeoutSecs: nil, stdout: "", stderr: "Probe suppressed: CLI signed out or not installed")
         }
         let (snap, diag) = await runCodexStatusViaTMUXAndCollect()
         _ = CodexProbeCleanup.cleanupNowIfAuto()

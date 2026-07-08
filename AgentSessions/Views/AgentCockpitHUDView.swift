@@ -3856,6 +3856,25 @@ private struct HUDLimitsBar: View {
         return out
     }
 
+    /// True when any shown provider needs auth remediation — HUDLimitsBarContent
+    /// swaps that provider's meter text for the compact AuthRemediationBanner
+    /// (icon + headline + command chip + Copy button), which is taller than a
+    /// plain meter row.
+    private var hasAlarmingAuth: Bool {
+        entries.contains { $0.authStatus?.state.isAlarming == true }
+    }
+
+    /// Signed-in bar keeps its exact 22pt clipped look (unchanged). When a
+    /// provider is alarming, the compact banner's content (~19pt) plus its own
+    /// 4pt top/bottom padding needs ~27pt, so grow the row just enough to clear
+    /// it without clipping the command chip / Copy button.
+    private var barContentHeight: CGFloat { hasAlarmingAuth ? 28 : 22 }
+
+    /// Divider rectangle (0.5pt) + bar content height — used both for the bar's
+    /// own frame and to keep the expanded panel's alignment offset in sync when
+    /// the bar grows for an alarming auth banner.
+    private var barTotalHeight: CGFloat { barContentHeight + 0.5 }
+
     var body: some View {
         if entries.isEmpty {
             EmptyView()
@@ -3866,7 +3885,7 @@ private struct HUDLimitsBar: View {
                     .frame(height: 0.5)
                 HUDLimitsBarContent(entries: entries, mode: mode, now: clockNow)
                     .id(contentRefreshID)
-                    .frame(height: 22)
+                    .frame(height: barContentHeight)
                     .clipped()
                     .onPreferenceChange(LimitsBarVariantKey.self) { activeVariant = $0 }
             }
@@ -3889,13 +3908,13 @@ private struct HUDLimitsBar: View {
             .overlay(alignment: .bottom) {
                 if shouldShowExpandedPanel && expansionDirection == .up {
                     expandedPanel
-                        .alignmentGuide(.bottom) { d in d[.bottom] + 22.5 }
+                        .alignmentGuide(.bottom) { d in d[.bottom] + barTotalHeight }
                 }
             }
             .overlay(alignment: .top) {
                 if shouldShowExpandedPanel && expansionDirection == .down {
                     expandedPanel
-                        .alignmentGuide(.top) { d in d[.top] - 22.5 }
+                        .alignmentGuide(.top) { d in d[.top] - barTotalHeight }
                 }
             }
             .task(id: runwayRequestID) {

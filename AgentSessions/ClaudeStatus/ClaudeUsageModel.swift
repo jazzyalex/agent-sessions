@@ -49,11 +49,11 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var loginRequired: Bool = false
     @Published var setupRequired: Bool = false
     @Published var setupHint: String? = nil
-    // Task 9b auth-verdict surfaces, fed by ClaudeAuthClassifier via the
-    // availability handler. `authStatus` carries the headline/remediation;
-    // `showAuthBanner` mirrors `state.isAlarming` (signed out / expired / no CLI).
+    // Task 9b auth-verdict surface, fed by ClaudeAuthClassifier via the
+    // availability handler. `authStatus` carries the headline/remediation; views
+    // read `authStatus?.state.isAlarming` directly to decide whether to show the
+    // banner (signed out / expired / no CLI).
     @Published var authStatus: UsageAuthStatus?
-    @Published var showAuthBanner: Bool = false
     @Published var isUpdating: Bool = false
     @Published var lastSuccessAt: Date? = nil
     @Published var dataIsStale: Bool = false
@@ -186,10 +186,16 @@ final class ClaudeUsageModel: ObservableObject {
         setupRequired = availability.setupRequired
         setupHint = availability.setupHint
         if let state = availability.authState {
-            authStatus = UsageAuthStatus.make(provider: .claude, state: state)
-            showAuthBanner = state.isAlarming
+            let newStatus = UsageAuthStatus.make(provider: .claude, state: state)
+            // F7: only assign the @Published verdict when it actually changed, so a
+            // steady auth state doesn't fire objectWillChange on every 60s poll.
+            if authStatus != newStatus { authStatus = newStatus }
+            // The notifier is called every poll (not gated by the change check): its
+            // own episode store dedups, and it must keep being invoked while an
+            // alarming episode persists so a notification permission granted
+            // mid-episode still fires.
             if !AppRuntime.isRunningTests {
-                Task { await Self.authNotifier.onStatus(UsageAuthStatus.make(provider: .claude, state: state), provider: .claude) }
+                Task { await Self.authNotifier.onStatus(newStatus, provider: .claude) }
             }
         }
     }
@@ -317,6 +323,24 @@ final class ClaudeUsageModel: ObservableObject {
 
     // MARK: - Hard probe (tmux path, for diagnostics)
 
+    /// Neutral no-op diagnostics returned when a hard probe is suppressed
+    /// because auth is known-bad (signed out / expired / CLI missing).
+    /// Shared by both the debounced-verdict guard and the authoritative
+    /// pre-spawn CLI check so their short-circuit shape stays identical.
+    private static func suppressedHardProbeDiagnostics() -> ClaudeProbeDiagnostics {
+        ClaudeProbeDiagnostics(
+            success: false,
+            exitCode: 126,
+            scriptPath: "(not run)",
+            workdir: ClaudeProbeConfig.probeWorkingDirectory(),
+            claudeBin: nil,
+            tmuxBin: nil,
+            timeoutSecs: nil,
+            stdout: "",
+            stderr: "Probe suppressed: signed out, session expired, or CLI not installed"
+        )
+    }
+
     // Hard-probe entry: run a one-off /usage probe and return diagnostics.
     // Bypasses the source manager to always use the tmux path for direct diagnostics.
     func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
@@ -335,10 +359,36 @@ final class ClaudeUsageModel: ObservableObject {
             completion(diag)
             return
         }
+        // I4: the hard probe uses the tmux `/usage` path, which hangs on a login /
+        // re-auth / setup screen. If the current auth verdict is alarming (signed out /
+        // expired / CLI not installed), short-circuit with a no-op diagnostics instead
+        // of spawning the hanging probe. `forceProbeNow()` itself has no auth gate
+        // (unlike Codex's), so the gate must live here, before the service is built.
+        if let state = authStatus?.state, state.isAlarming {
+            completion(Self.suppressedHardProbeDiagnostics())
+            return
+        }
         if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
             guard let self else { return }
+            // I4: authoritative pre-spawn check. The debounced `authStatus` verdict
+            // above can still be `.unknown`/nil during the signed-out cold-start
+            // window (~60-120s before the debounce commits `.signedOut`), letting
+            // the isAlarming guard pass through. Query the CLI directly here,
+            // before building the service / spawning the tmux probe — it is
+            // authoritative and never falsely reports `.signedOut` (any ambiguity,
+            // timeout, or launch failure yields `.unknown`, which falls through to
+            // the normal probe path).
+            let cliStatus = await CLIAuthStatusProbe.probeClaudeAuthStatus()
+            if cliStatus == .signedOut || cliStatus == .cliMissing {
+                let diag = Self.suppressedHardProbeDiagnostics()
+                await MainActor.run {
+                    self.isUpdating = false
+                    completion(diag)
+                }
+                return
+            }
             // Create a short-lived service for the forced probe. Apply the returned
             // snapshot below so completion cannot race ahead of model publication.
             let handler: @Sendable (ClaudeUsageSnapshot) -> Void = { _ in }

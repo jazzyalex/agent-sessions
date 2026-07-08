@@ -4,16 +4,18 @@ import XCTest
 /// Task 9b: `CodexUsageModel` publishes an auth verdict fed by `CodexAuthClassifier`.
 /// The full wiring (service poll → off-main probe/resolveRead → classify) isn't
 /// unit-testable without a real subprocess/network, so these tests pin the pure,
-/// deterministic surface: the `state -> (authStatus, showAuthBanner)` mapping in
-/// `applyAuthState(_:)`, plus the `.ok` short-circuit through `handleAuthFetchResult`
-/// (which resolves `.ok` from the fetch result alone, never touching the subprocess).
+/// deterministic surface: the `state -> authStatus` mapping in `applyAuthState(_:)`
+/// (the loud-banner signal is now read directly as `authStatus?.state.isAlarming` —
+/// the old dead `showAuthBanner` mirror was removed, F7), plus the `.ok`
+/// short-circuit through `handleAuthFetchResult` (which resolves `.ok` from the
+/// fetch result alone, never touching the subprocess).
 @MainActor
 final class CodexUsageModelAuthWiringTests: XCTestCase {
 
     func testApplyAuthStateSignedOutRaisesBanner() {
         let model = CodexUsageModel()
         model.applyAuthState(.signedOut)
-        XCTAssertTrue(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, true)
         XCTAssertEqual(model.authStatus?.state, .signedOut)
         XCTAssertEqual(model.authStatus?.remediation, .showCommand("codex login"))
     }
@@ -21,14 +23,14 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
     func testApplyAuthStateExpiredRaisesBanner() {
         let model = CodexUsageModel()
         model.applyAuthState(.expired)
-        XCTAssertTrue(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, true)
         XCTAssertEqual(model.authStatus?.state, .expired)
     }
 
     func testApplyAuthStateCliNotInstalledRaisesBanner() {
         let model = CodexUsageModel()
         model.applyAuthState(.cliNotInstalled)
-        XCTAssertTrue(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, true)
         XCTAssertEqual(model.authStatus?.state, .cliNotInstalled)
     }
 
@@ -37,14 +39,14 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
         // Seed an alarming state first, then confirm `.ok` clears the banner.
         model.applyAuthState(.signedOut)
         model.applyAuthState(.ok)
-        XCTAssertFalse(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, false)
         XCTAssertEqual(model.authStatus?.state, .ok)
     }
 
     func testApplyAuthStateUnknownIsSilent() {
         let model = CodexUsageModel()
         model.applyAuthState(.unknown)
-        XCTAssertFalse(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, false)
         XCTAssertEqual(model.authStatus?.state, .unknown)
     }
 
@@ -56,7 +58,7 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
         let model = CodexUsageModel()
         model.applyAuthState(.signedOut)   // start alarming to prove it clears
         await model.handleAuthFetchResult(.ok(CodexUsageSnapshot()))
-        XCTAssertFalse(model.showAuthBanner)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, false)
         XCTAssertEqual(model.authStatus?.state, .ok)
     }
 

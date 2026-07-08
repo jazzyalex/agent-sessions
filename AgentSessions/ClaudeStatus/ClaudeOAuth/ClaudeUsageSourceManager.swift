@@ -80,14 +80,46 @@ actor ClaudeUsageSourceManager {
     /// which case the throttle returns `.unknown` (→ `.ok`, never alarming).
     private var cliStatusCache: (status: CLIAuthStatus, at: Date)?
 
+    /// Monotonic generation for auth-verdict computations (I2). Incremented at the
+    /// START of each verdict computation (OAuth success path + `classifyAndPublishAuthState`).
+    /// A reentrant older Task that suspended across an `await` compares its captured
+    /// generation against this and drops its now-stale `currentAuthState` write when a
+    /// newer computation has since started — otherwise concurrent `performOAuthFetch`
+    /// invocations (refreshNow, credential watcher, delegated refresh, scheduled loop)
+    /// could clobber a newer verdict with a stale one.
+    private var authGeneration: UInt64 = 0
+
+    private func nextAuthGeneration() -> UInt64 {
+        authGeneration &+= 1
+        return authGeneration
+    }
+
     /// Single long-lived classifier instance — it is STATEFUL (debounces the
     /// `signedOut` verdict across polls), so it must never be re-created per call.
     private let authClassifier = ClaudeAuthClassifier()
 
     /// The tmux `/usage` probe hangs on a login screen when the account is signed
-    /// out or the CLI is absent, so it must never run in those states.
+    /// out, the CLI is absent, or the credentials are expired (which triggers a
+    /// CLI re-auth prompt that hangs exactly like signed-out), so it must never
+    /// run in those states.
     static func shouldSuppressTmuxFallback(_ state: UsageAuthState) -> Bool {
-        state == .signedOut || state == .cliNotInstalled
+        state == .signedOut || state == .cliNotInstalled || state == .expired
+    }
+
+    /// Reentrancy guard (I2): a verdict computation may commit its `currentAuthState`
+    /// write / availability emit only if no NEWER computation started while it was
+    /// suspended across an `await`. `authGeneration` is monotonic, so the captured
+    /// generation matches the current one iff this is still the latest computation.
+    static func verdictIsCurrent(captured: UInt64, current: UInt64) -> Bool {
+        captured == current
+    }
+
+    /// Pure routing for the failure-path fast verdict: a verified 401 while ANY
+    /// token (keychain / creds-file / env) is still present is `.expired`. Env-token
+    /// inclusion prevents an expired env-token 401 from silently falling through to
+    /// `.ok` (the resolver's source #1 is the env token).
+    static func hasAnyToken(keychainFound: Bool, credsFilePresentToken: Bool, envTokenPresent: Bool) -> Bool {
+        keychainFound || credsFilePresentToken || envTokenPresent
     }
 
     /// Pure success-path mapping: a healthy OAuth fetch proves the account
@@ -286,6 +318,7 @@ actor ClaudeUsageSourceManager {
             snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
 
             // Success — reset all failure state
+            let recoveredFromFailure = oauthFailureCount > 0
             oauthFailureCount = 0
             oauthRateLimitRetryDeadline = nil
             didAttemptDelegatedRefresh = false
@@ -294,6 +327,12 @@ actor ClaudeUsageSourceManager {
             credentialWatchTask = nil
             lastOAuthSnapshot = snapshot
             await store.save(snapshot)
+
+            // F5: a failure→success transition may mean the user just re-logged in.
+            // Drop the throttled CLI-status cache so the authoritative probe below
+            // re-runs fresh instead of serving a stale `.signedOut`/`.expired` for
+            // up to the 120s throttle window after recovery.
+            if recoveredFromFailure { cliStatusCache = nil }
 
             if !fromCache, usingWebFallback && mode != .webOnly {
                 os_log("ClaudeOAuth: OAuth recovered, deactivating web API fallback", log: log, type: .info)
@@ -314,8 +353,17 @@ actor ClaudeUsageSourceManager {
             // within one poll instead of after the 10-min token cache. Only a
             // DEFINITIVE `.signedOut` overrides — the probe never false-fires, so
             // no debounce is needed and ambiguous/`.unknown` stays `.ok`.
+            let gen = nextAuthGeneration()
             let cli = await throttledClaudeAuthStatus()
             let state = Self.successPathState(cli: cli)
+            // I2: if a newer verdict computation started while we were suspended on
+            // the probe above, drop this now-stale write instead of clobbering it.
+            // The newer computation owns the next-refresh scheduling too.
+            guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
+                os_log("ClaudeOAuth: dropping stale success-path auth verdict (newer computation started)",
+                       log: log, type: .info)
+                return
+            }
             // A confirmed-good fetch (.ok) proves the account works, so clear the
             // classifier's debounce clock: this fast-path bypasses classify(), and
             // a stale firstMissAt from an earlier transient miss must not survive a
@@ -403,6 +451,12 @@ actor ClaudeUsageSourceManager {
 
         let now = Date()
 
+        // Compute + publish the auth verdict FIRST (I1), before the switch below can
+        // call `activateTmuxFallback`. This makes `currentAuthState` reflect THIS poll
+        // so the activation guard sees the up-to-date verdict rather than a pre-classify
+        // one. `was401` distinguishes an expired-but-present token from a truly absent one.
+        await classifyAndPublishAuthState(was401: reason.contains("401"))
+
         switch oauthFailureCount {
         case 1:
             if var snap = lastOAuthSnapshot {
@@ -447,12 +501,6 @@ actor ClaudeUsageSourceManager {
         if mode != .tmuxOnly && mode != .webOnly {
             scheduleOAuthRetry()
         }
-
-        // Compute + publish the auth verdict on every failure — including the
-        // serve-stale / degraded paths above — so a signed-out user is detected
-        // even while cached data is still being displayed. `was401` distinguishes
-        // an expired-but-present token from a genuinely absent one.
-        await classifyAndPublishAuthState(was401: reason.contains("401"))
     }
 
     /// The second (and only other) writer of `currentAuthState` besides the
@@ -462,15 +510,18 @@ actor ClaudeUsageSourceManager {
     /// Then it publishes the verdict and tears down a live tmux fallback if the
     /// new state is one the probe must never run in (signed out / CLI missing).
     private func classifyAndPublishAuthState(was401: Bool) async {
+        let gen = nextAuthGeneration()
+
         // Token evidence (cheap, no subprocess): keychain read + creds-file check.
         let keychain = await tokenResolver.resolveKeychainRead()
         let credsFilePresentToken = await tokenResolver.credsFileHasToken()
-        let hasToken: Bool = {
-            if case .found = keychain { return true }
-            return credsFilePresentToken
-        }()
-
         let envTokenPresent = !(ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty
+        // Include the env token: an expired env-token 401 must route to `.expired`,
+        // not silently fall through to `.ok` (the env token is the resolver's source #1).
+        let keychainFound: Bool = { if case .found = keychain { return true }; return false }()
+        let hasToken = Self.hasAnyToken(keychainFound: keychainFound,
+                                        credsFilePresentToken: credsFilePresentToken,
+                                        envTokenPresent: envTokenPresent)
 
         let state: UsageAuthState
         if was401 && hasToken {
@@ -484,6 +535,11 @@ actor ClaudeUsageSourceManager {
             // Non-401 failure, or a 401 after the token vanished (really signed
             // out): run the full stateful classifier for a debounced verdict.
             let cliStatus = await CLIAuthStatusProbe.probeClaudeAuthStatus()
+            // Share this authoritative result with the throttled cache so the
+            // immediate-suppression backstop in `activateTmuxFallback` (called just
+            // below via the failure switch) reuses it instead of spawning a second
+            // `claude auth status` subprocess in the same failure handler.
+            cliStatusCache = (cliStatus, Date())
             // Deterministic disk existence check for the binary — never the flaky
             // login-shell/brew/npm probe, which can transiently return nil (e.g.
             // post-wake) and false-fire .cliNotInstalled for a signed-in user.
@@ -497,6 +553,15 @@ actor ClaudeUsageSourceManager {
                                  envTokenPresent: envTokenPresent),
                 now: Date()
             )
+        }
+
+        // I2: drop this write if a newer verdict computation started while we were
+        // suspended on the keychain/creds/probe awaits above — never clobber a newer
+        // verdict with this stale one.
+        guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
+            os_log("ClaudeOAuth: dropping stale failure-path auth verdict (newer computation started)",
+                   log: log, type: .info)
+            return
         }
 
         currentAuthState = state
@@ -731,6 +796,23 @@ actor ClaudeUsageSourceManager {
             return
         }
         guard tmuxAdapter == nil else { return }
+        // I1: at a signed-out cold start (no cached data) or during the transition
+        // window, `currentAuthState` may still be `.unknown` because the classifier's
+        // debounce hasn't flipped it to `.signedOut` yet — so the guard above passes and
+        // the probe would spawn and hang on the login screen. Consult the throttled
+        // AUTHORITATIVE status probe as an immediate backstop: it never false-fires
+        // `.signedOut`, so suppressing on a definitive signed-out / cli-missing here is
+        // safe. The debounce still governs only the loud banner.
+        let cli = await throttledClaudeAuthStatus()
+        if cli == .signedOut || cli == .cliMissing {
+            os_log("ClaudeOAuth: suppressing tmux fallback (authoritative probe %{public}@)",
+                   log: log, type: .info, String(describing: cli))
+            return
+        }
+        // Re-check after the probe await: a concurrent (reentrant) activation may have
+        // created the adapter while we were suspended above, and creating a second one
+        // would leak the first. This is the actor-reentrancy sibling of the I2 guard.
+        guard tmuxAdapter == nil else { return }
         os_log("ClaudeOAuth: activating tmux fallback: %{public}@", log: log, type: .info, reason)
         usingTmuxFallback = true
 
@@ -773,18 +855,6 @@ actor ClaudeUsageSourceManager {
         await adapter.stop()
         tmuxAdapter = nil
         usingTmuxFallback = false
-    }
-
-    /// Called by the auth classifier (Task 9) whenever its verdict changes. Tears
-    /// down a live tmux fallback the moment we transition into a suppressed state
-    /// (signed out / CLI missing) so a signed-out account never keeps a hanging
-    /// probe running in the background.
-    func updateAuthState(_ state: UsageAuthState) async {
-        let previous = currentAuthState
-        currentAuthState = state
-        if Self.shouldSuppressTmuxFallback(state), !Self.shouldSuppressTmuxFallback(previous), usingTmuxFallback {
-            await deactivateTmuxFallback()
-        }
     }
 
     // MARK: - Diagnostics

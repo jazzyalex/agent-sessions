@@ -396,4 +396,28 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now.addingTimeInterval(-119), now: now, interval: 120))
         XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now, now: now, interval: 120))
     }
+
+    // MARK: - Reentrancy generation guard (I2)
+
+    /// A verdict computation commits only while it is still the latest: captured
+    /// generation must equal the current one. A newer computation (higher current)
+    /// means the captured one is stale and its write must be dropped.
+    func testVerdictIsCurrentGuard() {
+        XCTAssertTrue(ClaudeUsageSourceManager.verdictIsCurrent(captured: 1, current: 1))
+        XCTAssertTrue(ClaudeUsageSourceManager.verdictIsCurrent(captured: 7, current: 7))
+        XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(captured: 1, current: 2))
+        XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(captured: 5, current: 6))
+    }
+
+    // MARK: - Failure-path token routing (env-token `.expired`)
+
+    /// Any token source — keychain, creds-file, OR the env token — counts as token
+    /// evidence for the `was401 && hasToken` → `.expired` fast-path. Without env-token
+    /// inclusion an expired env-token 401 would fall through to `.ok` (silent stall).
+    func testHasAnyTokenIncludesEnvToken() {
+        XCTAssertTrue(ClaudeUsageSourceManager.hasAnyToken(keychainFound: true, credsFilePresentToken: false, envTokenPresent: false))
+        XCTAssertTrue(ClaudeUsageSourceManager.hasAnyToken(keychainFound: false, credsFilePresentToken: true, envTokenPresent: false))
+        XCTAssertTrue(ClaudeUsageSourceManager.hasAnyToken(keychainFound: false, credsFilePresentToken: false, envTokenPresent: true))
+        XCTAssertFalse(ClaudeUsageSourceManager.hasAnyToken(keychainFound: false, credsFilePresentToken: false, envTokenPresent: false))
+    }
 }
