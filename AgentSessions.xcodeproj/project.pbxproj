@@ -225,6 +225,7 @@
 		904D6F2B42BF9D376A24694A /* ListScrubSignalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B62AFC927A9AA151790CB23 /* ListScrubSignalTests.swift */; };
 		907E81E2D9271D48E84190CF /* PreferencesView+UsageProbes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B83B0F2EEE3BE750B52293 /* PreferencesView+UsageProbes.swift */; };
 		91569B1DCD425054CA314375 /* AgentEnablement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */; };
+		91E8C3E5EC183BE5D7157C6A /* AuthRemediationBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C46BBDD0EA77A2B1EDAE78A /* AuthRemediationBanner.swift */; };
 		921DAA4414ADED63E3F366D6 /* ClaudeWebCookieResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EA0F64F6AA5E8913A6A87EF /* ClaudeWebCookieResolver.swift */; };
 		924D6ED196C2A69C0E716C56 /* CodexProbeCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 885AF956063BEBF5966E25A2 /* CodexProbeCleanup.swift */; };
 		92BDFB2715267A997B548342 /* ClaudeArchiveRestoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DF0478814E0D3D09AC5BDA8 /* ClaudeArchiveRestoreTests.swift */; };
@@ -500,6 +501,7 @@
 		0AA81B3C81B142CCF423565C /* codex_050_legacy.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = codex_050_legacy.jsonl; path = Resources/Fixtures/codex_050_legacy.jsonl; sourceTree = SOURCE_ROOT; };
 		0AC81660281801462B1C3784 /* CopilotResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CopilotResume/CopilotResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
 		0C279B7BBD37A8636171EB93 /* TranscriptBlockListReviewCardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptBlockListReviewCardTests.swift; sourceTree = SOURCE_ROOT; };
+		0C46BBDD0EA77A2B1EDAE78A /* AuthRemediationBanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Shared/Views/AuthRemediationBanner.swift; sourceTree = SOURCE_ROOT; };
 		0DDD967AC4CCB8C88A1752E1 /* ImageBrowserViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserViewModel.swift; sourceTree = SOURCE_ROOT; };
 		0F0FF569592BFE502A97E9AE /* ProgressThrottler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ProgressThrottler.swift; sourceTree = SOURCE_ROOT; };
 		1074E2B1681C2BEB28D59B2F /* Base64ImageDataURLScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/Base64ImageDataURLScanner.swift; sourceTree = SOURCE_ROOT; };
@@ -1255,6 +1257,7 @@
 				F44D1929C2B6C30D94E20497 /* UsageAuthStatus.swift */,
 				96A6013472A8EAAD80EF15CF /* CLIAuthStatusProbe.swift */,
 				F7A18C0AEF6B5DB5A329FCF4 /* AuthStatusNotifier.swift */,
+				A89A3AD74028E096AD291B13 /* Views */,
 			);
 			name = Shared;
 			sourceTree = "<group>";
@@ -1293,6 +1296,14 @@
 				520EA2A47376978BF4DA3B70 /* ClaudeAuthClassifier.swift */,
 			);
 			name = ClaudeStatus;
+			sourceTree = "<group>";
+		};
+		A89A3AD74028E096AD291B13 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				0C46BBDD0EA77A2B1EDAE78A /* AuthRemediationBanner.swift */,
+			);
+			name = Views;
 			sourceTree = "<group>";
 		};
 		A9663DCBB6D027932E3982FF /* Frameworks */ = {
@@ -2432,6 +2443,7 @@
 				F8BACBB63D06F3C9AAF582F2 /* CodexAuthClassifier.swift in Sources */,
 				734A3991A25C0546F315DD67 /* CLIAuthStatusProbe.swift in Sources */,
 				C7D7C64D03109E814BEA8335 /* AuthStatusNotifier.swift in Sources */,
+				91E8C3E5EC183BE5D7157C6A /* AuthRemediationBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
