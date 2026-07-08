@@ -1706,7 +1706,7 @@ struct UnifiedSessionsView: View {
                         isArchivedOn: $unified.showArchivedCodexDesktopOnly,
                         isMonochrome: stripMonochrome
                     )
-                    .help("Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived Desktop sessions; other enabled agents remain visible.")
+                    .help("Show or hide Codex sessions (⌘1). Archive icon: narrow Codex results to archived sessions; other enabled agents remain visible.")
                 }
 
                 if claudeAgentEnabled {

@@ -336,13 +336,19 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             components.contains("projects")
     }
 
+    /// True for any Codex session that lives under `~/.codex/archived_sessions`
+    /// (the folder Codex Desktop's "Archive" action writes to), regardless of the
+    /// session's originating surface.
+    ///
+    /// Intentionally path-only: it must NOT depend on `codexOriginator`/`codexSurface`.
+    /// Those fields are only populated by a live parse, but on launch the app hydrates
+    /// sessions from the SQLite index and never re-parses unchanged files — and archived
+    /// files never change — so their surface metadata is routinely absent (nil). Gating
+    /// on `isCodexDesktopSession` here made the archived-Codex filter match nothing for
+    /// hydrated sessions. The archive folder itself is the reliable signal.
     public var isArchivedCodexDesktopSession: Bool {
         guard source == .codex else { return false }
-        guard URL(fileURLWithPath: filePath).standardizedFileURL.pathComponents.contains("archived_sessions") else {
-            return false
-        }
-
-        return isCodexDesktopSession
+        return URL(fileURLWithPath: filePath).standardizedFileURL.pathComponents.contains("archived_sessions")
     }
 
     /// cliSessionId used to join Claude Desktop sidecar records. For Claude Code-tab transcripts

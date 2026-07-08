@@ -583,7 +583,7 @@ final class SessionParserTests: XCTestCase {
                                                   allowTranscriptGeneration: false))
     }
 
-    func testArchivedCodexDesktopPredicateRequiresDesktopCodexArchivedPath() throws {
+    func testArchivedCodexPredicateMatchesAnyCodexArchivedPath() throws {
         let archivedDesktop = Session(
             id: "archived-desktop",
             source: .codex,
@@ -647,9 +647,13 @@ final class SessionParserTests: XCTestCase {
             surface: .desktop
         )
 
+        // Path-only semantics: any Codex session under archived_sessions matches,
+        // regardless of surface. Metadata (codexOriginator/codexSurface) is NOT consulted,
+        // since hydrated sessions routinely lack it (see isArchivedCodexDesktopSession).
         XCTAssertTrue(archivedDesktop.isArchivedCodexDesktopSession)
         XCTAssertFalse(activeDesktop.isArchivedCodexDesktopSession)
-        XCTAssertFalse(archivedCLI.isArchivedCodexDesktopSession)
+        XCTAssertTrue(archivedCLI.isArchivedCodexDesktopSession)
+        // Non-Codex sources never match, even under an archived_sessions path.
         XCTAssertFalse(archivedClaudeDesktop.isArchivedCodexDesktopSession)
     }
 
