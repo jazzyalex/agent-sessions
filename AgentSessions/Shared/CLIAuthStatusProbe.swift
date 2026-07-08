@@ -33,13 +33,36 @@ enum CLIAuthStatusProbe {
         return .unknown
     }
 
-    /// Parse `codex login status` text. Explicit "not logged in"/"logged out"
-    /// → signedOut; otherwise "logged in" → signedIn; unrecognized → unknown.
+    /// Parse `codex login status` text on a per-LINE basis. Substring matching
+    /// over the whole blob is fragile: a signed-in account whose output carries
+    /// a logout HINT (e.g. "run `codex logout` to sign out") must NEVER be
+    /// misread as signed-out. So we scan line by line for definitive STATUS
+    /// signals and refuse to guess when they conflict:
+    ///   - signed-out: a line containing the phrase "not logged in" OR a
+    ///     "logged out" status. A logout *instruction* ("codex logout") is
+    ///     "logout" (no space) — it is neither, so it is ignored.
+    ///   - signed-in: a line containing the definitive "logged in" status
+    ///     (e.g. "Logged in using ChatGPT"). Note "log in" (the imperative
+    ///     hint "run `codex login` to log in") is not "logged in", so it is
+    ///     ignored too.
+    /// A contradictory mix (both signals) or no signal → `.unknown`. This keeps
+    /// the safety contract: ambiguity never becomes a confident `.signedOut`.
     static func parseCodexLoginStatus(stdout: String, exitCode: Int32) -> CLIAuthStatus {
-        let s = stdout.lowercased()
-        if s.contains("not logged in") || s.contains("logged out") { return .signedOut }
-        if s.contains("logged in") { return .signedIn }
-        return .unknown
+        var sawSignedIn = false
+        var sawSignedOut = false
+        for rawLine in stdout.split(whereSeparator: { $0.isNewline }) {
+            let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if line.contains("not logged in") || line.contains("logged out") {
+                sawSignedOut = true
+            } else if line.contains("logged in") {
+                sawSignedIn = true
+            }
+        }
+        switch (sawSignedIn, sawSignedOut) {
+        case (true, false): return .signedIn
+        case (false, true): return .signedOut
+        default: return .unknown
+        }
     }
 
     // MARK: Async runners (not unit-tested — subprocess)

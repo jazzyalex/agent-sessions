@@ -3390,6 +3390,10 @@ private struct HUDLimitsProviderEntry {
     let fiveHourProjectedRunoutAt: Date?
     let fiveHourProjectionObservedAt: Date?
     var fiveHourOnTrackObservedAt: Date? = nil
+    /// CLI auth status for this provider; when alarming, HUDLimitsBar swaps the
+    /// meter text for an AuthRemediationBanner. Left nil by callers (e.g. the
+    /// rows panel) that don't render the banner.
+    var authStatus: UsageAuthStatus? = nil
 }
 
 private extension CodexRunwaySnapshot {
@@ -3789,7 +3793,8 @@ private struct HUDLimitsBar: View {
                     codexUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
                     codexUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     codexUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    codexUsageModel.isUpdating ? "updating" : "idle"
+                    codexUsageModel.isUpdating ? "updating" : "idle",
+                    codexUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil"
                 ].joined(separator: "|")
             )
         }
@@ -3804,7 +3809,8 @@ private struct HUDLimitsBar: View {
                     claudeUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
                     claudeUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     claudeUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    claudeUsageModel.isUpdating ? "updating" : "idle"
+                    claudeUsageModel.isUpdating ? "updating" : "idle",
+                    claudeUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil"
                 ].joined(separator: "|")
             )
         }
@@ -3828,7 +3834,8 @@ private struct HUDLimitsBar: View {
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt
+                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
+                authStatus: codexUsageModel.authStatus
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -3842,7 +3849,8 @@ private struct HUDLimitsBar: View {
                 lastDataTimestamp: claudeUsageModel.lastUpdate,
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt
+                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
+                authStatus: claudeUsageModel.authStatus
             ))
         }
         return out
@@ -4915,18 +4923,54 @@ private struct HUDLimitsBarContent: View {
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
-                HUDLimitsProviderText(
-                    entry: entry,
-                    mode: mode,
-                    showResets: showResets,
-                    onlyBottleneck: onlyBottleneck,
-                    showProjection: showProjection,
-                    now: now
-                )
+                if let auth = entry.authStatus, auth.state.isAlarming {
+                    // The HUD bar is a single 22pt, clipped row and the window
+                    // resizes to content, so always use the compact banner here —
+                    // the full (two-line) banner would overflow. Keep the provider
+                    // icon so the alarming provider stays attributable.
+                    HUDLimitsAuthCell(source: entry.source, status: auth)
+                } else {
+                    HUDLimitsProviderText(
+                        entry: entry,
+                        mode: mode,
+                        showResets: showResets,
+                        onlyBottleneck: onlyBottleneck,
+                        showProjection: showProjection,
+                        now: now
+                    )
+                }
             }
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+/// Compact auth-remediation cell for the HUD limits bar: the provider icon
+/// (matching HUDLimitsProviderText) followed by the compact AuthRemediationBanner.
+private struct HUDLimitsAuthCell: View {
+    let source: UsageTrackingSource
+    let status: UsageAuthStatus
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if source == .claude {
+                Image("FooterIconClaude")
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+            } else {
+                Image("FooterIconCodex")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+            }
+            AuthRemediationBanner(status: status, compact: true, embedded: true)
+        }
     }
 }
 

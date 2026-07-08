@@ -557,9 +557,18 @@ final class CodexUsageModel: ObservableObject {
         // instead of after the cached token stops working. Only a DEFINITIVE
         // `.signedOut` overrides; ambiguous/`.unknown` stays `.ok`. The non-`.ok`
         // fetch path already runs the full stateful classifier — leave it alone.
+        //
+        // Credential-agreement gate (I7b): a working fetch proves the account is
+        // usable, so a fragile probe `.signedOut` must NOT flip it on its own.
+        // Require corroboration from on-disk credentials — override to
+        // `.signedOut` only when the probe says signed-out AND the OAuth creds
+        // are actually absent. A present token + a parser hiccup stays `.ok`.
         if case .ok = fetchResult, state == .ok {
             let cli = await throttledCodexAuthStatus()
-            state = Self.successPathState(cli: cli)
+            if Self.successPathState(cli: cli) == .signedOut,
+               CodexOAuthCredentials().resolveRead() == .absent {
+                state = .signedOut
+            }
         }
         applyAuthState(state)
         await service?.updateAuthState(state)
@@ -580,11 +589,12 @@ final class CodexUsageModel: ObservableObject {
         return cliStatusCache?.status ?? .unknown
     }
 
-    /// Pure success-path mapping: a healthy fetch proves the account works, so
-    /// ONLY a DEFINITIVE authoritative `.signedOut` overrides to signed-out.
-    /// Every other status (`.signedIn` / `.unknown` / `.cliMissing`) stays `.ok`
-    /// — a `.cliMissing`-while-fetch-succeeds is contradictory and ambiguous/
-    /// `.unknown` must never false-alarm.
+    /// Pure success-path mapping from the authoritative CLI status alone: only a
+    /// DEFINITIVE `.signedOut` maps to signed-out; every other status
+    /// (`.signedIn` / `.unknown` / `.cliMissing`) stays `.ok`. NOTE: on its own
+    /// this is necessary but NOT sufficient to flip a working account — the call
+    /// site (`handleAuthFetchResult`, I7b) additionally requires the on-disk
+    /// OAuth creds to be `.absent` before actually overriding a healthy fetch.
     nonisolated static func successPathState(cli: CLIAuthStatus) -> UsageAuthState {
         cli == .signedOut ? .signedOut : .ok
     }
@@ -619,7 +629,12 @@ final class CodexUsageModel: ObservableObject {
         }
         let creds = CodexOAuthCredentials().resolveRead()
         let override = UserDefaults.standard.string(forKey: CodexResumeSettings.Keys.binaryOverride)
-        let binaryPresent = CodexCLIEnvironment().resolveBinary(customPath: override) != nil
+        // Deterministic, subprocess-free disk check (see `CLIBinaryPresence`).
+        // The old `resolveBinary` path spawns a login shell + brew/npm probes
+        // with no timeout, so a transient flake (cold shell after wake, fork
+        // failure under memory pressure) could report "not installed" for an
+        // installed CLI and drive a false alarm. A FileManager check never flakes.
+        let binaryPresent = CLIBinaryPresence.codexInstalled(overridePath: override)
         let cliStatus = await CLIAuthStatusProbe.probeCodexLoginStatus()
         return AuthInputs(cliStatus: cliStatus, creds: creds, binaryPresent: binaryPresent)
     }

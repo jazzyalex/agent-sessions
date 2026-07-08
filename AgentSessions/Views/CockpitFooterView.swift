@@ -4,18 +4,17 @@ private enum CockpitFooterTheme {
     static let height: CGFloat = 26
     static let horizontalPadding: CGFloat = 10
 
-    static let lightBackground = Color(hex: "007acc")
-    static let darkBackground = Color.clear
-
+    /// Neutral status-bar look in both appearances: a system `.bar` material
+    /// (see `CockpitFooterView.body`) topped by a standard separator hairline.
+    /// The footer whispers until a quota is actually critical.
     static func topBorder(isDark: Bool) -> Color {
-        isDark ? Color.white.opacity(0.20) : Color.black.opacity(0.30)
+        Color(nsColor: .separatorColor)
     }
 
-    static func quotaBackgroundOpacity(isDark: Bool) -> Double { isDark ? 0.00 : 0.08 }
-    static func quotaBorderOpacity(isDark: Bool) -> Double { isDark ? 0.20 : 0.05 }
+    static func quotaBackgroundOpacity(isDark: Bool) -> Double { isDark ? 0.06 : 0.05 }
+    static func quotaBorderOpacity(isDark: Bool) -> Double { 0.10 }
     static func barTrackColor(isDark: Bool) -> Color {
-        if isDark { return Color.black.opacity(0.30) }
-        return Color.white.opacity(0.20)
+        Color.primary.opacity(0.12)
     }
 }
 
@@ -51,6 +50,8 @@ struct QuotaData: Equatable {
     var isUpdating: Bool = false
     var fiveHourProjectedRunoutAt: Date? = nil
     var fiveHourProjectionObservedAt: Date? = nil
+    /// CLI auth status for this provider; drives the AuthRemediationBanner when alarming.
+    var authStatus: UsageAuthStatus? = nil
 
     var hasUsageData: Bool {
         switch provider {
@@ -59,6 +60,13 @@ struct QuotaData: Equatable {
         case .claude:
             return lastUpdate != nil
         }
+    }
+
+    /// Live within the last 5 minutes. Mirrors the usage strip's freshness gate
+    /// for choosing the compact banner (over dimmed meters) vs the full banner
+    /// (replacing meters) when auth is alarming.
+    var hasLiveData: Bool {
+        lastUpdate.map { Date().timeIntervalSince($0) < 300 } ?? false
     }
 
     func resetDate(kind: String, raw: String) -> Date? {
@@ -81,7 +89,8 @@ struct QuotaData: Equatable {
             eventTimestamp: model.lastEventTimestamp,
             isUpdating: model.isUpdating,
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
-            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt
+            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
+            authStatus: model.authStatus
         )
     }
 
@@ -97,7 +106,8 @@ struct QuotaData: Equatable {
             eventTimestamp: nil,
             isUpdating: model.isUpdating,
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
-            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt
+            fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
+            authStatus: model.authStatus
         )
     }
 }
@@ -134,16 +144,31 @@ struct CockpitFooterView: View {
 
 		            HStack(spacing: 10) {
 		                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-		                    CockpitQuotaWidget(
-		                        data: q,
-		                        isDarkMode: colorScheme == .dark,
-		                        scope: .both,
-		                        style: .bars,
-		                        modeOverride: usageDisplayModeOverride,
-		                        baseForeground: .white,
-		                        showResetIndicators: true,
-		                        showPill: true
-		                    )
+		                    if let auth = q.authStatus, auth.state.isAlarming {
+		                        FooterAuthCell(status: auth, hasLiveData: q.hasLiveData) {
+		                            CockpitQuotaWidget(
+		                                data: q,
+		                                isDarkMode: colorScheme == .dark,
+		                                scope: .both,
+		                                style: .bars,
+		                                modeOverride: usageDisplayModeOverride,
+		                                baseForeground: .primary,
+		                                showResetIndicators: true,
+		                                showPill: true
+		                            )
+		                        }
+		                    } else {
+		                        CockpitQuotaWidget(
+		                            data: q,
+		                            isDarkMode: colorScheme == .dark,
+		                            scope: .both,
+		                            style: .bars,
+		                            modeOverride: usageDisplayModeOverride,
+		                            baseForeground: .primary,
+		                            showResetIndicators: true,
+		                            showPill: true
+		                        )
+		                    }
 		                }
 		            }
 
@@ -152,8 +177,11 @@ struct CockpitFooterView: View {
             SessionCountView(text: sessionCountText, freshnessText: freshnessText)
         }
         .padding(.horizontal, CockpitFooterTheme.horizontalPadding)
-        .frame(height: CockpitFooterTheme.height)
-        .background(colorScheme == .dark ? CockpitFooterTheme.darkBackground : CockpitFooterTheme.lightBackground)
+        // Fixed single-row height for the common (signed-in) case; grows only when
+        // an alarming AuthRemediationBanner needs an extra line, so the strip never
+        // jitters for normal usage.
+        .frame(minHeight: CockpitFooterTheme.height)
+        .background(.bar)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(CockpitFooterTheme.topBorder(isDark: colorScheme == .dark))
@@ -197,6 +225,39 @@ enum CockpitQuotaStyle: Equatable {
 		    }
 		}
 
+/// Per-provider auth remediation cell shown in the footer in place of a meter
+/// pill when that provider's CLI auth is alarming. Mirrors the usage strip:
+/// - `hasLiveData` → compact banner stacked over the dimmed cached meters.
+/// - otherwise → full banner replacing the meters.
+/// The banner's own internal Spacer is greedy, so we bound the cell width to
+/// keep the footer's horizontal layout tidy alongside the other provider and
+/// the session count.
+private struct FooterAuthCell<Meter: View>: View {
+    let status: UsageAuthStatus
+    let hasLiveData: Bool
+    let meter: Meter
+
+    init(status: UsageAuthStatus, hasLiveData: Bool, @ViewBuilder meter: () -> Meter) {
+        self.status = status
+        self.hasLiveData = hasLiveData
+        self.meter = meter()
+    }
+
+    var body: some View {
+        Group {
+            if hasLiveData {
+                VStack(alignment: .leading, spacing: 2) {
+                    AuthRemediationBanner(status: status, compact: true, embedded: true)
+                    meter.opacity(0.5)
+                }
+            } else {
+                AuthRemediationBanner(status: status, compact: false, embedded: true)
+            }
+        }
+        .frame(maxWidth: 360, alignment: .leading)
+    }
+}
+
 private struct IndexingStatusView: View {
     let isBusy: Bool
     let text: String
@@ -206,7 +267,7 @@ private struct IndexingStatusView: View {
             IndexingIndicator(isVisible: isBusy)
             Text(text)
                 .font(.system(size: 12))
-                .foregroundStyle(.white)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
     }
@@ -219,7 +280,7 @@ private struct IndexingIndicator: View {
     var body: some View {
         Circle()
             .trim(from: 0.0, to: 0.75)
-            .stroke(Color.white, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: 10, height: 10)
             .rotationEffect(.degrees(isAnimating ? 360 : 0))
             .opacity(isVisible ? 1 : 0)
@@ -335,7 +396,7 @@ private struct IndexingIndicator: View {
 
 		        return Presentation(
 		            barFillPercent: barFillPercent,
-		            barFillColor: isCritical ? .red : .white,
+		            barFillColor: isCritical ? .red : .secondary,
 		            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
 		            fiveHourPercentLabelText: (!hasUsageData || fiveUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
 		            weekPercentLabelText: (!hasUsageData || weekUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
@@ -378,7 +439,7 @@ private struct IndexingIndicator: View {
                 MiniUsageBar(
                     percentFill: presentation.barFillPercent,
                     percentUsed: presentation.bottleneckUsedPercent,
-                    tint: (presentation.barFillColor == .red) ? .red : baseForeground,
+                    tint: (presentation.barFillColor == .red) ? .red : .secondary,
                     isDarkMode: isDarkMode,
                     reduceMotion: reduceMotion
                 )
@@ -535,13 +596,13 @@ private struct SessionCountView: View {
             Text(text)
                 .monospacedDigit()
             if let freshnessText, !freshnessText.isEmpty {
-                DividerText(baseForeground: .white)
+                DividerText(baseForeground: .secondary)
                 Text(freshnessText)
                     .monospacedDigit()
             }
         }
         .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(Color.white.opacity(0.6))
+        .foregroundStyle(.secondary)
         .lineLimit(1)
     }
 }
@@ -660,4 +721,57 @@ private struct CockpitFooterPreviewMatrix: View {
 }
 
 #Preview("CockpitFooterView") { CockpitFooterPreviewMatrix() }
+
+private struct CockpitFooterAuthPreviewMatrix: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            // Signed out with NO live data → full banner replaces the meter.
+            CockpitFooterView(
+                isBusy: false,
+                statusText: "",
+                quotas: [
+                    QuotaData(provider: .codex,
+                              fiveHourRemainingPercent: 55,
+                              fiveHourResetText: "resets 14:00",
+                              weekRemainingPercent: 45,
+                              weekResetText: "resets 2/9/2026, 2:00 PM",
+                              lastUpdate: Date(),
+                              eventTimestamp: Date()),
+                    QuotaData(provider: .claude,
+                              fiveHourRemainingPercent: 0,
+                              fiveHourResetText: "",
+                              weekRemainingPercent: 0,
+                              weekResetText: "",
+                              lastUpdate: nil,
+                              eventTimestamp: nil,
+                              authStatus: .make(provider: .claude, state: .signedOut)),
+                ],
+                sessionCountText: "12 / 42 Sessions",
+                freshnessText: "Last: 2m ago"
+            )
+
+            // Expired but WITH live data → compact banner over dimmed meters.
+            CockpitFooterView(
+                isBusy: false,
+                statusText: "",
+                quotas: [
+                    QuotaData(provider: .codex,
+                              fiveHourRemainingPercent: 40,
+                              fiveHourResetText: "resets 14:00",
+                              weekRemainingPercent: 30,
+                              weekResetText: "resets 2/9/2026, 2:00 PM",
+                              lastUpdate: Date(),
+                              eventTimestamp: Date(),
+                              authStatus: .make(provider: .codex, state: .expired)),
+                ],
+                sessionCountText: "12 / 42 Sessions",
+                freshnessText: "Last: 1m ago"
+            )
+        }
+        .padding()
+        .frame(width: 720)
+    }
+}
+
+#Preview("CockpitFooterView • Auth") { CockpitFooterAuthPreviewMatrix() }
 #endif

@@ -204,6 +204,7 @@
 		80D8ADEC3F33AFADF7EEDF49 /* ClaudeProbeConfigShim.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D83CAFFA2389FC14E88853 /* ClaudeProbeConfigShim.swift */; };
 		818A50149DF28322F2FAA3A0 /* OnboardingDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CDC79D6AFA017C507F99EDB /* OnboardingDefaults.swift */; };
 		8302EEE664744FA8A3606F34 /* SemanticVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16EEA49AD2C64DCF8BDC1241 /* SemanticVersion.swift */; };
+		83268DC9293E64C9C76B20ED /* CLIBinaryPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDBC977E728A3F767B1185C /* CLIBinaryPresenceTests.swift */; };
 		834955216AABF3A188B6D2FB /* TranscriptTurnTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1116C1BDB5B78A25018D8CDD /* TranscriptTurnTimingTests.swift */; };
 		83EA221DD5EE026209A2B3DD /* SessionRowsBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F1BF1275194FBD35A0F9721 /* SessionRowsBuilder.swift */; };
 		8437CCD1B43B15364EAAF8A6 /* AnalyticsIndexPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE66BC0036A8BA5E9101777B /* AnalyticsIndexPhase.swift */; };
@@ -402,6 +403,7 @@
 		DEFB9060B8E3F2762D3A35EA /* NewProviderDiscoverabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5981003758B9226E65BA31D /* NewProviderDiscoverabilityTests.swift */; };
 		E048F5A3D6437615A927BF51 /* ClaudeUsageModelAuthWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 941D05409259C45574C5D308 /* ClaudeUsageModelAuthWiringTests.swift */; };
 		E04AA5C5FAC4C19032BAD3A6 /* ClaudeRunwayLogIO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76B8E4F7C43F96D506B253AD /* ClaudeRunwayLogIO.swift */; };
+		E0C10B86A5B5F1A1C9774DBC /* CLIBinaryPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CCE9E3D3EB93F780CF57CA /* CLIBinaryPresence.swift */; };
 		E1576140B0B1677E8952F346 /* ClaudeTmuxSuppressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72E70D88A73D9662066520AD /* ClaudeTmuxSuppressionTests.swift */; };
 		E1DDA78C704848A381A6A426 /* LoadingAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188663773714C61A568F7AA /* LoadingAnimationView.swift */; };
 		E30E25DBB8A97DC728D7BB0D /* IDEOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B374DD7125FED89457B180 /* IDEOpener.swift */; };
@@ -661,6 +663,7 @@
 		7B7CAD45F87994CCC597F5A1 /* CodexResetCreditsFetcher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/CodexOAuth/CodexResetCreditsFetcher.swift; sourceTree = SOURCE_ROOT; };
 		7C018BA230F9D81E63EEB125 /* PiResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/PiResume/PiResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		7CC0C3D8AA930D4672F70B67 /* SessionRowDisplayTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/SessionRowDisplayTests.swift; sourceTree = SOURCE_ROOT; };
+		7CDBC977E728A3F767B1185C /* CLIBinaryPresenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CLIBinaryPresenceTests.swift; sourceTree = SOURCE_ROOT; };
 		7D60A57D33ADD8309F775C5A /* DroidSessionIndexer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionIndexer.swift; sourceTree = SOURCE_ROOT; };
 		7E101E0039767737C6AA50E6 /* HUDRebuildGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/HUDRebuildGate.swift; sourceTree = SOURCE_ROOT; };
 		7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeSheet.swift; path = AgentSessions/Resume/CodexResumeSheet.swift; sourceTree = SOURCE_ROOT; };
@@ -690,6 +693,7 @@
 		9059F3E358CEE3DD092E327B /* test-session.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; path = "AgentSessionsTests/Fixtures/Cursor/test-session.jsonl"; sourceTree = SOURCE_ROOT; };
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		9250A5B0654ADC3B8ACA39B4 /* AgentUpdateService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentUpdateService.swift; sourceTree = SOURCE_ROOT; };
+		93CCE9E3D3EB93F780CF57CA /* CLIBinaryPresence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Shared/CLIBinaryPresence.swift; sourceTree = SOURCE_ROOT; };
 		941D05409259C45574C5D308 /* ClaudeUsageModelAuthWiringTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeUsageModelAuthWiringTests.swift; sourceTree = SOURCE_ROOT; };
 		9434705A30D3A111B1F3235C /* TranscriptAutoJumpPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptAutoJumpPolicyTests.swift; sourceTree = SOURCE_ROOT; };
 		94814E2E2CFFA7EEBB199684 /* PresenceEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PresenceEngineTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1258,6 +1262,7 @@
 				96A6013472A8EAAD80EF15CF /* CLIAuthStatusProbe.swift */,
 				F7A18C0AEF6B5DB5A329FCF4 /* AuthStatusNotifier.swift */,
 				A89A3AD74028E096AD291B13 /* Views */,
+				93CCE9E3D3EB93F780CF57CA /* CLIBinaryPresence.swift */,
 			);
 			name = Shared;
 			sourceTree = "<group>";
@@ -1501,6 +1506,7 @@
 				9FA91A4218E8A12FA20DBDFC /* CodexUsageModelAuthWiringTests.swift */,
 				941D05409259C45574C5D308 /* ClaudeUsageModelAuthWiringTests.swift */,
 				CD1C31E4CE17DF6E4A170FD4 /* AuthStatusNotifierTests.swift */,
+				7CDBC977E728A3F767B1185C /* CLIBinaryPresenceTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2444,6 +2450,7 @@
 				734A3991A25C0546F315DD67 /* CLIAuthStatusProbe.swift in Sources */,
 				C7D7C64D03109E814BEA8335 /* AuthStatusNotifier.swift in Sources */,
 				91E8C3E5EC183BE5D7157C6A /* AuthRemediationBanner.swift in Sources */,
+				E0C10B86A5B5F1A1C9774DBC /* CLIBinaryPresence.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2563,6 +2570,7 @@
 				07B99A3B23B81136E3A0AEF2 /* CodexUsageModelAuthWiringTests.swift in Sources */,
 				E048F5A3D6437615A927BF51 /* ClaudeUsageModelAuthWiringTests.swift in Sources */,
 				2BF6A61FB42B1CB0915CC860 /* AuthStatusNotifierTests.swift in Sources */,
+				83268DC9293E64C9C76B20ED /* CLIBinaryPresenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

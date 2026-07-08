@@ -316,6 +316,12 @@ actor ClaudeUsageSourceManager {
             // no debounce is needed and ambiguous/`.unknown` stays `.ok`.
             let cli = await throttledClaudeAuthStatus()
             let state = Self.successPathState(cli: cli)
+            // A confirmed-good fetch (.ok) proves the account works, so clear the
+            // classifier's debounce clock: this fast-path bypasses classify(), and
+            // a stale firstMissAt from an earlier transient miss must not survive a
+            // healthy poll to false-fire .signedOut later. Do NOT reset on
+            // .signedOut — that is an authoritative logout the classifier must keep.
+            if state == .ok { authClassifier.reset() }
             currentAuthState = state
             if Self.shouldSuppressTmuxFallback(state), usingTmuxFallback { await deactivateTmuxFallback() }
             availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
@@ -464,21 +470,31 @@ actor ClaudeUsageSourceManager {
             return credsFilePresentToken
         }()
 
+        let envTokenPresent = !(ProcessInfo.processInfo.environment["CLAUDE_CODE_OAUTH_TOKEN"] ?? "").isEmpty
+
         let state: UsageAuthState
         if was401 && hasToken {
             // A verified 401 with a token still present = expired credentials.
+            // A present token is not an absence, so clear the debounce clock —
+            // this .expired verdict bypasses classify() and must not leave a
+            // stale firstMissAt behind to false-fire .signedOut on a later miss.
             state = .expired
+            authClassifier.reset()
         } else {
             // Non-401 failure, or a 401 after the token vanished (really signed
             // out): run the full stateful classifier for a debounced verdict.
             let cliStatus = await CLIAuthStatusProbe.probeClaudeAuthStatus()
+            // Deterministic disk existence check for the binary — never the flaky
+            // login-shell/brew/npm probe, which can transiently return nil (e.g.
+            // post-wake) and false-fire .cliNotInstalled for a signed-in user.
             let override = UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath)
-            let binaryPresent = ClaudeCLIEnvironment().resolveBinary(customPath: override) != nil
+            let binaryPresent = CLIBinaryPresence.claudeInstalled(overridePath: override)
             state = authClassifier.classify(
                 ClaudeAuthInputs(cliStatus: cliStatus,
                                  keychain: keychain,
                                  credsFilePresentToken: credsFilePresentToken,
-                                 binaryPresent: binaryPresent),
+                                 binaryPresent: binaryPresent,
+                                 envTokenPresent: envTokenPresent),
                 now: Date()
             )
         }
