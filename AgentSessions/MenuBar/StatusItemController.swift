@@ -195,6 +195,23 @@ final class StatusItemController: NSObject {
             return desiredSource
         }()
 
+        // Auth remediation (Task 12): one quiet line per provider whose CLI
+        // auth needs attention (signed out / expired / CLI missing). Mirrors
+        // the AuthRemediationBanner shown in the usage strips, condensed to
+        // a single tappable menu row that opens Usage Tracking preferences.
+        var didShowAuthAlert = false
+        if codexTrackingEnabled, let codexAuth = codexStatus.authStatus, codexAuth.state.isAlarming {
+            menu.addItem(makeAuthAlertItem(provider: .codex, status: codexAuth))
+            didShowAuthAlert = true
+        }
+        if claudeTrackingEnabled, let claudeAuth = claudeStatus.authStatus, claudeAuth.state.isAlarming {
+            menu.addItem(makeAuthAlertItem(provider: .claude, status: claudeAuth))
+            didShowAuthAlert = true
+        }
+        if didShowAuthAlert {
+            menu.addItem(NSMenuItem.separator())
+        }
+
         if liveSessionsEnabled {
             let summary = AgentCockpitHUDView.liveSessionSummary(
                 activeCodex: activeSessions,
@@ -334,6 +351,35 @@ final class StatusItemController: NSObject {
         it.target = self
         it.state = checked ? .on : .off
         return it
+    }
+    private func makeAuthAlertItem(provider: AuthProvider, status: UsageAuthStatus) -> NSMenuItem {
+        let it = NSMenuItem(title: authAlertText(provider: provider, state: status.state), action: #selector(openUsagePreferences), keyEquivalent: "")
+        it.target = self
+        let symbolName: String
+        let tint: NSColor
+        switch status.state {
+        case .expired:
+            symbolName = "clock.badge.exclamationmark"
+            tint = .systemOrange
+        case .cliNotInstalled:
+            symbolName = "bolt.horizontal.circle"
+            tint = .secondaryLabelColor
+        default:
+            symbolName = "exclamationmark.triangle.fill"
+            tint = .systemRed
+        }
+        if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+            it.image = symbol.withSymbolConfiguration(.init(paletteColors: [tint]))
+        }
+        return it
+    }
+    private func authAlertText(provider: AuthProvider, state: UsageAuthState) -> String {
+        switch state {
+        case .signedOut: return "Sign in to \(provider.displayName)"
+        case .expired: return "\(provider.displayName) session expired — sign in"
+        case .cliNotInstalled: return "\(provider.displayName) CLI not installed"
+        default: return provider.displayName
+        }
     }
 
     // MARK: - Actions

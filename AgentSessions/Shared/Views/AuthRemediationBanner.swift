@@ -13,6 +13,10 @@ import AppKit
 struct AuthRemediationBanner: View {
     let status: UsageAuthStatus
     var compact: Bool = false
+    /// When true, this banner is nested inside a usage strip that already
+    /// provides horizontal padding and a material background — suppress our
+    /// own to avoid double padding / double material.
+    var embedded: Bool = false
 
     var body: some View {
         if compact {
@@ -44,9 +48,9 @@ struct AuthRemediationBanner: View {
 
             remediationControl
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, embedded ? 0 : 10)
         .padding(.vertical, 8)
-        .background(.thinMaterial)
+        .background(embedded ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.thinMaterial))
     }
 
     // MARK: - Compact mode
@@ -66,7 +70,7 @@ struct AuthRemediationBanner: View {
 
             remediationControl
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, embedded ? 0 : 10)
         .padding(.vertical, 4)
     }
 

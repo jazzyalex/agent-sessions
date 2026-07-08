@@ -14,47 +14,24 @@ struct ClaudeUsageStripView: View {
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
     @State private var showTmuxHelp: Bool = false
 
+    private var hasLiveData: Bool {
+        status.lastUpdate.map { Date().timeIntervalSince($0) < 300 } ?? false
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            if let label {
-                Text(label)
-                    .font(.footnote).bold()
-                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
-                    .frame(width: labelWidth, alignment: .leading)
-            }
-            UsageMeter(title: "5h", percent: status.sessionRemainingPercent, reset: status.sessionResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
-            UsageMeter(title: "Wk", percent: status.weekAllModelsRemainingPercent, reset: status.weekAllModelsResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
-
-            Spacer(minLength: 0)
-
-            if status.isUpdating {
-                UpdatingBadge()
-            }
-
-            // Status text (right-aligned): only show problems/warnings
-            if status.loginRequired {
-                Text("Login required")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .help(status.setupHint ?? "Claude Code CLI credentials are stale. Open Terminal and run: claude /login")
-            } else if status.setupRequired {
-                Text("Setup required")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .help(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
-            } else if status.cliUnavailable {
-                Text("CLI not found").font(.caption).foregroundStyle(.red)
-            } else if status.tmuxUnavailable {
-                Text("tmux not found").font(.caption).foregroundStyle(.red)
-            } else if status.lastUpdate == nil, status.unavailableMessage != nil {
-                Text("Usage unavailable").font(.caption).foregroundStyle(.orange)
-            } else if let update = status.lastUpdate {
-                // Show immediately when stale/degraded; otherwise only after 30 minutes
-                if status.dataIsStale || Date().timeIntervalSince(update) > 30 * 60 {
-                    Text("Updated \(timeAgo(update))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        Group {
+            if let authStatus = status.authStatus, authStatus.state.isAlarming {
+                if hasLiveData {
+                    VStack(spacing: 4) {
+                        AuthRemediationBanner(status: authStatus, compact: true, embedded: true)
+                        metersRow
+                            .opacity(0.5)
+                    }
+                } else {
+                    AuthRemediationBanner(status: authStatus, compact: false, embedded: true)
                 }
+            } else {
+                metersRow
             }
         }
         .padding(.horizontal, 10)
@@ -86,6 +63,46 @@ struct ClaudeUsageStripView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Claude usage tracking requires tmux to run headlessly. Install via Homebrew:\n\n  brew install tmux\n\nThen enable Usage Tracking again.")
+        }
+    }
+
+    private var metersRow: some View {
+        HStack(spacing: 12) {
+            if let label {
+                Text(label)
+                    .font(.footnote).bold()
+                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
+                    .frame(width: labelWidth, alignment: .leading)
+            }
+            UsageMeter(title: "5h", percent: status.sessionRemainingPercent, reset: status.sessionResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
+            UsageMeter(title: "Wk", percent: status.weekAllModelsRemainingPercent, reset: status.weekAllModelsResetText, tintColor: brandColor, lastUpdate: status.lastUpdate)
+
+            Spacer(minLength: 0)
+
+            if status.isUpdating {
+                UpdatingBadge()
+            }
+
+            // Status text (right-aligned): only show problems/warnings.
+            // (loginRequired/setupRequired/cliUnavailable captions retired —
+            // superseded by the AuthRemediationBanner above.)
+            if status.tmuxUnavailable {
+                Text("tmux not found").font(.caption).foregroundStyle(.red)
+            } else if status.setupRequired {
+                Text("Setup required")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .help(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
+            } else if status.lastUpdate == nil, status.unavailableMessage != nil {
+                Text("Usage unavailable").font(.caption).foregroundStyle(.orange)
+            } else if let update = status.lastUpdate {
+                // Show immediately when stale/degraded; otherwise only after 30 minutes
+                if status.dataIsStale || Date().timeIntervalSince(update) > 30 * 60 {
+                    Text("Updated \(timeAgo(update))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

@@ -13,26 +13,24 @@ struct UsageStripView: View {
     var collapseBottom: Bool = false
     @AppStorage("StripMonochromeMeters") private var stripMonochrome: Bool = false
 
+    private var hasLiveData: Bool {
+        codexStatus.lastUpdate.map { Date().timeIntervalSince($0) < 300 } ?? false
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 12) {
-                if let label {
-                    Text(label)
-                        .font(.footnote).bold()
-                        .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
-                        .frame(width: labelWidth, alignment: .leading)
+        Group {
+            if let authStatus = codexStatus.authStatus, authStatus.state.isAlarming {
+                if hasLiveData {
+                    VStack(spacing: 4) {
+                        AuthRemediationBanner(status: authStatus, compact: true, embedded: true)
+                        metersRow
+                            .opacity(0.5)
+                    }
+                } else {
+                    AuthRemediationBanner(status: authStatus, compact: false, embedded: true)
                 }
-                UsageMeter(title: "5h", percent: codexStatus.fiveHourRemainingPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-                UsageMeter(title: "Wk", percent: codexStatus.weekRemainingPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-                Spacer(minLength: 0)
-                if codexStatus.isUpdating {
-                    UpdatingBadge()
-                } else if let eff = effectiveEventTimestamp(source: .codex, eventTimestamp: codexStatus.lastEventTimestamp, lastUpdate: codexStatus.lastUpdate),
-                          Date().timeIntervalSince(eff) > 30 * 60 {
-                    Text("Last updated: \(timeAgo(eff))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            } else {
+                metersRow
             }
         }
         .padding(.horizontal, 10)
@@ -53,6 +51,28 @@ struct UsageStripView: View {
         .help(makeTooltip())
         .onAppear { codexStatus.setStripVisible(true) }
         .onDisappear { codexStatus.setStripVisible(false) }
+    }
+
+    private var metersRow: some View {
+        HStack(spacing: 12) {
+            if let label {
+                Text(label)
+                    .font(.footnote).bold()
+                    .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
+                    .frame(width: labelWidth, alignment: .leading)
+            }
+            UsageMeter(title: "5h", percent: codexStatus.fiveHourRemainingPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+            UsageMeter(title: "Wk", percent: codexStatus.weekRemainingPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+            Spacer(minLength: 0)
+            if codexStatus.isUpdating {
+                UpdatingBadge()
+            } else if let eff = effectiveEventTimestamp(source: .codex, eventTimestamp: codexStatus.lastEventTimestamp, lastUpdate: codexStatus.lastUpdate),
+                      Date().timeIntervalSince(eff) > 30 * 60 {
+                Text("Last updated: \(timeAgo(eff))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func makeTooltip() -> String {

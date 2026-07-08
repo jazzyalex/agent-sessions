@@ -41,7 +41,7 @@ fastlane/test_output
 # Internal reviews and promo operations (local git only)
 docs/Sonnet-4.5-review.md
 docs/social/agent-sessions-outreach/
-Marketing/promo-workflow/
+Marketing/
 skills/promo-outreach/
 .codex/
 .venv/
