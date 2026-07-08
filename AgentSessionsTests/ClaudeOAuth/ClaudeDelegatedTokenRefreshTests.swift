@@ -25,3 +25,22 @@ final class ClaudeDelegatedTokenRefreshTests: XCTestCase {
         _ = await refresher.attemptRefresh()
     }
 }
+
+/// Track C: the delegated refresh runs `claude auth status` (non-interactive) with a
+/// browser-suppressed environment so it can never pop the Safari OAuth page. The
+/// subprocess spawn isn't unit-testable; this covers the pure env helper.
+final class ClaudeDelegatedTokenRefreshEnvTests: XCTestCase {
+    func testBrowserSuppressedEnvironmentNeutralizesBrowserAndPreservesOthers() {
+        let base = ["BROWSER": "/Applications/Safari.app", "PATH": "/x"]
+        let env = ClaudeDelegatedTokenRefresh.browserSuppressedEnvironment(base)
+        XCTAssertEqual(env["BROWSER"], "/usr/bin/true")
+        XCTAssertEqual(env["CI"], "1")
+        XCTAssertEqual(env["PATH"], "/x")
+    }
+
+    func testBrowserSuppressedEnvironmentSetsKeysFromEmptyBase() {
+        let env = ClaudeDelegatedTokenRefresh.browserSuppressedEnvironment([:])
+        XCTAssertEqual(env["BROWSER"], "/usr/bin/true")
+        XCTAssertEqual(env["CI"], "1")
+    }
+}

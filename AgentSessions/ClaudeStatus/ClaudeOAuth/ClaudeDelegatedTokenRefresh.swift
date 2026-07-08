@@ -5,9 +5,16 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "Claude
 
 // MARK: - Delegated Token Refresh
 //
-// On 401, spawns `claude /status` which triggers the CLI's internal token
-// refresh logic (re-exchanges for a new access token). If the credentials
-// file or keychain changes afterwards, the new token is ready to use.
+// On 401, spawns `claude auth status` — the non-interactive status subcommand.
+// It prints JSON and, as a side effect, lets the CLI perform any silent
+// (refresh-token-grant) token refresh. Crucially it does NOT initiate the
+// interactive OAuth browser flow: with an expired/absent token it reports
+// logged-out rather than opening Safari. The spawn also runs in a
+// browser-suppressed environment (see `browserSuppressedEnvironment`) as
+// defense in depth, so no `claude` invocation can ever pop a browser here.
+//
+// If the credentials file or keychain changes afterwards, the new token is
+// ready to use (detected via the fingerprint change check).
 //
 // Called at most once per failure cycle via `didAttemptDelegatedRefresh`
 // guard in ClaudeUsageSourceManager. Polling is short (5 × 2s) since the
@@ -23,6 +30,18 @@ actor ClaudeDelegatedTokenRefresh {
 
     private let fingerprint = ClaudeCredentialFingerprint()
 
+    /// Returns a copy of `base` with browser launching neutralized, so no
+    /// subprocess spawned with this environment can open a URL/browser.
+    /// Pure and side-effect-free for unit testing.
+    static func browserSuppressedEnvironment(_ base: [String: String]) -> [String: String] {
+        var env = base
+        // Tools that honor $BROWSER run `$BROWSER <url>`; point it at a no-op.
+        env["BROWSER"] = "/usr/bin/true"
+        // Signal non-interactive / CI so browser-based auth flows self-suppress.
+        env["CI"] = "1"
+        return env
+    }
+
     func attemptRefresh() async -> RefreshResult {
         guard !AppRuntime.isRunningTests else {
             os_log("ClaudeOAuth: delegated refresh — skipped in test mode", log: log, type: .info)
@@ -37,7 +56,8 @@ actor ClaudeDelegatedTokenRefresh {
 
         let process = Process()
         process.executableURL = binaryURL
-        process.arguments = ["/status"]
+        process.arguments = ["auth", "status"]
+        process.environment = Self.browserSuppressedEnvironment(ProcessInfo.processInfo.environment)
         process.standardOutput = Pipe()
         process.standardError = Pipe()
 
