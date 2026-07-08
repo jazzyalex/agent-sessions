@@ -59,4 +59,27 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
         XCTAssertFalse(model.showAuthBanner)
         XCTAssertEqual(model.authStatus?.state, .ok)
     }
+
+    // MARK: - Success-path authoritative override (pure helpers)
+
+    /// Only a DEFINITIVE `.signedOut` from the throttled probe overrides the
+    /// success path; every other status (signed-in / unknown / cli-missing on a
+    /// healthy fetch) must stay `.ok` and never false-alarm.
+    func testSuccessPathStateMapping() {
+        XCTAssertEqual(CodexUsageModel.successPathState(cli: .signedOut), .signedOut)
+        XCTAssertEqual(CodexUsageModel.successPathState(cli: .signedIn), .ok)
+        XCTAssertEqual(CodexUsageModel.successPathState(cli: .unknown), .ok)
+        XCTAssertEqual(CodexUsageModel.successPathState(cli: .cliMissing), .ok)
+    }
+
+    /// Throttle predicate: never-probed (nil) → probe; older-than-interval →
+    /// probe; within the interval → reuse cache.
+    func testShouldReprobeThrottle() {
+        let now = Date()
+        XCTAssertTrue(CodexUsageModel.shouldReprobe(lastAt: nil, now: now, interval: 120))
+        XCTAssertTrue(CodexUsageModel.shouldReprobe(lastAt: now.addingTimeInterval(-120), now: now, interval: 120))
+        XCTAssertTrue(CodexUsageModel.shouldReprobe(lastAt: now.addingTimeInterval(-121), now: now, interval: 120))
+        XCTAssertFalse(CodexUsageModel.shouldReprobe(lastAt: now.addingTimeInterval(-119), now: now, interval: 120))
+        XCTAssertFalse(CodexUsageModel.shouldReprobe(lastAt: now, now: now, interval: 120))
+    }
 }

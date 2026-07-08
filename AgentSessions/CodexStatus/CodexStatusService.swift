@@ -189,6 +189,14 @@ final class CodexUsageModel: ObservableObject {
     /// isolation domain — the main actor. `classify` runs here; the async/IO
     /// inputs are gathered off-main first (see `gatherAuthInputs`).
     private let authClassifier = CodexAuthClassifier()
+
+    /// Throttle for the success-path authoritative status probe. Holds the last
+    /// `CLIAuthStatus` and when it was taken; re-probed at most every
+    /// `cliStatusReprobeInterval` (120s). `nil` until the first success-path
+    /// probe, in which case the throttle returns `.unknown` (→ `.ok`).
+    private var cliStatusCache: (status: CLIAuthStatus, at: Date)?
+    private static let cliStatusReprobeInterval: TimeInterval = 120
+
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var isEnabled: Bool = false
@@ -537,13 +545,55 @@ final class CodexUsageModel: ObservableObject {
     /// out. Invoked once per poll by the service's `authFetchResultHandler`.
     func handleAuthFetchResult(_ fetchResult: CodexUsageFetchResult) async {
         let inputs = await Self.gatherAuthInputs(fetchResult: fetchResult)
-        let state = authClassifier.classify(cliStatus: inputs.cliStatus,
+        var state = authClassifier.classify(cliStatus: inputs.cliStatus,
                                             creds: inputs.creds,
                                             lastFetch: fetchResult,
                                             binaryPresent: inputs.binaryPresent,
                                             now: Date())
+        // Success-path authoritative override. A healthy fetch resolves to `.ok`
+        // via the classifier (and resets its debounce), but the CLI may have been
+        // logged out live while a cached token still fetches. Consult the
+        // THROTTLED authoritative probe so a live logout surfaces within one poll
+        // instead of after the cached token stops working. Only a DEFINITIVE
+        // `.signedOut` overrides; ambiguous/`.unknown` stays `.ok`. The non-`.ok`
+        // fetch path already runs the full stateful classifier — leave it alone.
+        if case .ok = fetchResult, state == .ok {
+            let cli = await throttledCodexAuthStatus()
+            state = Self.successPathState(cli: cli)
+        }
         applyAuthState(state)
         await service?.updateAuthState(state)
+    }
+
+    /// Throttled authoritative `codex login status` probe for the SUCCESS path.
+    /// Re-probes at most once per `cliStatusReprobeInterval` (120s); between
+    /// probes returns the cached value; `.unknown` until the first probe. The
+    /// subprocess runs via the nonisolated static probe (off-main); the cache
+    /// read/write happens here on the main actor.
+    private func throttledCodexAuthStatus() async -> CLIAuthStatus {
+        let now = Date()
+        if Self.shouldReprobe(lastAt: cliStatusCache?.at, now: now, interval: Self.cliStatusReprobeInterval) {
+            let status = await CLIAuthStatusProbe.probeCodexLoginStatus()
+            cliStatusCache = (status, now)
+            return status
+        }
+        return cliStatusCache?.status ?? .unknown
+    }
+
+    /// Pure success-path mapping: a healthy fetch proves the account works, so
+    /// ONLY a DEFINITIVE authoritative `.signedOut` overrides to signed-out.
+    /// Every other status (`.signedIn` / `.unknown` / `.cliMissing`) stays `.ok`
+    /// — a `.cliMissing`-while-fetch-succeeds is contradictory and ambiguous/
+    /// `.unknown` must never false-alarm.
+    nonisolated static func successPathState(cli: CLIAuthStatus) -> UsageAuthState {
+        cli == .signedOut ? .signedOut : .ok
+    }
+
+    /// Pure throttle predicate: re-probe when never probed (`nil`) or when the
+    /// last probe is at least `interval` old; otherwise reuse the cached value.
+    nonisolated static func shouldReprobe(lastAt: Date?, now: Date, interval: TimeInterval) -> Bool {
+        guard let lastAt else { return true }
+        return now.timeIntervalSince(lastAt) >= interval
     }
 
     /// Pure mapping from an auth verdict to the two published surfaces. Kept

@@ -45,6 +45,13 @@ actor ClaudeUsageSourceManager {
     // Fast retries during cold start (first 90s) to close the blank-screen gap.
     private static let coldStartWindow: TimeInterval = 90
     private static let coldStartRetryDelays: [TimeInterval] = [10, 30]
+    // Authoritative CLI-status re-probe throttle on the SUCCESS path: at most
+    // one `claude auth status` subprocess per this interval. A live CLI logout
+    // is surfaced within one poll of the next re-probe (≤120s late) instead of
+    // waiting out the 10-min OAuth token cache while the stale token keeps
+    // fetching. The probe never false-fires, so trusting a `.signedOut` from it
+    // immediately (no debounce) is safe.
+    private static let cliStatusReprobeInterval: TimeInterval = 120
 
 #if DEBUG
     nonisolated static var refreshIntervalForTesting: TimeInterval {
@@ -67,6 +74,12 @@ actor ClaudeUsageSourceManager {
     /// gates the tmux fallback so a signed-out account never spawns a hanging probe.
     private var currentAuthState: UsageAuthState = .unknown
 
+    /// Throttle for the success-path authoritative status probe. Holds the last
+    /// `CLIAuthStatus` and when it was taken; re-probed at most every
+    /// `cliStatusReprobeInterval`. `nil` until the first success-path probe, in
+    /// which case the throttle returns `.unknown` (→ `.ok`, never alarming).
+    private var cliStatusCache: (status: CLIAuthStatus, at: Date)?
+
     /// Single long-lived classifier instance — it is STATEFUL (debounces the
     /// `signedOut` verdict across polls), so it must never be re-created per call.
     private let authClassifier = ClaudeAuthClassifier()
@@ -75,6 +88,22 @@ actor ClaudeUsageSourceManager {
     /// out or the CLI is absent, so it must never run in those states.
     static func shouldSuppressTmuxFallback(_ state: UsageAuthState) -> Bool {
         state == .signedOut || state == .cliNotInstalled
+    }
+
+    /// Pure success-path mapping: a healthy OAuth fetch proves the account
+    /// works, so ONLY a DEFINITIVE authoritative `.signedOut` overrides to
+    /// signed-out. Every other status (`.signedIn` / `.unknown` / `.cliMissing`)
+    /// stays `.ok` — a `.cliMissing`-while-fetch-succeeds is contradictory and an
+    /// ambiguous/`.unknown` must never false-alarm.
+    static func successPathState(cli: CLIAuthStatus) -> UsageAuthState {
+        cli == .signedOut ? .signedOut : .ok
+    }
+
+    /// Pure throttle predicate: re-probe when never probed (`nil`) or when the
+    /// last probe is at least `interval` old; otherwise reuse the cached value.
+    static func shouldReprobe(lastAt: Date?, now: Date, interval: TimeInterval) -> Bool {
+        guard let lastAt else { return true }
+        return now.timeIntervalSince(lastAt) >= interval
     }
 
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
@@ -279,12 +308,19 @@ actor ClaudeUsageSourceManager {
             }
 
             publish(snapshot)
-            // Success is authoritative on its own — do NOT run the classifier here
-            // (it would spend a subprocess and could debounce-flip a good login).
-            currentAuthState = .ok
+            // The OAuth token still fetches, but the CLI may have been logged
+            // out live while the resolver's cached token keeps working. Consult
+            // the THROTTLED authoritative status probe so a live logout surfaces
+            // within one poll instead of after the 10-min token cache. Only a
+            // DEFINITIVE `.signedOut` overrides — the probe never false-fires, so
+            // no debounce is needed and ambiguous/`.unknown` stays `.ok`.
+            let cli = await throttledClaudeAuthStatus()
+            let state = Self.successPathState(cli: cli)
+            currentAuthState = state
+            if Self.shouldSuppressTmuxFallback(state), usingTmuxFallback { await deactivateTmuxFallback() }
             availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
-                                                           loginRequired: false, setupRequired: false, setupHint: nil,
-                                                           authState: .ok))
+                                                           loginRequired: state == .signedOut, setupRequired: false, setupHint: nil,
+                                                           authState: state))
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 
@@ -462,6 +498,21 @@ actor ClaudeUsageSourceManager {
             setupHint: nil,
             authState: state
         ))
+    }
+
+    /// Throttled authoritative `claude auth status` probe for the SUCCESS path.
+    /// Re-probes at most once per `cliStatusReprobeInterval` (120s); between
+    /// probes returns the cached value; `.unknown` until the first probe. The
+    /// probe is subprocess-based but async/cooperative (never blocks the actor),
+    /// and it never reports a confident `.signedOut` on ambiguity/timeout.
+    private func throttledClaudeAuthStatus() async -> CLIAuthStatus {
+        let now = Date()
+        if Self.shouldReprobe(lastAt: cliStatusCache?.at, now: now, interval: Self.cliStatusReprobeInterval) {
+            let status = await CLIAuthStatusProbe.probeClaudeAuthStatus()
+            cliStatusCache = (status, now)
+            return status
+        }
+        return cliStatusCache?.status ?? .unknown
     }
 
     private func scheduleOAuthRetry() {

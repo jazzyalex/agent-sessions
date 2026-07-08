@@ -373,4 +373,27 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
 
         XCTAssertNil(merged)
     }
+
+    // MARK: - Success-path authoritative override (pure helpers)
+
+    /// Only a DEFINITIVE `.signedOut` from the throttled probe overrides the
+    /// OAuth-success path; every other status (signed-in / unknown / cli-missing
+    /// on a healthy fetch) must stay `.ok` and never false-alarm.
+    func testSuccessPathStateMapping() {
+        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .signedOut), .signedOut)
+        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .signedIn), .ok)
+        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .unknown), .ok)
+        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .cliMissing), .ok)
+    }
+
+    /// Throttle predicate: never-probed (nil) → probe; older-than-interval →
+    /// probe; within the interval → reuse cache.
+    func testShouldReprobeThrottle() {
+        let now = Date()
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldReprobe(lastAt: nil, now: now, interval: 120))
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldReprobe(lastAt: now.addingTimeInterval(-120), now: now, interval: 120))
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldReprobe(lastAt: now.addingTimeInterval(-121), now: now, interval: 120))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now.addingTimeInterval(-119), now: now, interval: 120))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now, now: now, interval: 120))
+    }
 }
