@@ -1159,11 +1159,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     /// Swatch color mirrors the card accent for the same kind (see
     /// `BlockTableController.accentColor`) so the chip reads as the thing it
-    /// filters. `.assistant` uses the session's agent-brand accent.
+    /// filters. `.assistant` uses the unified assistant accent (agent-independent).
     private func roleFilterAccent(_ role: TranscriptRoleFilter, source: SessionSource) -> Color {
         switch role {
         case .user: return TranscriptColorSystem.semanticAccent(.user)
-        case .assistant: return TranscriptColorSystem.agentBrandAccent(source: source)
+        case .assistant: return TranscriptColorSystem.semanticAccent(.assistant)
         case .tools: return TranscriptColorSystem.semanticAccent(.toolCall)
         case .errors: return TranscriptColorSystem.semanticAccent(.error)
         }

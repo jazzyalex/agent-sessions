@@ -2899,7 +2899,7 @@ private struct TerminalRolePalette {
                     accent: NSColor.systemBlue
                 )
             case .assistant:
-                let accentBase = sessionSource.map { TranscriptColorSystem.agentBrandAccent(source: $0) } ?? NSColor.secondaryLabelColor
+                let accentBase: NSColor = TranscriptColorSystem.semanticAccent(.assistant)
                 return AppKitSwatch(
                     foreground: NSColor.labelColor,
                     background: tinted(accentBase, light: 0.08, dark: 0.12),
@@ -2994,7 +2994,7 @@ private extension TerminalLineRole {
     }
 
     var isDark: Bool = false
-    var agentBrandAccent: NSColor = NSColor.secondaryLabelColor
+    var assistantAccent: NSColor = TranscriptColorSystem.semanticAccent(.assistant)
     var blocks: [BlockDecoration] = []
 	    var lineIndex: [LineIndexEntry] = []
 	    var matchLineIDs: Set<Int> = []
@@ -3055,7 +3055,7 @@ private extension TerminalLineRole {
 	                paddingY: 8
 	            )
         case .agent:
-            let base = agentBrandAccent
+            let base = assistantAccent
             return BlockStyle(
                 fill: rgba(base, alpha: dark ? 0.06 : 0.012),
                 accent: rgba(base, alpha: dark ? 0.60 : 0.42),
@@ -5097,7 +5097,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
             lm.isDark = (colorScheme == .dark)
-            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
+            lm.assistantAccent = TranscriptColorSystem.semanticAccent(.assistant)
             lm.lineIndex = zip(lines.map(\.id), lines.compactMap { ranges[$0.id] }).map { TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1) }
             lm.blocks = buildBlockDecorations(ranges: ranges)
             updateLayoutManagerUnifiedFind(lm,
@@ -5208,7 +5208,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
             lm.isDark = (colorScheme == .dark)
-            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
+            lm.assistantAccent = TranscriptColorSystem.semanticAccent(.assistant)
             lm.lineIndex = zip(lines.map(\.id), lines.compactMap { mergedRanges[$0.id] }).map {
                 TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1)
             }
@@ -5320,7 +5320,7 @@ private struct TerminalTextScrollView: NSViewRepresentable {
 
         if let lm = (textView.layoutManager as? TerminalLayoutManager) ?? context.coordinator.activeLayoutManager {
             lm.isDark = (colorScheme == .dark)
-            lm.agentBrandAccent = TranscriptColorSystem.agentBrandAccent(source: sessionSource)
+            lm.assistantAccent = TranscriptColorSystem.semanticAccent(.assistant)
             lm.lineIndex = zip(lines.map(\.id), lines.compactMap { mergedRanges[$0.id] }).map {
                 TerminalLayoutManager.LineIndexEntry(id: $0.0, range: $0.1)
             }

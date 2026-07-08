@@ -895,10 +895,20 @@ struct UnifiedSessionsView: View {
 	                .transaction { $0.animation = nil }
 	        } else if layoutMode == .vertical {
 	            HSplitView {
+	                // Native macOS split idiom: panes read as distinct via a one-step
+	                // background value difference (list on window gray, transcript on
+	                // the brighter text background) + a single crisp hairline. Each
+	                // pane is inset by `paneGutter` so neither the list content nor the
+	                // transcript stripes butt against the line — equal margin both sides.
 	                listPane
 	                    .frame(minWidth: 320, maxWidth: 1200)
+	                    .padding(.trailing, Self.paneGutter)
+	                    .background(Self.listPaneBackground)
+	                    .overlay(alignment: .trailing) { paneHairline(.vertical) }
 	                transcriptPane
 	                    .frame(minWidth: 450)
+	                    .padding(.leading, Self.paneGutter)
+	                    .background(Color(nsColor: .textBackgroundColor))
 	            }
 	            .background(SplitViewAutosave(key: "UnifiedSplit-H"))
 	            .transaction { $0.animation = nil }
@@ -906,11 +916,41 @@ struct UnifiedSessionsView: View {
 	            VSplitView {
 	                listPane
 	                    .frame(minHeight: 180)
+	                    .padding(.bottom, Self.paneGutter)
+	                    .background(Self.listPaneBackground)
+	                    .overlay(alignment: .bottom) { paneHairline(.horizontal) }
 	                transcriptPane
 	                    .frame(minHeight: 240)
+	                    .padding(.top, Self.paneGutter)
+	                    .background(Color(nsColor: .textBackgroundColor))
 	            }
 	            .background(SplitViewAutosave(key: "UnifiedSplit-V"))
 	            .transaction { $0.animation = nil }
+	        }
+	    }
+
+	    /// Content inset from the list/transcript hairline so neither pane's content
+	    /// touches the separator. Each pane's own background fills the inset up to
+	    /// the line, so the two panes read as distinct panels (AgentsView-style).
+	    private static let paneGutter: CGFloat = 8
+
+	    /// Flat "sidebar" tone for the Session-list pane — the standard window/chrome
+	    /// gray, one value step off the transcript's brighter text background, so the
+	    /// panes read as distinct without depending on column widths.
+	    private static let listPaneBackground = Color(nsColor: .windowBackgroundColor)
+
+	    /// A single 1px hairline at the list/transcript boundary, in the system
+	    /// `separatorColor` so it matches every other divider in the window and
+	    /// adapts to light/dark. Pane value contrast (see `mainSplitView`) does the
+	    /// heavy lifting; this just crisps the seam.
+	    @ViewBuilder
+	    private func paneHairline(_ axis: Axis) -> some View {
+	        let line = Color(nsColor: .separatorColor)
+	        switch axis {
+	        case .vertical:
+	            line.frame(width: 1).frame(maxHeight: .infinity)
+	        case .horizontal:
+	            line.frame(height: 1).frame(maxWidth: .infinity)
 	        }
 	    }
 
@@ -1044,7 +1084,10 @@ struct UnifiedSessionsView: View {
             // Removed separate Refresh column to avoid churn
 	        }
 	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID, reorderGeneration: tableReorderGeneration))
-	        .tableStyle(.inset(alternatesRowBackgrounds: true))
+	        .tableStyle(.inset(alternatesRowBackgrounds: false))
+            // Transparent table so the flat "sidebar" pane background shows through;
+            // system white zebra is dropped (see listPaneBackground).
+            .scrollContentBackground(.hidden)
             .tint(UnifiedSessionsStyle.selectionAccent)
 	        .environment(\.defaultMinListRowHeight, 28)
 		        .simultaneousGesture(TapGesture().onEnded {
@@ -1633,19 +1676,24 @@ struct UnifiedSessionsView: View {
                 .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
 
-                ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
-                    ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
-                } action: {
-                    collapseAllHierarchyParents()
-                }
-                .disabled(!isHierarchyBrowsing || currentExpandableParentIDs.isEmpty)
+                // Collapse/Expand-all only apply while browsing the subagent
+                // hierarchy, so keep them out of the toolbar entirely in the
+                // common flat-list mode rather than showing them disabled.
+                if isHierarchyBrowsing {
+                    ToolbarIconButton(help: "Collapse all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.down.right.and.arrow.up.left", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        collapseAllHierarchyParents()
+                    }
+                    .disabled(currentExpandableParentIDs.isEmpty)
 
-                ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
-                    ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
-                } action: {
-                    expandAllHierarchyParents()
+                    ToolbarIconButton(help: "Expand all visible parent sessions") { isHovering in
+                        ToolbarIcon(systemName: "arrow.up.left.and.arrow.down.right", opacity: isHovering ? 1 : 0.55)
+                    } action: {
+                        expandAllHierarchyParents()
+                    }
+                    .disabled(collapsedParents.isEmpty)
                 }
-                .disabled(!isHierarchyBrowsing || collapsedParents.isEmpty)
 
                 if codexAgentEnabled {
                     Button("") { unified.includeCodex.toggle() }

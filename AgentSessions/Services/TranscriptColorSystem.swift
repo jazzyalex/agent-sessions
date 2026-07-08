@@ -13,6 +13,7 @@ import AppKit
 enum TranscriptColorSystem {
     enum SemanticRole {
         case user
+        case assistant
         case toolCall
         case toolOutputSuccess
         case toolOutputError
@@ -27,6 +28,19 @@ enum TranscriptColorSystem {
         switch role {
         case .user:
             return NSColor.systemBlue
+        case .assistant:
+            // Single, agent-independent accent for the assistant's voice.
+            // Warm brown (formerly the Claude brand hue), kept clear of the
+            // blue/purple/green/red used by the other semantic roles so the
+            // transcript reads the same regardless of which agent produced it.
+            // Appearance-adaptive: darkened in light mode so the small semibold
+            // role label clears AA contrast on the near-white card background.
+            return NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                return isDark
+                    ? NSColor(calibratedRed: 0.74, green: 0.46, blue: 0.22, alpha: 1.0)
+                    : NSColor(calibratedRed: 0.55, green: 0.34, blue: 0.12, alpha: 1.0)
+            }
         case .toolCall:
             return NSColor.systemPurple
         case .toolOutputSuccess:

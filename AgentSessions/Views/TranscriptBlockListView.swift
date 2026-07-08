@@ -106,7 +106,8 @@ private enum CardMetrics {
     static let accentBarWidth: CGFloat = 3
     static let cornerRadius: CGFloat = 6
     /// Leading gap between the accent bar and text content.
-    static let contentLeadingInset: CGFloat = 10
+    /// Symmetric with the trailing inset so card text is optically centered.
+    static let contentLeadingInset: CGFloat = 12
     static let contentTrailingInset: CGFloat = 12
     static let headerHeight: CGFloat = 22
     /// Vertical gap between header baseline block and the body text.
@@ -247,7 +248,7 @@ struct TranscriptBlockListView: NSViewRepresentable {
         table.allowsColumnReordering = false
         table.allowsColumnSelection = false
         table.gridStyleMask = []
-        table.intercellSpacing = NSSize(width: 0, height: 8)
+        table.intercellSpacing = NSSize(width: 0, height: 10)
         table.usesAutomaticRowHeights = false
         table.rowSizeStyle = .custom
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
@@ -3715,7 +3716,7 @@ final class BlockCardCellView: NSTableCellView {
                             source: SessionSource) -> NSColor {
         switch kind {
         case .user: return TranscriptColorSystem.semanticAccent(.user)
-        case .assistant: return TranscriptColorSystem.agentBrandAccent(source: source)
+        case .assistant: return TranscriptColorSystem.semanticAccent(.assistant)
         case .toolCall: return TranscriptColorSystem.semanticAccent(.toolCall)
         case .toolOut: return TranscriptColorSystem.semanticAccent(.toolOutputSuccess)
         case .error: return TranscriptColorSystem.semanticAccent(.error)
