@@ -63,14 +63,18 @@ enum TranscriptColorSystem {
     }
 
     static func agentBrandAccent(source: SessionSource) -> NSColor {
-        // Keep these stable across the app.
+        // Brand hues, stable across the app. Each is wrapped in `adaptiveBrand`
+        // so the light-mode value is preserved while dark mode gets a brighter
+        // variant (the calibrated hues were tuned on light and read muddy on a
+        // dark background). System dynamic colors already adapt, so they pass
+        // through unchanged.
         switch source {
         case .codex:
             // Deep blue
-            return NSColor(calibratedRed: 0.14, green: 0.30, blue: 0.60, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.14, green: 0.30, blue: 0.60, alpha: 1.0))
         case .claude:
             // Warm brown
-            return NSColor(calibratedRed: 0.74, green: 0.46, blue: 0.22, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.74, green: 0.46, blue: 0.22, alpha: 1.0))
         case .antigravity:
             // Teal
             return NSColor.systemTeal
@@ -79,22 +83,37 @@ enum TranscriptColorSystem {
             return NSColor.systemPurple
         case .hermes:
             // Olive-gold accent, shifted away from Claude/OpenClaw warm oranges.
-            return NSColor(calibratedRed: 0.62, green: 0.64, blue: 0.18, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.62, green: 0.64, blue: 0.18, alpha: 1.0))
         case .copilot:
             // Magenta-ish
-            return NSColor(calibratedRed: 0.90, green: 0.20, blue: 0.60, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.90, green: 0.20, blue: 0.60, alpha: 1.0))
         case .droid:
             // Green brand (disambiguation handled via styling, not hue).
-            return NSColor(calibratedRed: 0.16, green: 0.68, blue: 0.28, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.16, green: 0.68, blue: 0.28, alpha: 1.0))
         case .openclaw:
             // Coral-orange accent, kept warm but separated from Claude/Hermes.
-            return NSColor(calibratedRed: 0.88, green: 0.33, blue: 0.20, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.88, green: 0.33, blue: 0.20, alpha: 1.0))
         case .cursor:
             // Teal-ish (Cursor brand).
-            return NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.20, green: 0.60, blue: 0.70, alpha: 1.0))
         case .pi:
             // Green-cyan accent, distinct from Gemini and Cursor.
-            return NSColor(calibratedRed: 0.05, green: 0.62, blue: 0.48, alpha: 1.0)
+            return adaptiveBrand(NSColor(calibratedRed: 0.05, green: 0.62, blue: 0.48, alpha: 1.0))
+        }
+    }
+
+    /// Wraps a light-tuned brand hue in an appearance-adaptive color: light mode
+    /// keeps the exact value; dark mode returns a brightened, slightly desaturated
+    /// variant so the hue stays legible on a dark background. Deterministic (no
+    /// hand-tuned per-agent dark values), so every brand color adapts consistently.
+    private static func adaptiveBrand(_ light: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            guard isDark else { return light }
+            let rgb = light.usingColorSpace(.sRGB) ?? light
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            rgb.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+            return NSColor(hue: h, saturation: s * 0.88, brightness: min(1.0, max(b, 0.74)), alpha: a)
         }
     }
 

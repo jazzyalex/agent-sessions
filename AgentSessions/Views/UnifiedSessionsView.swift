@@ -932,7 +932,7 @@ struct UnifiedSessionsView: View {
 	    /// Content inset from the list/transcript hairline so neither pane's content
 	    /// touches the separator. Each pane's own background fills the inset up to
 	    /// the line, so the two panes read as distinct panels (AgentsView-style).
-	    private static let paneGutter: CGFloat = 8
+	    private static let paneGutter: CGFloat = LayoutTokens.sm
 
 	    /// Flat "sidebar" tone for the Session-list pane — the standard window/chrome
 	    /// gray, one value step off the transcript's brighter text background, so the
@@ -1723,52 +1723,11 @@ struct UnifiedSessionsView: View {
                     .help("Show or hide Claude sessions (⌘2). Archive icon: narrow Claude results to archived Desktop sessions; other enabled agents remain visible.")
                 }
 
-                if antigravityAgentEnabled {
-                    AgentTabToggle(title: "Antigravity", color: Color.teal, isMonochrome: stripMonochrome, isOn: $unified.includeAntigravity)
-                        .help("Show or hide Antigravity sessions in the list (⌘3)")
-                        .keyboardShortcut("3", modifiers: .command)
-                }
-
-                if openCodeAgentEnabled {
-                    AgentTabToggle(title: "OpenCode", color: Color.purple, isMonochrome: stripMonochrome, isOn: $unified.includeOpenCode)
-                        .help("Show or hide OpenCode sessions in the list (⌘4)")
-                        .keyboardShortcut("4", modifiers: .command)
-                }
-
-                if hermesAgentEnabled {
-                    AgentTabToggle(title: "Hermes", color: TranscriptColorSystem.agentBrandAccent(source: .hermes), isMonochrome: stripMonochrome, isOn: $unified.includeHermes)
-                        .help("Show or hide Hermes sessions in the list")
-                }
-
-                if copilotAgentEnabled {
-                    AgentTabToggle(title: "Copilot", color: Color.agentCopilot, isMonochrome: stripMonochrome, isOn: $unified.includeCopilot)
-                        .help("Show or hide Copilot sessions in the list (⌘5)")
-                        .keyboardShortcut("5", modifiers: .command)
-                }
-
-                if droidAgentEnabled {
-                    AgentTabToggle(title: "Droid", color: Color.agentDroid, isMonochrome: stripMonochrome, isOn: $unified.includeDroid)
-                        .help("Show or hide Droid sessions in the list (⌘6)")
-                        .keyboardShortcut("6", modifiers: .command)
-                }
-
-                if openClawAgentEnabled {
-                    AgentTabToggle(title: "OpenClaw", color: Color.agentOpenClaw, isMonochrome: stripMonochrome, isOn: $unified.includeOpenClaw)
-                        .help("Show or hide OpenClaw sessions in the list (⌘7)")
-                        .keyboardShortcut("7", modifiers: .command)
-                }
-
-                if cursorAgentEnabled {
-                    AgentTabToggle(title: "Cursor", color: Color.agentCursor, isMonochrome: stripMonochrome, isOn: $unified.includeCursor)
-                        .help("Show or hide Cursor sessions in the list (⌘8)")
-                        .keyboardShortcut("8", modifiers: .command)
-                }
-
-                if piAgentEnabled {
-                    AgentTabToggle(title: "Pi", color: Color.agentPi, isMonochrome: stripMonochrome, isOn: $unified.includePi)
-                        .help("Show or hide Pi sessions in the list (⌘9)")
-                        .keyboardShortcut("9", modifiers: .command)
-                }
+                // Codex + Claude stay as pills; the remaining enabled agents show
+                // as pills while the toolbar is uncrowded, and collapse into a
+                // filter menu once more than four agents are enabled (⌘ shortcuts
+                // are preserved either way).
+                agentToggleControls()
             }
             .controlSize(.small)
             .tint(UnifiedSessionsStyle.selectionAccent)
@@ -1883,6 +1842,75 @@ struct UnifiedSessionsView: View {
             }
             .keyboardShortcut(",", modifiers: .command)
             .accessibilityLabel(Text("Settings"))
+        }
+    }
+
+    /// Enabled agents other than Codex/Claude (which always render as segmented
+    /// pills), in the fixed order they've historically appeared in the toolbar.
+    private var enabledOtherAgentSpecs: [AgentToolbarSpec] {
+        var specs: [AgentToolbarSpec] = []
+        if antigravityAgentEnabled {
+            specs.append(.init(id: "antigravity", title: "Antigravity", color: .teal, isOn: $unified.includeAntigravity, shortcut: "3"))
+        }
+        if openCodeAgentEnabled {
+            specs.append(.init(id: "opencode", title: "OpenCode", color: .purple, isOn: $unified.includeOpenCode, shortcut: "4"))
+        }
+        if hermesAgentEnabled {
+            specs.append(.init(id: "hermes", title: "Hermes", color: TranscriptColorSystem.agentBrandAccent(source: .hermes), isOn: $unified.includeHermes, shortcut: nil))
+        }
+        if copilotAgentEnabled {
+            specs.append(.init(id: "copilot", title: "Copilot", color: Color.agentCopilot, isOn: $unified.includeCopilot, shortcut: "5"))
+        }
+        if droidAgentEnabled {
+            specs.append(.init(id: "droid", title: "Droid", color: Color.agentDroid, isOn: $unified.includeDroid, shortcut: "6"))
+        }
+        if openClawAgentEnabled {
+            specs.append(.init(id: "openclaw", title: "OpenClaw", color: Color.agentOpenClaw, isOn: $unified.includeOpenClaw, shortcut: "7"))
+        }
+        if cursorAgentEnabled {
+            specs.append(.init(id: "cursor", title: "Cursor", color: Color.agentCursor, isOn: $unified.includeCursor, shortcut: "8"))
+        }
+        if piAgentEnabled {
+            specs.append(.init(id: "pi", title: "Pi", color: Color.agentPi, isOn: $unified.includePi, shortcut: "9"))
+        }
+        return specs
+    }
+
+    /// Total enabled agents including Codex/Claude — drives when the other agents
+    /// collapse into the overflow menu.
+    private var enabledAgentCount: Int {
+        (codexAgentEnabled ? 1 : 0) + (claudeAgentEnabled ? 1 : 0) + enabledOtherAgentSpecs.count
+    }
+
+    @ViewBuilder
+    private func agentToggleControls() -> some View {
+        let specs = enabledOtherAgentSpecs
+        if enabledAgentCount > 4 {
+            AgentOverflowMenu(specs: specs)
+            // Keep ⌘3–9 working while the pills are collapsed into the menu.
+            ForEach(specs) { spec in
+                if let sc = spec.shortcut {
+                    Button("") { spec.isOn.wrappedValue.toggle() }
+                        .keyboardShortcut(sc, modifiers: .command)
+                        .opacity(0)
+                        .frame(width: 0, height: 0)
+                }
+            }
+        } else {
+            ForEach(specs) { spec in
+                agentPill(spec)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func agentPill(_ spec: AgentToolbarSpec) -> some View {
+        let pill = AgentTabToggle(title: spec.title, color: spec.color, isMonochrome: stripMonochrome, isOn: spec.isOn)
+            .help("Show or hide \(spec.title) sessions in the list")
+        if let sc = spec.shortcut {
+            pill.keyboardShortcut(sc, modifiers: .command)
+        } else {
+            pill
         }
     }
 
@@ -3379,6 +3407,72 @@ struct UnifiedSessionsView: View {
     }
 }
 
+/// Describes one non-Codex/Claude agent toggle so it can render either as a
+/// toolbar pill or as a row in the overflow filter menu without duplicating the
+/// title/color/binding/shortcut in two places.
+private struct AgentToolbarSpec: Identifiable {
+    let id: String
+    let title: String
+    let color: Color
+    let isOn: Binding<Bool>
+    let shortcut: KeyEquivalent?
+}
+
+/// Overflow control shown in place of the individual agent pills once the
+/// toolbar gets crowded (more than four agents enabled). Styled as a pill
+/// identical to `AgentTabToggle` — with a chevron to signal it expands — so it
+/// reads as "the other agent pills, collapsed into one." Each menu row toggles
+/// that agent's inclusion; the ⌘ shortcuts are handled by hidden buttons.
+private struct AgentOverflowMenu: View {
+    let specs: [AgentToolbarSpec]
+
+    var body: some View {
+        Menu {
+            ForEach(specs) { spec in
+                Toggle(isOn: spec.isOn) { Text(spec.title) }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("Agents")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(.primary)
+            .agentPillSurface()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Show or hide agents in the list")
+        .accessibilityLabel(Text("Agent filters"))
+    }
+}
+
+/// The shared capsule surface used by every agent pill (individual toggles and
+/// the "Agents" overflow), so they stay pixel-identical.
+private struct AgentPillSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(UnifiedSessionsStyle.agentTabFont)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(UnifiedSessionsStyle.agentPillFill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    func agentPillSurface() -> some View { modifier(AgentPillSurface()) }
+}
+
 private struct AgentTabToggle: View {
     let title: String
     let color: Color
@@ -3394,19 +3488,8 @@ private struct AgentTabToggle: View {
     var body: some View {
         Button(action: { isOn.toggle() }) {
             Text(title)
-            .font(UnifiedSessionsStyle.agentTabFont)
-            .foregroundStyle(textColor)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(UnifiedSessionsStyle.agentPillFill)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(UnifiedSessionsStyle.agentPillStroke, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+                .foregroundStyle(textColor)
+                .agentPillSurface()
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(title))

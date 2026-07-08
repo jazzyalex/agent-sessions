@@ -107,8 +107,8 @@ private enum CardMetrics {
     static let cornerRadius: CGFloat = 6
     /// Leading gap between the accent bar and text content.
     /// Symmetric with the trailing inset so card text is optically centered.
-    static let contentLeadingInset: CGFloat = 12
-    static let contentTrailingInset: CGFloat = 12
+    static let contentLeadingInset: CGFloat = LayoutTokens.md
+    static let contentTrailingInset: CGFloat = LayoutTokens.md
     static let headerHeight: CGFloat = 22
     /// Vertical gap between header baseline block and the body text.
     static let headerToBodyGap: CGFloat = 2
