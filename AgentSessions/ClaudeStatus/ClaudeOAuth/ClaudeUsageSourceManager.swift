@@ -140,6 +140,18 @@ actor ClaudeUsageSourceManager {
         return now.timeIntervalSince(lastAt) >= interval
     }
 
+    /// True while we're still inside the post-launch cold-start window. A
+    /// transient OAuth miss during this window (e.g. the Keychain `security`
+    /// read racing app launch, or a single network hiccup) must retry the —
+    /// verified-working — OAuth path rather than immediately spawn the tmux
+    /// `/usage` CLI probe, which launches an interactive `claude` that can pop a
+    /// browser OAuth login even for a signed-in account. Outside this window a
+    /// persistent failure still activates the fallback as a genuine last resort.
+    static func isWithinColdStartWindow(startedAt: Date?, now: Date) -> Bool {
+        guard let startedAt else { return false }
+        return now.timeIntervalSince(startedAt) < coldStartWindow
+    }
+
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
         self.store = store
     }
@@ -471,9 +483,19 @@ actor ClaudeUsageSourceManager {
                     usingWebFallback = true
                     scheduleWebRefresh(delay: 0)
                 } else if !webApiEnabled && !usingTmuxFallback {
-                    os_log("ClaudeOAuth: no cache on first failure, activating tmux fallback early",
-                           log: log, type: .info)
-                    await activateTmuxFallback(reason: "first failure with no cache")
+                    if Self.isWithinColdStartWindow(startedAt: startedAt, now: now) {
+                        // Cold start: the OAuth path is almost always transiently
+                        // not-ready (Keychain read racing launch, first-request
+                        // hiccup). Retry OAuth via the cold-start schedule below
+                        // instead of spawning the interactive CLI probe — which is
+                        // what pops the browser auth page on a normal relaunch.
+                        os_log("ClaudeOAuth: first failure with no cache during cold-start window — retrying OAuth, deferring tmux fallback",
+                               log: log, type: .info)
+                    } else {
+                        os_log("ClaudeOAuth: no cache on first failure, activating tmux fallback early",
+                               log: log, type: .info)
+                        await activateTmuxFallback(reason: "first failure with no cache")
+                    }
                 }
             }
 
@@ -495,7 +517,17 @@ actor ClaudeUsageSourceManager {
                     usingWebFallback = true
                     scheduleWebRefresh(delay: 0)
                 } else if !webApiEnabled && !usingTmuxFallback {
-                    await activateTmuxFallback(reason: "OAuth failure #\(oauthFailureCount)")
+                    if Self.isWithinColdStartWindow(startedAt: startedAt, now: now) {
+                        // Still inside the cold-start window: keep retrying the
+                        // working OAuth path rather than spawn the browser-popping
+                        // CLI probe. Reaching failure #3 this fast means a genuinely
+                        // persistent problem, which the post-window retries (or the
+                        // auth banner) will surface without an interactive login.
+                        os_log("ClaudeOAuth: OAuth failure #%d during cold-start window — deferring tmux fallback, continuing OAuth retries",
+                               log: log, type: .info, oauthFailureCount)
+                    } else {
+                        await activateTmuxFallback(reason: "OAuth failure #\(oauthFailureCount)")
+                    }
                 }
             }
         }

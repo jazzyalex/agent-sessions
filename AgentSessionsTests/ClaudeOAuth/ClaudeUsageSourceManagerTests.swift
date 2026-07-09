@@ -397,6 +397,34 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now, now: now, interval: 120))
     }
 
+    // MARK: - Cold-start window (defers tmux/browser fallback)
+
+    /// The cold-start window predicate gates whether a transient OAuth failure
+    /// retries the (working) OAuth path or immediately spawns the tmux CLI probe
+    /// that can pop a browser login. Inside the window → defer the fallback.
+    func testColdStartWindow_boundaries() {
+        let started = Date(timeIntervalSince1970: 1_000)
+        // Just launched → inside the window.
+        XCTAssertTrue(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: started, now: started))
+        XCTAssertTrue(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: started, now: started.addingTimeInterval(10)))
+        // 89s in (< 90s window) → still inside.
+        XCTAssertTrue(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: started, now: started.addingTimeInterval(89)))
+        // At/after the 90s window → outside; the fallback is allowed.
+        XCTAssertFalse(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: started, now: started.addingTimeInterval(90)))
+        XCTAssertFalse(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: started, now: started.addingTimeInterval(120)))
+    }
+
+    /// A nil `startedAt` (never started) is not a cold start — must not defer.
+    func testColdStartWindow_nilStartIsNotColdStart() {
+        XCTAssertFalse(ClaudeUsageSourceManager.isWithinColdStartWindow(
+            startedAt: nil, now: Date()))
+    }
+
     // MARK: - Reentrancy generation guard (I2)
 
     /// A verdict computation commits only while it is still the latest: captured

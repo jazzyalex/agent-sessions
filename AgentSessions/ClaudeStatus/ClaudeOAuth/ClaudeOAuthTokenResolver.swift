@@ -95,9 +95,20 @@ actor ClaudeOAuthTokenResolver {
     /// `security` tool rather than AgentSessions, which is more expected for
     /// power users. After "Always Allow", access is completely silent.
     private func resolveFromKeychainCLI() async -> String? {
-        guard case .found(let raw) = await runSecurityCommand(service: "Claude Code-credentials") else {
-            return nil
+        var read = await runSecurityCommand(service: "Claude Code-credentials")
+        // A cold-start Keychain read can transiently time out or fail (the
+        // `security` subprocess racing app launch, the keychain not yet
+        // unlocked). Only `.unreadable` is transient — `.notFound` (errSec
+        // item-not-found) is a definitive answer. One short retry converts most
+        // of these transient misses into a clean read, so the resolver returns
+        // the valid token instead of nil, which would otherwise register as an
+        // OAuth "no token" failure and — on a cold start with no cache —
+        // prematurely spawn the browser-popping tmux CLI probe.
+        if case .unreadable = read {
+            try? await Task.sleep(nanoseconds: 300_000_000)  // 300ms
+            read = await runSecurityCommand(service: "Claude Code-credentials")
         }
+        guard case .found(let raw) = read else { return nil }
         return extractToken(fromJSON: raw)
     }
 
