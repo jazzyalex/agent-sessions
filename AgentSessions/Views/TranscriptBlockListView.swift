@@ -3813,9 +3813,18 @@ final class SelectableBlockTextView: NSTextView {
             ]
             insertionPointColor = .clear
         } else {
-            // Restore system defaults (empty ⇒ AppKit uses the standard
-            // responder-dependent appearance again).
-            selectedTextAttributes = [:]
+            // Restore the STANDARD selection highlight. An EMPTY dictionary does
+            // NOT restore AppKit's default — it strips the selection background
+            // entirely, so a native intra-block drag-select renders invisibly
+            // (the text is selected + copyable, but nothing highlights). Re-apply
+            // the standard selected-text attributes explicitly; the selecting row
+            // is first responder during/after its own drag, so the emphasized
+            // highlight is exactly the native single-card behavior we want, and
+            // non-selecting rows keep an empty range so nothing paints there.
+            selectedTextAttributes = [
+                .backgroundColor: NSColor.selectedTextBackgroundColor,
+                .foregroundColor: NSColor.selectedTextColor
+            ]
             insertionPointColor = .textColor
         }
     }

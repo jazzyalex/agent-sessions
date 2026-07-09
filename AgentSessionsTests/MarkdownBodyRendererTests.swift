@@ -285,6 +285,32 @@ final class MarkdownBodyRendererTests: XCTestCase {
         XCTAssertEqual(restoredBG, originalBG, "clearing find must restore the code-block card background, not strip it")
     }
 
+    // MARK: Native intra-block selection stays visible
+
+    func testInactiveSelectionAppearanceKeepsVisibleHighlight() {
+        // A body text view that is NOT driving a cross-block selection (the
+        // normal case) must still paint the standard selection highlight, so a
+        // native drag-select inside one card is visible and copyable. Setting
+        // `selectedTextAttributes = [:]` does NOT restore AppKit's default — it
+        // strips the selection background entirely, making the selection
+        // invisible. Guard against that regression: the inactive appearance must
+        // carry a non-nil `.backgroundColor`.
+        let textView = SelectableBlockTextView()
+        textView.forceActiveSelectionAppearance(false)
+        let bg = textView.selectedTextAttributes[.backgroundColor] as? NSColor
+        XCTAssertNotNil(bg, "native selection highlight must be visible when the coordinator is not driving")
+    }
+
+    func testActiveSelectionAppearanceKeepsVisibleHighlight() {
+        // The cross-block-drive path must likewise show a highlight (unchanged
+        // behavior) — asserted alongside the inactive case so both branches of
+        // forceActiveSelectionAppearance stay covered.
+        let textView = SelectableBlockTextView()
+        textView.forceActiveSelectionAppearance(true)
+        let bg = textView.selectedTextAttributes[.backgroundColor] as? NSColor
+        XCTAssertNotNil(bg, "cross-block selection highlight must be visible while the coordinator drives")
+    }
+
     // MARK: Task 15 — GFM tables (NSTextTable), cells unmappable → pill
 
     func testTableCellsRenderedAndUnmappable() {
