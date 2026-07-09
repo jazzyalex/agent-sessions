@@ -376,14 +376,15 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
 
     // MARK: - Success-path authoritative override (pure helpers)
 
-    /// Only a DEFINITIVE `.signedOut` from the throttled probe overrides the
-    /// OAuth-success path; every other status (signed-in / unknown / cli-missing
-    /// on a healthy fetch) must stay `.ok` and never false-alarm.
-    func testSuccessPathStateMapping() {
-        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .signedOut), .signedOut)
-        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .signedIn), .ok)
-        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .unknown), .ok)
-        XCTAssertEqual(ClaudeUsageSourceManager.successPathState(cli: .cliMissing), .ok)
+    /// A healthy fetch NEVER alarms (verdict is always `.ok`): a signed-out CLI
+    /// becomes a gentle caption — never a runway-hiding `.signedOut` — and every
+    /// other status carries no caption.
+    func testSuccessAdvisory() {
+        XCTAssertEqual(ClaudeUsageSourceManager.successAdvisory(cli: .signedOut),
+                       ClaudeUsageSourceManager.cliSignedOutAdvisory)
+        XCTAssertNil(ClaudeUsageSourceManager.successAdvisory(cli: .signedIn))
+        XCTAssertNil(ClaudeUsageSourceManager.successAdvisory(cli: .unknown))
+        XCTAssertNil(ClaudeUsageSourceManager.successAdvisory(cli: .cliMissing))
     }
 
     /// Throttle predicate: never-probed (nil) → probe; older-than-interval →

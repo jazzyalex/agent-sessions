@@ -124,13 +124,16 @@ actor ClaudeUsageSourceManager {
         keychainFound || credsFilePresentToken || envTokenPresent
     }
 
-    /// Pure success-path mapping: a healthy OAuth fetch proves the account
-    /// works, so ONLY a DEFINITIVE authoritative `.signedOut` overrides to
-    /// signed-out. Every other status (`.signedIn` / `.unknown` / `.cliMissing`)
-    /// stays `.ok` — a `.cliMissing`-while-fetch-succeeds is contradictory and an
-    /// ambiguous/`.unknown` must never false-alarm.
-    static func successPathState(cli: CLIAuthStatus) -> UsageAuthState {
-        cli == .signedOut ? .signedOut : .ok
+    /// Pure success-path advisory. A healthy OAuth fetch PROVES the account works,
+    /// so the published verdict is ALWAYS `.ok` and runway stays visible. A CLI
+    /// that reports signed-out is only a NON-URGENT heads-up — the app's saved
+    /// token still fetches — so it surfaces as a gentle caption (returned here),
+    /// never an alarming banner that would HIDE working runway. This is the
+    /// root-cause fix for "CLI logout blanks the runway": the old `successPathState`
+    /// overrode a healthy fetch to alarming `.signedOut`, and the HUD limits bar
+    /// replaces the meters on ANY alarming verdict.
+    static func successAdvisory(cli: CLIAuthStatus) -> String? {
+        cli == .signedOut ? cliSignedOutAdvisory : nil
     }
 
     /// Pure throttle predicate: re-probe when never probed (`nil`) or when the
@@ -166,6 +169,9 @@ actor ClaudeUsageSourceManager {
     /// strip without raising the banner or firing a notification.
     static let transientUnavailableReason = "Claude usage temporarily unavailable — retrying"
     static let rateLimitedReason = "Rate limited — retrying shortly"
+    /// Gentle, non-alarming caption for a signed-out CLI while the app's saved
+    /// token still fetches — a heads-up, not a runway-hiding banner (P5).
+    static let cliSignedOutAdvisory = "Claude CLI signed out — usage via the app's saved token"
 
     /// Pure escalation predicate: escalate `.expired` to the banner only once a
     /// verified 401 has persisted from `first401At` to at least `threshold` later.
@@ -413,15 +419,13 @@ actor ClaudeUsageSourceManager {
             }
 
             publish(snapshot)
-            // The OAuth token still fetches, but the CLI may have been logged
-            // out live while the resolver's cached token keeps working. Consult
-            // the THROTTLED authoritative status probe so a live logout surfaces
-            // within one poll instead of after the 10-min token cache. Only a
-            // DEFINITIVE `.signedOut` overrides — the probe never false-fires, so
-            // no debounce is needed and ambiguous/`.unknown` stays `.ok`.
+            // The OAuth token still fetches, but the CLI may have been logged out
+            // live. Consult the THROTTLED authoritative status probe — but a healthy
+            // fetch NEVER alarms: a signed-out CLI becomes a gentle caption, never a
+            // `.signedOut` verdict (which the HUD limits bar renders by REPLACING the
+            // meters, blanking working runway). See `successAdvisory`.
             let gen = nextAuthGeneration()
             let cli = await throttledClaudeAuthStatus()
-            let state = Self.successPathState(cli: cli)
             // I2: if a newer verdict computation started while we were suspended on
             // the probe above, drop this now-stale write instead of clobbering it.
             // The newer computation owns the next-refresh scheduling too.
@@ -430,17 +434,16 @@ actor ClaudeUsageSourceManager {
                        log: log, type: .info)
                 return
             }
-            // A confirmed-good fetch (.ok) proves the account works, so clear the
-            // classifier's debounce clock: this fast-path bypasses classify(), and
-            // a stale firstMissAt from an earlier transient miss must not survive a
-            // healthy poll to false-fire .signedOut later. Do NOT reset on
-            // .signedOut — that is an authoritative logout the classifier must keep.
-            if state == .ok { authClassifier.reset() }
-            currentAuthState = state
-            if Self.shouldSuppressTmuxFallback(state), usingTmuxFallback { await deactivateTmuxFallback() }
-            availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
-                                                           loginRequired: state == .signedOut, setupRequired: false, setupHint: nil,
-                                                           authState: state))
+            // A confirmed-good fetch proves the account works → verdict is ALWAYS
+            // `.ok` (runway visible). Clear the classifier's debounce clock so a
+            // stale firstMissAt can't survive a healthy poll and false-fire later.
+            authClassifier.reset()
+            currentAuthState = .ok
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                loginRequired: false, setupRequired: false, setupHint: nil,
+                authState: .ok,
+                transientReason: Self.successAdvisory(cli: cli)))
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 

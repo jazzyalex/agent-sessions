@@ -527,6 +527,10 @@ final class ClaudeUsageModel: ObservableObject {
         weekOpusResetText = s.weekOpusResetText
 
         lastUpdate = s.fetchedAt
+        // Mark that we have real data so `isInitialLoading` (isUpdating && lastSuccessAt == nil)
+        // stops blanking the meters to a spinner on OAuth-only setups — previously
+        // only the tmux hard probe ever set this, so it stayed nil forever here.
+        lastSuccessAt = s.fetchedAt
         unavailableMessage = nil
         currentSourceLabel = s.source.description
         currentSource = s.source
