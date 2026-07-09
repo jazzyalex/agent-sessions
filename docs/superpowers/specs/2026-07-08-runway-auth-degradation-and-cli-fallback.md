@@ -127,8 +127,11 @@ notifier, usage-meter math, and poll cadence are all unchanged.
 
 - **Resolved (was the open question):** Claude Desktop does *not* refresh a token AS can read
   (its own encrypted Electron store), so §5 rung 1 uses the existing claude.ai **Web API cookie
-  path** instead. Remaining check: confirm that shipped `claudeWebApiEnabled` path still works as
-  a Desktop-only remedy (it already exists — this is validation, not new auth surface).
+  path** instead. **CONFIRMED reachable (2026-07-08, source inspection):**
+  `ClaudeWebCookieResolver.resolve()` reads the Safari `sessionKey` cookie (no CLI, no mint),
+  `ClaudeWebUsageClient.fetch(sessionKey:)` hits the read-only usage endpoint, and the source
+  manager activates the web path on `claudeWebApiEnabled`. Caveat: reading Safari cookies may
+  require Full Disk Access on macOS 14+ — surfaced in the ladder alert copy.
 - **Read-only subscription-token use remains a ToS gray area** even without minting. Keep it
   minimal — read-only `usage` only, never inference — and be ready to gate behind a
   setting/disclosure if Anthropic signals objection.

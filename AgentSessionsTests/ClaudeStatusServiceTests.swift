@@ -2,6 +2,14 @@ import XCTest
 @testable import AgentSessions
 
 final class ClaudeStatusServiceTests: XCTestCase {
+    // MARK: - P4 Task 12: aborted/exit-13 probe publishes an auth verdict
+
+    func testAuthStateForProbeAvailabilityMapping() {
+        XCTAssertEqual(ClaudeStatusService.authStateForProbeAvailability(loginRequired: true, setupRequired: false), .signedOut)
+        XCTAssertEqual(ClaudeStatusService.authStateForProbeAvailability(loginRequired: false, setupRequired: true), .needsSetup)
+        XCTAssertNil(ClaudeStatusService.authStateForProbeAvailability(loginRequired: false, setupRequired: false))
+    }
+
     func testResolvedTmuxPathPrefersLoginShellPath() {
         let resolved = ClaudeStatusService.resolvedTmuxPath(loginShellPath: "/custom/bin/tmux") { _ in
             XCTFail("Common-path fallback should not run when login shell resolves tmux")

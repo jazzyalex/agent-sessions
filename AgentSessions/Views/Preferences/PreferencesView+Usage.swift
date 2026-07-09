@@ -111,7 +111,7 @@ extension PreferencesView {
                     }
                     .pickerStyle(.menu)
                     .frame(maxWidth: 200)
-                    .help("Auto: OAuth endpoint (60s), falls back to tmux on failure. Web API only: claude.ai session cookie. tmux only: legacy behavior.")
+                    .help("Auto: OAuth endpoint (60s); CLI tmux fallback only if you opt in below. Web API only: claude.ai session cookie. tmux only: legacy behavior.")
                 }
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
                 toggleRow(
@@ -139,6 +139,16 @@ extension PreferencesView {
                         }
                     }
                 }
+                toggleRow(
+                    "Allow CLI probe fallback",
+                    isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: PreferencesKey.claudeTmuxAutoFallbackOptIn) },
+                        set: { UserDefaults.standard.set($0, forKey: PreferencesKey.claudeTmuxAutoFallbackOptIn) }
+                    ),
+                    help: "When the OAuth endpoint keeps failing, Auto mode may fall back to running `claude` in tmux to scrape /usage. Off by default — the interactive CLI can open a browser sign-in. tmux-only mode is unaffected."
+                )
+                .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
+                          (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
                 labeledRow("Refresh every") {
                     Picker("", selection: $claudePollingInterval) {
                         Text("2 minutes").tag(120)

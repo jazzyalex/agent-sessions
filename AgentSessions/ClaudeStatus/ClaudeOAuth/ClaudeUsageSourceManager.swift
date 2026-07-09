@@ -190,6 +190,14 @@ actor ClaudeUsageSourceManager {
         verdict.isAlarming ? (verdict, nil) : (verdict, transientUnavailableReason)
     }
 
+    /// Whether the interactive tmux `/usage` fallback may activate (P4 Task 14).
+    /// `.tmuxOnly` is inherently opted in (the user chose the probe as their mode);
+    /// every other mode requires the explicit opt-in pref (default OFF) because the
+    /// interactive probe is the browser/ban-risk path.
+    static func tmuxFallbackPermitted(mode: ClaudeUsageMode, optIn: Bool) -> Bool {
+        mode == .tmuxOnly || optIn
+    }
+
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
         self.store = store
     }
@@ -893,10 +901,26 @@ actor ClaudeUsageSourceManager {
 
     // MARK: - Tmux Fallback
 
+    /// Publish an auth verdict through the availability channel so a suppressed or
+    /// aborted probe raises the banner instead of failing silently (P4 Task 12).
+    private func emitAuthAvailability(_ state: UsageAuthState) {
+        availabilityHandler?(ClaudeServiceAvailability(
+            cliUnavailable: state == .cliNotInstalled,
+            tmuxUnavailable: false,
+            loginRequired: state == .signedOut,
+            setupRequired: false,
+            setupHint: nil,
+            authState: state))
+    }
+
     private func activateTmuxFallback(reason: String) async {
         if Self.shouldSuppressTmuxFallback(currentAuthState) {
             os_log("ClaudeOAuth: suppressing tmux fallback (auth state %{public}@)",
                    log: log, type: .info, String(describing: currentAuthState))
+            // Don't fail silently: publish the verdict so the banner explains why.
+            // A .tmuxOnly signed-out/expired user would otherwise get no probe AND
+            // no banner (P4 Task 12).
+            emitAuthAvailability(currentAuthState)
             return
         }
         guard tmuxAdapter == nil else { return }
@@ -911,12 +935,22 @@ actor ClaudeUsageSourceManager {
         if cli == .signedOut || cli == .cliMissing {
             os_log("ClaudeOAuth: suppressing tmux fallback (authoritative probe %{public}@)",
                    log: log, type: .info, String(describing: cli))
+            emitAuthAvailability(cli == .signedOut ? .signedOut : .cliNotInstalled)
             return
         }
         // Re-check after the probe await: a concurrent (reentrant) activation may have
         // created the adapter while we were suspended above, and creating a second one
         // would leak the first. This is the actor-reentrancy sibling of the I2 guard.
         guard tmuxAdapter == nil else { return }
+        // P4 Task 14: the auto-mode interactive fallback is opt-in (default OFF) —
+        // it's the browser/ban-risk path. Checked AFTER the suppression guards above
+        // so a signed-out/expired user still gets the banner emit (Task 12). tmuxOnly
+        // mode and the manual double-click hard probe are unaffected.
+        let optIn = UserDefaults.standard.bool(forKey: PreferencesKey.claudeTmuxAutoFallbackOptIn)
+        guard Self.tmuxFallbackPermitted(mode: mode, optIn: optIn) else {
+            os_log("ClaudeOAuth: auto-mode tmux fallback disabled (opt-in off)", log: log, type: .info)
+            return
+        }
         os_log("ClaudeOAuth: activating tmux fallback: %{public}@", log: log, type: .info, reason)
         usingTmuxFallback = true
 

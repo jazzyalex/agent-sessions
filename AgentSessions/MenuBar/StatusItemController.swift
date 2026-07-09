@@ -275,6 +275,10 @@ final class StatusItemController: NSObject {
                 if let reason = claudeStatus.transientReason {
                     menu.addItem(makeTitleItem(reason))
                 }
+                // Honest source label (P4): CLI-probe fallback vs OAuth endpoint.
+                if claudeStatus.currentSource == .tmuxUsage {
+                    menu.addItem(makeTitleItem("via CLI probe"))
+                }
             }
 
             menu.addItem(NSMenuItem.separator())

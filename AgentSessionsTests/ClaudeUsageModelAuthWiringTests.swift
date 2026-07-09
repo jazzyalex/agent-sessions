@@ -21,7 +21,21 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         model.applyAvailability(availability(.signedOut))
         XCTAssertEqual(model.authStatus?.state.isAlarming, true)
         XCTAssertEqual(model.authStatus?.state, .signedOut)
-        XCTAssertEqual(model.authStatus?.remediation, .showCommand("claude auth login"))
+        // Remediation now depends on CLI presence (a disk check), so the exact
+        // rung is pinned by the pure-path tests in RunwayAuthDegradationTests
+        // rather than here, where it would couple to the test machine's env.
+    }
+
+    /// Task 9 wiring contract (pure path): the model publishes the ladder rung
+    /// chosen by CLI presence — this is what `applyAvailability` feeds `make`.
+    func testRemediationRungSelectedByCliPresence() {
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .expired, cliPresent: true).remediation,
+                       .showCommand("claude auth login"))
+        if case .noCLILadder = UsageAuthStatus.make(provider: .claude, state: .expired, cliPresent: false).remediation {
+            // ok
+        } else {
+            XCTFail("no-CLI user must get the ladder, not a copy command")
+        }
     }
 
     func testExpiredRaisesBanner() {
@@ -94,5 +108,23 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
             cliUnavailable: false, tmuxUnavailable: false, authState: .expired, transientReason: nil))
         XCTAssertEqual(model.authStatus?.state, .expired)
         XCTAssertNil(model.transientReason)
+    }
+
+    // MARK: - P4 Task 13: CLI-fallback source labeling
+
+    /// `currentSource` mirrors the applied snapshot so the UI can label CLI-probe
+    /// (tmux) data distinctly from the OAuth endpoint.
+    func testCurrentSourceReflectsSnapshotSource() {
+        let model = ClaudeUsageModel()
+        model.applyLimitSnapshotForTesting(Self.sampleSnapshot(source: .tmuxUsage))
+        XCTAssertEqual(model.currentSource, .tmuxUsage)
+        model.applyLimitSnapshotForTesting(Self.sampleSnapshot(source: .oauthEndpoint))
+        XCTAssertEqual(model.currentSource, .oauthEndpoint)
+    }
+
+    private static func sampleSnapshot(source: ClaudeUsageSource) -> ClaudeLimitSnapshot {
+        ClaudeLimitSnapshot(fetchedAt: Date(), source: source, health: .live,
+            fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",
+            weekOpusUsedRatio: nil, weekOpusResetText: nil, rawPayloadHash: nil)
     }
 }

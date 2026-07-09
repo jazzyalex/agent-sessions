@@ -99,6 +99,10 @@ struct ClaudeUsageStripView: View {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
             } else if status.lastUpdate == nil, status.unavailableMessage != nil {
                 Text("Usage unavailable").font(.caption).foregroundStyle(.orange)
+            } else if status.currentSource == .tmuxUsage {
+                // Honest labeling (P4): this data came from the CLI /usage probe,
+                // not the OAuth endpoint. Metadata, not a warning — secondary/gray.
+                Text("via CLI probe").font(.caption).foregroundStyle(.secondary)
             } else if let update = status.lastUpdate {
                 // Show immediately when stale/degraded; otherwise only after 30 minutes
                 if status.dataIsStale || Date().timeIntervalSince(update) > 30 * 60 {
@@ -138,7 +142,10 @@ struct ClaudeUsageStripView: View {
         if let unavailable = status.unavailableMessage {
             parts.append(unavailable)
         }
-        parts.append("Double-click to refresh now")
+        if status.currentSource == .tmuxUsage {
+            parts.append("Data source: CLI /usage probe (fallback)")
+        }
+        parts.append("Double-click runs a one-off CLI /usage probe")
 
         return parts.joined(separator: "\n")
     }

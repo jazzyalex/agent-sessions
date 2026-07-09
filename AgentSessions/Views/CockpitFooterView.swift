@@ -54,6 +54,8 @@ struct QuotaData: Equatable {
     var authStatus: UsageAuthStatus? = nil
     /// Calm caption for a transient (non-alarming) usage failure. (P2)
     var transientReason: String? = nil
+    /// Current usage data source; drives the "via CLI probe" fallback label. (P4)
+    var currentSource: ClaudeUsageSource? = nil
 
     var hasUsageData: Bool {
         switch provider {
@@ -110,7 +112,8 @@ struct QuotaData: Equatable {
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
             authStatus: model.authStatus,
-            transientReason: model.transientReason
+            transientReason: model.transientReason,
+            currentSource: model.currentSource
         )
     }
 }
@@ -176,6 +179,8 @@ struct CockpitFooterView: View {
 		                            // failure state, like the alarming banner does.
 		                            if let reason = q.transientReason {
 		                                Text(reason).font(.caption2).foregroundStyle(.secondary)
+		                            } else if q.currentSource == .tmuxUsage {
+		                                Text("via CLI probe").font(.caption2).foregroundStyle(.secondary)
 		                            }
 		                        }
 		                    }

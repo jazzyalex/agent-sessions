@@ -45,4 +45,55 @@ final class RunwayAuthDegradationTests: XCTestCase {
         XCTAssertEqual(p.authState, .unknown)
         XCTAssertEqual(p.reason, ClaudeUsageSourceManager.transientUnavailableReason)
     }
+
+    // MARK: - Task 7: no-CLI remediation ladder
+
+    /// A CLI user keeps the copy-command chip.
+    func testRemediationCLIPresentUsesLoginCommand() {
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .signedOut, cliPresent: true).remediation,
+                       .showCommand("claude auth login"))
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .expired, cliPresent: true).remediation,
+                       .showCommand("claude auth login"))
+    }
+
+    /// A no-CLI (Desktop-only) user gets the two-rung ladder for every alarming
+    /// auth state, including `.cliNotInstalled` (which is CLI-less by definition).
+    func testRemediationNoCLIUsesLadder() {
+        for state in [UsageAuthState.signedOut, .expired, .cliNotInstalled] {
+            let r = UsageAuthStatus.make(provider: .claude, state: state, cliPresent: false).remediation
+            guard case .noCLILadder = r else {
+                XCTFail("expected .noCLILadder for \(state), got \(r)"); continue
+            }
+        }
+    }
+
+    /// Ladder copy names both rungs (claude.ai Web API + CLI), drops the cancelled
+    /// in-app sign-in promise, and never mentions Claude Desktop (rejected rung-1).
+    func testNoCLILadderCopyHasBothRungsNoCancelledFeature() {
+        let s = UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled, cliPresent: false)
+        XCTAssertTrue(s.detail.contains("claude.ai"))                     // rung 1
+        XCTAssertTrue(s.detail.contains("CLI"))                            // rung 2
+        XCTAssertFalse(s.detail.lowercased().contains("coming soon"))
+        XCTAssertFalse(s.detail.contains("Desktop"))
+    }
+
+    /// Codex is unaffected: it uses the `cliPresent: true` default and keeps its
+    /// login command (no Web API rung exists for Codex).
+    func testCodexRemediationUnchanged() {
+        XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .signedOut).remediation,
+                       .showCommand("codex login"))
+    }
+
+    // MARK: - Task 14: auto-mode interactive fallback is opt-in
+
+    func testTmuxFallbackPermitted() {
+        // tmuxOnly is inherently opted in — the user chose the probe as their mode.
+        XCTAssertTrue(ClaudeUsageSourceManager.tmuxFallbackPermitted(mode: .tmuxOnly, optIn: false))
+        XCTAssertTrue(ClaudeUsageSourceManager.tmuxFallbackPermitted(mode: .tmuxOnly, optIn: true))
+        // auto / oauthOnly / webOnly require the explicit opt-in (default OFF).
+        for mode in [ClaudeUsageMode.auto, .oauthOnly, .webOnly] {
+            XCTAssertFalse(ClaudeUsageSourceManager.tmuxFallbackPermitted(mode: mode, optIn: false))
+            XCTAssertTrue(ClaudeUsageSourceManager.tmuxFallbackPermitted(mode: mode, optIn: true))
+        }
+    }
 }

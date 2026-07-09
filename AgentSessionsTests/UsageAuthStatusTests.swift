@@ -19,8 +19,15 @@ final class UsageAuthStatusTests: XCTestCase {
     func testUnknownIsSilent() {
         XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .unknown).remediation, .none)
     }
-    func testCliNotInstalledOpensURL() {
-        if case .openURL = UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled).remediation { }
-        else { XCTFail("expected openURL remediation") }
+    /// Claude with no CLI now offers the no-CLI ladder (rung 1 Web API mode,
+    /// rung 2 guided install) rather than a bare install link (P3, spec §5).
+    func testCliNotInstalledClaudeUsesNoCLILadder() {
+        if case .noCLILadder = UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled).remediation { }
+        else { XCTFail("expected Claude .cliNotInstalled to offer the no-CLI ladder") }
+    }
+    /// Codex has no Web API rung, so it keeps the install-link remediation.
+    func testCliNotInstalledCodexOpensURL() {
+        if case .openURL = UsageAuthStatus.make(provider: .codex, state: .cliNotInstalled).remediation { }
+        else { XCTFail("expected Codex .cliNotInstalled to open the install URL") }
     }
 }

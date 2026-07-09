@@ -18,6 +18,9 @@ struct AuthRemediationBanner: View {
     /// own to avoid double padding / double material.
     var embedded: Bool = false
 
+    /// Drives the no-CLI ladder help alert (rung 1 Web API mode, rung 2 install).
+    @State private var showNoCLIHelp = false
+
     var body: some View {
         if compact {
             compactBody
@@ -89,6 +92,26 @@ struct AuthRemediationBanner: View {
             }
             .buttonStyle(.borderless)
             .font(.caption)
+        case .noCLILadder(let installCommand, let docsURL):
+            // Zero-install-first: rung 1 enables the shipped Web API mode; rung 2
+            // guides the CLI install. AS only toggles a pref / copies a command —
+            // it never runs an installer or a login. Mirrors the tmux-help alert.
+            Button("How to fix…") { showNoCLIHelp = true }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .alert("Fix runway without the CLI", isPresented: $showNoCLIHelp) {
+                    Button("Enable Web API mode") {
+                        UserDefaults.standard.set(true, forKey: PreferencesKey.claudeWebApiEnabled)
+                    }
+                    Button("Copy CLI install command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(installCommand, forType: .string)
+                    }
+                    Button("Open install guide") { NSWorkspace.shared.open(docsURL) }
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Sign in at claude.ai, then enable Web API mode — no CLI needed (reads the Safari session cookie; may need Full Disk Access on macOS 14+).\n\nOr install the Claude CLI:\n\n  \(installCommand)")
+                }
         case .none:
             EmptyView()
         }
@@ -166,6 +189,13 @@ struct AuthRemediationBanner_Previews: PreviewProvider {
 
             AuthRemediationBanner(
                 status: .make(provider: .claude, state: .cliNotInstalled),
+                compact: false
+            )
+            .frame(width: 420)
+
+            // No-CLI ladder (Desktop-only): "How to fix…" → Web API / install alert.
+            AuthRemediationBanner(
+                status: .make(provider: .claude, state: .expired, cliPresent: false),
                 compact: false
             )
             .frame(width: 420)

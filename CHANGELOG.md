@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Runway auth — graceful degradation & guided CLI fallback (P1–P4)
+- **Cold-start fallback fix (P1):** on a fresh launch with no cached snapshot, a transient first-poll OAuth miss (e.g. the Keychain read racing app launch) no longer immediately spawns the interactive tmux `/usage` probe — which could open a Safari OAuth sign-in for an already-signed-in user. The fallback is deferred through the 90s cold-start window while the healthy OAuth path retries; the Keychain read also retries once on a transient `.unreadable`.
+- **Cause-aware degradation (P2):** transient failures (5xx / network / 429) show a calm "temporarily unavailable — retrying" caption in the strip, menu bar, and Cockpit instead of the alarming banner, and clear on the next good fetch. A verified 401 flips the internal `.expired` verdict immediately (preserving tmux-suppression) but the published banner is debounced behind a 5-minute clock, so a brief blip stays calm and only a persistent 401 escalates.
+- **No-CLI remediation ladder (P3):** a Claude user without the CLI now gets a two-rung fix-it ladder — rung 1 enables the existing claude.ai Web API mode (no install), rung 2 guides a CLI install — instead of a `claude auth login` command they can't run. AS never mints a token or runs an installer; the cancelled "sign in to Agent Sessions directly" copy is removed.
+- **Probe hardening (P4):** the tmux `/usage` script checks for an auth/login screen before pressing any keys and suppresses the browser hook (`BROWSER=/usr/bin/true`), so a probe can never advance a login into the browser; suppressed/aborted probes now raise the auth banner instead of failing silently; CLI-probe data is labeled "via CLI probe"; and the interactive Auto-mode fallback is now **opt-in** (Preferences → Usage, default off — behavior change).
+- Agent Sessions will not mint or refresh its own Claude subscription token (no in-app OAuth login) — it remains a read-only usage reader.
 
 ## [4.2] - 2026-07-06
 ### Highlights

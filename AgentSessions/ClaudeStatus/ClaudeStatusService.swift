@@ -333,6 +333,17 @@ actor ClaudeStatusService {
         if state == .running { state = .idle }
     }
 
+    /// Maps a probe outcome to an auth verdict so an aborted/exit-13 probe raises
+    /// the banner instead of failing silently (P4). exit 13 (login screen observed)
+    /// is a DEFINITIVE signed-out/needs-reauth signal from the CLI's own TUI; a
+    /// setup prompt maps to `.needsSetup`; a clean probe carries no verdict (`nil`),
+    /// leaving the banner to the OAuth `.ok` clearer.
+    static func authStateForProbeAvailability(loginRequired: Bool, setupRequired: Bool) -> UsageAuthState? {
+        if loginRequired { return .signedOut }
+        if setupRequired { return .needsSetup }
+        return nil
+    }
+
     private func publishAvailability(loginRequired: Bool,
                                      setupRequired: Bool,
                                      setupHint: String?) {
@@ -341,7 +352,8 @@ actor ClaudeStatusService {
             tmuxUnavailable: !tmuxAvailable,
             loginRequired: loginRequired,
             setupRequired: setupRequired,
-            setupHint: setupHint
+            setupHint: setupHint,
+            authState: Self.authStateForProbeAvailability(loginRequired: loginRequired, setupRequired: setupRequired)
         )
         availabilityHandler(availability)
     }

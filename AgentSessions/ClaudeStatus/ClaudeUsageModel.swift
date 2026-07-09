@@ -64,6 +64,10 @@ final class ClaudeUsageModel: ObservableObject {
 
     // Current source info for debug display
     @Published var currentSourceLabel: String = ""
+    /// Current usage data source, for honest UI labeling (P4): when `.tmuxUsage`
+    /// the strip/menu/Cockpit show a "via CLI probe" note distinguishing fallback
+    /// data from the OAuth endpoint.
+    @Published var currentSource: ClaudeUsageSource?
     @Published var currentHealthLabel: String = ""
     @Published var lastRawOAuthPayload: String? = nil
     @Published var fiveHourProjectedRunoutAt: Date? = nil
@@ -195,7 +199,13 @@ final class ClaudeUsageModel: ObservableObject {
             transientReason = availability.transientReason
         }
         if let state = availability.authState {
-            let newStatus = UsageAuthStatus.make(provider: .claude, state: state)
+            // Pick the remediation rung by CLI presence: a Desktop-only user with
+            // no CLI gets the Web-API/guided-install ladder instead of a copy
+            // command they can't run. Deterministic disk check — same source
+            // classifyAndPublishAuthState uses.
+            let cliPresent = CLIBinaryPresence.claudeInstalled(
+                overridePath: UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath))
+            let newStatus = UsageAuthStatus.make(provider: .claude, state: state, cliPresent: cliPresent)
             // F7: only assign the @Published verdict when it actually changed, so a
             // steady auth state doesn't fire objectWillChange on every 60s poll.
             if authStatus != newStatus { authStatus = newStatus }
@@ -483,6 +493,7 @@ final class ClaudeUsageModel: ObservableObject {
         lastUpdate = s.fetchedAt
         unavailableMessage = nil
         currentSourceLabel = s.source.description
+        currentSource = s.source
         currentHealthLabel = s.health.description
         dataIsStale = (s.health == .stale || s.health == .degraded)
         updateFiveHourProjection(
@@ -548,6 +559,7 @@ final class ClaudeUsageModel: ObservableObject {
         lastUpdate = now
         unavailableMessage = nil
         dataIsStale = false
+        currentSource = .tmuxUsage   // hard probe is always the CLI /usage path
         updateFiveHourProjection(
             remainingPercent: s.sessionRemainingPercent,
             remainingPercentExact: nil,

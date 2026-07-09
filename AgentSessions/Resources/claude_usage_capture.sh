@@ -369,13 +369,13 @@ fi
 # Launch Claude in temp directory (prevents project scanning)
 set +e
 "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
-    "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+    "cd '$WORKDIR' && env TERM=xterm-256color BROWSER=/usr/bin/true '$CLAUDE_CMD' --model $MODEL"
 rc=$?
 if [[ $rc -ne 0 ]]; then
     # Retry once in case the tmux server is still initializing.
     sleep 0.3
     "$TMUX_CMD" -L "$LABEL" new-session -d -s "$SESSION" \
-        "cd '$WORKDIR' && env TERM=xterm-256color '$CLAUDE_CMD' --model $MODEL"
+        "cd '$WORKDIR' && env TERM=xterm-256color BROWSER=/usr/bin/true '$CLAUDE_CMD' --model $MODEL"
     rc=$?
 fi
 set -e
@@ -410,7 +410,18 @@ booted=false
 
     output=$("$TMUX_CMD" -L "$LABEL" capture-pane -t "$SESSION:0.0" -p 2>/dev/null || echo "")
 
-    # Check for trust prompt first (handle before boot check)
+    # Check for auth/login prompts FIRST — before any send-keys branch below.
+    # A login screen can otherwise be mistaken for a trust/theme prompt and get
+    # Enter pressed into "Select login method", which triggers the browser OAuth
+    # flow. Bailing here (exit 13) keeps the probe from ever advancing a login.
+    if echo "$output" | grep -qE '(sign in|login|authentication|unauthorized|Please run.*claude login|Select login method)'; then
+        echo "$(error_json auth_required_or_cli_prompted_login 'Run: claude auth login')"
+        echo "ERROR: Authentication/login required" >&2
+        echo "$output" >&2
+        exit 13
+    fi
+
+    # Check for trust prompt (handle before boot check)
 	    if echo "$output" | grep -qE "(Do you trust the files in this folder|trust this folder|Yes, I trust this folder)"; then
 	        "$TMUX_CMD" -L "$LABEL" send-keys -t "$SESSION:0.0" Enter
 	        sleep 1.0
@@ -442,13 +453,6 @@ booted=false
         fi
     fi
 
-    # Check for auth/login prompts
-    if echo "$output" | grep -qE '(sign in|login|authentication|unauthorized|Please run.*claude login|Select login method)'; then
-        echo "$(error_json auth_required_or_cli_prompted_login 'Run: claude login')"
-        echo "ERROR: Authentication/login required" >&2
-        echo "$output" >&2
-        exit 13
-    fi
 done
 
 if [ "$booted" = false ]; then

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Spec:** `docs/superpowers/specs/2026-07-08-reauth-and-as-owned-refresh-design.md` (P1 is DONE — commit `84fc9696` + the shipped Phase-1 classifier/banner/notifier stack).
+**Spec:** `docs/superpowers/specs/2026-07-08-runway-auth-degradation-and-cli-fallback.md` (P1 is DONE — commit `84fc9696` + the shipped Phase-1 classifier/banner/notifier stack).
 
 **Goal:** When the OAuth usage path fails, tell the user *why* and *what to do*: transient service/network/429 failures show a calm "temporarily unavailable — retrying" caption and never alarm; only a **persistent, debounced 401** escalates to the `.expired` remediation banner. Desktop-only (no-CLI) users get an honest remediation ladder instead of a dead-end command. The interactive tmux `/usage` probe is hardened so no path can surprise-launch a browser, CLI-fallback data is labeled, and the auto-mode probe becomes explicit opt-in.
 
