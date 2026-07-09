@@ -65,4 +65,34 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertTrue(model.cliUnavailable)                      // legacy bool still applied
         XCTAssertTrue(model.tmuxUnavailable)
     }
+
+    // MARK: - P2: transientReason (calm caption, distinct from the banner)
+
+    /// A transient emit publishes the calm caption but never raises the banner.
+    func testTransientReasonPublishedWithoutTouchingBanner() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, transientReason: "temp"))
+        XCTAssertEqual(model.transientReason, "temp")
+        XCTAssertNil(model.authStatus)   // no auth update → banner untouched
+    }
+
+    /// A later emit with a nil reason (e.g. a successful fetch) clears the caption.
+    func testTransientReasonClearsOnRecovery() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, transientReason: "temp"))
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, transientReason: nil))
+        XCTAssertNil(model.transientReason)
+    }
+
+    /// An alarming (banner) emit never also carries the calm caption — never both.
+    func testAlarmingEmitCarriesNoTransientReason() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, authState: .expired, transientReason: nil))
+        XCTAssertEqual(model.authStatus?.state, .expired)
+        XCTAssertNil(model.transientReason)
+    }
 }

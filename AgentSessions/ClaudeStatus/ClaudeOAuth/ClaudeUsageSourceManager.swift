@@ -152,6 +152,44 @@ actor ClaudeUsageSourceManager {
         return now.timeIntervalSince(startedAt) < coldStartWindow
     }
 
+    // MARK: - Cause-aware degradation (P2)
+
+    /// Escalation threshold for publishing `.expired`. The first verified
+    /// 401-with-token starts the clock; a later verified 401 at/after this
+    /// threshold escalates to the loud banner. The *internal* `currentAuthState`
+    /// still flips to `.expired` immediately (see `classifyAndPublishAuthState`)
+    /// so `shouldSuppressTmuxFallback` keeps blocking the login-screen hang —
+    /// only the *published* banner is debounced. Owner-tunable.
+    private static let expiredEscalationThreshold: TimeInterval = 5 * 60
+
+    /// Calm captions for non-alarming failures — shown in `.secondary` on the
+    /// strip without raising the banner or firing a notification.
+    static let transientUnavailableReason = "Claude usage temporarily unavailable — retrying"
+    static let rateLimitedReason = "Rate limited — retrying shortly"
+
+    /// Pure escalation predicate: escalate `.expired` to the banner only once a
+    /// verified 401 has persisted from `first401At` to at least `threshold` later.
+    /// No first 401 (`nil`) → never escalate.
+    static func shouldEscalateExpired(first401At: Date?, now: Date, threshold: TimeInterval) -> Bool {
+        guard let first401At else { return false }
+        return now.timeIntervalSince(first401At) >= threshold
+    }
+
+    /// Pure publication routing for the verified-401-with-token branch.
+    /// Pre-escalation: publish NO auth change (`nil` leaves the banner as-is) plus
+    /// the calm transient caption. Post-escalation: publish `.expired`, no caption
+    /// (the banner speaks for itself).
+    static func expiredPublication(escalated: Bool) -> (authState: UsageAuthState?, reason: String?) {
+        escalated ? (.expired, nil) : (nil, transientUnavailableReason)
+    }
+
+    /// Pure publication routing for the classifier branch: an alarming verdict
+    /// publishes as-is (no caption — the banner owns it); a non-alarming verdict
+    /// publishes the calm caption so the strip explains the degradation without alarm.
+    static func failurePublication(verdict: UsageAuthState) -> (authState: UsageAuthState?, reason: String?) {
+        verdict.isAlarming ? (verdict, nil) : (verdict, transientUnavailableReason)
+    }
+
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
         self.store = store
     }
@@ -176,6 +214,11 @@ actor ClaudeUsageSourceManager {
     private var shouldRun = false
     private var startedAt: Date?
     private var didAttemptDelegatedRefresh = false
+    /// Timestamp of the first verified 401-with-token in the current failure
+    /// episode; drives the debounced `.expired` banner escalation (P2). Cleared
+    /// on a successful fetch and whenever the failure path takes the non-401
+    /// classifier branch (a different cause the classifier's own debounce owns).
+    private var first401At: Date?
 
     // Credential gating
     private let credentialWatcher = ClaudeCredentialFingerprint()
@@ -336,6 +379,7 @@ actor ClaudeUsageSourceManager {
             oauthFailureCount = 0
             oauthRateLimitRetryDeadline = nil
             didAttemptDelegatedRefresh = false
+            first401At = nil
             lastFailureFingerprint = nil
             credentialWatchTask?.cancel()
             credentialWatchTask = nil
@@ -411,13 +455,20 @@ actor ClaudeUsageSourceManager {
                 os_log("ClaudeOAuth: delegated refresh result = no change, entering credential-gated mode",
                        log: log, type: .info)
             }
+            // classifyAndPublishAuthState (invoked first inside handleOAuthFailure)
+            // is now the single 401 publisher — debounced via first401At. The old
+            // immediate CLI-auth-required emit (stale login hint that bypassed the
+            // debounce) has been removed.
             await handleOAuthFailure(reason: "401 unauthorized")
-            publishCLIAuthRequired()
 
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
             oauthRateLimitRetryDeadline = Date().addingTimeInterval(delay)
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
+            // Calm caption (authState nil → banner untouched). A rate limit is
+            // transient and self-heals; it must never look like an auth failure.
+            availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
+                                                           transientReason: Self.rateLimitedReason))
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
@@ -603,15 +654,34 @@ actor ClaudeUsageSourceManager {
             await deactivateTmuxFallback()
         }
 
-        // Keep the legacy bools coherent with the verdict so current UI stays in
-        // sync while the full auth banner (authState) rolls out.
+        // Route the PUBLISHED verdict through the debounce/caption helpers. The
+        // internal `currentAuthState` above is always immediate (protecting the
+        // tmux-suppression guarantee); only what reaches the banner is shaped here.
+        let published: (authState: UsageAuthState?, reason: String?)
+        if was401 && hasToken {
+            let now = Date()
+            if first401At == nil { first401At = now }
+            let escalated = Self.shouldEscalateExpired(first401At: first401At, now: now,
+                                                       threshold: Self.expiredEscalationThreshold)
+            published = Self.expiredPublication(escalated: escalated)
+        } else {
+            // A different cause than an expired token (non-401, or the token
+            // vanished) — the classifier's own debounce owns this path, so clear
+            // the expiry clock.
+            first401At = nil
+            published = Self.failurePublication(verdict: state)
+        }
+
+        // Legacy bools derive from the PUBLISHED authState (nil pre-escalation) so
+        // "calm means calm": a debounced/transient emit never flips loginRequired.
         availabilityHandler?(ClaudeServiceAvailability(
-            cliUnavailable: state == .cliNotInstalled,
+            cliUnavailable: published.authState == .cliNotInstalled,
             tmuxUnavailable: false,
-            loginRequired: state == .signedOut,
+            loginRequired: published.authState == .signedOut,
             setupRequired: false,
             setupHint: nil,
-            authState: state
+            authState: published.authState,
+            transientReason: published.reason
         ))
     }
 
@@ -868,18 +938,6 @@ actor ClaudeUsageSourceManager {
             menuVisible: ctx.menuVisible,
             stripVisible: ctx.stripVisible,
             appIsActive: ctx.appIsActive
-        )
-    }
-
-    private func publishCLIAuthRequired() {
-        availabilityHandler?(
-            ClaudeServiceAvailability(
-                cliUnavailable: false,
-                tmuxUnavailable: false,
-                loginRequired: true,
-                setupRequired: false,
-                setupHint: "Claude Code CLI credentials are stale. Open Terminal and run: claude /login"
-            )
         )
     }
 

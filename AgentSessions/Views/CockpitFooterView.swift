@@ -52,6 +52,8 @@ struct QuotaData: Equatable {
     var fiveHourProjectionObservedAt: Date? = nil
     /// CLI auth status for this provider; drives the AuthRemediationBanner when alarming.
     var authStatus: UsageAuthStatus? = nil
+    /// Calm caption for a transient (non-alarming) usage failure. (P2)
+    var transientReason: String? = nil
 
     var hasUsageData: Bool {
         switch provider {
@@ -107,7 +109,8 @@ struct QuotaData: Equatable {
             isUpdating: model.isUpdating,
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
-            authStatus: model.authStatus
+            authStatus: model.authStatus,
+            transientReason: model.transientReason
         )
     }
 }
@@ -158,16 +161,23 @@ struct CockpitFooterView: View {
 		                            )
 		                        }
 		                    } else {
-		                        CockpitQuotaWidget(
-		                            data: q,
-		                            isDarkMode: colorScheme == .dark,
-		                            scope: .both,
-		                            style: .bars,
-		                            modeOverride: usageDisplayModeOverride,
-		                            baseForeground: .primary,
-		                            showResetIndicators: true,
-		                            showPill: true
-		                        )
+		                        VStack(alignment: .leading, spacing: 1) {
+		                            CockpitQuotaWidget(
+		                                data: q,
+		                                isDarkMode: colorScheme == .dark,
+		                                scope: .both,
+		                                style: .bars,
+		                                modeOverride: usageDisplayModeOverride,
+		                                baseForeground: .primary,
+		                                showResetIndicators: true,
+		                                showPill: true
+		                            )
+		                            // Calm transient caption (P2) — grows the row only on a
+		                            // failure state, like the alarming banner does.
+		                            if let reason = q.transientReason {
+		                                Text(reason).font(.caption2).foregroundStyle(.secondary)
+		                            }
+		                        }
 		                    }
 		                }
 		            }

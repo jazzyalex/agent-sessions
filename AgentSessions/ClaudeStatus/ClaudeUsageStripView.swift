@@ -93,6 +93,10 @@ struct ClaudeUsageStripView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .help(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
+            } else if let reason = status.transientReason {
+                // Calm, non-alarming caption for a transient failure (network / 5xx /
+                // 429). Secondary/gray, no icon — auto-clears on the next good fetch.
+                Text(reason).font(.caption).foregroundStyle(.secondary)
             } else if status.lastUpdate == nil, status.unavailableMessage != nil {
                 Text("Usage unavailable").font(.caption).foregroundStyle(.orange)
             } else if let update = status.lastUpdate {
@@ -127,6 +131,9 @@ struct ClaudeUsageStripView: View {
 
         if status.setupRequired {
             parts.append(status.setupHint ?? "Claude Code needs one-time setup. Open Terminal and run: claude")
+        }
+        if let reason = status.transientReason {
+            parts.append(reason)
         }
         if let unavailable = status.unavailableMessage {
             parts.append(unavailable)

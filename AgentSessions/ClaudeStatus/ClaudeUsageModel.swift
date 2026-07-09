@@ -54,6 +54,9 @@ final class ClaudeUsageModel: ObservableObject {
     // read `authStatus?.state.isAlarming` directly to decide whether to show the
     // banner (signed out / expired / no CLI).
     @Published var authStatus: UsageAuthStatus?
+    /// Calm caption for a transient (non-alarming) usage failure — network/5xx/429.
+    /// `nil` when healthy. Distinct from `authStatus` (the alarming banner). (P2)
+    @Published var transientReason: String?
     @Published var isUpdating: Bool = false
     @Published var lastSuccessAt: Date? = nil
     @Published var dataIsStale: Bool = false
@@ -185,6 +188,12 @@ final class ClaudeUsageModel: ObservableObject {
         loginRequired = availability.loginRequired
         setupRequired = availability.setupRequired
         setupHint = availability.setupHint
+        // Transient caption is written every emit (NOT authState-gated) so a
+        // recovery clears it; change-check avoids churning objectWillChange on
+        // steady polls (mirror F7).
+        if transientReason != availability.transientReason {
+            transientReason = availability.transientReason
+        }
         if let state = availability.authState {
             let newStatus = UsageAuthStatus.make(provider: .claude, state: state)
             // F7: only assign the @Published verdict when it actually changed, so a
@@ -656,4 +665,10 @@ struct ClaudeServiceAvailability {
     /// express (notably `.expired`); `nil` means "no auth update in this emit"
     /// so existing constructions and callers that don't classify stay valid.
     var authState: UsageAuthState? = nil
+    /// Calm, non-alarming caption for transient failures (network / 5xx / 429).
+    /// The strip shows it in `.secondary` without raising the banner; `nil`
+    /// clears it. Written unconditionally by `applyAvailability` (unlike the
+    /// authState-gated fields) so a recovery silently clears the caption.
+    /// (P2, spec §3/§4.)
+    var transientReason: String? = nil
 }

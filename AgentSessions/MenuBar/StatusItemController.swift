@@ -271,6 +271,10 @@ final class StatusItemController: NSObject {
                 }
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                // Calm transient caption (P2) — beneath the Claude meters, no alarm.
+                if let reason = claudeStatus.transientReason {
+                    menu.addItem(makeTitleItem(reason))
+                }
             }
 
             menu.addItem(NSMenuItem.separator())
