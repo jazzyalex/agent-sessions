@@ -102,6 +102,9 @@ struct AuthRemediationBanner: View {
                 .alert("Fix runway without the CLI", isPresented: $showNoCLIHelp) {
                     Button("Enable Web API mode") {
                         UserDefaults.standard.set(true, forKey: PreferencesKey.claudeWebApiEnabled)
+                        // Ask the model to re-fetch now so runway returns promptly
+                        // instead of waiting for the next poll (P4 finding-1 fix).
+                        NotificationCenter.default.post(name: .claudeUsageRefreshRequested, object: nil)
                     }
                     Button("Copy CLI install command") {
                         NSPasteboard.general.clearContents()

@@ -127,4 +127,44 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
             fiveHourUsedRatio: 0.3, fiveHourResetText: "", weeklyUsedRatio: 0.1, weeklyResetText: "",
             weekOpusUsedRatio: nil, weekOpusResetText: nil, rawPayloadHash: nil)
     }
+
+    // MARK: - No-CLI ladder, end-to-end through applyAvailability (self-test)
+
+    /// With the CLI absent, an alarming auth state publishes the no-CLI ladder —
+    /// this drives the exact path the banner renders, not just the pure factory.
+    func testNoCLILadderRenderedWhenCLIAbsent() {
+        ClaudeUsageModel.cliPresenceOverrideForTesting = false
+        defer { ClaudeUsageModel.cliPresenceOverrideForTesting = nil }
+        let model = ClaudeUsageModel()
+        model.applyAvailability(availability(.expired))
+        XCTAssertEqual(model.authStatus?.state, .expired)
+        guard case .noCLILadder = model.authStatus?.remediation else {
+            return XCTFail("no-CLI user must get the ladder, got \(String(describing: model.authStatus?.remediation))")
+        }
+    }
+
+    /// With the CLI present, the same alarming state keeps the copy-command chip.
+    func testCopyCommandRenderedWhenCLIPresent() {
+        ClaudeUsageModel.cliPresenceOverrideForTesting = true
+        defer { ClaudeUsageModel.cliPresenceOverrideForTesting = nil }
+        let model = ClaudeUsageModel()
+        model.applyAvailability(availability(.signedOut))
+        XCTAssertEqual(model.authStatus?.remediation, .showCommand("claude auth login"))
+    }
+
+    // MARK: - Finding-2 fix: caption-only emit doesn't clobber orthogonal state
+
+    func testCaptionOnlyEmitDoesNotClobberLegacyState() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, setupRequired: true, authState: nil))
+        XCTAssertTrue(model.setupRequired)
+        // A caption-only transient emit (e.g. 429) must update the caption but leave
+        // setupRequired untouched.
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false,
+            transientReason: "temp", captionOnly: true))
+        XCTAssertEqual(model.transientReason, "temp")
+        XCTAssertTrue(model.setupRequired)   // NOT clobbered
+    }
 }

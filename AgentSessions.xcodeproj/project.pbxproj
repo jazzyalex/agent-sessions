@@ -378,7 +378,6 @@
 		CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000001 /* ClaudeUsageModel.swift */; };
 		CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000002 /* ClaudeStatusService.swift */; };
 		CLC000010000000000000003 /* claude_usage_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000003 /* claude_usage_capture.sh */; };
-		CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CLC000020000000000000004 /* ClaudeUsageStripView.swift */; };
 		D00B6A91ECAF450F6CFD9C2D /* SearchIngestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76C57B79C5527E50719ADBB /* SearchIngestTests.swift */; };
 		D0CFF111B559BC4E97E66549 /* ClaudeAuthClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE85475F0B2EEDB639B0F200 /* ClaudeAuthClassifierTests.swift */; };
 		D1279A32A63675F7592613C1 /* OpenCodeResumeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33F7F485EB415C40F4533771 /* OpenCodeResumeCoordinator.swift */; };
@@ -845,7 +844,6 @@
 		CLC000020000000000000001 /* ClaudeUsageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageModel.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
-		CLC000020000000000000004 /* ClaudeUsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeUsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		D08E626D5410489B595FF4D1 /* TranscriptSelectionCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/TranscriptSelectionCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		D2A4B0DBEB6CE6812D3332F8 /* PiSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/PiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		D2BB94A3759137164517CC64 /* ProbeCleanupHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/ProbeCleanupHelpers.swift; sourceTree = SOURCE_ROOT; };
@@ -1793,7 +1791,6 @@
 			children = (
 				CLC000020000000000000001 /* ClaudeUsageModel.swift */,
 				CLC000020000000000000002 /* ClaudeStatusService.swift */,
-				CLC000020000000000000004 /* ClaudeUsageStripView.swift */,
 				A27D0637DFF720558181BE5D /* ClaudeProbeConfig.swift */,
 				5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */,
 				BBD66FC176CB54B298244DDB /* ClaudeProbeConfig.swift */,
@@ -2206,7 +2203,6 @@
 				UTILS00002000000000000001 /* SplitViewAutosave.swift in Sources */,
 				CLC000010000000000000001 /* ClaudeUsageModel.swift in Sources */,
 				CLC000010000000000000002 /* ClaudeStatusService.swift in Sources */,
-				CLC000010000000000000004 /* ClaudeUsageStripView.swift in Sources */,
 				MB000020000000000000001 /* StatusItemController.swift in Sources */,
 				MB000020000000000000002 /* SettingsUpdateProxy.swift in Sources */,
 				SRCH000020000000000000001 /* SearchCoordinator.swift in Sources */,

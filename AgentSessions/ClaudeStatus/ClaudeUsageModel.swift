@@ -90,6 +90,9 @@ final class ClaudeUsageModel: ObservableObject {
     // NSApp is an IUO and can be nil this early in startup.
     private var appIsActive: Bool = false
     private var wakeObservers: [NSObjectProtocol] = []
+    /// Observer for an explicit refresh request (e.g. the no-CLI banner enabling
+    /// Web API mode) — on NotificationCenter.default, removed separately. (P4)
+    private var refreshRequestObserver: NSObjectProtocol?
 
 #if DEBUG
     static var projectionDiagnosticsDefaultsForTesting: UserDefaults?
@@ -186,25 +189,44 @@ final class ClaudeUsageModel: ObservableObject {
     /// is unit-testable without a subprocess/network. The auth fields are only
     /// written when the emit actually carries a verdict, so legacy tmux/probe
     /// emits (authState == nil) don't disturb the banner.
+#if DEBUG
+    /// Test/debug seam: forces the CLI-presence result used to pick the remediation
+    /// rung, so the no-CLI ladder can be exercised deterministically (the real disk
+    /// check returns true on any machine with the CLI installed). `nil` = real check.
+    static var cliPresenceOverrideForTesting: Bool?
+#endif
+
+    /// Deterministic Claude-CLI presence used to choose the remediation rung. Same
+    /// disk check `classifyAndPublishAuthState` uses; overridable in DEBUG for tests.
+    private func resolveClaudeCLIPresent() -> Bool {
+        #if DEBUG
+        if let forced = Self.cliPresenceOverrideForTesting { return forced }
+        #endif
+        return CLIBinaryPresence.claudeInstalled(
+            overridePath: UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath))
+    }
+
     func applyAvailability(_ availability: ClaudeServiceAvailability) {
-        cliUnavailable = availability.cliUnavailable
-        tmuxUnavailable = availability.tmuxUnavailable
-        loginRequired = availability.loginRequired
-        setupRequired = availability.setupRequired
-        setupHint = availability.setupHint
-        // Transient caption is written every emit (NOT authState-gated) so a
+        // Transient caption is written on every emit (NOT authState-gated) so a
         // recovery clears it; change-check avoids churning objectWillChange on
         // steady polls (mirror F7).
         if transientReason != availability.transientReason {
             transientReason = availability.transientReason
         }
+        // A caption-only emit (a transient blip: 429 / pre-escalation) carries no
+        // meaningful legacy bools or authState — leave the orthogonal setup/CLI/login
+        // state and the banner exactly as they are.
+        if availability.captionOnly { return }
+        cliUnavailable = availability.cliUnavailable
+        tmuxUnavailable = availability.tmuxUnavailable
+        loginRequired = availability.loginRequired
+        setupRequired = availability.setupRequired
+        setupHint = availability.setupHint
         if let state = availability.authState {
             // Pick the remediation rung by CLI presence: a Desktop-only user with
             // no CLI gets the Web-API/guided-install ladder instead of a copy
-            // command they can't run. Deterministic disk check — same source
-            // classifyAndPublishAuthState uses.
-            let cliPresent = CLIBinaryPresence.claudeInstalled(
-                overridePath: UserDefaults.standard.string(forKey: ClaudeResumeSettings.Keys.binaryPath))
+            // command they can't run.
+            let cliPresent = resolveClaudeCLIPresent()
             let newStatus = UsageAuthStatus.make(provider: .claude, state: state, cliPresent: cliPresent)
             // F7: only assign the @Published verdict when it actually changed, so a
             // steady auth state doesn't fire objectWillChange on every 60s poll.
@@ -281,6 +303,16 @@ final class ClaudeUsageModel: ObservableObject {
                 }
             }
         )
+        // Explicit refresh request: the no-CLI banner's "Enable Web API mode" flips
+        // the pref then posts this so runway returns promptly instead of waiting for
+        // the next poll (P4 finding-1 fix). Registered on NotificationCenter.default.
+        if refreshRequestObserver == nil {
+            refreshRequestObserver = NotificationCenter.default.addObserver(
+                forName: .claudeUsageRefreshRequested, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.refreshNow() }
+            }
+        }
     }
 
     private func removeWakeObservers() {
@@ -289,6 +321,10 @@ final class ClaudeUsageModel: ObservableObject {
             nc.removeObserver(token)
         }
         wakeObservers.removeAll()
+        if let obs = refreshRequestObserver {
+            NotificationCenter.default.removeObserver(obs)
+            refreshRequestObserver = nil
+        }
     }
 
     private func handleWake() {
@@ -667,6 +703,13 @@ final class ClaudeUsageModel: ObservableObject {
 
 }
 
+extension Notification.Name {
+    /// Posted to ask the Claude usage model to re-fetch immediately (e.g. after the
+    /// no-CLI banner enables Web API mode, so runway returns without waiting for the
+    /// next poll). (P4)
+    static let claudeUsageRefreshRequested = Notification.Name("ClaudeUsageRefreshRequested")
+}
+
 struct ClaudeServiceAvailability {
     var cliUnavailable: Bool
     var tmuxUnavailable: Bool
@@ -683,4 +726,9 @@ struct ClaudeServiceAvailability {
     /// authState-gated fields) so a recovery silently clears the caption.
     /// (P2, spec §3/§4.)
     var transientReason: String? = nil
+    /// This emit carries ONLY the transient caption — `applyAvailability` updates
+    /// `transientReason` and leaves the orthogonal legacy bools (setup/CLI/login)
+    /// and the banner untouched, so a rate-limit/transient blip can't clobber an
+    /// unrelated state. Set by the pure-caption emits (429 + pre-escalation).
+    var captionOnly: Bool = false
 }

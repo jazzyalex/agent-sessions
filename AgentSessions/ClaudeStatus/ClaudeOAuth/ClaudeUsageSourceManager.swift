@@ -473,10 +473,12 @@ actor ClaudeUsageSourceManager {
             let delay = retryAfter + 10
             oauthRateLimitRetryDeadline = Date().addingTimeInterval(delay)
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
-            // Calm caption (authState nil → banner untouched). A rate limit is
-            // transient and self-heals; it must never look like an auth failure.
+            // Calm caption (captionOnly → banner AND legacy bools untouched). A rate
+            // limit is transient and self-heals; it must never look like an auth
+            // failure nor clobber an orthogonal setup/CLI state.
             availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
-                                                           transientReason: Self.rateLimitedReason))
+                                                           transientReason: Self.rateLimitedReason,
+                                                           captionOnly: true))
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
@@ -681,7 +683,8 @@ actor ClaudeUsageSourceManager {
         }
 
         // Legacy bools derive from the PUBLISHED authState (nil pre-escalation) so
-        // "calm means calm": a debounced/transient emit never flips loginRequired.
+        // "calm means calm". A pre-escalation emit (authState nil + reason) is
+        // caption-only: it must not clobber orthogonal legacy state or the banner.
         availabilityHandler?(ClaudeServiceAvailability(
             cliUnavailable: published.authState == .cliNotInstalled,
             tmuxUnavailable: false,
@@ -689,7 +692,8 @@ actor ClaudeUsageSourceManager {
             setupRequired: false,
             setupHint: nil,
             authState: published.authState,
-            transientReason: published.reason
+            transientReason: published.reason,
+            captionOnly: published.authState == nil
         ))
     }
 
