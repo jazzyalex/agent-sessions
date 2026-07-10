@@ -17,13 +17,13 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         }
     }
 
-    func testEveryVersionIntroducedProducesValidNewProviderScreen() {
+    func testEveryVersionIntroducedProducesValidProviderHighlight() {
         // Round-trip: every source's versionIntroduced must produce a non-empty
-        // result from newProviderScreens, guarding against typo mismatches.
+        // "new provider" What's New highlight, guarding against typo mismatches.
         let versions = Set(SessionSource.allCases.map(\.versionIntroduced))
         for version in versions {
-            let screens = OnboardingContent.newProviderScreens(for: version)
-            XCTAssertFalse(screens.isEmpty, "versionIntroduced \"\(version)\" should produce at least one new-provider screen")
+            let items = WhatsNewCatalog.providerHighlights(for: version)
+            XCTAssertFalse(items.isEmpty, "versionIntroduced \"\(version)\" should produce at least one provider highlight")
         }
     }
 
@@ -143,34 +143,31 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertTrue(candidates.isEmpty)
     }
 
-    // MARK: - Update Tour Screens
+    // MARK: - New Provider Highlights (What's New)
 
-    func testNewProviderScreens_returnsCursorScreenForVersion3_2() {
-        let screens = OnboardingContent.newProviderScreens(for: "3.2")
-        XCTAssertEqual(screens.count, 1)
-        let screen = screens[0]
-        XCTAssertEqual(screen.title, "New Agent Support")
-        XCTAssertEqual(screen.agentShowcase.count, 1)
-        XCTAssertEqual(screen.agentShowcase[0].title, "Cursor")
-        XCTAssertEqual(screen.agentShowcase[0].symbolName, "cursorarrow.rays")
+    func testProviderHighlights_returnsCursorItemForVersion3_2() {
+        let items = WhatsNewCatalog.providerHighlights(for: "3.2")
+        XCTAssertEqual(items.count, 1)
+        let item = items[0]
+        XCTAssertEqual(item.kind, .highlight)
+        XCTAssertTrue(item.title.contains("Cursor"), "provider highlight should name Cursor")
+        XCTAssertEqual(item.iconSystemName, SessionSource.cursor.iconName)
     }
 
-    func testNewProviderScreens_returnsEmptyForUnknownVersion() {
-        let screens = OnboardingContent.newProviderScreens(for: "99.0")
-        XCTAssertTrue(screens.isEmpty)
+    func testProviderHighlights_returnsEmptyForUnknownVersion() {
+        XCTAssertTrue(WhatsNewCatalog.providerHighlights(for: "99.0").isEmpty)
     }
 
-    func testNewProviderScreens_returnsEmptyForVersionWithNoNewProviders() {
+    func testProviderHighlights_returnsEmptyForVersionWithNoNewProviders() {
         // Version "2.9" exists as a real app version but no provider has versionIntroduced == "2.9"
-        let screens = OnboardingContent.newProviderScreens(for: "2.9")
-        XCTAssertTrue(screens.isEmpty, "Version with no new providers should produce no screens")
+        XCTAssertTrue(WhatsNewCatalog.providerHighlights(for: "2.9").isEmpty,
+                      "Version with no new providers should produce no highlights")
     }
 
-    func testUpdateTourForVersion3_2_includesNewProviderScreen() {
-        // Exercise the same path OnboardingCoordinator uses at runtime
-        let content = OnboardingContent.updateTour(for: "3.2")
-            ?? OnboardingContent.fallbackUpdateTour(for: "3.2")
-        let hasNewAgentScreen = content.screens.contains { $0.title == "New Agent Support" }
-        XCTAssertTrue(hasNewAgentScreen, "Update tour for 3.2 should include New Agent Support slide")
+    func testWhatsNewForVersion3_2IncludesProviderHighlight() {
+        // The assembled What's New list for 3.2 should surface the Cursor highlight.
+        let items = WhatsNewCatalog.assemble(for: "3.2")
+        let hasCursorHighlight = items.contains { $0.kind == .highlight && $0.title.contains("Cursor") }
+        XCTAssertTrue(hasCursorHighlight, "What's New for 3.2 should include the Cursor provider highlight")
     }
 }

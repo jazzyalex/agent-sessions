@@ -9,6 +9,7 @@ extension Notification.Name {
     static let openTranscriptFindFromMenu = Notification.Name("AgentSessionsOpenTranscriptFindFromMenu")
     static let showOnboardingFromMenu = Notification.Name("AgentSessionsShowOnboardingFromMenu")
     static let showPowerTipsFromMenu = Notification.Name("AgentSessionsShowPowerTipsFromMenu")
+    static let showWhatsNewFromMenu = Notification.Name("AgentSessionsShowWhatsNewFromMenu")
     static let navigateToSessionFromImages = Notification.Name("AgentSessionsNavigateToSessionFromImages")
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
@@ -313,6 +314,7 @@ struct AgentSessionsApp: App {
         .environmentObject(indexer.columnVisibility)
         .environmentObject(archiveManager)
         .environmentObject(updaterController)
+        .environmentObject(onboardingCoordinator)
         .background(WindowAutosave(name: "MainWindow"))
         .background(WindowOpenRegistrationView())
         .onAppear {
@@ -359,13 +361,16 @@ struct AgentSessionsApp: App {
         .onReceive(NotificationCenter.default.publisher(for: .showPowerTipsFromMenu)) { _ in
             onboardingCoordinator.presentPowerTips()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showWhatsNewFromMenu)) { _ in
+            onboardingCoordinator.presentWhatsNewFromMenu()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .requestCoreIndexRebuild)) { _ in
             unified.rebuildCoreIndex()
         }
-        .onChange(of: onboardingCoordinator.isPresented) { _, isPresented in
-            if isPresented, let content = onboardingCoordinator.content {
+        .onChange(of: onboardingCoordinator.presentation) { _, presentation in
+            if let presentation {
                 onboardingWindowPresenter.show(
-                    content: content,
+                    presentation: presentation,
                     coordinator: onboardingCoordinator,
                     codexIndexer: indexer,
                     claudeIndexer: claudeIndexer,
@@ -444,6 +449,10 @@ struct AgentSessionsApp: App {
             CommandGroup(after: .help) {
                 Button("Power Tips") {
                     NotificationCenter.default.post(name: .showPowerTipsFromMenu, object: nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                Button("What's New") {
+                    NotificationCenter.default.post(name: .showWhatsNewFromMenu, object: nil)
                     NSApp.activate(ignoringOtherApps: true)
                 }
                 Button("Show Onboarding") {
@@ -1182,7 +1191,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     private var state: OnboardingWindowState?
 
     func show(
-        content: OnboardingContent,
+        presentation: OnboardingPresentation,
         coordinator: OnboardingCoordinator,
         codexIndexer: SessionIndexer,
         claudeIndexer: ClaudeSessionIndexer,
@@ -1199,7 +1208,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     ) {
         self.coordinator = coordinator
         state = OnboardingWindowState(
-            content: content,
+            presentation: presentation,
             coordinator: coordinator,
             codexIndexer: codexIndexer,
             claudeIndexer: claudeIndexer,
@@ -1278,7 +1287,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         teardownObservers()
         hostingView?.onAppearanceChanged = nil
-        if coordinator?.isPresented == true {
+        if coordinator?.presentation != nil {
             coordinator?.skip()
         }
         coordinator = nil
@@ -1291,7 +1300,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
 // (Legacy ContentView and FirstRunPrompt removed)
 
 private struct OnboardingWindowState {
-    let content: OnboardingContent
+    let presentation: OnboardingPresentation
     let coordinator: OnboardingCoordinator
     let codexIndexer: SessionIndexer
     let claudeIndexer: ClaudeSessionIndexer
@@ -1311,30 +1320,38 @@ private struct OnboardingWindowRoot: View {
     let state: OnboardingWindowState
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
-    var body: some View {
-        let content = OnboardingSheetView(
-            content: state.content,
-            coordinator: state.coordinator,
-            codexIndexer: state.codexIndexer,
-            claudeIndexer: state.claudeIndexer,
-            antigravityIndexer: state.antigravityIndexer,
-            opencodeIndexer: state.opencodeIndexer,
-            hermesIndexer: state.hermesIndexer,
-            copilotIndexer: state.copilotIndexer,
-            droidIndexer: state.droidIndexer,
-            openclawIndexer: state.openclawIndexer,
-            cursorIndexer: state.cursorIndexer,
-            piIndexer: state.piIndexer,
-            codexUsageModel: state.codexUsageModel,
-            claudeUsageModel: state.claudeUsageModel
-        )
+    @ViewBuilder
+    private var presentedContent: some View {
+        switch state.presentation {
+        case .firstRunSetup:
+            FirstRunSetupView(
+                coordinator: state.coordinator,
+                codexIndexer: state.codexIndexer,
+                claudeIndexer: state.claudeIndexer,
+                antigravityIndexer: state.antigravityIndexer,
+                opencodeIndexer: state.opencodeIndexer,
+                hermesIndexer: state.hermesIndexer,
+                copilotIndexer: state.copilotIndexer,
+                droidIndexer: state.droidIndexer,
+                openclawIndexer: state.openclawIndexer,
+                cursorIndexer: state.cursorIndexer,
+                piIndexer: state.piIndexer
+            )
+        case .powerTips(let content):
+            OnboardingSheetView(
+                content: content,
+                coordinator: state.coordinator
+            )
+        }
+    }
 
+    var body: some View {
         let appAppearance = AppAppearance(rawValue: appAppearanceRaw) ?? .system
         Group {
             switch appAppearance {
-            case .light: content.preferredColorScheme(.light)
-            case .dark: content.preferredColorScheme(.dark)
-            case .system: content
+            case .light: presentedContent.preferredColorScheme(.light)
+            case .dark: presentedContent.preferredColorScheme(.dark)
+            case .system: presentedContent
             }
         }
     }

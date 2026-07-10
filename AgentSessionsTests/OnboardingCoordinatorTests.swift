@@ -2,6 +2,14 @@ import XCTest
 @testable import AgentSessions
 
 final class OnboardingCoordinatorTests: XCTestCase {
+    private func makeDefaults(_ suite: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+
+    // MARK: - Version parsing (unchanged)
+
     func testMajorMinorParsing() {
         XCTAssertEqual(OnboardingContent.majorMinor(from: "2.9"), "2.9")
         XCTAssertEqual(OnboardingContent.majorMinor(from: "2.9.0"), "2.9")
@@ -10,181 +18,188 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertNil(OnboardingContent.majorMinor(from: "invalid"))
     }
 
-    func testCheckAndPresentIfNeededPresentsFullTourOnFreshInstall() async {
-        let suite = "OnboardingCoordinatorTests.present"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+    // MARK: - Fresh install → first-run setup (once)
 
-        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?, title: String?) in
+    func testFreshInstallPresentsFirstRunSetup() async {
+        let defaults = makeDefaults("Onboarding.freshSetup")
+
+        let presentation = await MainActor.run { () -> OnboardingPresentation? in
             let coordinator = OnboardingCoordinator(
                 defaults: defaults,
-                currentMajorMinorProvider: { "2.9" },
+                currentMajorMinorProvider: { "4.3" },
                 isFreshInstallProvider: { true }
             )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.kind, coordinator.content?.screens.first?.title)
+            return coordinator.presentation
         }
 
-        XCTAssertTrue(result.isPresented)
-        XCTAssertEqual(result.kind, .fullTour)
-        XCTAssertTrue(
-            ["Welcome to Agent Sessions", "Sessions Found"].contains(result.title ?? ""),
-            "Unexpected first screen title: \(result.title ?? "nil")"
-        )
+        XCTAssertEqual(presentation, .firstRunSetup)
     }
 
-    func testCheckAndPresentIfNeededPresentsUpdateTourWhenNotFreshAndNotSeenForVersion() async {
-        let suite = "OnboardingCoordinatorTests.seen"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+    func testFirstRunSetupShownOnlyOnce() async {
+        let defaults = makeDefaults("Onboarding.setupOnce")
+        // Simulate a prior completed first run.
+        defaults.onboardingFullTourCompleted = true
 
-        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+        let result = await MainActor.run { () -> (OnboardingPresentation?, String?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "4.3" },
+                isFreshInstallProvider: { true },
+                whatsNewAvailableProvider: { _ in false }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.presentation, coordinator.whatsNewMajorMinor)
+        }
+
+        // Already completed: no setup, and fresh-install path never flags What's New.
+        XCTAssertNil(result.0)
+        XCTAssertNil(result.1)
+    }
+
+    // MARK: - Version bump → What's New flag (not a sheet)
+
+    func testVersionBumpSetsWhatsNewFlagNotSheet() async {
+        let defaults = makeDefaults("Onboarding.bumpFlag")
+
+        let result = await MainActor.run { () -> (OnboardingPresentation?, String?) in
             let coordinator = OnboardingCoordinator(
                 defaults: defaults,
                 currentMajorMinorProvider: { "2.9" },
-                isFreshInstallProvider: { false }
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
             )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.kind)
+            return (coordinator.presentation, coordinator.whatsNewMajorMinor)
         }
 
-        XCTAssertTrue(result.isPresented)
-        XCTAssertEqual(result.kind, .updateTour)
+        XCTAssertNil(result.0, "Updates must never present a modal")
+        XCTAssertEqual(result.1, "2.9")
     }
 
-    func testCheckAndPresentIfNeededSkipsUpdateTourWhenUpgradingFromTwoEleven() async {
-        let suite = "OnboardingCoordinatorTests.skip211"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defaults.onboardingLastActionMajorMinor = "2.11"
+    func testWhatsNewNotFlaggedWhenCatalogEmpty() async {
+        let defaults = makeDefaults("Onboarding.bumpEmpty")
 
-        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+        let flag = await MainActor.run { () -> String? in
             let coordinator = OnboardingCoordinator(
                 defaults: defaults,
-                currentMajorMinorProvider: { "2.12" },
-                isFreshInstallProvider: { false }
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in false }
             )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.kind)
+            return coordinator.whatsNewMajorMinor
         }
 
-        XCTAssertFalse(result.isPresented)
-        XCTAssertNil(result.kind)
-        XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
+        XCTAssertNil(flag)
     }
 
-    func testCheckAndPresentIfNeededStillShowsUpdateTourWhenUpgradingFromOlderVersions() async {
-        let suite = "OnboardingCoordinatorTests.oldUpgrade"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defaults.onboardingLastActionMajorMinor = "2.10"
-        defaults.onboardingLastSeenAppMajorMinor = "2.10"
+    func testDismissedVersionNeverReFlags() async {
+        let defaults = makeDefaults("Onboarding.dismissed")
+        defaults.onboardingWhatsNewDismissedMajorMinor = "2.9"
 
-        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?) in
+        let flag = await MainActor.run { () -> String? in
             let coordinator = OnboardingCoordinator(
                 defaults: defaults,
-                currentMajorMinorProvider: { "2.12" },
-                isFreshInstallProvider: { false }
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
             )
             coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.kind)
+            return coordinator.whatsNewMajorMinor
         }
 
-        XCTAssertTrue(result.isPresented)
-        XCTAssertEqual(result.kind, .updateTour)
-        XCTAssertEqual(defaults.onboardingLastSeenAppMajorMinor, "2.12")
+        XCTAssertNil(flag)
     }
 
-    func testFullTourScreenSequence() {
-        let fullTour = OnboardingContent.fullTour(for: "3.0")
-        let titles = fullTour.screens.map(\.title)
-
-        XCTAssertEqual(titles.count, 6)
-        XCTAssertEqual(titles[0], "Sessions Found")
-        XCTAssertEqual(titles[1], "Connect Your Agents")
-        XCTAssertEqual(titles[2], "Quota Meter")
-        XCTAssertEqual(titles[3], "Power Tips")
-        XCTAssertEqual(titles[4], "Analytics & Usage")
-        XCTAssertEqual(titles[5], "Feedback & Community Support")
-    }
-
-    func testFullTourUsesPrimaryPowerTips() {
-        let fullTour = OnboardingContent.fullTour(for: "3.0")
-        let powerTips = fullTour.screens.first { $0.title == "Power Tips" }
-
-        XCTAssertEqual(powerTips?.bullets.count, 2)
-        XCTAssertTrue(powerTips?.bullets.first?.hasPrefix("Hide the Dock icon:") == true)
-        XCTAssertTrue(powerTips?.bullets.last?.hasPrefix("Use Agent Cockpit:") == true)
-    }
-
-    func testReleaseThreeUpdateCatalogStartsWithPowerTips() {
-        let updateTour = OnboardingContent.updateTour(for: "3.0")
-
-        XCTAssertEqual(updateTour?.kind, .updateTour)
-        // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
-        XCTAssertEqual(updateTour?.screens.count, 4)
-        XCTAssertEqual(updateTour?.screens.first?.title, "Power Tips")
-        XCTAssertEqual(updateTour?.screens.first?.body, "Two quick tips from Agent Sessions.")
-        XCTAssertEqual(updateTour?.screens.first?.bullets.count, 2)
-        XCTAssertEqual(updateTour?.screens[1].title, "Quota Meter")
-        XCTAssertEqual(updateTour?.screens[2].title, "Feedback & Community Support")
-        XCTAssertEqual(updateTour?.screens.last?.title, "New Agent Support")
-    }
-
-    func testCheckAndPresentIfNeededForReleaseThreeShowsFourScreenUpdateTour() async {
-        let suite = "OnboardingCoordinatorTests.release3Update"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defaults.onboardingLastActionMajorMinor = "2.12"
-        defaults.onboardingLastSeenAppMajorMinor = "2.12"
-
-        let result = await MainActor.run { () -> (isPresented: Bool, kind: OnboardingContent.Kind?, screens: Int) in
-            let coordinator = OnboardingCoordinator(
-                defaults: defaults,
-                currentMajorMinorProvider: { "3.0" },
-                isFreshInstallProvider: { false }
-            )
-            coordinator.checkAndPresentIfNeeded()
-            return (coordinator.isPresented, coordinator.content?.kind, coordinator.content?.screens.count ?? 0)
-        }
-
-        XCTAssertTrue(result.isPresented)
-        XCTAssertEqual(result.kind, .updateTour)
-        // Droid was introduced in 3.0, so newProviderScreens appends a "New Agent Support" slide.
-        XCTAssertEqual(result.screens, 4)
-    }
-
-    func testFallbackUpdateTourStartsWithPowerTips() {
-        let fallback = OnboardingContent.fallbackUpdateTour(for: "9.9")
-
-        XCTAssertEqual(fallback.kind, .updateTour)
-        XCTAssertEqual(fallback.screens.count, 3)
-        XCTAssertEqual(fallback.screens.first?.title, "Power Tips")
-        XCTAssertEqual(fallback.screens.first?.body, "Two quick tips from Agent Sessions.")
-        XCTAssertEqual(fallback.screens.first?.bullets.count, 2)
-        XCTAssertEqual(fallback.screens[1].title, "Quota Meter")
-        XCTAssertEqual(fallback.screens.last?.title, "Feedback & Community Support")
-    }
-
-    func testPowerTipsTourContainsAllTipSlides() {
-        let tour = OnboardingContent.powerTipsTour(for: "3.0")
-
-        XCTAssertEqual(tour.kind, .powerTips)
-        XCTAssertEqual(tour.screens.count, 16)
-        XCTAssertEqual(tour.screens.first?.title, "Power Tips")
-        XCTAssertEqual(tour.screens.last?.title, "Quick Navigation")
-        XCTAssertTrue(tour.screens.allSatisfy { $0.bullets.count == 2 })
-    }
-
-    func testPowerTipsDismissDoesNotRecordOnboardingCompletion() async {
-        let suite = "OnboardingCoordinatorTests.powerTips"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+    func testDismissWhatsNewCardRecordsVersion() async {
+        let defaults = makeDefaults("Onboarding.dismissRecords")
 
         await MainActor.run {
             let coordinator = OnboardingCoordinator(
                 defaults: defaults,
-                currentMajorMinorProvider: { "3.0" },
+                currentMajorMinorProvider: { "2.9" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            XCTAssertEqual(coordinator.whatsNewMajorMinor, "2.9")
+            coordinator.dismissWhatsNewCard()
+            XCTAssertNil(coordinator.whatsNewMajorMinor)
+        }
+
+        XCTAssertEqual(defaults.onboardingWhatsNewDismissedMajorMinor, "2.9")
+    }
+
+    // MARK: - Suppression matrix (carried over)
+
+    func testSuppressesWhatsNewWhenUpgradingFromTwoEleven() async {
+        let defaults = makeDefaults("Onboarding.skip211")
+        defaults.onboardingLastActionMajorMinor = "2.11"
+
+        let result = await MainActor.run { () -> (String?, String?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.12" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.whatsNewMajorMinor, defaults.onboardingLastSeenAppMajorMinor)
+        }
+
+        XCTAssertNil(result.0)
+        XCTAssertEqual(result.1, "2.12")
+    }
+
+    func testStillFlagsWhatsNewWhenUpgradingFromOlderVersions() async {
+        let defaults = makeDefaults("Onboarding.oldUpgrade")
+        defaults.onboardingLastActionMajorMinor = "2.10"
+        defaults.onboardingLastSeenAppMajorMinor = "2.10"
+
+        let result = await MainActor.run { () -> (String?, String?) in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "2.12" },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
+            )
+            coordinator.checkAndPresentIfNeeded()
+            return (coordinator.whatsNewMajorMinor, defaults.onboardingLastSeenAppMajorMinor)
+        }
+
+        XCTAssertEqual(result.0, "2.12")
+        XCTAssertEqual(result.1, "2.12")
+    }
+
+    // MARK: - Modal completion recording
+
+    func testFirstRunSkipRecordsCompletion() async {
+        let defaults = makeDefaults("Onboarding.skipRecords")
+
+        let presentation = await MainActor.run { () -> OnboardingPresentation? in
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "4.3" },
+                isFreshInstallProvider: { true }
+            )
+            coordinator.presentManually()
+            coordinator.skip()
+            return coordinator.presentation
+        }
+
+        XCTAssertNil(presentation)
+        XCTAssertTrue(defaults.onboardingFullTourCompleted)
+        XCTAssertEqual(defaults.onboardingLastActionMajorMinor, "4.3")
+    }
+
+    func testPowerTipsDismissDoesNotRecordCompletion() async {
+        let defaults = makeDefaults("Onboarding.powerTips")
+
+        await MainActor.run {
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { "4.3" },
                 isFreshInstallProvider: { false }
             )
             coordinator.presentPowerTips()
@@ -195,24 +210,14 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertFalse(defaults.onboardingFullTourCompleted)
     }
 
-    func testSkipRecordsVersionAndDismisses() async {
-        let suite = "OnboardingCoordinatorTests.skip"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+    // MARK: - OnboardingContent catalogs (Power Tips untouched)
 
-        let result = await MainActor.run { () -> Bool in
-            let coordinator = OnboardingCoordinator(
-                defaults: defaults,
-                currentMajorMinorProvider: { "2.9" },
-                isFreshInstallProvider: { true }
-            )
-            coordinator.presentManually()
-            coordinator.skip()
-            return coordinator.isPresented
-        }
-
-        XCTAssertFalse(result)
-        XCTAssertEqual(defaults.onboardingLastActionMajorMinor, "2.9")
-        XCTAssertTrue(defaults.onboardingFullTourCompleted)
+    func testPowerTipsTourContainsAllTipSlides() {
+        let tour = OnboardingContent.powerTipsTour(for: "4.3")
+        XCTAssertEqual(tour.kind, .powerTips)
+        XCTAssertEqual(tour.screens.count, 16)
+        XCTAssertEqual(tour.screens.first?.title, "Power Tips")
+        XCTAssertEqual(tour.screens.last?.title, "Quick Navigation")
+        XCTAssertTrue(tour.screens.allSatisfy { $0.bullets.count == 2 })
     }
 }

@@ -318,6 +318,7 @@ struct UnifiedSessionsView: View {
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
+    @EnvironmentObject var onboardingCoordinator: OnboardingCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.openWindow) private var openWindow
@@ -887,10 +888,20 @@ struct UnifiedSessionsView: View {
 	        }
 	    }
 
+	    /// Session-list pane with the onboarding top-card slot (What's New / feedback)
+	    /// mounted above the table. Renders nothing extra when there's nothing to show.
+	    private var listPaneWithTopSlot: some View {
+	        VStack(spacing: 0) {
+	            OnboardingListTopSlot(coordinator: onboardingCoordinator)
+	            listPane
+	        }
+	        .onboardingSheets(coordinator: onboardingCoordinator)
+	    }
+
 	    @ViewBuilder
 	    private var mainSplitView: some View {
 	        if !showTranscriptWindow {
-	            listPane
+	            listPaneWithTopSlot
 	                .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
 	                .transaction { $0.animation = nil }
 	        } else if layoutMode == .vertical {
@@ -900,7 +911,7 @@ struct UnifiedSessionsView: View {
 	                // the brighter text background) + a single crisp hairline. Each
 	                // pane is inset by `paneGutter` so neither the list content nor the
 	                // transcript stripes butt against the line — equal margin both sides.
-	                listPane
+	                listPaneWithTopSlot
 	                    .frame(minWidth: 320, maxWidth: 1200)
 	                    .padding(.trailing, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
@@ -914,7 +925,7 @@ struct UnifiedSessionsView: View {
 	            .transaction { $0.animation = nil }
 	        } else {
 	            VSplitView {
-	                listPane
+	                listPaneWithTopSlot
 	                    .frame(minHeight: 180)
 	                    .padding(.bottom, Self.paneGutter)
 	                    .background(Self.listPaneBackground)
@@ -2184,6 +2195,9 @@ struct UnifiedSessionsView: View {
             guard !Task.isCancelled, selection == id else { return }
             Perf.event("selectionPropagate", "id=\(id.prefix(8))")
             settledSelection = id
+            // Count a session-open for the feedback-ask trigger (debounced settle
+            // fires once per rested selection, not per key-repeat scrub).
+            onboardingCoordinator.noteSessionOpened()
             // Auto-jump to the first search-term occurrence in the transcript, but only once
             // the transcript pane's own selection (settledSelection) is about to match this id —
             // TranscriptPlainView gates its match on searchState.autoJumpSessionID == session.id,
