@@ -329,4 +329,75 @@ final class ClaudeWorkflowSubagentTests: XCTestCase {
 
         XCTAssertEqual(result.rowMeta["PARENT_ID"]?.hasWorkflowChildren, false)
     }
+
+    // MARK: - Lightweight parse: multi-byte UTF-8 slice boundaries (issue #49 root cause)
+
+    private static let lightweightHeadSlice = 256 * 1024
+    private static let lightweightTailSlice = 256 * 1024
+
+    /// Builds a large (> head+tail) Claude JSONL whose head slice ends inside a
+    /// multi-byte character AND whose tail slice starts inside one, so the
+    /// strict-UTF8 slice decoder would drop both slices whole. The first line is
+    /// a genuine Japanese user prompt: if either slice decodes, the session is
+    /// non-housekeeping.
+    private func makeCJKBoundarySplittingSession(promptLine: String) -> Data {
+        let head = Self.lightweightHeadSlice
+        let tail = Self.lightweightTailSlice
+        // Long run of 3-byte characters so a slice boundary reliably lands mid-char.
+        let filler = #"{"type":"summary","summary":"\#(String(repeating: "あ", count: 4000))"}"#
+
+        func padLine(_ n: Int) -> Data {
+            Data(("{\"type\":\"summary\",\"summary\":\"" + String(repeating: " ", count: n) + "\"}\n").utf8)
+        }
+        func assemble(headPad: Int, tailPad: Int) -> Data {
+            var d = Data()
+            d.append(Data((promptLine + "\n").utf8))
+            if headPad > 0 { d.append(padLine(headPad)) }
+            while d.count < head + tail + 96 * 1024 {
+                d.append(Data((filler + "\n").utf8))
+            }
+            // tailPad is appended last, so it never shifts bytes[0..<head).
+            if tailPad > 0 {
+                d.append(Data(("{\"type\":\"summary\",\"summary\":\"" + String(repeating: " ", count: tailPad) + "\"}").utf8))
+            }
+            return d
+        }
+        func headSplits(_ d: Data) -> Bool { String(data: Data(d.prefix(head)), encoding: .utf8) == nil }
+        func tailSplits(_ d: Data) -> Bool { String(data: Data(d.suffix(tail)), encoding: .utf8) == nil }
+
+        // Align the head boundary first (pad inserted before it), then the tail
+        // (pad appended at end) with head fixed. The cap must exceed the widest
+        // run of non-splitting bytes (the ~31-byte ASCII structure between filler
+        // runs) so a 1-byte-at-a-time nudge is guaranteed to walk into the
+        // 3-byte-char run and land mid-character.
+        let maxPad = 64
+        var headPad = 0
+        while headPad < maxPad, !headSplits(assemble(headPad: headPad, tailPad: 0)) { headPad += 1 }
+        var tailPad = 0
+        while tailPad < maxPad, !tailSplits(assemble(headPad: headPad, tailPad: tailPad)) { tailPad += 1 }
+        return assemble(headPad: headPad, tailPad: tailPad)
+    }
+
+    func test_lightweightParse_largeCJKSession_notMisclassifiedAsHousekeeping() throws {
+        let dir = try makeUniqueTempDir()
+        let url = dir.appendingPathComponent("\(parentUUID).jsonl")
+
+        let promptText = "テニスのコーチング分析ツールを作ってください。完全にオフラインで動作する必要があります。"
+        let promptLine = "{\"type\":\"user\",\"sessionId\":\"\(parentUUID)\",\"cwd\":\"/Users/me/proj\",\"timestamp\":\"2026-07-01T00:00:00.000Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"\(promptText)\"}]}}"
+
+        let data = makeCJKBoundarySplittingSession(promptLine: promptLine)
+        try data.write(to: url)
+
+        // Precondition: the fixture actually reproduces the split boundaries the
+        // bug depends on — otherwise the assertion below would pass vacuously.
+        XCTAssertNil(String(data: Data(data.prefix(Self.lightweightHeadSlice)), encoding: .utf8),
+                     "fixture head slice should split a multi-byte char")
+        XCTAssertNil(String(data: Data(data.suffix(Self.lightweightTailSlice)), encoding: .utf8),
+                     "fixture tail slice should split a multi-byte char")
+
+        let session = try XCTUnwrap(ClaudeSessionParser.parseFile(at: url))
+
+        XCTAssertFalse(session.isHousekeeping,
+                       "A large CJK session with a real prompt must not be hidden as housekeeping")
+    }
 }

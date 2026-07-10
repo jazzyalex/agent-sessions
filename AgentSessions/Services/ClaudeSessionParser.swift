@@ -801,7 +801,16 @@ final class ClaudeSessionParser {
             }
 
             func lines(from data: Data, keepHead: Bool) -> [String] {
-                guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return [] }
+                guard !data.isEmpty else { return [] }
+                // A fixed-size head/tail slice can end (or start) inside a
+                // multi-byte UTF-8 character. The strict String(data:encoding:.utf8)
+                // initializer returns nil for such a slice, which dropped EVERY
+                // valid line in it — silently misclassifying large CJK/emoji
+                // sessions as empty ("housekeeping") and hiding them (issue #49).
+                // Decode leniently instead: only the single truncated boundary
+                // line is corrupted, and it is discarded anyway by the JSON guard
+                // in ingest().
+                let s = String(decoding: data, as: UTF8.self)
                 let parts = s.components(separatedBy: "\n")
                 if keepHead {
                     return Array(parts.prefix(300))
