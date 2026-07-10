@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.3] - 2026-07-09
+### Highlights
+- **Usage tracking that never cries wolf.** When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet "signed out" state instead of a scary error), and shows clear in-app **sign-in remediation** right in the usage strips and menu bar so you know exactly how to get your quota readings back.
+
+### Improvements
+- Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views.
+- Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look.
+- Usage probing is gentler on your machine — auth-status re-checks are throttled on the healthy path, and stale background probes are cleaned up instead of piling up.
+
+### Bug Fixes
+- Session view: restored click-and-drag text selection in the transcript.
+- Filter: archived Codex sessions now show in the Archived filter regardless of surface metadata.
+
 ## [4.2] - 2026-07-06
 ### Highlights
 - **A brand-new transcript.** The session transcript is rebuilt as a clean, readable **Session view** — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.
