@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.2/AgentSessions-4.2.dmg"><b>Download Agent Sessions 4.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg"><b>Download Agent Sessions 4.3 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.2** — A brand-new transcript: assistant replies in real **Markdown**, collapsible tool calls, inline images, and clickable file paths, plus role filters (You / Agent / Tools / Errors) with jump-to-next navigation and a right-click menu. [See what's new ↓](#whats-new-in-42)
+> **New in 4.3** — Usage tracking that never cries wolf: when your Claude or Codex CLI is signed out or its token has expired, the Quota Meter degrades calmly and shows clear in-app sign-in guidance instead of false alarms or surprise browser sign-ins. Plus restored transcript text selection and an archived-Codex filter fix. [See what's new ↓](#whats-new-in-43)
 
 ## Overview
 
@@ -72,19 +72,20 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.2
+## What's New in 4.3
 
-**TL;DR** - The redesigned transcript. 4.2 rebuilds the session transcript from the ground up as a clean, readable Session view — structured cards with real Markdown, collapsible tool calls, inline images, and clickable file paths — plus role filters with jump-to-next navigation and a right-click menu.
+**TL;DR** - Usage tracking that never cries wolf. When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway stop flashing false alarms and stop silently opening a browser sign-in behind your back. Agent Sessions reads the real CLI auth state, degrades calmly, and shows clear in-app sign-in guidance so you know exactly how to get your readings back.
 
-**Highlights:** The transcript is no longer a raw terminal dump. Assistant replies render as proper Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy expandable cards, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and each turn and tool call carries a duration badge. Filter a session to just You, Agent, Tools, or Errors and step through occurrences with the ▲▼ controls, and right-click any message for Copy, Copy Block, or Speak.
+**Highlights:** The Quota Meter now distinguishes a real signed-out or expired-token state from a passing network blip: transient failures show a calm "temporarily unavailable — retrying" caption and clear on the next good fetch, while a persistent auth failure surfaces sign-in remediation right in the usage strips and menu bar. Agent Sessions never mints or refreshes your subscription token and never advances a login into the browser on its own — it stays a read-only usage reader. A Claude user without the CLI gets a two-rung fix-it ladder (enable the no-install web mode, or install the CLI) instead of a command they can't run.
 
-New in 4.2:
-- **Redesigned transcript (Session view)** — block-based cards, rich Markdown rendering, collapsible tool calls, inline images, review summaries, clickable file paths, and turn/tool duration badges.
-- **Role filters + jump navigation** — show only You / Agent / Tools / Errors, and jump to the next or previous occurrence of each.
-- **Right-click menu** — Copy, Copy Block, and Speak on any message.
-- **Quota Meter smile** — the meter smiles when your pace is on track to fit the 5-hour window.
+New in 4.3:
+- **Auth-resilient Quota Meter & Session Runway** — real signed-out / expired-token detection, calm degradation for transient errors, and no surprise browser sign-ins.
+- **In-app sign-in remediation** — clear guidance in the usage strips and menu bar when a provider needs re-authentication.
+- **Cockpit refinements** — a segmented cockpit-view popover that matches the Runway drawer, with ⇧⌘M to cycle cockpit views.
+- **Transcript polish** — restored click-and-drag text selection in the Session view, a unified palette, and a native list/transcript separator.
+- **Archived-Codex filter fix** — archived Codex sessions now show in the Archived filter regardless of surface metadata.
 
-Previous release — 4.1: The Instant release — instant transcript open, instant sort, indexed full-text search, and much quieter idle. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.2: A brand-new transcript — structured Session view with real Markdown, collapsible tool calls, inline images, and clickable file paths. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -138,7 +139,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.2/AgentSessions-4.2.dmg)
+1. [Download AgentSessions-4.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

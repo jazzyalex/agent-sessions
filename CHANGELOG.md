@@ -10,6 +10,20 @@ All notable changes to this project will be documented in this file.
 - **Probe hardening (P4):** the tmux `/usage` script checks for an auth/login screen before pressing any keys and suppresses the browser hook (`BROWSER=/usr/bin/true`), so a probe can never advance a login into the browser; suppressed/aborted probes now raise the auth banner instead of failing silently; CLI-probe data is labeled "via CLI probe"; and the interactive Auto-mode fallback is now **opt-in** (Preferences → Usage, default off — behavior change).
 - Agent Sessions will not mint or refresh its own Claude subscription token (no in-app OAuth login) — it remains a read-only usage reader.
 
+### Auth verdict plumbing & hardening (tracks A–C)
+- Shared `UsageAuthStatus` model and remediation copy; both the Claude and Codex usage managers publish an authoritative auth verdict from an explicit `claude auth status` / `codex login status` probe (throttled to ~15 min on the success path) rather than inferring it from a fetch failure.
+- Result-typed credential resolution surfaces 401 / absent / malformed distinctly, distinguishes Keychain not-found from unreadable, and short-circuits the usage feed while signed out. Debounced classifiers on both providers never false-alarm; recovery emits cleanly.
+- Closed several probe hazards found during hardening: cold-start tmux hangs, probe reentrancy, orphaned live tmux probes (SIGKILL-escalate past the retry cap), and spawning a `/status` or `/usage` tmux probe while signed out. A permission-gated one-shot "signed out" notification fires at most once.
+- Non-interactive, browser-safe delegated token refresh; cold-start tmux fallback deferred so a valid-token relaunch never opens browser auth.
+
+### UI & other changes
+- Cockpit: segmented cockpit-view popover matching the Runway drawer style; ⇧⌘M now cycles cockpit views. Auth remediation renders in the usage strips and menu bar (`AuthRemediationBanner`).
+- Transcript: unified palette and native list/transcript separator; shared layout tokens. Removed dead `ClaudeUsageStripView`.
+
+### Bug Fixes
+- Session view: restored visible click-and-drag text selection in the Rich Session transcript.
+- Filter: archived Codex sessions now appear in the Archived filter regardless of (often NULL) surface metadata — the filter keys off file path instead.
+
 ## [4.2] - 2026-07-06
 ### Highlights
 - **A brand-new transcript.** The session transcript is rebuilt as a clean, readable **Session view** — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.
