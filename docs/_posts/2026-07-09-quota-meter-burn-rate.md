@@ -3,6 +3,12 @@ layout: post
 title: "Projecting the Claude 5-hour limit: burn rate, not percent used"
 description: "A '% used' number can't say when the Claude 5-hour limit will stop you. The burn-rate math behind projecting run-out for Claude and Codex usage limits."
 date: 2026-07-09
+summary: >-
+  A usage percentage like "7% used" is a level, not a rate: it cannot tell you
+  whether you will reach the reset before the rolling window fills. This is the
+  burn-rate math behind Agent Sessions' Session Runway — how per-session token
+  logs become a quota-minutes-per-hour rate, how run-out gets projected, and why
+  the Claude side stays honest about being coarse by design.
 ---
 
 The Claude 5-hour limit is a rolling window, not a daily allowance. It starts

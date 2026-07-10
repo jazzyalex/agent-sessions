@@ -13,7 +13,11 @@ permalink: /blog/
   <li>
     <h2><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h2>
     <p class="post-meta"><time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: "%B %-d, %Y" }}</time></p>
-    <p class="post-excerpt">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 200 }}</p>
+    {% if post.summary %}
+    <p class="post-excerpt">{{ post.summary }}</p>
+    {% else %}
+    <p class="post-excerpt">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 340 }}</p>
+    {% endif %}
   </li>
   {% endfor %}
 </ul>
