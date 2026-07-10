@@ -40,12 +40,15 @@ approves; you write. **Never commit.**
 3. **Show the draft.** Press Enter to accept, or reply with edits. Keep approval light.
 
 4. **Write (prepend, newest-first).**
-   - New file → create `RepoHandover.md` with this entry, and add one line to the repo's
-     `CLAUDE.md` (create a short one if absent):
-     `> Before starting work, read the newest entry in \`RepoHandover.md\`.`
+   - New file → create `RepoHandover.md` with this entry as its only content.
    - Existing file → **prepend** the entry above the current top entry (blank line between).
-     Don't touch older entries except in step 5. **Never run `git commit`** — tell the user
-     it's written and theirs to commit.
+     Don't touch older entries except in step 5.
+   - Either way, ensure the repo's `CLAUDE.md` contains this pointer (add it once, creating a
+     short `CLAUDE.md` if absent):
+
+            > Before starting work, read the newest entry in `RepoHandover.md`.
+
+   - **Never run `git commit`** — tell the user it's written and theirs to commit.
 
 5. **Supersede (optional).** If an older entry has the same `slug` and isn't already
    superseded, offer to set its status line to `status: superseded-by:<new-entry-date>`
@@ -54,5 +57,7 @@ approves; you write. **Never commit.**
 ## Notes
 - **Lean by default.** State + key decisions + next steps. No git verification dump, no
   "Verified/Believed" ceremony, no risk matrix. If the user wants more detail, they'll ask.
+- Sanity-check (optional, cheap): `handover-lint.sh RepoHandover.md` — installed next to this
+  skill — exits 0 when the newest entry's heading + `status:` line are well-formed.
 - Rotation: if `RepoHandover.md` passes ~1000 lines, offer (never silently) to move all but
   the newest ~10 entries to `RepoHandover-archive.md`.
