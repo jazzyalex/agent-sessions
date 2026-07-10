@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.2</title>
-            <pubDate>Mon, 06 Jul 2026 15:29:47 -0700</pubDate>
+            <title>4.3</title>
+            <pubDate>Thu, 09 Jul 2026 17:26:47 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,27 +27,29 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.2</h2>
+<h2>What&#x27;s New in 4.3</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>A brand-new transcript.</strong> The session transcript is rebuilt as a clean, readable <strong>Session view</strong> — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.</li>
-<li><strong>Filter and navigate a session.</strong> Focus the transcript on just <strong>You</strong>, <strong>Agent</strong>, <strong>Tools</strong>, or <strong>Errors</strong>, and use the ▲▼ controls beside each to jump to the next or previous occurrence. Right-click any message for <strong>Copy</strong>, <strong>Copy Block</strong>, or <strong>Speak</strong>.</li>
+<li><strong>Usage tracking that never cries wolf.</strong> When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet &quot;signed out&quot; state instead of a scary error), and shows clear in-app <strong>sign-in remediation</strong> right in the usage strips and menu bar so you know exactly how to get your quota readings back.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li>Quota Meter now <strong>smiles</strong> when your current pace is on track to fit within the 5-hour window.</li>
+<li>Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views.</li>
+<li>Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look.</li>
+<li>Usage probing is gentler on your machine — auth-status re-checks are throttled on the healthy path, and stale background probes are cleaned up instead of piling up.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>Search: fixed a rare crash while the full-text search index was building in the background.</li>
+<li>Session view: restored click-and-drag text selection in the transcript.</li>
+<li>Filter: archived Codex sessions now show in the Archived filter regardless of surface metadata.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.2</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3</a></p>
 </div>
             ]]></description>
-            <sparkle:version>55</sparkle:version>
-            <sparkle:shortVersionString>4.2</sparkle:shortVersionString>
+            <sparkle:version>56</sparkle:version>
+            <sparkle:shortVersionString>4.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.2/AgentSessions-4.2.dmg" length="20898483" type="application/octet-stream" sparkle:edSignature="VQxWzQvy74StMeiN1fi127Yiv9MEwmR3IOryzu+9tlTg3RE4GS1Yl9GLnZ4pfab7caxluKipJSPTCoCmPcqfAg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg" length="21152808" type="application/octet-stream" sparkle:edSignature="TaF7JMH5ciLLnteZOumPvY/aCxx7B/g+m4BFpbUFi3neX1rDJhdmZ7uNJFlSp5JRAdPz141X8AFSNR3E1WHNCw=="/>
         </item>
     </channel>
 </rss>
