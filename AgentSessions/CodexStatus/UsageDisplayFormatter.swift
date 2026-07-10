@@ -87,6 +87,12 @@ struct UsageLimitProjectionTracker {
     /// 5h window. `nil` when running out early or when no burn is measured.
     private(set) var lastOnTrackObservedAt: Date?
 
+    /// How long a retained projection survives with no fresh burn before it is
+    /// cleared entirely (not merely gate-hidden). Matches the 3-minute freshness
+    /// window in `formatUsageProjectionLabel`, so the published estimate goes nil
+    /// in lockstep with the label rather than lingering armed until run-out.
+    private static let retentionWindow: TimeInterval = 3 * 60
+
     mutating func update(with sample: UsageLimitProjectionSample,
                          now: Date = Date()) -> UsageLimitProjectionEstimate? {
         guard sample.hasRateLimit,
@@ -184,6 +190,15 @@ struct UsageLimitProjectionTracker {
     private mutating func retainedProjection(for current: ResolvedSample, now: Date, fallback: String) -> UsageLimitProjectionEstimate? {
         guard let projection = lastProjection else {
             lastDiagnostics = fallback
+            return nil
+        }
+        // No fresh burn within the display window: clear the projection outright
+        // so the published estimate goes nil in lockstep with the hidden label,
+        // rather than staying armed (and re-appearing) until run-out.
+        guard now.timeIntervalSince(projection.observedAt) <= Self.retentionWindow else {
+            lastProjection = nil
+            lastOnTrackObservedAt = nil
+            lastDiagnostics = "Projection stale"
             return nil
         }
         guard abs(projection.resetDate.timeIntervalSince(current.resetDate)) < 120 else {

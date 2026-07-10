@@ -1328,10 +1328,18 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(tracker.lastDiagnostics, "Active ▸2h")
     }
 
-    func testUsageLimitProjectionTrackerStopsFormattingRetainedProjectionWhenBurnIsStale() {
+    // Idle-expiry: once the last measured burn is older than the 3-minute display
+    // window, the tracker clears the retained projection and publishes nil — in
+    // lockstep with the label gate — rather than holding a "zombie" projection
+    // that lingers (armed until runout) behind a merely-hidden label. Mirrors the
+    // Codex OAuth idle case where fresh polls keep arriving with no usage drop.
+    func testUsageLimitProjectionTrackerClearsRetainedProjectionWhenBurnIsStale() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
         let secondTime = firstTime.addingTimeInterval(6 * 60)
+        // A fresh idle refresh still inside the window keeps the projection.
+        let freshRefresh = secondTime.addingTimeInterval(2 * 60)
+        // The next idle refresh crosses the 3-minute burn window.
         let staleTime = secondTime.addingTimeInterval(3 * 60 + 1)
         let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
         let resetText = formatResetISO8601(reset)
@@ -1354,7 +1362,19 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: secondTime
         ), now: secondTime)
 
-        let retained = tracker.update(with: UsageLimitProjectionSample(
+        let retainedInWindow = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: freshRefresh
+        ), now: freshRefresh)
+
+        // Still fresh: original burn observation retained (observedAt unchanged).
+        XCTAssertEqual(retainedInWindow?.observedAt, secondTime)
+
+        let expired = tracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: 88,
             resetText: resetText,
@@ -1363,8 +1383,66 @@ final class CodexUsageParserTests: XCTestCase {
             observedAt: staleTime
         ), now: staleTime)
 
-        XCTAssertEqual(retained?.observedAt, secondTime)
-        XCTAssertNil(formatUsageProjectionLabel(runoutAt: retained?.runoutAt, observedAt: retained?.observedAt, now: staleTime))
+        // Past the window: estimate cleared entirely (nil), not merely gate-hidden.
+        XCTAssertNil(expired)
+        XCTAssertEqual(tracker.lastDiagnostics, "Projection stale")
+    }
+
+    // Idle-expiry must not wedge the tracker: after a stale idle refresh clears
+    // the projection, a genuine resume burn re-projects with a fresh observation.
+    // (This is the intended slow-burn-across-a-gap behavior — the tracker keeps
+    // the pre-gap baseline, so a real usage drop later still projects honestly.)
+    func testUsageLimitProjectionTrackerReprojectsAfterStaleClearOnResumeBurn() {
+        var tracker = UsageLimitProjectionTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let burnTime = firstTime.addingTimeInterval(6 * 60)         // baseline burn 100 -> 88
+        let staleRefresh = burnTime.addingTimeInterval(3 * 60 + 1)  // idle, past the window
+        let resumeDrop = burnTime.addingTimeInterval(30 * 60)       // usage resumes: 88 -> 70
+        let reset = firstTime.addingTimeInterval(4.5 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 100,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: firstTime
+        ), now: firstTime)
+
+        _ = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: burnTime
+        ), now: burnTime)
+
+        // Idle refresh past the 3-minute window: the zombie projection is cleared.
+        let cleared = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 88,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: staleRefresh
+        ), now: staleRefresh)
+        XCTAssertNil(cleared)
+        XCTAssertEqual(tracker.lastDiagnostics, "Projection stale")
+
+        // Usage genuinely resumes: a fresh drop re-projects with a fresh
+        // observation (label shown again), off the retained baseline.
+        let resumed = tracker.update(with: UsageLimitProjectionSample(
+            source: .codex,
+            remainingPercent: 70,
+            resetText: resetText,
+            hasRateLimit: true,
+            freshness: .fresh,
+            observedAt: resumeDrop
+        ), now: resumeDrop)
+        XCTAssertEqual(resumed?.observedAt, resumeDrop)
+        XCTAssertNotNil(formatUsageProjectionLabel(runoutAt: resumed?.runoutAt, observedAt: resumed?.observedAt, now: resumeDrop))
     }
 
     func testUsageLimitProjectionTrackerReportsResetFirstForRetainedProjection() {
