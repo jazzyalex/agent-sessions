@@ -1,0 +1,19 @@
+---
+layout: blog
+title: The Rollout
+description: Notes from building Agent Sessions — usage math, local agent-session formats, and what shipped.
+permalink: /blog/
+---
+<p class="eyebrow">Agent Sessions</p>
+<h1>The Rollout</h1>
+<p class="lede">Notes from building Agent Sessions: usage math, local agent-session formats, and what shipped.</p>
+
+<ul class="post-list">
+  {% for post in site.posts %}
+  <li>
+    <h2><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h2>
+    <p class="post-meta"><time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: "%B %-d, %Y" }}</time></p>
+    <p class="post-excerpt">{{ post.excerpt | strip_html | normalize_whitespace | truncate: 200 }}</p>
+  </li>
+  {% endfor %}
+</ul>

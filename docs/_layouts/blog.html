@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% seo %}
+  <link rel="alternate" type="application/rss+xml" title="The Rollout — Agent Sessions" href="{{ '/feed.xml' | relative_url }}">
+  <link rel="icon" href="{{ '/assets/app-icon-32.png' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/guides/guide.css' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/blog/blog.css' | relative_url }}">
+  <script defer src="{{ '/guides/guide.js' | relative_url }}"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <a href="{{ '/' | relative_url }}"
+        style="display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;">
+        <img src="{{ '/assets/app-icon-512.png' | relative_url }}" alt="Agent Sessions app icon" width="40" height="40"
+          style="border-radius:6px;">
+        <h1 style="margin:0;font-size:20px;">Agent Sessions</h1>
+      </a>
+    </div>
+    <div class="header-right">
+      <a href="{{ '/blog/' | relative_url }}">The Rollout</a>
+      <span>• macOS • Open Source • <span id="github-stars-container" style="display:none;">⭐ <span
+            id="github-stars">–</span></span></span>
+    </div>
+  </header>
+  <main class="guide-shell">
+    {{ content }}
+  </main>
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
+</body>
+</html>

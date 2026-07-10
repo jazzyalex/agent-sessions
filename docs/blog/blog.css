@@ -1,0 +1,68 @@
+/* The Rollout — blog-only styles, layered over guides/guide.css. */
+
+.post-list {
+  list-style: none;
+  padding-left: 0;
+  max-width: 860px;
+}
+
+.post-list li {
+  padding: 18px 0;
+  border-bottom: 1px solid #d0d7de;
+}
+
+.post-list h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.post-list h2 a {
+  text-decoration: none;
+}
+
+.post-meta {
+  color: #57606a;
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+.post-excerpt {
+  margin: 6px 0 0;
+  color: #3d444d;
+}
+
+article.post {
+  max-width: 860px;
+}
+
+article.post img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+}
+
+.post-back {
+  margin-top: 40px;
+}
+
+.post-figure {
+  margin: 28px 0;
+}
+
+.post-figure svg,
+.post-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.post-figure figcaption {
+  color: #57606a;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-top: 10px;
+  max-width: 720px;
+}

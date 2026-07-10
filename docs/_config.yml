@@ -1,0 +1,106 @@
+# Site config for jazzyalex.github.io/agent-sessions (GitHub Pages, legacy Jekyll build).
+# Existing HTML pages have no front matter and pass through byte-identical.
+# This config adds "The Rollout" blog (/blog/) and stops internal docs from being served.
+title: Agent Sessions
+description: >-
+  Local history, search, and usage tracking for AI coding agents on macOS —
+  Codex, Claude Code, Cursor, OpenCode, Copilot, and more.
+url: "https://jazzyalex.github.io"
+baseurl: "/agent-sessions"
+timezone: America/Los_Angeles
+encoding: utf-8
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# Posts render at /blog/<slug>/
+permalink: /blog/:title/
+
+defaults:
+  - scope:
+      type: posts
+    values:
+      layout: post
+
+# MUST KEEP SERVED (never add to exclude): index.html, appcast.xml (Sparkle
+# SUFeedURL — breaking this breaks auto-update), assets/, guides/, blog/.
+#
+# NOTE: on the Pages Jekyll (3.x) this list REPLACES the built-in defaults,
+# so the tooling entries are repeated here explicitly.
+exclude:
+  # build tooling
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - node_modules
+  # internal directories (specs, plans, ops docs, mockups)
+  - adr
+  - agent-support
+  - analytics
+  - deep-dive
+  - mockups
+  - plans
+  - release
+  - schemas
+  - snippets
+  - summaries
+  - superpowers
+  - updates
+  - vision
+  # internal root-level mockups (never linked from any live page)
+  - cockpit-mockup.html
+  - cockpit-hud-mockup.html
+  # root-level internal markdown. Enumerated deliberately: a bare "*.md" glob
+  # on Pages Jekyll 3.x ALSO matches _posts/*.md and silently drops every blog
+  # post. Excluding a named .md also suppresses its optional-front-matter .html.
+  # A new root .md leaks until added here — the deploy manifest gate (.md count
+  # must be 0) catches that before publish.
+  - "CHANGELOG.md"
+  - "CONTRIBUTING.md"
+  - "Energy-and-Performance.md"
+  - "Ghostty-support-v1.md"
+  - "PRIVACY.md"
+  - "QA_SUMMARY_v2.1.md"
+  - "Session Viewer 2 -  for v2.6.5.md"
+  - "Ventura-macOS13-compatibility.md"
+  - "agent-json-tracking.md"
+  - "backlog.md"
+  - "claude-code-session-format.md"
+  - "claude-resume.md"
+  - "claude-usage-probe-cleanup-spec.md"
+  - "claude-usage-projection-freshness.md"
+  - "cockpit-hud-implementation.md"
+  - "cockpit-ux-spec.md"
+  - "codebase-0.1-review.md"
+  - "codex-resume.md"
+  - "competitive-agentsview.md"
+  - "deployment.md"
+  - "feature_request_tool_blocks.md"
+  - "focus-architecture.md"
+  - "focus_bug_prompt.md"
+  - "git-worktree.md"
+  - "index-AS-plan.md"
+  - "multi-claude-config-dirs-plan.md"
+  - "onboarding-implementation-plan.md"
+  - "perf-fable-review-brief.md"
+  - "perf-fable-review.md"
+  - "perf-master-plan.md"
+  - "perf-quick-wins.md"
+  - "perf-session-list-beachball-handoff.md"
+  - "perf-transcript-virtualization-plan.md"
+  - "ph-relaunch-quota-meter.md"
+  - "qm-runway-single-orphan-session-spec.md"
+  - "review-workflow.md"
+  - "search-architecture.md"
+  - "security.md"
+  - "session-images-v2.md"
+  - "session-storage-format.md"
+  - "session-viewer-terminal-raw.md"
+  - "sparkle-updates.md"
+  - "transcript-color-reference.md"
+  - "transcript-ui-redesign-proposal.md"
+  - "v2.1-QA.md"
+  - "viewbridge-errors.md"
+  - "xcodeproj-add-files-with-system-tools.md"
