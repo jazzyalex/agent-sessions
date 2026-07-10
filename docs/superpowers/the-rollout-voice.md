@@ -65,14 +65,52 @@ truth for public voice — pull them and match the cadence.
 - **No "In conclusion" / restate-the-intro** closer. End on a real point.
 - **No invented stats.** Every number traces to code or a cited doc.
 - **No emoji in body copy.** Headers/social: sparingly, if at all.
+- **No fake-hook openers (the biggest tell).** Do NOT open by narrating an
+  imagined scene in second person: "You're deep in a refactor…", "It's 2am and…",
+  "Picture this…", "We've all been there." Manufactured immersion reads as AI
+  instantly. Related bans: opening on the word "You"/"Your"; "Here's the thing /
+  the part that stings / the part that matters"; the rhetorical-question hook.
+- **No staccato fragment drama.** Punchy sentence-fragment stacks for effect —
+  "Not an error. A limit." / "Reassuring. Useless." — are an AI cadence. Write
+  full sentences; let the fact carry the weight, not the theatrical rhythm.
+
+  Specimen of exactly what NOT to write (real rejected draft): *"You're deep in a
+  refactor. The agent is three files into a change, you're reading its diff, and
+  it stops. Not an error. A limit."* — fake scene + second-person + fragments.
 
 ## Structure defaults
 
 - **Title:** problem-first and concrete. Earn any colon-subtitle; don't reach for
   a buzzword pairing.
-- **Open in-scene or on the sharp problem.** Never "In this post we'll…"
+- **Openings — lead with a fact, not a feeling.** Start on a concrete technical
+  claim, a specific number, a mechanism, or a plainly-stated observation the
+  reader already knows is true. The recognition should come from *accuracy*, not
+  staged tension. Good starts: a surprising-but-true statement about how the
+  tools actually behave; a precise question of fact you then answer; a concrete
+  detail from the code. Never "In this post we'll…", never a narrated scene.
+  Second person is fine later in the body; just don't *open* by dramatizing the
+  reader's imagined experience.
 - **Captions** read like a person pointing at the screen, not alt-text.
 - **CTA:** soft, one line, honest — free, local-only, no telemetry, link. Done.
+
+## Every post ships with a visual
+
+Every post includes at least one graphical element. A wall of text is a missed
+post. In order of preference:
+
+1. **An original explanatory diagram or chart** that carries an idea the prose
+   can't — e.g. a burn-rate line projecting to run-out, a level-vs-rate contrast,
+   a format/architecture diagram. Render as **inline, self-contained SVG**
+   (no external assets), legible in both light and dark, following the dataviz
+   conventions (accessible color, labeled axes, real units). This is the best
+   option for a technical post because it's original and unfakeable.
+2. **A real product screenshot**, annotated if that helps the reader.
+3. **A small comparison table** when the point is a comparison.
+
+No stock photography, no decorative AI-generated "hero" images, no generic
+gradients. Graphics inform; they never just fill space. Mark image/chart slots
+inline (`<!-- SCREENSHOT: … -->` / `<!-- CHART: … -->`) if the asset is produced
+separately, and caption every visual like a person pointing at the screen.
 
 ## Distribution voice
 
