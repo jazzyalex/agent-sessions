@@ -3,8 +3,26 @@ import XCTest
 
 final class ClaudeUsageSnapshotStoreTests: XCTestCase {
 
+    /// Unique temp file per test so the suite never touches the real
+    /// ~/Library/Application Support/com.triada.AgentSessions/claude_usage_latest.json
+    private var tempURL: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude_usage_test_\(UUID().uuidString).json")
+    }
+
+    override func tearDown() {
+        if let url = tempURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        tempURL = nil
+        super.tearDown()
+    }
+
     func testSaveAndLoad_roundTrip() async {
-        let store = ClaudeUsageSnapshotStore()
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
         let snapshot = ClaudeLimitSnapshot(
             fetchedAt: Date(timeIntervalSince1970: 1700000000),
             source: .oauthEndpoint,
@@ -32,16 +50,14 @@ final class ClaudeUsageSnapshotStoreTests: XCTestCase {
     }
 
     func testLoad_missingFile_returnsNil() async {
-        // Create a store pointing at a non-existent path
-        let store = ClaudeUsageSnapshotStore()
-        // The actual file may or may not exist; this test just verifies load doesn't crash
+        // tempURL points at a path that was never written — load must return nil, not crash.
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
         let result = await store.load()
-        // Either nil (no file) or a valid snapshot — just no crash
-        _ = result
+        XCTAssertNil(result)
     }
 
     func testSave_overwritesPreviousSnapshot() async {
-        let store = ClaudeUsageSnapshotStore()
+        let store = ClaudeUsageSnapshotStore(fileURL: tempURL)
 
         let snap1 = ClaudeLimitSnapshot(
             fetchedAt: Date(timeIntervalSince1970: 1700000000),

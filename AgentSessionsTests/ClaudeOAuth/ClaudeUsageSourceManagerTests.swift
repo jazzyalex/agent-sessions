@@ -3,11 +3,36 @@ import XCTest
 
 final class ClaudeUsageSourceManagerTests: XCTestCase {
 
+    /// Shared temp-file store so no test manager falls back to the real
+    /// ~/Library/Application Support path via `init(store:)`'s default argument.
+    /// `start()` can persist a live fetch (save() at lines 401/876/1059), so a
+    /// default-store manager would write real user data during the suite.
+    private var tempStoreURL: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempStoreURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test_claude_usage_mgr_\(UUID().uuidString).json")
+    }
+
+    override func tearDown() {
+        if let url = tempStoreURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        tempStoreURL = nil
+        super.tearDown()
+    }
+
+    /// Build a manager backed by the per-test temp store (never the real path).
+    private func makeManager() -> ClaudeUsageSourceManager {
+        ClaudeUsageSourceManager(store: ClaudeUsageSnapshotStore(fileURL: tempStoreURL))
+    }
+
     // MARK: - Mode switching
 
     func testInit_tmuxOnlyMode_doesNotAttemptOAuth() async {
         var deliveredSnapshots: [ClaudeLimitSnapshot] = []
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
 
         await mgr.start(
             mode: .tmuxOnly,
@@ -23,7 +48,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     }
 
     func testDiagnosticsSnapshot_returnsNonEmpty() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(
             mode: .auto,
             handler: { _ in },
@@ -36,14 +61,14 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     }
 
     func testStop_canBeCalledMultipleTimes() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
         await mgr.stop()
         await mgr.stop() // Should not crash
     }
 
     func testSetVisibility_doesNotCrash() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
         await mgr.setVisibility(menuVisible: true, stripVisible: false, appIsActive: false)
         await mgr.setVisibility(menuVisible: false, stripVisible: true, appIsActive: true)
@@ -54,14 +79,14 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     // MARK: - Auto mode health description
 
     func testHealthDescription_noData_returnsPending() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         // Don't start — just check initial state directly
         let health = await mgr.currentHealthDescription()
         XCTAssertEqual(health, "pending")
     }
 
     func testCurrentSourceDescription_oauthOnlyMode() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .oauthOnly, handler: { _ in }, availabilityHandler: { _ in })
         let source = await mgr.currentSourceDescription()
         // oauthOnly without successful fetch
@@ -96,7 +121,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     // MARK: - Web API mode
 
     func testWebOnlyMode_doesNotAttemptOAuth() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .webOnly, handler: { _ in }, availabilityHandler: { _ in })
         let source = await mgr.currentSourceDescription()
         XCTAssertTrue(source.contains("Web API"), "webOnly mode should report Web API source, got: \(source)")
@@ -104,7 +129,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     }
 
     func testAutoMode_credentialGating_diagnosticsReflectWatchState() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
         // Give a brief moment for OAuth attempt to fail and enter credential-gated mode
         try? await Task.sleep(nanoseconds: 200_000_000)
@@ -212,7 +237,7 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
     }
 
     func testAutoMode_webApiFallback_stateTrackedInDiagnostics() async {
-        let mgr = ClaudeUsageSourceManager()
+        let mgr = makeManager()
         await mgr.start(mode: .auto, handler: { _ in }, availabilityHandler: { _ in })
         let diag = await mgr.diagnosticsSnapshot()
         XCTAssertTrue(diag.contains("usingWebFallback"))
