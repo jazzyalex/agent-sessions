@@ -121,6 +121,7 @@
     .nav-links a { color: var(--ink-2); }
     .nav-links a:hover { color: var(--ink); text-decoration: none; }
     .nav-star { font-variant-numeric: tabular-nums; }
+    .gh-star-icon { color: #f5b301; }
 
     @media (max-width: 720px) { .nav-links a.hide-sm { display: none; } }
 
@@ -588,7 +589,7 @@
         });
         if (!res.ok) return;
         const repo = await res.json();
-        el.textContent = ' - ' + (repo.stargazers_count ?? 0) + ' stars';
+        el.innerHTML = ' <span class="gh-star-icon">★</span> ' + Number(repo.stargazers_count ?? 0);
       } catch (e) { /* offline: leave blank */ }
     })();
   </script>
