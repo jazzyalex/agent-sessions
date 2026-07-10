@@ -15,21 +15,21 @@ assert_exit() {
   if [ "$got" = "$want" ]; then pass "$label"; else fail "$label (want exit $want, got $got)"; fi
 }
 
-# Valid entry
-cat > "$WORK/good.md" <<'EOF'
-## 2026-07-09 14:32 · runway-auth · AS-owned OAuth (P2)
+# Lean valid entry: heading + status, NO branch line
+cat > "$WORK/lean.md" <<'EOF'
+## 2026-07-09 16:20 · runway-auth · AS-owned OAuth (P2)
 status: in-progress
-branch: main @ 9ade2753 (dirty: 2 files)
 
-**State in one line:** next is P2.
+**State:** next is P2.
 EOF
-assert_exit 0 "$WORK/good.md" "valid entry passes"
+assert_exit 0 "$WORK/lean.md" "lean entry (no branch line) passes"
 
 # superseded-by status is valid
 cat > "$WORK/superseded.md" <<'EOF'
 ## 2026-07-09 14:32 · runway-auth · title
 status: superseded-by:2026-07-10
-branch: main @ abc1234 (clean)
+
+**State:** done, replaced.
 EOF
 assert_exit 0 "$WORK/superseded.md" "superseded-by status passes"
 
@@ -37,23 +37,21 @@ assert_exit 0 "$WORK/superseded.md" "superseded-by status passes"
 cat > "$WORK/badstatus.md" <<'EOF'
 ## 2026-07-09 14:32 · slug · title
 status: wip
-branch: main @ abc1234
 EOF
 assert_exit 1 "$WORK/badstatus.md" "invalid status fails"
 
-# Missing branch line
-cat > "$WORK/nobranch.md" <<'EOF'
+# status not on the line after the heading
+cat > "$WORK/nostatus.md" <<'EOF'
 ## 2026-07-09 14:32 · slug · title
-status: done
 **State:** x
+status: done
 EOF
-assert_exit 1 "$WORK/nobranch.md" "missing branch line fails"
+assert_exit 1 "$WORK/nostatus.md" "status not directly after heading fails"
 
 # Heading without timestamp
 cat > "$WORK/badhead.md" <<'EOF'
 ## runway-auth notes
 status: done
-branch: main
 EOF
 assert_exit 1 "$WORK/badhead.md" "heading without timestamp fails"
 

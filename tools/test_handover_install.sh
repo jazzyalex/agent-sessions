@@ -10,29 +10,25 @@ PASSED=0; FAILED=0
 pass() { echo "✓ $1"; PASSED=$((PASSED+1)); }
 fail() { echo "✗ $1"; FAILED=$((FAILED+1)); }
 
-# Ensure SKILL.md exists (stub tolerated for this task)
-[ -f "$SRC/SKILL.md" ] || echo "# handover (stub)" > "$SRC/SKILL.md"
-
 bash "$INSTALL"
 
 CH="$HOME/.claude"
 [ -f "$CH/skills/handover/SKILL.md" ] && pass "SKILL.md installed" || fail "SKILL.md missing"
-[ -x "$CH/hooks/handover-offer.sh" ] && pass "hook installed + executable" || fail "hook missing/not executable"
+[ -x "$CH/skills/handover/handover-lint.sh" ] && pass "linter installed + executable" || fail "linter missing/not executable"
 
-if jq -e . "$CH/settings.json" >/dev/null 2>&1; then pass "settings.json is valid JSON"; else fail "settings.json invalid"; fi
+# Manual-only install must NOT create/modify settings.json and must NOT wire any hook.
+[ ! -f "$CH/settings.json" ] && pass "no settings.json written (manual-only)" || fail "settings.json should not be touched"
+[ ! -e "$CH/hooks/handover-offer.sh" ] && pass "no Stop hook installed (no nag)" || fail "hook should not be installed"
 
-cmd="$(jq -r '.hooks.Stop[].hooks[].command' "$CH/settings.json" 2>/dev/null | grep -c 'handover-offer.sh' || true)"
-[ "$cmd" = "1" ] && pass "exactly one Stop hook entry" || fail "expected 1 Stop entry, got $cmd"
-
-# Idempotency: run again, still exactly one
+# Idempotency: run again, still fine
 bash "$INSTALL"
-cmd="$(jq -r '.hooks.Stop[].hooks[].command' "$CH/settings.json" 2>/dev/null | grep -c 'handover-offer.sh' || true)"
-[ "$cmd" = "1" ] && pass "idempotent: still one Stop entry" || fail "duplicate after re-install, got $cmd"
+[ -f "$CH/skills/handover/SKILL.md" ] && pass "idempotent re-install ok" || fail "re-install broke"
 
-# Preserve unrelated pre-existing settings keys
-echo '{"model":"opusish","hooks":{"Stop":[]}}' > "$CH/settings.json"
+# Preserve a pre-existing settings.json untouched
+mkdir -p "$CH"; echo '{"model":"opusish"}' > "$CH/settings.json"
 bash "$INSTALL"
-[ "$(jq -r '.model' "$CH/settings.json")" = "opusish" ] && pass "preserves unrelated keys" || fail "clobbered unrelated keys"
+[ "$(jq -r '.model' "$CH/settings.json")" = "opusish" ] && [ "$(jq -r '.hooks // "none"' "$CH/settings.json")" = "none" ] \
+  && pass "pre-existing settings.json left untouched" || fail "settings.json was modified"
 
 echo "----"; echo "PASSED=$PASSED FAILED=$FAILED"
 [ "$FAILED" = 0 ]

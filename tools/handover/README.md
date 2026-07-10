@@ -1,35 +1,39 @@
-# Handover skill + Stop hook
+# Handover skill
 
-Global `/handover` skill and a `Stop` hook that offers a handover once per substantive
-session. Entries go to a per-repo `RepoHandover.md` (newest-first). Spec:
-`docs/superpowers/specs/2026-07-09-handover-skill-design.md`.
+A **manual** `/handover` skill: writes a short, dated entry to a per-repo `RepoHandover.md`
+(newest-first) so you or a future agent can resume without grepping archived sessions.
+Design spec: `docs/superpowers/specs/2026-07-09-handover-skill-design.md` (note: the
+mid-session auto-offer hook and the verbose git-heavy format described there were dropped —
+see "History" below).
+
+## Use
+Type `/handover` (or say "write a handover"). It drafts a lean entry from the session — no
+git audit — shows it for approval, then prepends it to `RepoHandover.md`. It never commits.
+
+Entries look like:
+
+    ## 2026-07-09 16:20 · runway-auth · AS-owned OAuth
+    status: in-progress
+
+    **State:** no-CLI ladder shipped; AS-owned OAuth store is next.
+
+    **Next:**
+    1. Build the token store.
 
 ## Install
     bash tools/handover/install.sh
-Installs to `~/.claude/skills/handover/`, `~/.claude/hooks/handover-offer.sh`, and merges a
-`Stop` hook into `~/.claude/settings.json`. Idempotent (safe to re-run; preserves all other
-settings keys).
-
-## Tune
-- `HANDOVER_MIN_TRANSCRIPT_LINES` (default 50) — substantiveness threshold.
-- `HANDOVER_OFFER_MODE` (`context` default | `systemMessage`) — offer channel. Switch to
-  `systemMessage` if the `additionalContext` nudge doesn't reliably make the assistant ask.
-
-## Rollback
-- Remove just the Stop entry (keeps everything else):
-      jq 'del(.hooks.Stop)' ~/.claude/settings.json > /tmp/s && mv /tmp/s ~/.claude/settings.json
-  Or restore the backup written at install time:
-      mv ~/.claude/settings.json.pre-handover.bak ~/.claude/settings.json
-- Remove the skill + hook:
-      rm -rf ~/.claude/skills/handover ~/.claude/hooks/handover-offer.sh
+Installs `SKILL.md` + `handover-lint.sh` to `~/.claude/skills/handover/`. Manual-only —
+it does **not** touch `settings.json` and installs no hook. Idempotent. Restart any open
+session to pick up the skill (skills load at session start).
 
 ## Tests
-    bash tools/test_handover_lint.sh
-    bash tools/test_handover_hook.sh
-    bash tools/test_handover_install.sh
+    bash tools/test_handover_lint.sh      # format validator
+    bash tools/test_handover_install.sh   # manual-only install
 
-## Production smoke (verified 2026-07-09)
-- Substantive session (≥50 transcript lines OR dirty tree) → emits `additionalContext` offer.
-- Trivial session → silent.
-- `stop_hook_active: true` → silent (loop guard).
-- Merge preserved all 15 pre-existing `settings.json` keys; only `hooks.Stop` added.
+## History
+- Dropped: a `Stop` hook that offered a handover every turn — it nagged. Handover is now
+  purely your call via `/handover`.
+- Dropped: the git-audit preamble and Verified/Believed/Risks/How-to-verify scaffold — too
+  verbose and token-heavy. Entries are now state + decisions + next steps.
+- Open: an optional "auto at true session close" path (`SessionEnd`) is possible but not yet
+  built — `SessionEnd` can't run the model, so it would need a headless draft. TBD.

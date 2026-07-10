@@ -1,105 +1,58 @@
 ---
 name: handover
-description: Use when wrapping up or capturing the current state of a coding session — writes a dated, structured entry to the repo's RepoHandover.md so a future agent or you can resume without grepping archived sessions. Triggers on "handover", "hand off", "write handover", "capture state", "checkpoint this session".
+description: Use when wrapping up or capturing the current state of a coding session — writes a short, dated entry to the repo's RepoHandover.md so a future agent or you can resume without grepping archived sessions. Triggers on "handover", "hand off", "write handover", "capture state", "checkpoint this session".
 ---
 
 # Handover
 
-Append one dated, structured entry to `RepoHandover.md` at the repo root (newest-first),
-capturing the session's state so it can be resumed later. Serves both a future agent
-(actionable state) and the human (skimmable narrative). You draft it; the user approves;
-you write it. **Never commit** — the user commits.
+Append a **short**, dated entry to `RepoHandover.md` at the repo root (newest-first)
+capturing where things stand, so you or a future agent can resume. Keep it lean — a handful
+of lines, **no git audit**. Draft it from what you already know in this session; the user
+approves; you write. **Never commit.**
 
 ## Procedure
 
-### 1. Gather ground truth from git (never infer facts from the conversation)
-Run and read the output:
-- `git rev-parse --abbrev-ref HEAD` — branch
-- `git rev-parse --short HEAD` — commit hash
-- `git status --porcelain` — dirty files (count + top dir for the branch line)
-- `git log --oneline -5` — commits (identify which were made this session)
-- `git diff --stat` — scope of uncommitted work
+1. **Draft from the conversation — do NOT run a git audit.** You already know what happened
+   this session. At most, run a single `git branch --show-current` if you want the branch in
+   the header. Do not run `git status`/`log`/`diff` sweeps — that's the verbosity we removed.
 
-### 2. Extract entry content, in reliability order
-- **Key files** ← files you actually touched via Edit/Write this session (NOT files merely
-  mentioned). Format each inline as `path:line — why`.
-- **Already decided / don't redo** ← user messages that rejected/corrected an approach,
-  plus approaches you tried that failed. This is the highest-value section.
-- **Verified** ← claims backed by a real tool result in this session (a git hash, test
-  output, a sample). **Believed / unverified** ← everything else. Never promote a Believed
-  claim to Verified without transcript evidence.
-- **Next steps (prioritized)** ← the final todo/plan state, numbered. Items needing the
-  human get a `DECIDE:` prefix.
-- **Risks / landmines** ← risk → mitigation/stop-condition pairs.
-- **How to verify** ← the build/test command that confirms the entry's claims (omit if N/A).
+2. **Compose a short entry** in this format. Omit any line/section that would be empty.
+   Aim for ~8–15 lines total:
 
-### 3. Reconcile git vs conversation
-If the conversation says "committed" but the tree is dirty (or vice versa), flag the
-discrepancy in the entry rather than picking one. **Git wins for facts; conversation wins
-for intent.**
+        ## <YYYY-MM-DD HH:MM> · <slug> · <title>
+        status: in-progress            # in-progress | blocked | done
 
-### 4. Draft within budget
-Compose the entry using the exact format below. Hard budget: **~50 lines / ~600 words**.
-Trim before showing. Omit any section that would be empty. The scope-slug is derived from
-the branch name or the active plan/spec doc name — do not freestyle it (supersede-matching
-depends on stable slugs).
+        **State:** <one sentence — where things stand right now>
 
-Format (key block is exactly three lines: heading, `status:`, `branch:`):
+        **Decided / don't redo:**      <only if there is something>
+        - <a decision made, or a dead-end already tried>
 
-    ## <YYYY-MM-DD> <HH:MM> · <scope-slug> · <title>
-    status: <in-progress | blocked | done>
-    branch: <branch> @ <short-hash> (dirty: <n> files[ in <dir>])
+        **Key files:**                 <only if it helps resume>
+        - `path` — <why it matters>
 
-    **State in one line:** <one sentence>
+        **Next:**
+        1. <the next concrete step>
+        2. <...>
 
-    ### Already decided / don't redo
-    - …
+   - `slug` = the branch or plan/spec name (keep it stable — supersede-matching uses it).
+   - Timestamp: `date +'%Y-%m-%d %H:%M'`.
 
-    ### Key files
-    - `path:line` — …
+3. **Show the draft.** Press Enter to accept, or reply with edits. Keep approval light.
 
-    ### Verified
-    - … (commit <hash> / test output)
-    ### Believed / unverified
-    - …
+4. **Write (prepend, newest-first).**
+   - New file → create `RepoHandover.md` with this entry, and add one line to the repo's
+     `CLAUDE.md` (create a short one if absent):
+     `> Before starting work, read the newest entry in \`RepoHandover.md\`.`
+   - Existing file → **prepend** the entry above the current top entry (blank line between).
+     Don't touch older entries except in step 5. **Never run `git commit`** — tell the user
+     it's written and theirs to commit.
 
-    ### Next steps (prioritized)
-    1. …
-    2. DECIDE: …
-
-    ### Risks / landmines
-    - <risk> — mitigation: <…>
-
-    ### How to verify
-    - <command>
-
-Use the current date/time for the heading (ask the shell: `date +'%Y-%m-%d %H:%M'`).
-
-### 5. Show the draft; default-accept on Enter
-Present the drafted entry. Tell the user: press Enter to accept as-is, or reply with edits.
-Apply any edits inline. Keep approval lightweight — heavyweight approval kills the habit.
-
-### 6. Write (prepend, newest-first)
-- If `RepoHandover.md` does not exist, create it with the new entry as the only content,
-  AND append one line to the repo's `CLAUDE.md` (create a short one if absent):
-  `> Before starting work, read the newest entry in \`RepoHandover.md\`.`
-- If it exists, **prepend** the new entry above the current topmost entry (a blank line
-  between entries). Do not touch older entries except in step 7.
-- **Never run `git commit`.** Tell the user the file is written and theirs to commit.
-
-### 7. Supersede check
-Scan existing entries for one whose scope-slug matches the new entry's slug and whose
-status is not already `superseded-by:`. If found, offer to change that older entry's
-`status:` line to `status: superseded-by:<new-entry-date>` (a one-line edit; leave its
-prose untouched). Only on user confirmation.
-
-### 8. Self-check the format
-Run the installed validator against the file and report the result:
-`~/.claude/skills/handover/handover-lint.sh RepoHandover.md` (or the repo copy
-`tools/handover/handover-lint.sh` when developing). It must exit 0. If it fails, fix the
-key block and re-run.
+5. **Supersede (optional).** If an older entry has the same `slug` and isn't already
+   superseded, offer to set its status line to `status: superseded-by:<new-entry-date>`
+   (a one-line edit; leave its prose alone). Only on the user's confirmation.
 
 ## Notes
-- Rotation: if `RepoHandover.md` exceeds ~1000 lines, offer (never silently) to move all
-  but the newest ~10 entries to `RepoHandover-archive.md`.
-- The Stop hook may *offer* a handover at session close; this skill is what actually runs.
+- **Lean by default.** State + key decisions + next steps. No git verification dump, no
+  "Verified/Believed" ceremony, no risk matrix. If the user wants more detail, they'll ask.
+- Rotation: if `RepoHandover.md` passes ~1000 lines, offer (never silently) to move all but
+  the newest ~10 entries to `RepoHandover-archive.md`.
