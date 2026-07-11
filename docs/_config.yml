@@ -10,6 +10,12 @@ baseurl: "/agent-sessions"
 timezone: America/Los_Angeles
 encoding: utf-8
 
+# Social cards (jekyll-seo-tag). Posts set their own `image:`; this is the
+# default handle + card type so links render a large-image card on X/LinkedIn.
+twitter:
+  username: jazzyalex
+  card: summary_large_image
+
 plugins:
   - jekyll-feed
   - jekyll-seo-tag
@@ -23,6 +29,7 @@ defaults:
       type: posts
     values:
       layout: post
+      image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
 
 # MUST KEEP SERVED (never add to exclude): index.html, appcast.xml (Sparkle
 # SUFeedURL — breaking this breaks auto-update), assets/, guides/, blog/.
