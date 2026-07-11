@@ -1,6 +1,6 @@
 # Spec — Runway "single orphan session" promotion (no more "+1 session")
 
-**Status:** Draft / awaiting approval — no code written yet
+**Status:** Implemented 2026-07-09 (`RunwayOverflowRule.split` + `withPendingRows` rewrite, incl. Appendix A merge)
 **Date:** 2026-07-03
 **Area:** Quota Meter (QM) → session Runway drawer
 

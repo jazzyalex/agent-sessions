@@ -315,8 +315,24 @@ enum RunwaySnapshotAssembly {
         let pendingIdentities = activeIdentities.filter { !representedIDs.contains($0.id) }
         guard !pendingIdentities.isEmpty else { return existing }
 
-        let openSlots = max(0, maxRows - existing.rows.count)
-        let pendingRows = pendingIdentities.prefix(openSlots).map { identity in
+        if let burnSummary = existing.burstSummary {
+            // Rows are already full to maxRows, so every pending identity stays
+            // hidden. Merge the counts so "+X" reflects hidden burns AND hidden
+            // idle actives; the burn summary keeps the aggregate rate/deadline
+            // (pending sessions contribute rate 0).
+            return CodexRunwaySnapshot(
+                baseline: existing.baseline,
+                rows: existing.rows,
+                burstSummary: RunwayShortBurstSummary(
+                    count: burnSummary.count + pendingIdentities.count,
+                    deadline: burnSummary.deadline,
+                    gainedSeconds: burnSummary.gainedSeconds,
+                    quotaMinutesPerHour: burnSummary.quotaMinutesPerHour
+                )
+            )
+        }
+
+        let candidates = existing.rows + pendingIdentities.map { identity in
             RunwayPauseImpactRow(
                 id: identity.id,
                 displayName: identity.displayName,
@@ -328,20 +344,20 @@ enum RunwaySnapshotAssembly {
                 confidence: identity.isIdle ? .idle : .waiting
             )
         }
-        let hiddenPendingCount = max(0, pendingIdentities.count - pendingRows.count)
-        let pendingSummary: RunwayShortBurstSummary? = hiddenPendingCount > 0
-            ? RunwayShortBurstSummary(
-                count: hiddenPendingCount,
-                deadline: .unavailable,
+        let (visible, overflow) = RunwayOverflowRule.split(candidates, maxRows: maxRows)
+        let burstSummary: RunwayShortBurstSummary? = overflow.isEmpty
+            ? nil
+            : RunwayShortBurstSummary(
+                count: overflow.count,
+                deadline: overflow.first?.deadline ?? .unavailable,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: 0
+                quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.quotaMinutesPerHour }
             )
-            : nil
 
         return CodexRunwaySnapshot(
             baseline: existing.baseline,
-            rows: existing.rows + pendingRows,
-            burstSummary: existing.burstSummary ?? pendingSummary
+            rows: Array(visible),
+            burstSummary: burstSummary
         )
     }
 
@@ -369,6 +385,21 @@ enum RunwaySnapshotAssembly {
                 order: min(lhs.order, rhs.order)
             )
         }
+    }
+}
+
+enum RunwayOverflowRule {
+    /// Splits an already-ranked list into visible rows plus overflow.
+    /// Orphan rule: a lone overflow item is promoted to a visible row — a
+    /// summary row costs the same height as a real row, so "+1 sessions"
+    /// would hide the session's name and rate for free. A summary is only
+    /// worth emitting when it collapses two or more sessions.
+    static func split<T>(_ ranked: [T], maxRows: Int) -> (visible: ArraySlice<T>, overflow: ArraySlice<T>) {
+        guard maxRows > 0 else { return (ranked.prefix(0), ranked[...]) }
+        if ranked.count - maxRows <= 1 {
+            return (ranked[...], ranked.suffix(0))
+        }
+        return (ranked.prefix(maxRows), ranked.dropFirst(maxRows))
     }
 }
 
@@ -419,7 +450,8 @@ enum CodexRunwayCalculator {
                 }
                 return lhs.row.displayName.localizedCaseInsensitiveCompare(rhs.row.displayName) == .orderedAscending
             }
-            let rows = ranked.prefix(maxRows).map {
+            let (visible, overflow) = RunwayOverflowRule.split(ranked, maxRows: maxRows)
+            let rows = visible.map {
                 RunwayPauseImpactRow(
                     id: $0.row.id,
                     displayName: $0.row.displayName,
@@ -430,15 +462,14 @@ enum CodexRunwayCalculator {
                     confidence: $0.row.confidence
                 )
             }
-            let hiddenCount = ranked.dropFirst(maxRows).count
-            let burstSummary = hiddenCount > 0
-                ? RunwayShortBurstSummary(
-                    count: hiddenCount,
+            let burstSummary = overflow.isEmpty
+                ? nil
+                : RunwayShortBurstSummary(
+                    count: overflow.count,
                     deadline: .afterReset,
                     gainedSeconds: 0,
-                    quotaMinutesPerHour: ranked.dropFirst(maxRows).reduce(0) { $0 + $1.row.quotaMinutesPerHour }
+                    quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.row.quotaMinutesPerHour }
                 )
-                : nil
             return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
         }
 
@@ -456,10 +487,10 @@ enum CodexRunwayCalculator {
                 return lhs.row.displayName.localizedCaseInsensitiveCompare(rhs.row.displayName) == .orderedAscending
             }
 
-        let rows = pressureImpacts.prefix(maxRows).map(\.row)
-        let remainingImpacts = pressureImpacts.dropFirst(maxRows)
+        let (visible, overflow) = RunwayOverflowRule.split(pressureImpacts, maxRows: maxRows)
+        let rows = visible.map(\.row)
         let burstSummary = summary(
-            for: Array(remainingImpacts),
+            for: Array(overflow),
             baseline: baseline,
             providerRate: providerRate
         )

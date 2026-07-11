@@ -2709,7 +2709,7 @@ final class CodexUsageParserTests: XCTestCase {
             currentRunoutAt: now.addingTimeInterval(90 * 60),
             observedAt: now
         )
-        let burns = (1...5).map { index in
+        let burns = (1...6).map { index in
             RunwaySessionBurn(
                 identity: RunwaySessionIdentity(
                     id: "session-\(index)",
@@ -2726,12 +2726,177 @@ final class CodexUsageParserTests: XCTestCase {
 
         let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: burns, maxRows: 4)
 
-        XCTAssertEqual(snapshot?.rows.map(\.id), ["session-5", "session-4", "session-3", "session-2"])
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["session-6", "session-5", "session-4", "session-3"])
         XCTAssertEqual(snapshot?.rows.map(\.deadline), [.noChange, .noChange, .noChange, .noChange])
-        XCTAssertEqual(snapshot?.burstSummary?.count, 1)
+        XCTAssertEqual(snapshot?.burstSummary?.count, 2)
         XCTAssertEqual(snapshot?.burstSummary?.deadline, .noChange)
         XCTAssertEqual(snapshot?.burstSummary?.gainedSeconds ?? -1, 0, accuracy: 0.001)
         XCTAssertGreaterThan(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 0)
+    }
+
+    func testCodexRunwayCalculatorPromotesSingleOverflowSessionToRow() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 10,
+            resetAt: now.addingTimeInterval(60 * 60),
+            currentRunoutAt: now.addingTimeInterval(30 * 60),
+            observedAt: now
+        )
+        let burns = ["one", "two"].map { id in
+            RunwaySessionBurn(
+                identity: RunwaySessionIdentity(id: id, displayName: id, isGoal: false, logPaths: ["/tmp/\(id).jsonl"]),
+                percentPerSecond: 0.001,
+                confidence: .direct,
+                sampleStart: now.addingTimeInterval(-120),
+                sampleEnd: now
+            )
+        }
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: burns, maxRows: 1)
+
+        XCTAssertEqual(snapshot?.rows.count, 2)
+        XCTAssertEqual(Set(snapshot?.rows.map(\.displayName) ?? []), ["one", "two"])
+        XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testCodexRunwayCalculatorAfterResetPromotesSingleOverflow() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 80,
+            resetAt: now.addingTimeInterval(60 * 60),
+            currentRunoutAt: now.addingTimeInterval(4 * 60 * 60),
+            observedAt: now
+        )
+        let burns = ["one", "two", "three"].map { id in
+            RunwaySessionBurn(
+                identity: RunwaySessionIdentity(id: id, displayName: id, isGoal: false, logPaths: ["/tmp/\(id).jsonl"]),
+                percentPerSecond: 1.0 / 3600.0,
+                confidence: .mixed,
+                sampleStart: now.addingTimeInterval(-120),
+                sampleEnd: now
+            )
+        }
+
+        let snapshot = CodexRunwayCalculator.snapshot(baseline: baseline, burns: burns, maxRows: 2)
+
+        XCTAssertEqual(snapshot?.rows.count, 3)
+        XCTAssertEqual(snapshot?.rows.map(\.deadline), [.afterReset, .afterReset, .afterReset])
+        XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testRunwayPendingRowsPromoteSingleOverflowIdentity() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let existingRows = ["one", "two"].map { id in
+            RunwayPauseImpactRow(
+                id: id,
+                displayName: id,
+                isGoal: false,
+                deadline: .noChange,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: 5,
+                confidence: .direct
+            )
+        }
+        let existing = CodexRunwaySnapshot(baseline: baseline, rows: existingRows, burstSummary: nil)
+        let pending = RunwaySessionIdentity(id: "extra", displayName: "extra", isGoal: false, logPaths: ["/tmp/extra.jsonl"])
+
+        let snapshot = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline,
+            snapshot: existing,
+            activeIdentities: [pending],
+            maxRows: 2
+        )
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two", "extra"])
+        XCTAssertNil(snapshot?.burstSummary)
+    }
+
+    func testRunwayPendingRowsKeepSummaryForTwoOverflowIdentities() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let existingRows = ["one", "two"].map { id in
+            RunwayPauseImpactRow(
+                id: id,
+                displayName: id,
+                isGoal: false,
+                deadline: .noChange,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: 5,
+                confidence: .direct
+            )
+        }
+        let existing = CodexRunwaySnapshot(baseline: baseline, rows: existingRows, burstSummary: nil)
+        let pendings = ["extra-1", "extra-2"].map {
+            RunwaySessionIdentity(id: $0, displayName: $0, isGoal: false, logPaths: ["/tmp/\($0).jsonl"])
+        }
+
+        let snapshot = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline,
+            snapshot: existing,
+            activeIdentities: pendings,
+            maxRows: 2
+        )
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two"])
+        XCTAssertEqual(snapshot?.burstSummary?.count, 2)
+    }
+
+    func testRunwayPendingOverflowMergesWithBurnSummaryCount() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let baseline = RunwayProviderBaseline(
+            source: .codex,
+            remainingPercent: 30,
+            resetAt: now.addingTimeInterval(3 * 60 * 60),
+            currentRunoutAt: now.addingTimeInterval(90 * 60),
+            observedAt: now
+        )
+        let existingRows = ["one", "two"].map { id in
+            RunwayPauseImpactRow(
+                id: id,
+                displayName: id,
+                isGoal: false,
+                deadline: .noChange,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: 5,
+                confidence: .direct
+            )
+        }
+        let burnSummary = RunwayShortBurstSummary(
+            count: 2,
+            deadline: .noChange,
+            gainedSeconds: 0,
+            quotaMinutesPerHour: 7
+        )
+        let existing = CodexRunwaySnapshot(baseline: baseline, rows: existingRows, burstSummary: burnSummary)
+        let pendings = ["extra-1", "extra-2", "extra-3"].map {
+            RunwaySessionIdentity(id: $0, displayName: $0, isGoal: false, logPaths: ["/tmp/\($0).jsonl"])
+        }
+
+        let snapshot = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline,
+            snapshot: existing,
+            activeIdentities: pendings,
+            maxRows: 2
+        )
+
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two"])
+        XCTAssertEqual(snapshot?.burstSummary?.count, 5)
+        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 7, accuracy: 0.001)
     }
 
     func testCodexRunwayLoaderUniqueIdentitiesMergePartialHudRowIntoCorrectedParent() {
@@ -3275,7 +3440,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(3 * 60 * 60)
-        let identities = (1...5).map { index in
+        let identities = (1...6).map { index in
             RunwaySessionIdentity(
                 id: "session-\(index)",
                 displayName: "session \(index)",
@@ -3303,7 +3468,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.rows.map(\.id), ["session-1", "session-2", "session-3", "session-4"])
         XCTAssertEqual(snapshot?.rows.map(\.confidence), [.waiting, .waiting, .waiting, .waiting])
-        XCTAssertEqual(snapshot?.burstSummary?.count, 1)
+        XCTAssertEqual(snapshot?.burstSummary?.count, 2)
         XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? -1, 0, accuracy: 0.001)
     }
 
