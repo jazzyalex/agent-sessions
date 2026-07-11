@@ -46,6 +46,10 @@ struct FirstRunSetupView: View {
     @State private var indexedSessionsSnapshot: [SessionSource: [Session]] = [:]
     @State private var cachedSessionCounts: [SessionSource: (total: Int, visible: Int)] = [:]
     @State private var didLoadIndexedSessionsSnapshot: Bool = false
+    /// The count-up animation runs once; later updates snap so the number never re-spins.
+    @State private var didAnimateCount: Bool = false
+    /// Cheap raw per-source counts; skip the expensive visible-filter when unchanged.
+    @State private var lastRawCounts: [SessionSource: Int] = [:]
     @StateObject private var availabilityModel = FirstRunAgentAvailabilityModel()
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
@@ -62,13 +66,11 @@ struct FirstRunSetupView: View {
 
             OnboardingGlassCard(palette: palette) {
                 VStack(spacing: 0) {
-                    ScrollView {
-                        content
-                            .frame(maxWidth: 560)
-                            .padding(.horizontal, 30)
-                            .padding(.top, 28)
-                            .padding(.bottom, 18)
-                    }
+                    content
+                        .frame(maxWidth: 560, maxHeight: .infinity)
+                        .padding(.horizontal, 30)
+                        .padding(.top, 24)
+                        .padding(.bottom, 14)
 
                     Rectangle()
                         .fill(palette.divider)
@@ -79,10 +81,10 @@ struct FirstRunSetupView: View {
                         .padding(.vertical, 16)
                 }
             }
-            .frame(minWidth: 620, minHeight: 560)
+            .frame(minWidth: 620, minHeight: 640)
             .padding(20)
         }
-        .frame(minWidth: 680, minHeight: 620)
+        .frame(minWidth: 680, minHeight: 720)
         .task { await availabilityModel.refreshIfNeeded() }
         .onAppear {
             loadIndexedSessionsSnapshotIfNeeded()
@@ -101,7 +103,7 @@ struct FirstRunSetupView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 14) {
             SlideHeader(
                 palette: palette,
                 icon: .appIcon,
@@ -110,7 +112,10 @@ struct FirstRunSetupView: View {
                 subtitle: "Your CLI agent history is ready to explore"
             )
 
+            // Block A flexes and scrolls internally; Block B stays pinned so the
+            // Quota Meter is always on screen no matter how many agents there are.
             sessionsBlock
+                .frame(maxHeight: .infinity)
             quotaMeterBlock
 
             Text("Tips live in Help → Power Tips.")
@@ -122,40 +127,43 @@ struct FirstRunSetupView: View {
     // MARK: - Block A: Your sessions
 
     private var sessionsBlock: some View {
-        setupBlock(title: "Your sessions") {
-            VStack(spacing: 14) {
-                HStack(spacing: 16) {
-                    CountingNumberText(value: animatedPrimarySessions, font: .system(size: 52, weight: .regular, design: .default))
+        setupBlock(title: "Your sessions", fill: true) {
+            VStack(spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    CountingNumberText(value: animatedPrimarySessions, font: .system(size: 40, weight: .regular, design: .default))
                         .foregroundStyle(palette.accentBlue)
                     Text("sessions found")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.primary)
-                }
-                .frame(maxWidth: .infinity)
-
-                if hiddenSessionsCount > 0 {
-                    Text("\(formattedCount(hiddenSessionsCount)) hidden by current filters. Adjust in Settings.")
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                    ForEach(agentsForToggles, id: \.rawValue) { source in
-                        let counts = cachedSessionCounts[source] ?? (total: 0, visible: 0)
-                        AgentToggleTile(
-                            source: source,
-                            displayName: source.displayName,
-                            count: counts.visible,
-                            isEnabled: isAgentEnabled(source),
-                            palette: palette,
-                            isOn: agentBinding(for: source),
-                            isDisabled: isToggleDisabled(for: source)
-                        )
+                    if hiddenSessionsCount > 0 {
+                        Spacer(minLength: 8)
+                        Text("\(formattedCount(hiddenSessionsCount)) hidden")
+                            .font(.system(size: 11, weight: .regular, design: .default))
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                        ForEach(agentsForToggles, id: \.rawValue) { source in
+                            let counts = cachedSessionCounts[source] ?? (total: 0, visible: 0)
+                            AgentToggleTile(
+                                source: source,
+                                displayName: source.displayName,
+                                count: counts.visible,
+                                isEnabled: isAgentEnabled(source),
+                                palette: palette,
+                                isOn: agentBinding(for: source),
+                                isDisabled: isToggleDisabled(for: source)
+                            )
+                        }
+                    }
+                    .padding(.trailing, 2)
+                }
+                .frame(maxHeight: .infinity)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -184,17 +192,22 @@ struct FirstRunSetupView: View {
     @ViewBuilder
     private var quotaMeterDemo: some View {
         if AnimatedGIFView.hasAsset(named: Self.quotaMeterGIFAsset) {
+            // Fixed exact-aspect frame: the GIF fills it precisely, so it never
+            // crops (a maxWidth + aspectRatio combo let the NSImageView overflow).
             AnimatedGIFView(assetName: Self.quotaMeterGIFAsset, animates: !reduceMotion)
-                .frame(maxWidth: Self.quotaMeterGIFWidth)
-                .aspectRatio(Self.quotaMeterGIFAspect, contentMode: .fit)
+                .frame(width: Self.quotaMeterGIFWidth, height: Self.quotaMeterGIFWidth / Self.quotaMeterGIFAspect)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(palette.rowStroke, lineWidth: 1)
+                )
                 .frame(maxWidth: .infinity)
         }
     }
 
     /// One rounded, uppercase-titled block on the gray card background, matching
     /// the "Your sessions" / "Quota Meter" pairing.
-    private func setupBlock<Inner: View>(title: String, @ViewBuilder content: () -> Inner) -> some View {
+    private func setupBlock<Inner: View>(title: String, fill: Bool = false, @ViewBuilder content: () -> Inner) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold, design: .default))
@@ -202,7 +215,7 @@ struct FirstRunSetupView: View {
                 .foregroundStyle(.secondary)
             content()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 14)
@@ -253,17 +266,34 @@ struct FirstRunSetupView: View {
     }
 
     private func handleSessionDataUpdate() {
+        // The 10 indexers each publish on appear; skip the expensive visible-filter
+        // recompute when the cheap raw per-source counts haven't actually changed.
+        let raw = rawCountsSignature()
+        guard raw != lastRawCounts else { return }
+        lastRawCounts = raw
         refreshSessionCounts()
         updateAnimatedCount(animated: !reduceMotion)
     }
 
+    private func rawCountsSignature() -> [SessionSource: Int] {
+        var signature: [SessionSource: Int] = [:]
+        for source in SessionSource.allCases {
+            let live = sessionsFromIndexer(source).count
+            signature[source] = live > 0 ? live : (indexedSessionsSnapshot[source]?.count ?? 0)
+        }
+        return signature
+    }
+
     private func updateAnimatedCount(animated: Bool) {
         let target = Double(visibleSessionsTotal)
-        if !animated {
-            animatedPrimarySessions = target
-            return
-        }
-        withAnimation(.easeOut(duration: 0.7)) {
+        // Animate the count-up exactly once (the first time real data arrives);
+        // every later update snaps, so the number never re-spins.
+        if animated, !didAnimateCount, target > 0 {
+            didAnimateCount = true
+            withAnimation(.easeOut(duration: 0.7)) {
+                animatedPrimarySessions = target
+            }
+        } else {
             animatedPrimarySessions = target
         }
     }
@@ -314,8 +344,7 @@ struct FirstRunSetupView: View {
                 }
                 await MainActor.run {
                     self.indexedSessionsSnapshot = snapshot
-                    self.refreshSessionCounts()
-                    self.updateAnimatedCount(animated: !reduceMotion)
+                    self.handleSessionDataUpdate()
                 }
             } catch {
                 // Best-effort: live indexers still supply counts.
