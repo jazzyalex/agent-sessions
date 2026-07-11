@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [4.3.1] - 2026-07-10
 ### Highlights
 - **A rebuilt first run.** The setup experience is now a single, focused screen — live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and in-app **feedback** you can send without leaving the app.
 - **One-click "Fix" for usage tracking.** When Agent Sessions can't read your Claude or Codex usage — an expired login or a signed-out CLI — every usage surface (menu bar, cockpit meter, window footer) now shows a **Fix…** button that opens a guided dialog: it explains what's wrong and walks you through the solutions in order (re-authenticate → Web API or CLI-probe fallback → recheck), so you're never stuck at a broken meter.
