@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.3</title>
-            <pubDate>Thu, 09 Jul 2026 17:26:47 -0700</pubDate>
+            <title>4.3.1</title>
+            <pubDate>Fri, 10 Jul 2026 20:13:23 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,29 +27,39 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.3</h2>
+<h2>What&#x27;s New in 4.3.1</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Usage tracking that never cries wolf.</strong> When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet &quot;signed out&quot; state instead of a scary error), and shows clear in-app <strong>sign-in remediation</strong> right in the usage strips and menu bar so you know exactly how to get your quota readings back.</li>
+<li><strong>A rebuilt first run.</strong> The setup experience is now a single, focused screen — live session count, per-agent toggles, and the Quota Meter always in view — plus a <strong>What&#x27;s New</strong> panel that surfaces changes when you update and in-app <strong>feedback</strong> you can send without leaving the app.</li>
+<li><strong>One-click &quot;Fix&quot; for usage tracking.</strong> When Agent Sessions can&#x27;t read your Claude or Codex usage — an expired login or a signed-out CLI — every usage surface (menu bar, cockpit meter, window footer) now shows a <strong>Fix…</strong> button that opens a guided dialog: it explains what&#x27;s wrong and walks you through the solutions in order (re-authenticate → Web API or CLI-probe fallback → recheck), so you&#x27;re never stuck at a broken meter.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
+<li>Cleaner window footer — the usage strip drops its grey background bar.</li>
+</ul>
+<h3>Bug Fixes</h3>
+<ul>
+<li>Expired Claude no longer shows a misleading <strong>&quot;0%&quot;</strong> — the Quota Meter, menu bar, and cockpit now show an honest &quot;reconnecting&quot; state and then a clear &quot;sign-in needed&quot; prompt instead of reading as quota-exhausted.</li>
+<li>Usage returns after <code>claude auth login</code> <strong>without relaunching</strong> — on the next refresh, or on its own within ~30 seconds.</li>
+<li>The &quot;session expired&quot; sign-in prompt now appears <strong>promptly</strong> (~90 seconds) instead of after several minutes of silent &quot;reconnecting.&quot;</li>
+<li>The Quota Meter / Runway <strong>&quot;active burn&quot;</strong> countdown no longer lingers after a session goes idle — it clears shortly after you stop.</li>
+<li>Runway <strong>&quot;+N sessions&quot;</strong> overflow now counts hidden idle sessions, and a lone hidden session is promoted to a real row instead of &quot;+1.&quot;</li>
+<li>Sessions with <strong>non-ASCII (multi-byte) transcripts</strong> are no longer hidden by a too-strict decode.</li>
+</ul>
+<h3>Reminder: What You Got in 4.3</h3>
+<ul>
+<li><strong>Usage tracking that never cries wolf.</strong> When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet &quot;signed out&quot; state instead of a scary error), and shows clear in-app <strong>sign-in remediation</strong> right in the usage strips and menu bar so you know exactly how to get your quota readings back.</li>
 <li>Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views.</li>
 <li>Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look.</li>
 <li>Usage probing is gentler on your machine — auth-status re-checks are throttled on the healthy path, and stale background probes are cleaned up instead of piling up.</li>
 </ul>
-<h3>Bug Fixes</h3>
-<ul>
-<li>Session view: restored click-and-drag text selection in the transcript.</li>
-<li>Filter: archived Codex sessions now show in the Archived filter regardless of surface metadata.</li>
-</ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.3.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>56</sparkle:version>
-            <sparkle:shortVersionString>4.3</sparkle:shortVersionString>
+            <sparkle:version>57</sparkle:version>
+            <sparkle:shortVersionString>4.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg" length="21152808" type="application/octet-stream" sparkle:edSignature="TaF7JMH5ciLLnteZOumPvY/aCxx7B/g+m4BFpbUFi3neX1rDJhdmZ7uNJFlSp5JRAdPz141X8AFSNR3E1WHNCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.1/AgentSessions-4.3.1.dmg" length="21468842" type="application/octet-stream" sparkle:edSignature="0DLWHn24e3UpDgGls/fBkS7VNFK4U7ZIAXrd3lvqsejDk4Qr4gOGOziE47m1Ved6t3UGSEvMiK0bdSciZxOICw=="/>
         </item>
     </channel>
 </rss>
