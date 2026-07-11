@@ -5,6 +5,25 @@ decision if one was made. Newest on top.
 
 ---
 
+## Usage Tracking
+
+### Verify the Claude Web API usage source actually works
+- **What:** The Web API fallback (`claudeWebApiEnabled`; "Web API only" mode) is
+  implemented — `ClaudeWebUsageClient.swift` + `ClaudeWebCookieResolver.swift`
+  (reads the Safari claude.ai session cookie) — but has **never been observed
+  serving data at runtime**. The source diagnostic has only ever shown OAuth;
+  the CLI OAuth path recovers first and masks it.
+- **How to prove:** set Claude Data source → "Web API only" (forces the path),
+  reload, confirm the source flips to a web source and serves numbers, then
+  restore Auto.
+- **Caveats:** needs Safari signed into claude.ai; Full Disk Access is per-binary
+  (the grant is on the production build, not the `.deriveddata-run` debug build) —
+  so test from the production build, or grant FDA to the test binary.
+- **Why deferred (2026-07-10):** owner skipped the live test; normal (OAuth) auth
+  is fixed and sufficient for now.
+
+---
+
 ## Transcript (Session view)
 
 ### Semantic filters (Plan / Code / Diff / Review) in the Session view
@@ -52,6 +71,9 @@ decision if one was made. Newest on top.
   standalone. Same function is rewritten there; needs its own test + a small
   rate-ownership decision. Low severity, rare trigger (≥ `maxRows` burning + ≥ 1 idle in
   one provider). Spec: [qm-runway-single-orphan-session-spec.md](qm-runway-single-orphan-session-spec.md) → Appendix A.
+- **DONE (2026-07-09):** shipped with the single-orphan promotion — `withPendingRows`
+  now merges `burnSummary.count + pendingIdentities.count` (burn summary keeps
+  rate/deadline). Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ### Runway "pause impact" projection is modeled but never displayed
 - **Where:** [CodexRunwayModel.swift](../AgentSessions/CodexStatus/CodexRunwayModel.swift) —

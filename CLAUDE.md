@@ -1,5 +1,7 @@
 # CLAUDE Agent Notes
 
+> Before starting work, read the newest entry in `RepoHandover.md`.
+
 This repository uses a shared playbook for all agents (Claude, Codex, Xcode, Cursor, etc.).
 
 Primary source of truth
