@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Highlights
+- **A rebuilt first run.** The setup experience is now a single, focused screen — live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and in-app **feedback** you can send without leaving the app.
+- **One-click "Fix" for usage tracking.** When Agent Sessions can't read your Claude or Codex usage — an expired login or a signed-out CLI — every usage surface (menu bar, cockpit meter, window footer) now shows a **Fix…** button that opens a guided dialog: it explains what's wrong and walks you through the solutions in order (re-authenticate → Web API or CLI-probe fallback → recheck), so you're never stuck at a broken meter.
+
+### Bug Fixes
+- Expired Claude no longer shows a misleading **"0%"** — the Quota Meter, menu bar, and cockpit now show an honest "reconnecting" state and then a clear "sign-in needed" prompt instead of reading as quota-exhausted.
+- Usage returns after `claude auth login` **without relaunching** — on the next refresh, or on its own within ~30 seconds.
+- The "session expired" sign-in prompt now appears **promptly** (~90 seconds) instead of after several minutes of silent "reconnecting."
+- The Quota Meter / Runway **"active burn"** countdown no longer lingers after a session goes idle — it clears shortly after you stop.
+- Runway **"+N sessions"** overflow now counts hidden idle sessions, and a lone hidden session is promoted to a real row instead of "+1."
+- Sessions with **non-ASCII (multi-byte) transcripts** are no longer hidden by a too-strict decode.
+- **Settings** opens to the requested pane even when the window is already open.
+
+### Improvements
+- Cleaner window footer — the usage strip drops its grey background bar.
 
 ## [4.3] - 2026-07-09
 ### Highlights

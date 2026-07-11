@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg"><b>Download Agent Sessions 4.3 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.1/AgentSessions-4.3.1.dmg"><b>Download Agent Sessions 4.3.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.3** — Usage tracking that never cries wolf: when your Claude or Codex CLI is signed out or its token has expired, the Quota Meter degrades calmly and shows clear in-app sign-in guidance instead of false alarms or surprise browser sign-ins. Plus restored transcript text selection and an archived-Codex filter fix. [See what's new ↓](#whats-new-in-43)
+> **New in 4.3.1** — A rebuilt first-run experience (single-screen setup, a What's New panel, in-app feedback) and one-click **Fix** for usage tracking: whenever Agent Sessions can't read your Claude or Codex usage, a guided dialog explains what's wrong and walks you through getting it back. [See what's new ↓](#whats-new-in-431)
 
 ## Overview
 
@@ -72,20 +72,21 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.3
+## What's New in 4.3.1
 
-**TL;DR** - Usage tracking that never cries wolf. When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway stop flashing false alarms and stop silently opening a browser sign-in behind your back. Agent Sessions reads the real CLI auth state, degrades calmly, and shows clear in-app sign-in guidance so you know exactly how to get your readings back.
+**TL;DR** - A rebuilt first run and one-click "Fix" for usage tracking. Setup is now a single, focused screen with a What's New panel and in-app feedback; and whenever Agent Sessions can't read your Claude or Codex usage, a **Fix** button walks you through getting it back.
 
-**Highlights:** The Quota Meter now distinguishes a real signed-out or expired-token state from a passing network blip: transient failures show a calm "temporarily unavailable — retrying" caption and clear on the next good fetch, while a persistent auth failure surfaces sign-in remediation right in the usage strips and menu bar. Agent Sessions never mints or refreshes your subscription token and never advances a login into the browser on its own — it stays a read-only usage reader. A Claude user without the CLI gets a two-rung fix-it ladder (enable the no-install web mode, or install the CLI) instead of a command they can't run.
+**Highlights:** The first-run experience is one clean screen — a live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and native **feedback** you can send without leaving the app. When usage tracking can't reach your account (an expired login or a signed-out CLI), every surface — menu bar, cockpit meter, window footer — shows a **Fix…** button that opens a guided dialog explaining the problem and the solutions to try in order (re-authenticate, then the Web API or CLI-probe fallback, then recheck). Expired Claude no longer reads as a misleading "0%", usage recovers after `claude auth login` without relaunching, and the Session Runway "+N sessions" overflow now counts hidden idle sessions.
 
-New in 4.3:
-- **Auth-resilient Quota Meter & Session Runway** — real signed-out / expired-token detection, calm degradation for transient errors, and no surprise browser sign-ins.
-- **In-app sign-in remediation** — clear guidance in the usage strips and menu bar when a provider needs re-authentication.
-- **Cockpit refinements** — a segmented cockpit-view popover that matches the Runway drawer, with ⇧⌘M to cycle cockpit views.
-- **Transcript polish** — restored click-and-drag text selection in the Session view, a unified palette, and a native list/transcript separator.
-- **Archived-Codex filter fix** — archived Codex sessions now show in the Archived filter regardless of surface metadata.
+New in 4.3.1:
+- **Rebuilt first run** — a single-screen setup, a What's New panel on update, and in-app feedback.
+- **One-click "Fix" for usage tracking** — a guided dialog on every usage surface that explains what's wrong and walks through the fixes in order.
+- **Honest usage states** — an expired Claude login shows "reconnecting" and then "sign-in needed" instead of a misleading "0%".
+- **Faster recovery** — usage returns after `claude auth login` without relaunching, and the "session expired" prompt now appears in ~90 seconds.
+- **Runway fixes** — "+N sessions" overflow counts hidden idle sessions, and the "active burn" countdown no longer lingers after a session goes idle.
+- **Non-ASCII transcripts** — sessions with multi-byte content are no longer hidden by a too-strict decode.
 
-Previous release — 4.2: A brand-new transcript — structured Session view with real Markdown, collapsible tool calls, inline images, and clickable file paths. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.3: Usage tracking that never cries wolf — real signed-out / expired-token detection, calm degradation, and in-app sign-in remediation. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -139,7 +140,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3/AgentSessions-4.3.dmg)
+1. [Download AgentSessions-4.3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.1/AgentSessions-4.3.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
