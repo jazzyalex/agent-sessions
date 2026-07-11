@@ -56,6 +56,11 @@ struct QuotaData: Equatable {
     var transientReason: String? = nil
     /// Current usage data source; drives the "via CLI probe" fallback label. (P4)
     var currentSource: ClaudeUsageSource? = nil
+    /// Served data is meaningfully stale (cache aged past freshness / degraded).
+    /// Drives an immediate at-a-glance "stale" cue on the menu-bar face, before
+    /// the slower 5-minute auth-expiry escalation raises the loud remediation —
+    /// so a QM user is never left with a silently-frozen meter.
+    var dataIsStale: Bool = false
 
     var hasUsageData: Bool {
         switch provider {
@@ -64,6 +69,38 @@ struct QuotaData: Equatable {
         case .claude:
             return lastUpdate != nil
         }
+    }
+
+    /// A copy scrubbed of usage values so a meter renders as unavailable ("--")
+    /// rather than a misleading cached/zero percentage. Used on the menu-bar face
+    /// when the provider's auth is alarming: an expired provider has no
+    /// trustworthy numbers, and "0%" there reads as "quota exhausted".
+    func unavailableForDisplay() -> QuotaData {
+        var copy = self
+        copy.lastUpdate = nil
+        copy.eventTimestamp = nil
+        copy.fiveHourResetText = ""
+        copy.weekResetText = ""
+        return copy
+    }
+
+    /// Shared meter state so the footer, menu-bar face, and QM dropdown all speak
+    /// the same language:
+    /// - `.live` — trustworthy fresh numbers → show the meter.
+    /// - `.reconnecting` — no trustworthy data yet, but not a confirmed problem →
+    ///   spinning "reconnecting" affordance (actively retrying).
+    /// - `.needsAction` — auth is alarming (expired / signed out / no CLI) → show
+    ///   what's wrong + how to fix; retrying alone won't recover it.
+    enum PresentationState: Equatable {
+        case live
+        case reconnecting
+        case needsAction(UsageAuthStatus)
+    }
+
+    var presentationState: PresentationState {
+        if let auth = authStatus, auth.state.isAlarming { return .needsAction(auth) }
+        if !hasUsageData || dataIsStale || transientReason != nil { return .reconnecting }
+        return .live
     }
 
     /// Live within the last 5 minutes. Mirrors the usage strip's freshness gate
@@ -113,7 +150,8 @@ struct QuotaData: Equatable {
             fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
             authStatus: model.authStatus,
             transientReason: model.transientReason,
-            currentSource: model.currentSource
+            currentSource: model.currentSource,
+            dataIsStale: model.dataIsStale
         )
     }
 }
@@ -150,20 +188,18 @@ struct CockpitFooterView: View {
 
 		            HStack(spacing: 10) {
 		                ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-		                    if let auth = q.authStatus, auth.state.isAlarming {
-		                        FooterAuthCell(status: auth, hasLiveData: q.hasLiveData) {
-		                            CockpitQuotaWidget(
-		                                data: q,
-		                                isDarkMode: colorScheme == .dark,
-		                                scope: .both,
-		                                style: .bars,
-		                                modeOverride: usageDisplayModeOverride,
-		                                baseForeground: .primary,
-		                                showResetIndicators: true,
-		                                showPill: true
-		                            )
-		                        }
-		                    } else {
+		                    switch q.presentationState {
+		                    case .needsAction(let auth):
+		                        // Confirmed problem that needs the user: what's wrong + how
+		                        // to fix, on one line (e.g. "Claude auth expired · claude
+		                        // auth login").
+		                        FooterAuthCell(status: auth)
+		                    case .reconnecting:
+		                        // Actively retrying: one compact line with spinning arrows,
+		                        // not a broken "-- ↻ Waiting" meter. Escalates to the chip
+		                        // above if the retries keep failing.
+		                        FooterRetryChip(provider: q.provider)
+		                    case .live:
 		                        VStack(alignment: .leading, spacing: 1) {
 		                            CockpitQuotaWidget(
 		                                data: q,
@@ -175,11 +211,7 @@ struct CockpitFooterView: View {
 		                                showResetIndicators: true,
 		                                showPill: true
 		                            )
-		                            // Calm transient caption (P2) — grows the row only on a
-		                            // failure state, like the alarming banner does.
-		                            if let reason = q.transientReason {
-		                                Text(reason).font(.caption2).foregroundStyle(.secondary)
-		                            } else if q.currentSource == .tmuxUsage {
+		                            if q.currentSource == .tmuxUsage {
 		                                Text("via CLI probe").font(.caption2).foregroundStyle(.secondary)
 		                            }
 		                        }
@@ -196,7 +228,8 @@ struct CockpitFooterView: View {
         // an alarming AuthRemediationBanner needs an extra line, so the strip never
         // jitters for normal usage.
         .frame(minHeight: CockpitFooterTheme.height)
-        .background(.bar)
+        // No filled bar background — the meters read as plain text over the window,
+        // separated only by the hairline below.
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(CockpitFooterTheme.topBorder(isDark: colorScheme == .dark))
@@ -240,36 +273,43 @@ enum CockpitQuotaStyle: Equatable {
 		    }
 		}
 
-/// Per-provider auth remediation cell shown in the footer in place of a meter
-/// pill when that provider's CLI auth is alarming. Mirrors the usage strip:
-/// - `hasLiveData` → compact banner stacked over the dimmed cached meters.
-/// - otherwise → full banner replacing the meters.
-/// The banner's own internal Spacer is greedy, so we bound the cell width to
-/// keep the footer's horizontal layout tidy alongside the other provider and
-/// the session count.
-private struct FooterAuthCell<Meter: View>: View {
+/// Per-provider auth remediation cell shown in the footer in place of the meter
+/// when that provider's CLI auth is alarming. A single quiet chip (short label +
+/// remediation control) rather than the loud multi-line banner — the full banner
+/// lives on the Agent Cockpit HUD, which has room for it. The chip's width is
+/// bounded so the footer's horizontal layout stays tidy alongside the other
+/// provider and the session count.
+private struct FooterAuthCell: View {
     let status: UsageAuthStatus
-    let hasLiveData: Bool
-    let meter: Meter
-
-    init(status: UsageAuthStatus, hasLiveData: Bool, @ViewBuilder meter: () -> Meter) {
-        self.status = status
-        self.hasLiveData = hasLiveData
-        self.meter = meter()
-    }
 
     var body: some View {
-        Group {
-            if hasLiveData {
-                VStack(alignment: .leading, spacing: 2) {
-                    AuthRemediationBanner(status: status, compact: true, embedded: true)
-                    meter.opacity(0.5)
-                }
-            } else {
-                AuthRemediationBanner(status: status, compact: false, embedded: true)
-            }
+        AuthRemediationBanner(status: status, chip: true, embedded: true)
+            .frame(maxWidth: 360, alignment: .leading)
+    }
+}
+
+/// Compact one-line "actively retrying" chip shown while a provider's usage is
+/// transiently unavailable — spinning arrows + provider name, no verbose
+/// "-- ↻ Waiting" meter or second caption line. If the retries keep failing the
+/// auth classifier escalates and `FooterAuthCell` takes over with the actionable
+/// fix, so the user is never left staring at an endless "retrying".
+private struct FooterRetryChip: View {
+    let provider: QuotaData.Provider
+    @State private var spinning = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(spinning ? 360 : 0))
+                .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: spinning)
+            Text("\(provider == .claude ? "Claude" : "Codex") — reconnecting…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .frame(maxWidth: 360, alignment: .leading)
+        .onAppear { spinning = true }
     }
 }
 

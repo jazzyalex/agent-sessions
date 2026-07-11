@@ -30,4 +30,20 @@ final class UsageAuthStatusTests: XCTestCase {
         if case .openURL = UsageAuthStatus.make(provider: .codex, state: .cliNotInstalled).remediation { }
         else { XCTFail("expected Codex .cliNotInstalled to open the install URL") }
     }
+
+    // MARK: - Compact chip label (footer chip + menu-bar surfaces)
+
+    /// The chip drops the verbose "Runway paused — …" headline for a tight,
+    /// provider-qualified label.
+    func testChipLabelIsShortAndProviderQualified() {
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .expired).chipLabel, "Claude auth expired")
+        XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .signedOut).chipLabel, "Codex signed out")
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled).chipLabel, "Claude token needed")
+    }
+
+    /// Non-alarming states carry no chip label (nothing to surface).
+    func testChipLabelEmptyWhenNotAlarming() {
+        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .ok).chipLabel, "")
+        XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .unknown).chipLabel, "")
+    }
 }

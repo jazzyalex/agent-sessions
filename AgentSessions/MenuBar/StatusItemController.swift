@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 import Combine
 
+/// Boxes a `UsageAuthStatus` so it can ride on an `NSMenuItem.representedObject`
+/// (Any?) and be recovered in the click handler that opens the Fix dialog.
+private final class AuthStatusBox {
+    let status: UsageAuthStatus
+    init(status: UsageAuthStatus) { self.status = status }
+}
+
 @MainActor
 final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
@@ -361,8 +368,9 @@ final class StatusItemController: NSObject {
         return it
     }
     private func makeAuthAlertItem(provider: AuthProvider, status: UsageAuthStatus) -> NSMenuItem {
-        let it = NSMenuItem(title: authAlertText(provider: provider, state: status.state), action: #selector(openUsagePreferences), keyEquivalent: "")
+        let it = NSMenuItem(title: authAlertText(provider: provider, state: status.state), action: #selector(handleAuthRemediation(_:)), keyEquivalent: "")
         it.target = self
+        it.representedObject = AuthStatusBox(status: status)
         let symbolName: String
         let tint: NSColor
         switch status.state {
@@ -382,12 +390,23 @@ final class StatusItemController: NSObject {
         return it
     }
     private func authAlertText(provider: AuthProvider, state: UsageAuthState) -> String {
+        let name = provider.displayName
         switch state {
-        case .signedOut: return "Sign in to \(provider.displayName)"
-        case .expired: return "\(provider.displayName) session expired — sign in"
-        case .cliNotInstalled: return "\(provider.displayName) CLI not installed"
-        default: return provider.displayName
+        case .signedOut: return "\(name) signed out — Fix…"
+        case .expired: return "\(name) session expired — Fix…"
+        case .cliNotInstalled: return "\(name) CLI not installed — Fix…"
+        default: return name
         }
+    }
+
+    /// Clicking a menu-bar auth alert opens the shared guided Fix dialog — the
+    /// same one the footer/HUD "Fix…" buttons open — so remediation is one
+    /// consistent, explained flow rather than a dead-end Preferences pane.
+    @objc private func handleAuthRemediation(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? AuthStatusBox else {
+            openUsagePreferences(); return
+        }
+        AuthFixWindowController.shared.show(status: box.status)
     }
 
     // MARK: - Actions
@@ -491,11 +510,18 @@ final class StatusItemController: NSObject {
     }
 
     private func claudeResetLine(label: String, percent: Int, reset: String) -> String {
-        if claudeStatus.lastUpdate == nil {
-            let unavailable = claudeStatus.unavailableMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return "\(label) --  \((unavailable?.isEmpty == false) ? "Usage unavailable" : "Waiting for data")"
+        // Same shared state as the footer and menu-bar face, so all three surfaces
+        // read alike. Never a misleading "0% / no resets" (reads as exhausted):
+        // `.reconnecting` says so, `.needsAction` shows unavailable (the auth-alert
+        // row above carries the fix command).
+        switch QuotaData.claude(from: claudeStatus).presentationState {
+        case .needsAction:
+            return "\(label) --  Usage unavailable"
+        case .reconnecting:
+            return "\(label) --  reconnecting…"
+        case .live:
+            return resetLine(label: label, percent: percent, reset: reset)
         }
-        return resetLine(label: label, percent: percent, reset: reset)
     }
 }
 

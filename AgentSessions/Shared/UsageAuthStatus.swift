@@ -28,6 +28,24 @@ struct UsageAuthStatus: Equatable {
     var remediation: Remediation
     var headline: String
     var detail: String
+    /// Provider display name ("Claude"/"Codex"), retained so compact surfaces
+    /// (footer chip, menu-bar face) can build a short label without the full
+    /// "Runway paused — …" headline.
+    var providerName: String = ""
+
+    /// Ultra-short label for the compact footer chip. Drops the "Runway paused —"
+    /// preamble the full-banner headline carries, so the chip stays a single tight
+    /// pill. Empty for non-alarming states.
+    var chipLabel: String {
+        let name = providerName.isEmpty ? "CLI" : providerName
+        switch state {
+        case .signedOut: return "\(name) signed out"
+        case .expired: return "\(name) auth expired"
+        case .cliNotInstalled: return "\(name) token needed"
+        case .needsSetup: return "\(name) needs setup"
+        case .ok, .unknown: return ""
+        }
+    }
 
     /// - Parameter cliPresent: whether the provider's CLI is installed. When it
     ///   is absent (CLI-less Claude users), alarming states offer the no-CLI
@@ -49,38 +67,42 @@ struct UsageAuthStatus: Equatable {
 
         switch state {
         case .ok, .unknown:
-            return .init(state: state, remediation: .none, headline: "", detail: "")
+            return .init(state: state, remediation: .none, headline: "", detail: "", providerName: name)
         case .signedOut:
             if claudeNoCLI {
                 return .init(state: state, remediation: ladder,
-                    headline: "Runway paused — sign in to \(name)", detail: ladderDetail)
+                    headline: "Runway paused — sign in to \(name)", detail: ladderDetail, providerName: name)
             }
             return .init(state: state, remediation: .showCommand(loginCmd),
                 headline: "Runway paused — sign in to \(name)",
-                detail: "You're signed out of the \(name) CLI. Run the command below, then runway resumes automatically.")
+                detail: "You're signed out of the \(name) CLI. Run the command below, then runway resumes automatically.",
+                providerName: name)
         case .expired:
             if claudeNoCLI {
                 return .init(state: state, remediation: ladder,
-                    headline: "Runway paused — \(name) session expired", detail: ladderDetail)
+                    headline: "Runway paused — \(name) session expired", detail: ladderDetail, providerName: name)
             }
             return .init(state: state, remediation: .showCommand(loginCmd),
                 headline: "Runway paused — \(name) session expired",
-                detail: "Your \(name) credentials expired. Run the command below to re-authenticate.")
+                detail: "Your \(name) credentials expired. Run the command below to re-authenticate.",
+                providerName: name)
         case .cliNotInstalled:
             // CLI-less by definition. Claude → the ladder (drops the cancelled
             // in-app-sign-in promise the old copy carried); Codex → its install
             // link (no Web API rung exists for Codex).
             if provider == .claude {
                 return .init(state: state, remediation: ladder,
-                    headline: "Runway needs an account token", detail: ladderDetail)
+                    headline: "Runway needs an account token", detail: ladderDetail, providerName: name)
             }
             return .init(state: state, remediation: .openURL(installURL),
                 headline: "Runway needs an account token",
-                detail: "Install the \(name) CLI to read usage.")
+                detail: "Install the \(name) CLI to read usage.",
+                providerName: name)
         case .needsSetup:
             return .init(state: state, remediation: .showCommand(provider == .claude ? "claude" : "codex"),
                 headline: "\(name) needs one-time setup",
-                detail: "Open Terminal and run the \(name) CLI once to finish setup.")
+                detail: "Open Terminal and run the \(name) CLI once to finish setup.",
+                providerName: name)
         }
     }
 }

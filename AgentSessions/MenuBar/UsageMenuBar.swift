@@ -185,6 +185,21 @@ private struct FallbackMenuBarLabel: View {
     }
 }
 
+/// Spinning arrows shown on the menu-bar face while a provider's usage is
+/// reconnecting — the compact form of the footer's "reconnecting…" chip, so all
+/// three surfaces share the same vocabulary.
+private struct MenuBarReconnectingGlyph: View {
+    @State private var spin = false
+    var body: some View {
+        Image(systemName: "arrow.triangle.2.circlepath")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(spin ? 360 : 0))
+            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: spin)
+            .onAppear { spin = true }
+    }
+}
+
 private struct UsageMeterMenuBarLabel: View {
     @EnvironmentObject var codexStatus: CodexUsageModel
     @EnvironmentObject var claudeStatus: ClaudeUsageModel
@@ -251,16 +266,41 @@ private struct UsageMeterMenuBarLabel: View {
 
         HStack(spacing: 10) {
             ForEach(Array(quotas.enumerated()), id: \.offset) { _, q in
-                CockpitQuotaWidget(
-                    data: q,
-                    isDarkMode: colorScheme == .dark,
-                    scope: scope,
-                    style: style,
-                    modeOverride: nil,
-                    baseForeground: .primary,
-                    showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators,
-                    showPill: showPills
-                )
+                // Same three states as the footer and QM dropdown, sized for the
+                // bar — never a misleading "0% / no resets" (which reads as
+                // exhausted).
+                switch q.presentationState {
+                case .needsAction:
+                    // Amber ⚠ + provider name; the dropdown carries the full fix.
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color(hex: "e08600"))
+                        Text(q.provider == .claude ? "Claude" : "Codex")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                case .reconnecting:
+                    // Spinning arrows + provider name — the footer's "reconnecting"
+                    // affordance in a menu-bar-sized form.
+                    HStack(spacing: 3) {
+                        MenuBarReconnectingGlyph()
+                        Text(q.provider == .claude ? "Claude" : "Codex")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                case .live:
+                    CockpitQuotaWidget(
+                        data: q,
+                        isDarkMode: colorScheme == .dark,
+                        scope: scope,
+                        style: style,
+                        modeOverride: nil,
+                        baseForeground: .primary,
+                        showResetIndicators: (q.provider == .codex) ? showCodexResetIndicators : showClaudeResetIndicators,
+                        showPill: showPills
+                    )
+                }
             }
         }
         .onAppear { applyMenuVisibility(visibility) }

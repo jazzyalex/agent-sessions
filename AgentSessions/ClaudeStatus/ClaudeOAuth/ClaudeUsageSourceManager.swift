@@ -162,8 +162,10 @@ actor ClaudeUsageSourceManager {
     /// threshold escalates to the loud banner. The *internal* `currentAuthState`
     /// still flips to `.expired` immediately (see `classifyAndPublishAuthState`)
     /// so `shouldSuppressTmuxFallback` keeps blocking the login-screen hang —
-    /// only the *published* banner is debounced. Owner-tunable.
-    private static let expiredEscalationThreshold: TimeInterval = 5 * 60
+    /// only the *published* banner is debounced. Owner-tunable. 90s keeps a brief
+    /// blip from crying "expired" while still surfacing the actionable fix fast,
+    /// rather than leaving the user in a multi-minute "reconnecting…" limbo.
+    private static let expiredEscalationThreshold: TimeInterval = 90
 
     /// Calm captions for non-alarming failures — shown in `.secondary` on the
     /// strip without raising the banner or firing a notification.
@@ -233,6 +235,15 @@ actor ClaudeUsageSourceManager {
     /// on a successful fetch and whenever the failure path takes the non-401
     /// classifier branch (a different cause the classifier's own debounce owns).
     private var first401At: Date?
+    /// One-shot timer that re-publishes the already-verified `.expired` verdict at
+    /// `first401At + expiredEscalationThreshold`. Without it the escalation is only
+    /// re-evaluated on the NEXT failed poll — and the post-cold-start retry cadence
+    /// is minutes (visible: 3 min) or credential-gated/indefinite (hidden), so the
+    /// banner could lag the 90s threshold by many minutes. The timer performs NO
+    /// network fetch and spawns NO CLI; it only re-emits the known verdict. It is
+    /// cancelled by a successful fetch, the non-401 classifier branch, escalation
+    /// via a regular poll, and `stop()`.
+    private var expiredEscalationTask: Task<Void, Never>?
 
     // Credential gating
     private let credentialWatcher = ClaudeCredentialFingerprint()
@@ -298,6 +309,7 @@ actor ClaudeUsageSourceManager {
         refreshTask = nil
         credentialWatchTask?.cancel()
         credentialWatchTask = nil
+        cancelExpiredEscalationTimer()
         webRefreshTask?.cancel()
         webRefreshTask = nil
         await tmuxAdapter?.stop()
@@ -348,9 +360,13 @@ actor ClaudeUsageSourceManager {
             await performWebFetch()
             return
         }
-        // Bypass credential gate — cancel watch and retry OAuth immediately
+        // Bypass credential gate — cancel watch and retry OAuth immediately.
+        // Invalidate the 10-minute token cache first so a user-initiated refresh
+        // re-reads the keychain and picks up a just-run `claude auth login`
+        // without needing an app relaunch.
         credentialWatchTask?.cancel()
         credentialWatchTask = nil
+        await tokenResolver.invalidateCache()
         await performOAuthFetch()
     }
 
@@ -394,6 +410,7 @@ actor ClaudeUsageSourceManager {
             oauthRateLimitRetryDeadline = nil
             didAttemptDelegatedRefresh = false
             first401At = nil
+            cancelExpiredEscalationTimer()
             lastFailureFingerprint = nil
             credentialWatchTask?.cancel()
             credentialWatchTask = nil
@@ -677,11 +694,21 @@ actor ClaudeUsageSourceManager {
             let escalated = Self.shouldEscalateExpired(first401At: first401At, now: now,
                                                        threshold: Self.expiredEscalationThreshold)
             published = Self.expiredPublication(escalated: escalated)
+            if escalated {
+                // A regular poll escalated on its own — the one-shot is moot.
+                cancelExpiredEscalationTimer()
+            } else if let first401At {
+                // Pre-escalation: arm the one-shot so the `.expired` banner fires
+                // at `first401At + threshold` even if no poll lands before then
+                // (the retry cadence is minutes, or credential-gated when hidden).
+                scheduleExpiredEscalation(firstAt: first401At)
+            }
         } else {
             // A different cause than an expired token (non-401, or the token
             // vanished) — the classifier's own debounce owns this path, so clear
             // the expiry clock.
             first401At = nil
+            cancelExpiredEscalationTimer()
             published = Self.failurePublication(verdict: state)
         }
 
@@ -697,6 +724,57 @@ actor ClaudeUsageSourceManager {
             authState: published.authState,
             transientReason: published.reason,
             captionOnly: published.authState == nil
+        ))
+    }
+
+    // MARK: - Expired escalation timer (P2 follow-up)
+
+    /// Arms the one-shot `.expired` escalation for the current 401 episode. Idempotent
+    /// per episode: while a timer is armed, later pre-escalation polls are no-ops
+    /// (`first401At` is fixed for the episode, so the fire time never moves).
+    private func scheduleExpiredEscalation(firstAt: Date) {
+        guard expiredEscalationTask == nil, shouldRun else { return }
+        // +0.5s epsilon so `shouldEscalateExpired` is safely past the threshold at
+        // fire time despite Task.sleep's tolerance.
+        let delay = max(0, firstAt.addingTimeInterval(Self.expiredEscalationThreshold).timeIntervalSinceNow) + 0.5
+        os_log("ClaudeOAuth: arming expired-escalation timer (fires in %.0fs)", log: log, type: .info, delay)
+        expiredEscalationTask = Task {
+            do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }
+            self.fireExpiredEscalation()
+        }
+    }
+
+    private func cancelExpiredEscalationTimer() {
+        expiredEscalationTask?.cancel()
+        expiredEscalationTask = nil
+    }
+
+    /// Fires at `first401At + expiredEscalationThreshold`: re-publishes the already
+    /// verified `.expired` verdict so the banner escalates on schedule instead of
+    /// waiting for the next (minutes-away, or credential-gated) failed poll. No
+    /// network fetch, no CLI subprocess — publication only. Bails out silently if
+    /// the episode closed (a success cleared `first401At`) or a newer classification
+    /// replaced the internal `.expired` verdict while the timer slept.
+    private func fireExpiredEscalation() {
+        expiredEscalationTask = nil
+        guard shouldRun else { return }
+        guard let first401At, currentAuthState == .expired else { return }
+        guard Self.shouldEscalateExpired(first401At: first401At, now: Date(),
+                                         threshold: Self.expiredEscalationThreshold) else { return }
+        os_log("ClaudeOAuth: expired-escalation timer fired — publishing .expired banner",
+               log: log, type: .info)
+        // Mirrors the escalated `expiredPublication` emit in `classifyAndPublishAuthState`
+        // exactly: authState `.expired`, no caption (the banner speaks for itself),
+        // legacy bools all false, not caption-only.
+        availabilityHandler?(ClaudeServiceAvailability(
+            cliUnavailable: false,
+            tmuxUnavailable: false,
+            loginRequired: false,
+            setupRequired: false,
+            setupHint: nil,
+            authState: .expired,
+            transientReason: nil,
+            captionOnly: false
         ))
     }
 
@@ -830,9 +908,13 @@ actor ClaudeUsageSourceManager {
                 if await self.credentialWatcher.hasChanged(since: fp) {
                     os_log("ClaudeOAuth: credential change detected, retrying OAuth", log: log, type: .info)
                     self.credentialWatchTask = nil
+                    // Credentials changed on disk — drop the cached token so the
+                    // retry uses the freshly written one (e.g. after re-auth).
+                    await self.tokenResolver.invalidateCache()
                     await self.performOAuthFetch()
                     return
                 }
+
             }
         }
     }

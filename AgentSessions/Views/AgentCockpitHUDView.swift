@@ -3394,6 +3394,12 @@ private struct HUDLimitsProviderEntry {
     /// meter text for an AuthRemediationBanner. Left nil by callers (e.g. the
     /// rows panel) that don't render the banner.
     var authStatus: UsageAuthStatus? = nil
+    /// Shared meter state (`QuotaData.presentationState`) so every QM surface —
+    /// the limits bar, the Meter-mode rows panel, and the hover detail panel —
+    /// degrades exactly like the footer / menu bar: an auth-remediation cell
+    /// (`.needsAction`) or a spinning "reconnecting" cell (`.reconnecting`)
+    /// instead of a misleading "0% / no reset" meter.
+    var presentationState: QuotaData.PresentationState = .live
 }
 
 private extension CodexRunwaySnapshot {
@@ -3810,7 +3816,11 @@ private struct HUDLimitsBar: View {
                     claudeUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     claudeUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
                     claudeUsageModel.isUpdating ? "updating" : "idle",
-                    claudeUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil"
+                    claudeUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil",
+                    // presentationState inputs beyond the fields above — a stale/
+                    // transient flip must rebuild the bar into its reconnecting cell.
+                    claudeUsageModel.dataIsStale ? "stale" : "fresh",
+                    claudeUsageModel.transientReason ?? "transient-nil"
                 ].joined(separator: "|")
             )
         }
@@ -3835,7 +3845,8 @@ private struct HUDLimitsBar: View {
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
-                authStatus: codexUsageModel.authStatus
+                authStatus: codexUsageModel.authStatus,
+                presentationState: QuotaData.codex(from: codexUsageModel).presentationState
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -3850,7 +3861,8 @@ private struct HUDLimitsBar: View {
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
-                authStatus: claudeUsageModel.authStatus
+                authStatus: claudeUsageModel.authStatus,
+                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
             ))
         }
         return out
@@ -3861,7 +3873,10 @@ private struct HUDLimitsBar: View {
     /// (icon + headline + command chip + Copy button), which is taller than a
     /// plain meter row.
     private var hasAlarmingAuth: Bool {
-        entries.contains { $0.authStatus?.state.isAlarming == true }
+        entries.contains { entry in
+            if case .needsAction = entry.presentationState { return true }
+            return false
+        }
     }
 
     /// Signed-in bar keeps its exact 22pt clipped look (unchanged). When a
@@ -4068,7 +4083,9 @@ private struct HUDLimitsRowsPanel: View {
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt
+                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
+                authStatus: codexUsageModel.authStatus,
+                presentationState: QuotaData.codex(from: codexUsageModel).presentationState
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -4082,7 +4099,9 @@ private struct HUDLimitsRowsPanel: View {
                 lastDataTimestamp: claudeUsageModel.lastUpdate,
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt
+                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
+                authStatus: claudeUsageModel.authStatus,
+                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
             ))
         }
         return out
@@ -4158,22 +4177,36 @@ private struct HUDLimitsRowsPanel: View {
         }
     }
 
+    @ViewBuilder
     private func row(entry: HUDLimitsProviderEntry) -> some View {
         HStack(spacing: 0) {
-            HUDLimitsProviderText(
-                entry: entry,
-                mode: mode,
-                showResets: true,
-                onlyBottleneck: false,
-                showProjection: true,
-                alignColumns: entries.count > 1,
-                reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
-                enlarged: quotaMeterEnlarged,
-                now: clockNow
-            )
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .allowsTightening(true)
+            // Same shared-state degradation as the footer / menu bar / limits bar:
+            // never render a misleading "0% / no reset" meter for a provider whose
+            // data isn't trustworthy.
+            switch entry.presentationState {
+            case .needsAction(let auth):
+                // Chip variant: "Claude auth expired · claude auth login [Copy]" —
+                // matches the footer's FooterAuthCell language and fits the QM's
+                // content-hugging width (the full headline banner would clip).
+                HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+            case .reconnecting:
+                HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged)
+            case .live:
+                HUDLimitsProviderText(
+                    entry: entry,
+                    mode: mode,
+                    showResets: true,
+                    onlyBottleneck: false,
+                    showProjection: true,
+                    alignColumns: entries.count > 1,
+                    reserveProjectionSlot: shouldReserveFiveHourProjectionSlot,
+                    enlarged: quotaMeterEnlarged,
+                    now: clockNow
+                )
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
@@ -4401,12 +4434,32 @@ private struct HUDLimitsDetailPanel: View {
                         .frame(height: 0.5)
                         .padding(.horizontal, 10)
                 }
-                // Grid keeps the "5h:" / "Wk:" columns aligned within a provider row.
-                Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
-                    detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
+                // Same shared-state degradation as the footer / menu bar / limits
+                // bar: an untrustworthy provider shows the remediation chip or the
+                // reconnecting cell instead of a misleading "0% / --" detail row.
+                switch entry.presentationState {
+                case .needsAction(let auth):
+                    HStack(spacing: 0) {
+                        HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 22)
+                case .reconnecting:
+                    HStack(spacing: 0) {
+                        HUDLimitsRetryCell(source: entry.source)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 22)
+                case .live:
+                    // Grid keeps the "5h:" / "Wk:" columns aligned within a provider row.
+                    Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
+                        detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity)
                 if entry.source == .codex,
                    let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: now) {
                     HStack(spacing: 0) {
@@ -4942,13 +4995,18 @@ private struct HUDLimitsBarContent: View {
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
-                if let auth = entry.authStatus, auth.state.isAlarming {
+                switch entry.presentationState {
+                case .needsAction(let auth):
                     // The HUD bar is a single 22pt, clipped row and the window
                     // resizes to content, so always use the compact banner here —
                     // the full (two-line) banner would overflow. Keep the provider
                     // icon so the alarming provider stays attributable.
                     HUDLimitsAuthCell(source: entry.source, status: auth)
-                } else {
+                case .reconnecting:
+                    // Actively retrying: spinner + quiet caption, never a broken
+                    // "0% / --" meter (mirrors the footer's FooterRetryChip).
+                    HUDLimitsRetryCell(source: entry.source)
+                case .live:
                     HUDLimitsProviderText(
                         entry: entry,
                         mode: mode,
@@ -4965,30 +5023,65 @@ private struct HUDLimitsBarContent: View {
     }
 }
 
-/// Compact auth-remediation cell for the HUD limits bar: the provider icon
-/// (matching HUDLimitsProviderText) followed by the compact AuthRemediationBanner.
+/// Compact auth-remediation cell for the HUD limits surfaces: the provider icon
+/// (matching HUDLimitsProviderText) followed by the AuthRemediationBanner.
+/// `chip: true` renders the banner's single-pill chip variant ("Claude auth
+/// expired · claude auth login [Copy]") for the width-constrained QM rows /
+/// detail panel; the default compact variant keeps the limits bar unchanged.
 private struct HUDLimitsAuthCell: View {
     let source: UsageTrackingSource
     let status: UsageAuthStatus
-    @Environment(\.colorScheme) private var colorScheme
+    var chip: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
-            if source == .claude {
-                Image("FooterIconClaude")
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-            } else {
-                Image("FooterIconCodex")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 14, height: 14)
-                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-            }
-            AuthRemediationBanner(status: status, compact: true, embedded: true)
+            HUDLimitsProviderIcon(source: source)
+            AuthRemediationBanner(status: status, compact: !chip, chip: chip, embedded: true)
+        }
+    }
+}
+
+/// Compact "reconnecting" cell for the HUD limits surfaces: provider icon +
+/// spinning arrows + a quiet caption — the QM sibling of the footer's
+/// FooterRetryChip, so a transiently-unavailable provider never renders a
+/// misleading "0% / no reset" meter. Escalates to HUDLimitsAuthCell once the
+/// auth classifier publishes an alarming verdict.
+private struct HUDLimitsRetryCell: View {
+    let source: UsageTrackingSource
+    var enlarged: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HUDLimitsProviderIcon(source: source)
+            HUDLimitsLoadingSpinner()
+            Text("reconnecting…")
+                .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+/// Provider icon shared by the HUD limits cells — matches HUDLimitsProviderText's
+/// icon chrome exactly (14pt, Claude full-color / Codex template).
+private struct HUDLimitsProviderIcon: View {
+    let source: UsageTrackingSource
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if source == .claude {
+            Image("FooterIconClaude")
+                .renderingMode(.original)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+        } else {
+            Image("FooterIconCodex")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
         }
     }
 }

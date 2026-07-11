@@ -98,7 +98,11 @@ private struct PreferencesWindowRoot: View {
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some View {
+        // `.id(initialTab)` so reopening the already-open window at a different
+        // tab actually switches: without it SwiftUI preserves PreferencesView's
+        // @State selection across the rootView swap and stays on the last pane.
         let content = PreferencesView(initialTab: initialTab)
+            .id(initialTab)
             .environmentObject(indexer)
             .environmentObject(indexer.columnVisibility)
             .environmentObject(updaterController)
