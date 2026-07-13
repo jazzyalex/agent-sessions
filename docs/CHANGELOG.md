@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.3.2] - 2026-07-12
+### Highlights
+- **A much quieter Quota Meter.** The usage meters were re-reading and re-parsing your entire session history every few seconds while idle. They now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release) so your machine stays cool and quiet. The "active burn" shimmer also pauses when nothing is burning and honors **Reduce Motion**.
+
+### Bug Fixes
+- Claude usage over the **Web API** path is far more resilient: when Full Disk Access isn't granted it now shows a clear cause instead of failing silently, retries recover instead of stalling after a few failures, and a new **Test Web API** button in Preferences → Usage Tracking runs an end-to-end self-check.
+- An **idle, expired Claude token** now shows a calm "no active session" state instead of a misleading error.
+
 ## [4.3.1] - 2026-07-10
 ### Highlights
 - **A rebuilt first run.** The setup experience is now a single, focused screen — live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and in-app **feedback** you can send without leaving the app.
