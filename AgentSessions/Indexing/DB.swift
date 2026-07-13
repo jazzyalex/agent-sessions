@@ -372,6 +372,24 @@ actor IndexDB {
             // Optional.
         }
 
+        // ─────────────────────────────────────────────────────────────────────
+        // GUARDRAIL — reindex markers below must NOT wipe the FTS search corpus.
+        //
+        // These one-time markers re-derive parse-derived `session_meta` columns for
+        // existing installs. To force that re-derive, delete ONLY `session_meta`
+        // (scoped by `source`): the core indexer rebuilds it from files, and the
+        // search corpus (`session_search` / `session_tool_io`) stays queryable the
+        // whole time — its text never depends on these metadata columns. A NEW marker
+        // must use the corpus-preserving pattern — `try reindexSessionMeta(db, sources:)`
+        // (the `static` form, callable here where `handle` is not yet set) — NOT
+        // `DELETE FROM session_search` / `session_tool_io`, which blanks search for the
+        // entire multi-minute reparse. Contract: `MigrationCorpusPreservationTests`.
+        //
+        // The markers below predate this guidance and still wipe the corpus. They are
+        // one-time and already applied on current installs, so they are left as-is
+        // rather than rewritten; do not copy their shape for new schema changes.
+        // ─────────────────────────────────────────────────────────────────────
+
         // Force full reindex to populate parent_session_id and subagent_type for all sessions.
         // v2: extract agent_role from Codex thread_spawn instead of hardcoding "thread_spawn".
         // Runs after all CREATE TABLE statements so fresh databases don't hit "no such table".
@@ -1291,6 +1309,70 @@ actor IndexDB {
         // Note: source values are controlled ASCII identifiers (e.g. "codex"); interpolation is safe here.
         try exec("DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:\(source):%'")
     }
+
+    /// Sanctioned reindex primitive: force a re-derive of `session_meta` for `sources`
+    /// (or every source when `sources` is nil) WITHOUT touching the FTS search corpus
+    /// (`session_search` / `session_tool_io`) or the derived analytics tables
+    /// (`session_days` / `rollups_daily`).
+    ///
+    /// Emptying `session_meta` forces a repopulate on the next refresh — for the sources
+    /// with a core `session_meta` writer (Claude / Codex / OpenClaw) via their "missing
+    /// hydrated" supplement, and for every other source via the search-ingest pass, which
+    /// re-parses and re-upserts the row. Either way:
+    ///   • the search corpus is never emptied — its rows are never deleted, only upserted
+    ///     in place — so search stays queryable the whole time, and
+    ///   • for the core-writer sources the search skip-gate (`files ⨝ session_meta ⨝
+    ///     session_search`) re-matches once the core rebuilds meta, so their corpus is not
+    ///     re-parsed at all; the other sources refresh their corpus in place as meta is
+    ///     rebuilt (a reparse, but search never goes dark).
+    ///
+    /// This is the corpus-preserving alternative to the historical "wipe everything"
+    /// reindex markers in `bootstrap`. A schema change that adds a parse-derived
+    /// `session_meta` column should re-derive via this path; a migration must NOT
+    /// `DELETE FROM session_search` / `session_tool_io`, which blanks search for the
+    /// entire (minutes-long) reparse. Contract locked by `MigrationCorpusPreservationTests`.
+    ///
+    /// A new bootstrap marker cannot use this instance method (`handle` is not assigned
+    /// until after `bootstrap` returns) — it must call the `static` form below, which
+    /// operates on the local `db` pointer via the same static `exec`/`execBind` helpers
+    /// the other migrations use.
+    func reindexSessionMeta(sources: [String]? = nil) throws {
+        guard let db = handle else { throw DBError.openFailed("db closed") }
+        try Self.reindexSessionMeta(db, sources: sources)
+    }
+
+    /// `bootstrap`-usable form of `reindexSessionMeta`. Runs before `handle` is set, so it
+    /// takes the raw `db` pointer and uses the static `exec`/`execBind` helpers — call this
+    /// from a new reindex marker instead of hand-writing (or copy-pasting) corpus wipes.
+    private static func reindexSessionMeta(_ db: OpaquePointer?, sources: [String]? = nil) throws {
+        guard let sources else {
+            try exec(db, "DELETE FROM session_meta;")
+            return
+        }
+        for source in sources {
+            try execBind(db, "DELETE FROM session_meta WHERE source = ?;", source)
+        }
+    }
+
+#if DEBUG
+    /// Test-only row counter over the known index tables. `table` is whitelisted so the
+    /// interpolation below can never carry untrusted input.
+    func rowCountForTesting(table: String, source: String? = nil) throws -> Int {
+        let allowed: Set<String> = ["files", "session_meta", "session_search",
+                                    "session_tool_io", "session_days", "rollups_daily"]
+        guard allowed.contains(table) else {
+            throw DBError.execFailed("rowCountForTesting: table '\(table)' not allowed")
+        }
+        let sql = source == nil
+            ? "SELECT COUNT(*) FROM \(table);"
+            : "SELECT COUNT(*) FROM \(table) WHERE source = ?;"
+        let stmt = try prepare(sql)
+        defer { sqlite3_finalize(stmt) }
+        if let source { sqlite3_bind_text(stmt, 1, source, -1, SQLITE_TRANSIENT) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+#endif
 
     /// Delete DB rows for sessions whose file paths were removed.
     /// Returns the distinct days affected (so callers can recompute rollups).
