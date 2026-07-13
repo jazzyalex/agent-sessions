@@ -91,14 +91,19 @@ struct QuotaData: Equatable {
     ///   spinning "reconnecting" affordance (actively retrying).
     /// - `.needsAction` — auth is alarming (expired / signed out / no CLI) → show
     ///   what's wrong + how to fix; retrying alone won't recover it.
+    /// - `.idle` — signed in, but the saved token lapsed from inactivity → calm
+    ///   "no active session" cell; usage resumes with the next Claude session,
+    ///   so neither the spinner (not retrying its way out) nor the alarm fits.
     enum PresentationState: Equatable {
         case live
         case reconnecting
         case needsAction(UsageAuthStatus)
+        case idle(UsageAuthStatus)
     }
 
     var presentationState: PresentationState {
         if let auth = authStatus, auth.state.isAlarming { return .needsAction(auth) }
+        if let auth = authStatus, auth.state == .idle { return .idle(auth) }
         if !hasUsageData || dataIsStale || transientReason != nil { return .reconnecting }
         return .live
     }
@@ -194,6 +199,11 @@ struct CockpitFooterView: View {
 		                        // to fix, on one line (e.g. "Claude auth expired · claude
 		                        // auth login").
 		                        FooterAuthCell(status: auth)
+		                    case .idle(let auth):
+		                        // Signed in, token lapsed from inactivity: calm cell, no
+		                        // spinner (retrying won't recover it), no Fix chip
+		                        // (nothing is broken — the next session refreshes it).
+		                        FooterIdleChip(provider: q.provider, detail: auth.detail)
 		                    case .reconnecting:
 		                        // Actively retrying: one compact line with spinning arrows,
 		                        // not a broken "-- ↻ Waiting" meter. Escalates to the chip
@@ -285,6 +295,29 @@ private struct FooterAuthCell: View {
     var body: some View {
         AuthRemediationBanner(status: status, chip: true, embedded: true)
             .frame(maxWidth: 360, alignment: .leading)
+    }
+}
+
+/// Calm one-line "no active session" chip for the idle-token state: the account
+/// is signed in but the saved token lapsed from inactivity, and usage resumes
+/// with the next session. Deliberately not FooterAuthCell (nothing to fix) and
+/// not FooterRetryChip (retrying alone never recovers a lapsed token) — the
+/// tooltip carries the full explanation.
+private struct FooterIdleChip: View {
+    let provider: QuotaData.Provider
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "moon.zzz")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("\(provider == .claude ? "Claude" : "Codex") — no active session")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .help(detail)
     }
 }
 

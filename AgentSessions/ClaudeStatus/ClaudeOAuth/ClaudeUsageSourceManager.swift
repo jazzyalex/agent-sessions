@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os.log
 
@@ -174,6 +175,11 @@ actor ClaudeUsageSourceManager {
     /// Gentle, non-alarming caption for a signed-out CLI while the app's saved
     /// token still fetches — a heads-up, not a runway-hiding banner (P5).
     static let cliSignedOutAdvisory = "Claude CLI signed out — usage via the app's saved token"
+    /// Cause-aware Web API captions (2026-07-12). A TCC-denied Safari cookie
+    /// read and a signed-out Safari need OPPOSITE user actions, so they must
+    /// never collapse into a silent "no session cookie" log line.
+    static let webNeedsFullDiskAccessReason = "Web API needs Full Disk Access to read Safari's claude.ai session"
+    static let webNoSafariSessionReason = "No claude.ai session in Safari — sign in at claude.ai"
 
     /// Pure escalation predicate: escalate `.expired` to the banner only once a
     /// verified 401 has persisted from `first401At` to at least `threshold` later.
@@ -189,6 +195,36 @@ actor ClaudeUsageSourceManager {
     /// (the banner speaks for itself).
     static func expiredPublication(escalated: Bool) -> (authState: UsageAuthState?, reason: String?) {
         escalated ? (.expired, nil) : (nil, transientUnavailableReason)
+    }
+
+    /// Idle-aware routing for the verified-401-with-token branch (2026-07-12).
+    /// A CLI that still reports signed-in while the SAME token keeps 401ing is a
+    /// routine inactivity lapse — nothing refreshes the access token between
+    /// sessions (delegated `claude auth status` doesn't, Desktop's own store is
+    /// separate) — so publish the calm `.idle` verdict instead of the alarming
+    /// expired banner. `freshTokenStill401s` (an externally refreshed token that
+    /// is STILL rejected) or a CLI that stops answering signed-in is genuinely
+    /// broken and falls back to the debounced expired path.
+    static func expired401Publication(cli: CLIAuthStatus,
+                                      freshTokenStill401s: Bool,
+                                      escalated: Bool) -> (authState: UsageAuthState?, reason: String?) {
+        if cli == .signedIn && !freshTokenStill401s { return (.idle, nil) }
+        return expiredPublication(escalated: escalated)
+    }
+
+    /// Pure remap for `emitAuthAvailability`: while the published verdict is the
+    /// calm `.idle`, a suppressed-fallback dead end (tmux/web can't serve an
+    /// expired token — the same lapsed-idle token) must re-emit idle, never
+    /// escalate it back to the alarming banner.
+    static func effectiveEmitState(_ state: UsageAuthState,
+                                   lastPublished: UsageAuthState?) -> UsageAuthState {
+        (state == .expired && lastPublished == .idle) ? .idle : state
+    }
+
+    /// Short non-reversible fingerprint of an access token, kept only to detect
+    /// "a DIFFERENT token also 401s" across polls. Never logged, never persisted.
+    static func tokenFingerprint(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Pure publication routing for the classifier branch: an alarming verdict
@@ -235,6 +271,17 @@ actor ClaudeUsageSourceManager {
     /// on a successful fetch and whenever the failure path takes the non-401
     /// classifier branch (a different cause the classifier's own debounce owns).
     private var first401At: Date?
+    /// Fingerprint of the token that took the FIRST verified 401 of the current
+    /// episode. A later 401 with a DIFFERENT fingerprint means an externally
+    /// refreshed token is still rejected — genuinely broken, never the calm
+    /// `.idle` presentation. Cleared with `first401At`.
+    private var episodeFirst401TokenHash: String?
+    /// The auth verdict most recently PUBLISHED through the availability channel
+    /// (nil until the first publish). Routes the tmux-suppression emit and the
+    /// escalation timer: while the published verdict is the calm `.idle`, a
+    /// suppressed-fallback dead end must not re-raise the alarming banner for
+    /// the same lapsed-idle token.
+    private var lastPublishedAuthState: UsageAuthState?
     /// One-shot timer that re-publishes the already-verified `.expired` verdict at
     /// `first401At + expiredEscalationThreshold`. Without it the escalation is only
     /// re-evaluated on the NEXT failed poll — and the post-cold-start retry cadence
@@ -259,6 +306,12 @@ actor ClaudeUsageSourceManager {
     private var webFailureCount = 0
     private var usingWebFallback = false
     private var webRefreshTask: Task<Void, Never>?
+    /// Reentrancy guard for `performWebFetch`. Visibility transitions and the
+    /// fallback activations all schedule instant refreshes; without the guard a
+    /// burst of them runs concurrent fetches and burns webFailureCount to the
+    /// tmux-handoff threshold in milliseconds (observed live: 3 failures in
+    /// 350ms at launch).
+    private var webFetchInFlight = false
 
     private var webApiEnabled: Bool {
         UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
@@ -410,6 +463,7 @@ actor ClaudeUsageSourceManager {
             oauthRateLimitRetryDeadline = nil
             didAttemptDelegatedRefresh = false
             first401At = nil
+            episodeFirst401TokenHash = nil
             cancelExpiredEscalationTimer()
             lastFailureFingerprint = nil
             credentialWatchTask?.cancel()
@@ -420,7 +474,7 @@ actor ClaudeUsageSourceManager {
             // F5: a failure→success transition may mean the user just re-logged in.
             // Drop the throttled CLI-status cache so the authoritative probe below
             // re-runs fresh instead of serving a stale `.signedOut`/`.expired` for
-            // up to the 120s throttle window after recovery.
+            // up to the reprobe-throttle window (15 min) after recovery.
             if recoveredFromFailure { cliStatusCache = nil }
 
             if !fromCache, usingWebFallback && mode != .webOnly {
@@ -456,6 +510,7 @@ actor ClaudeUsageSourceManager {
             // stale firstMissAt can't survive a healthy poll and false-fire later.
             authClassifier.reset()
             currentAuthState = .ok
+            lastPublishedAuthState = .ok
             availabilityHandler?(ClaudeServiceAvailability(
                 cliUnavailable: false, tmuxUnavailable: false,
                 loginRequired: false, setupRequired: false, setupHint: nil,
@@ -486,8 +541,11 @@ actor ClaudeUsageSourceManager {
             // classifyAndPublishAuthState (invoked first inside handleOAuthFailure)
             // is now the single 401 publisher — debounced via first401At. The old
             // immediate CLI-auth-required emit (stale login hint that bypassed the
-            // debounce) has been removed.
-            await handleOAuthFailure(reason: "401 unauthorized")
+            // debounce) has been removed. The rejected token's fingerprint rides
+            // along so the idle-aware routing can tell "the same lapsed token
+            // keeps failing" (calm) from "a fresh token still fails" (alarm).
+            await handleOAuthFailure(reason: "401 unauthorized",
+                                     failedTokenHash: Self.tokenFingerprint(resolved.token))
 
         } catch ClaudeOAuthUsageClientError.rateLimited(let retryAfter) {
             let delay = retryAfter + 10
@@ -539,7 +597,7 @@ actor ClaudeUsageSourceManager {
         }
     }
 
-    private func handleOAuthFailure(reason: String) async {
+    private func handleOAuthFailure(reason: String, failedTokenHash: String? = nil) async {
         oauthRateLimitRetryDeadline = nil
         oauthFailureCount += 1
         os_log("ClaudeOAuth: failure #%d: %{public}@", log: log, type: .info, oauthFailureCount, reason)
@@ -550,7 +608,8 @@ actor ClaudeUsageSourceManager {
         // call `activateTmuxFallback`. This makes `currentAuthState` reflect THIS poll
         // so the activation guard sees the up-to-date verdict rather than a pre-classify
         // one. `was401` distinguishes an expired-but-present token from a truly absent one.
-        await classifyAndPublishAuthState(was401: reason.contains("401"))
+        await classifyAndPublishAuthState(was401: reason.contains("401"),
+                                          failedTokenHash: failedTokenHash)
 
         switch oauthFailureCount {
         case 1:
@@ -624,7 +683,7 @@ actor ClaudeUsageSourceManager {
     /// token vanished — or any other failure — defers to the stateful classifier.
     /// Then it publishes the verdict and tears down a live tmux fallback if the
     /// new state is one the probe must never run in (signed out / CLI missing).
-    private func classifyAndPublishAuthState(was401: Bool) async {
+    private func classifyAndPublishAuthState(was401: Bool, failedTokenHash: String? = nil) async {
         let gen = nextAuthGeneration()
 
         // Token evidence (cheap, no subprocess): keychain read + creds-file check.
@@ -639,6 +698,7 @@ actor ClaudeUsageSourceManager {
                                         envTokenPresent: envTokenPresent)
 
         let state: UsageAuthState
+        var cli401Status: CLIAuthStatus = .unknown
         if was401 && hasToken {
             // A verified 401 with a token still present = expired credentials.
             // A present token is not an absence, so clear the debounce clock —
@@ -646,6 +706,11 @@ actor ClaudeUsageSourceManager {
             // stale firstMissAt behind to false-fire .signedOut on a later miss.
             state = .expired
             authClassifier.reset()
+            // The idle-aware presentation below needs the authoritative CLI
+            // answer: signed-in + same failing token = calm idle lapse; anything
+            // else keeps the alarming expired path. Throttled (15 min), and
+            // awaited BEFORE the generation guard like every other await here.
+            cli401Status = await throttledClaudeAuthStatus()
         } else {
             // Non-401 failure, or a 401 after the token vanished (really signed
             // out): run the full stateful classifier for a debounced verdict.
@@ -690,12 +755,31 @@ actor ClaudeUsageSourceManager {
         let published: (authState: UsageAuthState?, reason: String?)
         if was401 && hasToken {
             let now = Date()
-            if first401At == nil { first401At = now }
+            if first401At == nil {
+                first401At = now
+                episodeFirst401TokenHash = failedTokenHash
+            }
+            // A 401 from a DIFFERENT token than the one that opened the episode
+            // means something external refreshed the credentials and the fresh
+            // token is STILL rejected — genuinely broken, never a calm lapse.
+            let freshTokenStill401s = failedTokenHash != nil
+                && episodeFirst401TokenHash != nil
+                && failedTokenHash != episodeFirst401TokenHash
+            // A fresh token failing flips the episode from calm to genuine —
+            // drop the idle latch NOW so the armed escalation one-shot can fire
+            // on schedule (its guard bails while the latch reads `.idle`; the
+            // pre-escalation publish below is caption-only and wouldn't clear it).
+            if freshTokenStill401s, lastPublishedAuthState == .idle {
+                lastPublishedAuthState = nil
+            }
             let escalated = Self.shouldEscalateExpired(first401At: first401At, now: now,
                                                        threshold: Self.expiredEscalationThreshold)
-            published = Self.expiredPublication(escalated: escalated)
-            if escalated {
-                // A regular poll escalated on its own — the one-shot is moot.
+            published = Self.expired401Publication(cli: cli401Status,
+                                                   freshTokenStill401s: freshTokenStill401s,
+                                                   escalated: escalated)
+            if published.authState == .idle || escalated {
+                // Idle: the calm verdict owns the surface — the one-shot must not
+                // later replace it with the banner. Escalated: the one-shot is moot.
                 cancelExpiredEscalationTimer()
             } else if let first401At {
                 // Pre-escalation: arm the one-shot so the `.expired` banner fires
@@ -708,9 +792,11 @@ actor ClaudeUsageSourceManager {
             // vanished) — the classifier's own debounce owns this path, so clear
             // the expiry clock.
             first401At = nil
+            episodeFirst401TokenHash = nil
             cancelExpiredEscalationTimer()
             published = Self.failurePublication(verdict: state)
         }
+        lastPublishedAuthState = published.authState ?? lastPublishedAuthState
 
         // Legacy bools derive from the PUBLISHED authState (nil pre-escalation) so
         // "calm means calm". A pre-escalation emit (authState nil + reason) is
@@ -759,6 +845,10 @@ actor ClaudeUsageSourceManager {
         expiredEscalationTask = nil
         guard shouldRun else { return }
         guard let first401At, currentAuthState == .expired else { return }
+        // A poll that published the calm `.idle` verdict cancels this timer, but
+        // guard against the armed-then-idled race: the idle surface must never be
+        // clobbered by a late banner for the same lapsed token.
+        guard lastPublishedAuthState != .idle else { return }
         guard Self.shouldEscalateExpired(first401At: first401At, now: Date(),
                                          threshold: Self.expiredEscalationThreshold) else { return }
         os_log("ClaudeOAuth: expired-escalation timer fired — publishing .expired banner",
@@ -766,6 +856,7 @@ actor ClaudeUsageSourceManager {
         // Mirrors the escalated `expiredPublication` emit in `classifyAndPublishAuthState`
         // exactly: authState `.expired`, no caption (the banner speaks for itself),
         // legacy bools all false, not caption-only.
+        lastPublishedAuthState = .expired
         availabilityHandler?(ClaudeServiceAvailability(
             cliUnavailable: false,
             tmuxUnavailable: false,
@@ -779,7 +870,7 @@ actor ClaudeUsageSourceManager {
     }
 
     /// Throttled authoritative `claude auth status` probe for the SUCCESS path.
-    /// Re-probes at most once per `cliStatusReprobeInterval` (120s); between
+    /// Re-probes at most once per `cliStatusReprobeInterval` (15 min); between
     /// probes returns the cached value; `.unknown` until the first probe. The
     /// probe is subprocess-based but async/cooperative (never blocks the actor),
     /// and it never reports a confident `.signedOut` on ambiguity/timeout.
@@ -936,10 +1027,31 @@ actor ClaudeUsageSourceManager {
 
     private func performWebFetch() async {
         guard shouldRun, usingWebFallback || mode == .webOnly else { return }
+        guard !webFetchInFlight else { return }
+        webFetchInFlight = true
+        defer { webFetchInFlight = false }
 
-        guard let cookie = await webCookieResolver.resolve() else {
-            os_log("ClaudeOAuth: web API — no session cookie available", log: log, type: .info)
-            await handleWebFailure(reason: "no session cookie")
+        let cookie: ClaudeWebCookieResolver.ResolvedCookie
+        switch await webCookieResolver.resolveDetailed() {
+        case .found(let resolved):
+            cookie = resolved
+        case .permissionDenied:
+            // TCC blocked the Safari cookie read — retrying can't fix this; the
+            // user must grant Full Disk Access. Say so on the surface (calm
+            // caption, never an auth banner) instead of dying as a log line.
+            os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
+                   log: log, type: .info)
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: Self.webNeedsFullDiskAccessReason, captionOnly: true))
+            await handleWebFailure(reason: "cookie read permission denied")
+            return
+        case .noSession:
+            os_log("ClaudeOAuth: web API — no claude.ai session in Safari", log: log, type: .info)
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: Self.webNoSafariSessionReason, captionOnly: true))
+            await handleWebFailure(reason: "no claude.ai session in Safari")
             return
         }
 
@@ -956,6 +1068,12 @@ actor ClaudeUsageSourceManager {
             webFailureCount = 0
             publish(snapshot)
             await store.save(snapshot)
+            // Clear any lingering cause caption (FDA / sign-in hint) — in
+            // webOnly mode no OAuth emit ever would. Caption-only: the auth
+            // banner and legacy bools are someone else's state.
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: nil, captionOnly: true))
             os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
                    log: log, type: .info, fromCache ? "true" : "false")
             scheduleWebRefresh(delay: Self.refreshInterval)
@@ -983,7 +1101,15 @@ actor ClaudeUsageSourceManager {
             os_log("ClaudeOAuth: web API failed %d times, activating tmux fallback",
                    log: log, type: .info, webFailureCount)
             await activateTmuxFallback(reason: "web API failure #\(webFailureCount)")
-        } else {
+        }
+        // Keep the web loop alive unless tmux ACTUALLY took over (activation is
+        // usually suppressed: auth-gated or opt-in OFF). The old code stopped
+        // rescheduling after the tmux handoff attempt, stranding
+        // `usingWebFallback` with no timer — the web path never retried again,
+        // even after the user fixed the cause (granted Full Disk Access /
+        // signed in at claude.ai). When tmux did take over, OAuth recovery
+        // tears it down and web re-arms via the normal fallback activation.
+        if !usingTmuxFallback {
             scheduleWebRefresh(delay: Self.refreshInterval)
         }
     }
@@ -993,13 +1119,16 @@ actor ClaudeUsageSourceManager {
     /// Publish an auth verdict through the availability channel so a suppressed or
     /// aborted probe raises the banner instead of failing silently (P4 Task 12).
     private func emitAuthAvailability(_ state: UsageAuthState) {
+        // Idle-aware remap — see `effectiveEmitState` (pure, tested).
+        let effective = Self.effectiveEmitState(state, lastPublished: lastPublishedAuthState)
+        lastPublishedAuthState = effective
         availabilityHandler?(ClaudeServiceAvailability(
-            cliUnavailable: state == .cliNotInstalled,
+            cliUnavailable: effective == .cliNotInstalled,
             tmuxUnavailable: false,
-            loginRequired: state == .signedOut,
+            loginRequired: effective == .signedOut,
             setupRequired: false,
             setupHint: nil,
-            authState: state))
+            authState: effective))
     }
 
     private func activateTmuxFallback(reason: String) async {

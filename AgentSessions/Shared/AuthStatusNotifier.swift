@@ -42,8 +42,8 @@ final class AuthEpisodeStore {
             d.set(true, forKey: key(p)); return true
         case .ok:
             d.set(false, forKey: key(p)); return false   // only a definite recovery resets the episode
-        case .unknown, .needsSetup:
-            return false                                  // ambiguous: neither notify nor reset
+        case .unknown, .needsSetup, .idle:
+            return false                                  // ambiguous/calm: neither notify nor reset
         }
     }
     func reset(provider p: AuthProvider) { UserDefaults.standard.set(false, forKey: key(p)) }

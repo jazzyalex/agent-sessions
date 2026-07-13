@@ -84,6 +84,107 @@ final class RunwayAuthDegradationTests: XCTestCase {
                        .showCommand("codex login"))
     }
 
+    // MARK: - Idle-token presentation (2026-07-12)
+    //
+    // A verified 401 while the CLI still reports signed-in and the SAME token
+    // keeps failing is a routine inactivity lapse (nothing refreshes the access
+    // token between sessions) — publish the calm `.idle` verdict, never the
+    // alarming "auth expired / Fix…" banner. Only a DIFFERENT (externally
+    // refreshed) token that still 401s, or a CLI that stops reporting
+    // signed-in, falls back to the alarming expired path.
+
+    func testExpired401PublicationSignedInSameTokenIsIdle() {
+        let p = ClaudeUsageSourceManager.expired401Publication(
+            cli: .signedIn, freshTokenStill401s: false, escalated: false)
+        XCTAssertEqual(p.authState, .idle)
+        XCTAssertNil(p.reason)
+        // Idle outlasts the escalation threshold: a token can stay lapsed for
+        // days while the CLI is signed in — that is still not an alarm.
+        let p2 = ClaudeUsageSourceManager.expired401Publication(
+            cli: .signedIn, freshTokenStill401s: false, escalated: true)
+        XCTAssertEqual(p2.authState, .idle)
+    }
+
+    func testExpired401PublicationFreshTokenStill401sTakesExpiredPath() {
+        let escalated = ClaudeUsageSourceManager.expired401Publication(
+            cli: .signedIn, freshTokenStill401s: true, escalated: true)
+        XCTAssertEqual(escalated.authState, .expired)
+        XCTAssertNil(escalated.reason)
+        let pre = ClaudeUsageSourceManager.expired401Publication(
+            cli: .signedIn, freshTokenStill401s: true, escalated: false)
+        XCTAssertNil(pre.authState)
+        XCTAssertEqual(pre.reason, ClaudeUsageSourceManager.transientUnavailableReason)
+    }
+
+    func testExpired401PublicationNonSignedInCLIFallsBackToExpiredPath() {
+        for cli in [CLIAuthStatus.signedOut, .unknown, .cliMissing] {
+            let p = ClaudeUsageSourceManager.expired401Publication(
+                cli: cli, freshTokenStill401s: false, escalated: true)
+            XCTAssertEqual(p.authState, .expired, "cli \(cli) must keep the alarming path")
+        }
+    }
+
+    func testIdleStateIsCalmWithNoRemediation() {
+        XCTAssertFalse(UsageAuthState.idle.isAlarming)
+        let s = UsageAuthStatus.make(provider: .claude, state: .idle)
+        XCTAssertEqual(s.remediation, .none)
+        XCTAssertTrue(s.headline.contains("No active"))
+        XCTAssertTrue(s.detail.contains("next Claude session"))
+        XCTAssertEqual(s.chipLabel, "")
+    }
+
+    /// A suppressed-fallback dead end re-emits the calm idle verdict instead of
+    /// escalating the same lapsed token back to the alarming banner — and only
+    /// remaps `.expired`-over-`.idle`; every other combination passes through.
+    func testEffectiveEmitStatePreservesIdleOnlyForExpired() {
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.expired, lastPublished: .idle), .idle)
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.expired, lastPublished: .ok), .expired)
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.expired, lastPublished: nil), .expired)
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.signedOut, lastPublished: .idle), .signedOut)
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.cliNotInstalled, lastPublished: .idle), .cliNotInstalled)
+        XCTAssertEqual(ClaudeUsageSourceManager.effectiveEmitState(.idle, lastPublished: .idle), .idle)
+    }
+
+    func testTokenFingerprintStableAndDistinct() {
+        XCTAssertEqual(ClaudeUsageSourceManager.tokenFingerprint("sk-a"),
+                       ClaudeUsageSourceManager.tokenFingerprint("sk-a"))
+        XCTAssertNotEqual(ClaudeUsageSourceManager.tokenFingerprint("sk-a"),
+                          ClaudeUsageSourceManager.tokenFingerprint("sk-b"))
+    }
+
+    /// The idle presentation wins over the reconnecting spinner (retrying alone
+    /// never recovers a lapsed token), but an alarming verdict still wins over idle.
+    func testQuotaDataIdlePresentationOrdering() {
+        var q = QuotaData(provider: .claude, fiveHourRemainingPercent: 0, fiveHourResetText: "",
+                          weekRemainingPercent: 0, weekResetText: "")
+        q.authStatus = .make(provider: .claude, state: .idle)
+        q.dataIsStale = true
+        guard case .idle = q.presentationState else {
+            return XCTFail("expected .idle, got \(q.presentationState)")
+        }
+        q.authStatus = .make(provider: .claude, state: .expired)
+        guard case .needsAction = q.presentationState else {
+            return XCTFail("alarming must win over idle, got \(q.presentationState)")
+        }
+    }
+
+    // MARK: - Web API cause-aware cookie read (2026-07-12)
+
+    /// TCC denial (needs Full Disk Access) must classify as a permission
+    /// problem; a missing file or network-ish error must not.
+    func testCookiePermissionDenialClassification() {
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)))
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))))
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))))
+        XCTAssertFalse(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)))
+        XCTAssertFalse(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)))
+    }
+
     // MARK: - Task 14: auto-mode interactive fallback is opt-in
 
     func testTmuxFallbackPermitted() {

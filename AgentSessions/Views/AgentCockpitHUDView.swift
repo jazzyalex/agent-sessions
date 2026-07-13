@@ -4197,6 +4197,8 @@ private struct HUDLimitsRowsPanel: View {
                 // matches the footer's FooterAuthCell language and fits the QM's
                 // content-hugging width (the full headline banner would clip).
                 HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+            case .idle(let auth):
+                HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
                 HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged)
             case .live:
@@ -4449,6 +4451,13 @@ private struct HUDLimitsDetailPanel: View {
                 case .needsAction(let auth):
                     HStack(spacing: 0) {
                         HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 22)
+                case .idle(let auth):
+                    HStack(spacing: 0) {
+                        HUDLimitsIdleCell(source: entry.source, detail: auth.detail)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
@@ -5046,6 +5055,10 @@ private struct HUDLimitsBarContent: View {
                     // the full (two-line) banner would overflow. Keep the provider
                     // icon so the alarming provider stays attributable.
                     HUDLimitsAuthCell(source: entry.source, status: auth)
+                case .idle(let auth):
+                    // Signed in, token lapsed from inactivity: calm cell — no
+                    // spinner, no Fix chip; the next session refreshes it.
+                    HUDLimitsIdleCell(source: entry.source, detail: auth.detail)
                 case .reconnecting:
                     // Actively retrying: spinner + quiet caption, never a broken
                     // "0% / --" meter (mirrors the footer's FooterRetryChip).
@@ -5082,6 +5095,31 @@ private struct HUDLimitsAuthCell: View {
             HUDLimitsProviderIcon(source: source)
             AuthRemediationBanner(status: status, compact: !chip, chip: chip, embedded: true)
         }
+    }
+}
+
+/// Calm "no active session" cell for the HUD limits surfaces: provider icon +
+/// moon glyph + quiet caption. The idle-token sibling of HUDLimitsRetryCell —
+/// no spinner (retrying alone never recovers a lapsed token) and no remediation
+/// chrome (nothing is broken; the next Claude session refreshes the token).
+/// The tooltip carries the full explanation.
+private struct HUDLimitsIdleCell: View {
+    let source: UsageTrackingSource
+    var detail: String = ""
+    var enlarged: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HUDLimitsProviderIcon(source: source)
+            Image(systemName: "moon.zzz")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("no active session")
+                .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .help(detail.isEmpty ? "Usage will update after the next session." : detail)
     }
 }
 

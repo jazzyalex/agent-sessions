@@ -278,6 +278,12 @@ final class StatusItemController: NSObject {
                 }
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                // Calm idle explainer — the "No active session" reset lines above
+                // say what; this one line says when it comes back. Mirrors the
+                // footer / HUD idle cells' tooltip.
+                if let auth = claudeStatus.authStatus, auth.state == .idle {
+                    menu.addItem(makeTitleItem(auth.detail))
+                }
                 // Calm transient caption (P2) — beneath the Claude meters, no alarm.
                 if let reason = claudeStatus.transientReason {
                     menu.addItem(makeTitleItem(reason))
@@ -517,6 +523,8 @@ final class StatusItemController: NSObject {
         switch QuotaData.claude(from: claudeStatus).presentationState {
         case .needsAction:
             return "\(label) --  Usage unavailable"
+        case .idle:
+            return "\(label) --  No active session"
         case .reconnecting:
             return "\(label) --  reconnecting…"
         case .live:

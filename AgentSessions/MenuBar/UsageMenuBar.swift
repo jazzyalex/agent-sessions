@@ -280,6 +280,18 @@ private struct UsageMeterMenuBarLabel: View {
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
+                case .idle:
+                    // Calm moon + provider name — signed in, token lapsed from
+                    // inactivity; the dropdown carries the one-line explanation.
+                    // Deliberately not the amber ⚠ (nothing to fix).
+                    HStack(spacing: 3) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(q.provider == .claude ? "Claude" : "Codex")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
                 case .reconnecting:
                     // Spinning arrows + provider name — the footer's "reconnecting"
                     // affordance in a menu-bar-sized form.
