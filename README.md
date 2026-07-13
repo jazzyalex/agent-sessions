@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.1/AgentSessions-4.3.1.dmg"><b>Download Agent Sessions 4.3.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.2/AgentSessions-4.3.2.dmg"><b>Download Agent Sessions 4.3.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.3.1** — A rebuilt first-run experience (single-screen setup, a What's New panel, in-app feedback) and one-click **Fix** for usage tracking: whenever Agent Sessions can't read your Claude or Codex usage, a guided dialog explains what's wrong and walks you through getting it back. [See what's new ↓](#whats-new-in-431)
+> **New in 4.3.2** — A much quieter Quota Meter: the usage meters stop re-parsing your whole session history every few seconds while idle, cutting idle CPU from roughly 25–41% down to about 11%. Plus a more resilient Claude Web API path and a calm "no active session" state for expired logins. [See what's new ↓](#whats-new-in-432)
 
 ## Overview
 
@@ -72,21 +72,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.3.1
+## What's New in 4.3.2
 
-**TL;DR** - A rebuilt first run and one-click "Fix" for usage tracking. Setup is now a single, focused screen with a What's New panel and in-app feedback; and whenever Agent Sessions can't read your Claude or Codex usage, a **Fix** button walks you through getting it back.
+**TL;DR** - A much quieter Quota Meter. The usage meters no longer re-read and re-parse your entire session history every few seconds while idle, so your Mac stays cool and quiet — plus a more resilient Claude Web API path and a calm state for expired logins.
 
-**Highlights:** The first-run experience is one clean screen — a live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and native **feedback** you can send without leaving the app. When usage tracking can't reach your account (an expired login or a signed-out CLI), every surface — menu bar, cockpit meter, window footer — shows a **Fix…** button that opens a guided dialog explaining the problem and the solutions to try in order (re-authenticate, then the Web API or CLI-probe fallback, then recheck). Expired Claude no longer reads as a misleading "0%", usage recovers after `claude auth login` without relaunching, and the Session Runway "+N sessions" overflow now counts hidden idle sessions.
+**Highlights:** The usage surfaces used to re-parse the whole session corpus on every 5-second refresh; they now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release). The "active burn" shimmer pauses when nothing is burning and honors **Reduce Motion**. On the Claude side, the Web API path is far more resilient — it surfaces a Full Disk Access problem clearly instead of failing silently, recovers from retries instead of stalling, and adds a **Test Web API** self-check in Preferences. An idle, expired Claude token now shows a calm "no active session" state instead of a misleading error.
 
-New in 4.3.1:
-- **Rebuilt first run** — a single-screen setup, a What's New panel on update, and in-app feedback.
-- **One-click "Fix" for usage tracking** — a guided dialog on every usage surface that explains what's wrong and walks through the fixes in order.
-- **Honest usage states** — an expired Claude login shows "reconnecting" and then "sign-in needed" instead of a misleading "0%".
-- **Faster recovery** — usage returns after `claude auth login` without relaunching, and the "session expired" prompt now appears in ~90 seconds.
-- **Runway fixes** — "+N sessions" overflow counts hidden idle sessions, and the "active burn" countdown no longer lingers after a session goes idle.
-- **Non-ASCII transcripts** — sessions with multi-byte content are no longer hidden by a too-strict decode.
+New in 4.3.2:
+- **A much quieter Quota Meter** — usage meters cache each file's parse instead of re-reading your whole history every 5 seconds, cutting idle CPU from ~25–41% to ~11%.
+- **Reduce Motion aware** — the "active burn" shimmer runs only while a session is burning and honors the system Reduce Motion setting.
+- **Resilient Claude Web API** — a Full Disk Access problem now shows a clear cause instead of failing silently, retries recover instead of stalling, and a new **Test Web API** button runs an end-to-end self-check.
+- **Calm expired state** — an idle, expired Claude token shows "no active session" instead of a misleading error.
 
-Previous release — 4.3: Usage tracking that never cries wolf — real signed-out / expired-token detection, calm degradation, and in-app sign-in remediation. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.3.1: A rebuilt first run and one-click "Fix" for usage tracking. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -140,7 +138,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.3.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.1/AgentSessions-4.3.1.dmg)
+1. [Download AgentSessions-4.3.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.2/AgentSessions-4.3.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

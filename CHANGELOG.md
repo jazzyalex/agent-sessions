@@ -24,6 +24,14 @@ All notable changes to this project will be documented in this file.
 - Session view: restored visible click-and-drag text selection in the Rich Session transcript.
 - Filter: archived Codex sessions now appear in the Archived filter regardless of (often NULL) surface metadata — the filter keys off file path instead.
 
+## [4.3.2] - 2026-07-12
+### Highlights
+- **A much quieter Quota Meter.** The usage meters were re-reading and re-parsing your entire session history every few seconds while idle. They now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release) so your machine stays cool and quiet. The "active burn" shimmer also pauses when nothing is burning and honors **Reduce Motion**.
+
+### Bug Fixes
+- Claude usage over the **Web API** path is far more resilient: when Full Disk Access isn't granted it now shows a clear cause instead of failing silently, retries recover instead of stalling after a few failures, and a new **Test Web API** button in Preferences → Usage Tracking runs an end-to-end self-check.
+- An **idle, expired Claude token** now shows a calm "no active session" state instead of a misleading error.
+
 ## [4.2] - 2026-07-06
 ### Highlights
 - **A brand-new transcript.** The session transcript is rebuilt as a clean, readable **Session view** — structured message cards instead of a raw terminal dump. Assistant replies render as real Markdown (headings, lists, GFM tables, fenced code blocks, blockquotes, inline code), tool calls fold into tidy cards you can expand, and inline images and review summaries appear inline. File paths are clickable — click one to open it in your editor — and every turn and tool call shows a duration badge so you can see where the time went.
