@@ -2545,8 +2545,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         recomputeDebouncer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            let bgQueue = FeatureFlags.backgroundIngestQueue
-            bgQueue.async {
+            // recomputeNow() is only ever triggered by discrete user actions (filter
+            // toggles, favorites, sort, project-filter clear) -- run at .userInitiated so
+            // it doesn't queue behind background ingest (also .utility) on large corpora.
+            let queue = FeatureFlags.interactiveFilterRecomputeQueue
+            queue.async {
                 let results = self.applyFiltersAndSort(to: self.allSessions)
                 DispatchQueue.main.async {
                     self.sessions = results
@@ -2555,7 +2558,9 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
         }
         recomputeDebouncer = work
-        let delay: TimeInterval = FeatureFlags.increaseFilterDebounce ? 0.28 : 0.15
+        // Discrete toggles (not typing) drive recomputeNow(), so a short debounce still
+        // coalesces rapid multi-clicks without adding perceptible latency to a single one.
+        let delay: TimeInterval = FeatureFlags.fastFilterRecomputeDebounce ? 0.08 : (FeatureFlags.increaseFilterDebounce ? 0.28 : 0.15)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
@@ -2687,9 +2692,12 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hasCommandsOnly {
             results = results.filter { s in
                 // For command-capable JSONL providers, require evidence of commands/tool calls (or lightweightCommands>0).
+                // hasToolCallEvent is precomputed once at Session construction from `events`
+                // (Session.swift), so this no longer rescans the full events array per session
+                // per recompute.
                 if s.source == .codex || s.source == .opencode || s.source == .hermes || s.source == .copilot || s.source == .droid || s.source == .openclaw || s.source == .cursor || s.source == .pi {
                     if !s.events.isEmpty {
-                        return s.events.contains { $0.kind == .tool_call }
+                        return s.hasToolCallEvent
                     } else {
                         return (s.lightweightCommands ?? 0) > 0
                     }
@@ -2697,7 +2705,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 // For Claude and Antigravity, treat sessions as command-bearing only when we see tool_call events.
                 if s.source == .claude || s.source == .antigravity {
                     if s.events.isEmpty { return false }
-                    return s.events.contains { $0.kind == .tool_call }
+                    return s.hasToolCallEvent
                 }
                 return true
             }

@@ -3736,6 +3736,14 @@ enum HUDRunwayRequestBuilder {
     }
 }
 
+/// One shared 5s clock for every HUD limits panel. The collapsed bar and the
+/// expanded rows panel both drive their `clockNow` (and the runway refresh keyed
+/// off it) from this single publisher, so they wake the main run loop together
+/// on one timer source instead of two independent, phase-offset 5s timers.
+private enum HUDSharedClock {
+    static let fiveSecond = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+}
+
 private struct HUDLimitsBar: View {
     let activeRows: [HUDRow]
     @EnvironmentObject private var codexUsageModel: CodexUsageModel
@@ -3938,7 +3946,7 @@ private struct HUDLimitsBar: View {
         }
     }
 
-    private static let clockTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private static let clockTimer = HUDSharedClock.fiveSecond
 
     private var shouldShowExpandedPanel: Bool {
         isHovering || isHoveringExpandedPanel || autoExpandNeeded
@@ -4224,7 +4232,7 @@ private struct HUDLimitsRowsPanel: View {
         }
     }
 
-    private static let clockTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private static let clockTimer = HUDSharedClock.fiveSecond
 
     private var emptyRow: some View {
         HStack(spacing: 8) {
@@ -4565,15 +4573,50 @@ private struct HUDLimitsDetailPanel: View {
     }
 }
 
+/// Drives the runway load-bar shimmer with a real 0.8s timer that only runs
+/// while a burning row is on screen. Scheduling and invalidating a `Timer`
+/// (rather than gating an always-on publisher) means an idle runway wakes the
+/// main run loop zero times; the wave resumes cleanly the moment a burn returns.
+private final class RunwayShimmerTicker: ObservableObject {
+    @Published private(set) var tick: Int = 0
+    private var timer: Timer?
+
+    func setActive(_ active: Bool) {
+        if active {
+            guard timer == nil else { return }
+            let timer = Timer(timeInterval: 0.8, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.tick = (self.tick + 1) % 1024
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        } else {
+            timer?.invalidate()
+            timer = nil
+        }
+    }
+
+    deinit { timer?.invalidate() }
+}
+
 private struct HUDRunwayPanel: View {
     let snapshot: CodexRunwaySnapshot
     let now: Date
     var agentLabel: String = "Codex"
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
-    @State private var animationTick: Int = 0
+    // The shimmer ticker runs a real 0.8s timer ONLY while a row is actively
+    // burning — an empty/idle/waiting bar ignores the tick, so a static runway
+    // now issues zero periodic wakeups instead of 75/min. Reduce Motion pauses it.
+    @StateObject private var shimmer = RunwayShimmerTicker()
 
-    private static let loadTimer = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
+    /// A row whose load bar is actually filled and animated. Waiting/idle rows
+    /// keep an empty track, so they need no shimmer.
+    private var hasAnimatedBar: Bool {
+        snapshot.rows.contains { $0.confidence == .direct || $0.confidence == .mixed }
+            || (snapshot.burstSummary.map { $0.quotaMinutesPerHour > 0 } ?? false)
+    }
 
     private var runwayFontSize: CGFloat { QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged) }
     private var runwayRowHeight: CGFloat { QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged) }
@@ -4616,9 +4659,10 @@ private struct HUDRunwayPanel: View {
                 .fill(Color.primary.opacity(0.08))
                 .frame(height: 0.5)
         }
-        .onReceive(Self.loadTimer) { _ in
-            animationTick = (animationTick + 1) % 1024
-        }
+        .onAppear { shimmer.setActive(hasAnimatedBar && !reduceMotion) }
+        .onDisappear { shimmer.setActive(false) }
+        .onChange(of: hasAnimatedBar) { _, active in shimmer.setActive(active && !reduceMotion) }
+        .onChange(of: reduceMotion) { _, reduced in shimmer.setActive(hasAnimatedBar && !reduced) }
     }
 
     /// Burn-rate cell. A finished session shows a calm dash; everything else
@@ -4651,7 +4695,7 @@ private struct HUDRunwayPanel: View {
                     quotaMinutesPerHour: row.quotaMinutesPerHour,
                     maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
                     confidence: row.confidence,
-                    animationTick: animationTick,
+                    animationTick: shimmer.tick,
                     index: index
                 )
             }
@@ -4675,7 +4719,7 @@ private struct HUDRunwayPanel: View {
                     quotaMinutesPerHour: summary.quotaMinutesPerHour,
                     maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
                     confidence: confidence,
-                    animationTick: animationTick,
+                    animationTick: shimmer.tick,
                     index: snapshot.rows.count
                 )
             }

@@ -41,6 +41,12 @@ final class PerfQuickWinsTests: XCTestCase {
                      messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
     }
 
+    private func toolCallEvent(_ id: String, toolName: String = "shell") -> SessionEvent {
+        SessionEvent(id: id, timestamp: nil, kind: .tool_call, role: "assistant", text: nil,
+                     toolName: toolName, toolInput: nil, toolOutput: nil,
+                     messageID: "t-\(id)", parentID: nil, isDelta: false, rawJSON: "{}")
+    }
+
     // MARK: - Task 1: coalescer delta-merge must be linear, not CoW-quadratic
 
     func testCoalesceLongDeltaChainIsLinearAndLossless() {
@@ -537,5 +543,60 @@ final class PerfQuickWinsTests: XCTestCase {
             let expected = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
             XCTAssertEqual(SubagentHierarchyBuilder.fileBaseName(ofPath: path), expected, "path: \(path)")
         }
+    }
+
+    // MARK: - 2026-07-12 perf audit Fix 3: Session.hasToolCallEvent precomputed bit
+    //
+    // UnifiedSessionIndexer's hasCommandsOnly filter used to run
+    // `s.events.contains { $0.kind == .tool_call }` per session on every filter recompute.
+    // hasToolCallEvent precomputes that scan once, inside Session's initializers, from the
+    // `events` array passed at construction -- these tests pin that both initializers compute
+    // it correctly and that it's re-derived fresh (not stale) whenever a session is
+    // reconstructed with a different events array, which is how live-tail growth and
+    // DB-hydration merges already rebuild Session values elsewhere in the codebase.
+
+    func testHasToolCallEventTrueWhenEventsContainToolCall() {
+        let s = session([userEvent("u1", "hi"), toolCallEvent("tc1"), toolResultEvent("tr1", output: "ok")])
+        XCTAssertTrue(s.hasToolCallEvent)
+    }
+
+    func testHasToolCallEventFalseWhenNoToolCallEvents() {
+        let s = session([userEvent("u1", "hi"), assistantDelta("a1", "hello", messageID: "m1"), metaEvent("meta1", "note")])
+        XCTAssertFalse(s.hasToolCallEvent)
+    }
+
+    func testHasToolCallEventFalseWhenEventsEmpty() {
+        // Lightweight/DB-hydrated-without-events sessions: callers must fall back to
+        // lightweightCommands instead of trusting this bit (see UnifiedSessionIndexer).
+        let s = session([])
+        XCTAssertFalse(s.hasToolCallEvent)
+    }
+
+    func testHasToolCallEventComputedByLightweightInitializerToo() {
+        // The "lightweight session initializer" overload (cwd/repoName/lightweightTitle) is a
+        // second, separate init from the default one `session(_:id:)` exercises above -- both
+        // must independently compute hasToolCallEvent from the passed events.
+        let events = [userEvent("u1", "hi"), toolCallEvent("tc1")]
+        let s = Session(id: "s-lightweight", source: .codex, startTime: nil, endTime: nil,
+                         model: "test", filePath: "/tmp/perf.jsonl", eventCount: events.count,
+                         events: events, cwd: "/tmp", repoName: "repo", lightweightTitle: "title")
+        XCTAssertTrue(s.hasToolCallEvent)
+
+        let noToolEvents = [userEvent("u1", "hi")]
+        let s2 = Session(id: "s-lightweight-2", source: .codex, startTime: nil, endTime: nil,
+                          model: "test", filePath: "/tmp/perf.jsonl", eventCount: noToolEvents.count,
+                          events: noToolEvents, cwd: "/tmp", repoName: "repo", lightweightTitle: "title")
+        XCTAssertFalse(s2.hasToolCallEvent)
+    }
+
+    func testHasToolCallEventRecomputesOnReconstructionWithDifferentEvents() {
+        // Same session id, rebuilt with a different events array (e.g. live-tail growth or a
+        // DB-hydration merge) -- hasToolCallEvent must reflect the NEW events, not a stale
+        // value carried over from an earlier construction.
+        let withTool = session([toolCallEvent("tc1")], id: "s-grow")
+        XCTAssertTrue(withTool.hasToolCallEvent)
+
+        let withoutTool = session([userEvent("u1", "hi")], id: "s-grow")
+        XCTAssertFalse(withoutTool.hasToolCallEvent)
     }
 }

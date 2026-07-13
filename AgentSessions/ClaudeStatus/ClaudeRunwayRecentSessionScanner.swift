@@ -34,12 +34,12 @@ enum ClaudeRunwayRecentSessionScanner {
                            fileManager: FileManager = .default) -> [RunwaySessionIdentity] {
         let rootURL = root ?? defaultRoot()
         let cutoff = now.addingTimeInterval(-maximumFileAge)
-        var candidates: [(url: URL, modifiedAt: Date)] = []
+        var candidates: [(url: URL, modifiedAt: Date, signature: RunwayFileSignature)] = []
 
         guard fileManager.fileExists(atPath: rootURL.path),
               let enumerator = fileManager.enumerator(
                 at: rootURL,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
               ) else {
             return []
@@ -47,14 +47,20 @@ enum ClaudeRunwayRecentSessionScanner {
 
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
-            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
             guard values?.isRegularFile == true,
                   let modifiedAt = values?.contentModificationDate,
                   modifiedAt >= cutoff else {
                 continue
             }
-            candidates.append((url, modifiedAt))
+            let signature = RunwayFileSignature(mtime: modifiedAt, size: UInt64(values?.fileSize ?? 0))
+            candidates.append((url, modifiedAt, signature))
         }
+
+        // Unchanged files (same mtime+size) reuse their head/tail parse; only the
+        // now-dependent active window is recomputed below. Prune to the current
+        // in-window set so the cache tracks the recent-file set, not history.
+        fileCache.retain(paths: Set(candidates.map { $0.url.path }))
 
         var byID: [String: (displayName: String, logPaths: [String], hasPrimaryName: Bool, isIdle: Bool)] = [:]
         var order: [String] = []
@@ -65,7 +71,7 @@ enum ClaudeRunwayRecentSessionScanner {
         // applied to distinct sessions, not raw files, so subagents can't crowd
         // out other sessions.
         for entry in candidates.sorted(by: { $0.modifiedAt > $1.modifiedAt }) {
-            guard let candidate = candidate(for: entry.url, now: now) else { continue }
+            guard let candidate = candidate(for: entry.url, now: now, signature: entry.signature) else { continue }
             if var existing = byID[candidate.id] {
                 existing.logPaths.append(candidate.logPath)
                 // A non-subagent (parent) transcript's name beats a subagent's
@@ -97,12 +103,30 @@ enum ClaudeRunwayRecentSessionScanner {
         }
     }
 
-    private static func candidate(for url: URL, now: Date) -> ScannedCandidate? {
-        let metadata = metadata(from: url)
+    // The parse struct lives at file scope (not nested): a static stored
+    // property whose generic argument is a type nested in the same declaration
+    // trips a circular-reference error in the type checker.
+    private static let fileCache = RunwayFileParseCache<ClaudeScannerFileParse>()
+
+    #if DEBUG
+    static var fileCacheMissCountForTesting: Int { fileCache.missCount }
+    static func resetFileCacheForTesting() { fileCache.removeAllForTesting() }
+    #endif
+
+    private static func candidate(for url: URL, now: Date, signature: RunwayFileSignature) -> ScannedCandidate? {
+        let parse = fileCache.value(path: url.path, signature: signature) {
+            // Self-qualified: the unqualified name would bind to the local
+            // `metadata` below and cycle the type checker.
+            ClaudeScannerFileParse(
+                metadata: Self.metadata(from: url),
+                activeStateLines: activeStateLines(url: url)
+            )
+        }
+        let metadata = parse.metadata
         if ClaudeProbeConfig.isProbeWorkingDirectory(metadata.cwd) {
             return nil
         }
-        let state = activeState(url: url, now: now)
+        let state = activeState(from: parse.activeStateLines, now: now)
         guard state.active else { return nil }
         let fallbackID = url.deletingPathExtension().lastPathComponent
         let isSubagent = url.pathComponents.contains("subagents")
@@ -121,7 +145,7 @@ enum ClaudeRunwayRecentSessionScanner {
         )
     }
 
-    private static func projectFallbackName(metadata: SessionMetadata, fallbackID: String) -> String {
+    private static func projectFallbackName(metadata: ClaudeScannerSessionMetadata, fallbackID: String) -> String {
         if let cwd = metadata.cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cwd.isEmpty {
             return compact(URL(fileURLWithPath: cwd).lastPathComponent)
         }
@@ -136,28 +160,44 @@ enum ClaudeRunwayRecentSessionScanner {
         let isIdle: Bool
     }
 
-    /// Whether the session is still on the runway, and whether its latest line
-    /// shows it idle (finished its turn). Idle sessions use a shorter presence
-    /// window and render a calm "—" instead of a spinner.
-    private static func activeState(url: URL, now: Date) -> (active: Bool, isIdle: Bool) {
+    /// The expensive, `now`-independent half of the active-state read: tail the
+    /// file and parse the last lines into `(capturedAt, idle)`. Lines without a
+    /// valid object/timestamp are dropped exactly as the reverse scan would skip
+    /// them, so this is byte-identical to inlining the parse. Cached per file.
+    private static func activeStateLines(url: URL) -> [ClaudeScannerActiveStateLine] {
         guard let data = ClaudeRunwayLog.tailData(path: url.path, maxBytes: 256 * 1024),
               let text = String(data: data, encoding: .utf8) else {
-            return (false, false)
+            return []
         }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(200)
-        for line in lines.reversed() {
+        var result: [ClaudeScannerActiveStateLine] = []
+        result.reserveCapacity(lines.count)
+        for line in lines {
             guard let obj = ClaudeRunwayLog.jsonObject(String(line)),
                   let capturedAt = ClaudeRunwayLog.date(obj["timestamp"]) else {
                 continue
             }
+            result.append(ClaudeScannerActiveStateLine(capturedAt: capturedAt, idle: isIdleMarker(obj)))
+        }
+        return result
+    }
+
+    /// Whether the session is still on the runway, and whether its latest line
+    /// shows it idle (finished its turn). Idle sessions use a shorter presence
+    /// window and render a calm "—" instead of a spinner.
+    ///
+    /// Recomputed every cycle from the cached `lines`: the future-timestamp skip
+    /// and the presence-window thresholds are the only `now`-dependencies, so
+    /// state advances (active→idle→gone) as time passes with the disk unchanged.
+    private static func activeState(from lines: [ClaudeScannerActiveStateLine], now: Date) -> (active: Bool, isIdle: Bool) {
+        for line in lines.reversed() {
             // Skip lines with implausible future timestamps (clock skew / bad
             // data) rather than treating them as live activity.
-            guard capturedAt <= now.addingTimeInterval(5) else { continue }
+            guard line.capturedAt <= now.addingTimeInterval(5) else { continue }
             // An idle session (finished its turn) drops sooner than a working
             // one so it doesn't linger as a stale row.
-            let idle = isIdleMarker(obj)
-            let threshold = idle ? idleSessionGrace : maximumActiveSampleAge
-            return (now.timeIntervalSince(capturedAt) <= threshold, idle)
+            let threshold = line.idle ? idleSessionGrace : maximumActiveSampleAge
+            return (now.timeIntervalSince(line.capturedAt) <= threshold, line.idle)
         }
         return (false, false)
     }
@@ -175,12 +215,12 @@ enum ClaudeRunwayRecentSessionScanner {
         return stop == "end_turn" || stop == "stop_sequence"
     }
 
-    private static func metadata(from url: URL) -> SessionMetadata {
+    private static func metadata(from url: URL) -> ClaudeScannerSessionMetadata {
         guard let data = ClaudeRunwayLog.headData(path: url.path, maxBytes: 96 * 1024),
               let text = String(data: data, encoding: .utf8) else {
-            return SessionMetadata()
+            return ClaudeScannerSessionMetadata()
         }
-        var metadata = SessionMetadata()
+        var metadata = ClaudeScannerSessionMetadata()
         // Scan a healthy slice of the head: ai-title/custom-title records are
         // usually written a few turns in, after the first user message.
         for line in text.split(separator: "\n", omittingEmptySubsequences: true).prefix(160) {
@@ -211,7 +251,7 @@ enum ClaudeRunwayRecentSessionScanner {
         return metadata
     }
 
-    private static func displayName(metadata: SessionMetadata, fallbackID: String) -> String {
+    private static func displayName(metadata: ClaudeScannerSessionMetadata, fallbackID: String) -> String {
         // Mirror ClaudeSessionParser's preference: custom-title > ai-title >
         // first prompt > project folder. (Desktop-only titles that never land
         // in the transcript can't be recovered here.)
@@ -254,12 +294,32 @@ enum ClaudeRunwayRecentSessionScanner {
     private static func string(_ value: Any?) -> String? {
         value as? String
     }
+}
 
-    private struct SessionMetadata {
-        var sessionID: String?
-        var cwd: String?
-        var firstUserText: String?
-        var customTitle: String?
-        var aiTitle: String?
-    }
+// MARK: - Cached parse artifacts (file scope)
+// These are the scanner's per-file cache value types. They must live at file
+// scope: `RunwayFileParseCache<CachedFileParse>` as a static stored property
+// with a nested generic argument trips a circular-reference error in the
+// type checker.
+
+/// Bytes-derived, `now`-independent artifacts for one transcript file. Held
+/// in the scanner's `fileCache` keyed by `(path, mtime, size)`; the
+/// now-dependent active window is recomputed from `activeStateLines` on every
+/// cycle.
+private struct ClaudeScannerFileParse {
+    let metadata: ClaudeScannerSessionMetadata
+    let activeStateLines: [ClaudeScannerActiveStateLine]
+}
+
+private struct ClaudeScannerActiveStateLine {
+    let capturedAt: Date
+    let idle: Bool
+}
+
+private struct ClaudeScannerSessionMetadata {
+    var sessionID: String?
+    var cwd: String?
+    var firstUserText: String?
+    var customTitle: String?
+    var aiTitle: String?
 }

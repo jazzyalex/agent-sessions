@@ -42,9 +42,42 @@ enum ClaudeRunwayTokenActivityParser {
     static let provisionalMinTurnDuration: TimeInterval = 2
     static let provisionalMaxTurnDuration: TimeInterval = 120
 
+    private static let sampleCache = RunwayFileParseCache<[ClaudeRunwayTokenActivitySample]>()
+
+    #if DEBUG
+    static var sampleCacheMissCountForTesting: Int { sampleCache.missCount }
+    static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
+    #endif
+
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 1024 * 1024,
                               now: Date = Date()) -> [ClaudeRunwayTokenActivitySample] {
+        // The expensive tail read + JSON parse is a pure function of the bytes,
+        // so cache it per (path, mtime, size). The only `now`-dependency in a
+        // sample list — the future-timestamp skip — is deferred to the filter
+        // below so a cached parse stays byte-identical to a fresh one for any
+        // `now`. Dedupe consumes a message id even for a future line (see
+        // `parseLine`), so re-admitting that line at a later `now` matches the
+        // un-cached path exactly.
+        let unfiltered: [ClaudeRunwayTokenActivitySample]
+        if let signature = RunwayFileSignature.read(path: path) {
+            unfiltered = sampleCache.value(path: path, signature: signature) {
+                parseSamples(fromLogPath: path, maxBytes: maxBytes)
+            }
+        } else {
+            unfiltered = parseSamples(fromLogPath: path, maxBytes: maxBytes)
+        }
+        return unfiltered
+            .filter { $0.capturedAt <= now.addingTimeInterval(5) }
+            .sorted { $0.capturedAt < $1.capturedAt }
+    }
+
+    /// File-order, `now`-independent parse of every usage sample in the tail.
+    /// Dedupe-by-message-id and turn-start tracking are pure functions of the
+    /// bytes; the future-timestamp skip and the final sort are applied by
+    /// `recentSamples`, matching the original order of operations exactly.
+    private static func parseSamples(fromLogPath path: String,
+                                     maxBytes: Int) -> [ClaudeRunwayTokenActivitySample] {
         guard let data = ClaudeRunwayLog.tailData(path: path, maxBytes: maxBytes),
               let text = String(data: data, encoding: .utf8) else {
             return []
@@ -57,13 +90,12 @@ enum ClaudeRunwayTokenActivityParser {
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let (lineTimestamp, sample) = parseLine(String(line),
                                                     logPath: path,
-                                                    now: now,
                                                     turnStartedAt: previousTimestamp,
                                                     seenMessageIDs: &seenMessageIDs)
             if let sample { samples.append(sample) }
             if let lineTimestamp { previousTimestamp = lineTimestamp }
         }
-        return samples.sorted { $0.capturedAt < $1.capturedAt }
+        return samples
     }
 
     static func activity(identity: RunwaySessionIdentity,
@@ -102,6 +134,9 @@ enum ClaudeRunwayTokenActivityParser {
     static func burns(identities: [RunwaySessionIdentity],
                       baseline: RunwayProviderBaseline,
                       now: Date = Date()) -> [RunwaySessionBurn] {
+        // Once-per-cycle prune: keep only the small in-window path set so the
+        // sample cache tracks the active sessions rather than all history.
+        sampleCache.retain(paths: Set(identities.flatMap { $0.logPaths }))
         let currentSeconds = baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
         guard currentSeconds > 0, baseline.remainingPercent > 0 else { return [] }
         let providerRate = baseline.remainingPercent / currentSeconds
@@ -197,10 +232,12 @@ enum ClaudeRunwayTokenActivityParser {
 
     /// Returns this line's timestamp (for turn-start tracking, regardless of
     /// type) and, when the line is a fresh non-duplicate usage record, the
-    /// parsed sample.
+    /// parsed sample. The dedupe insert precedes the tokens check exactly as
+    /// before; the future-timestamp skip now lives in `recentSamples`, so a
+    /// future line still consumes its message id here (matching the un-cached
+    /// path) and its sample is dropped downstream by `now`.
     private static func parseLine(_ line: String,
                                   logPath: String,
-                                  now: Date,
                                   turnStartedAt: Date?,
                                   seenMessageIDs: inout Set<String>) -> (timestamp: Date?, sample: ClaudeRunwayTokenActivitySample?) {
         guard let data = line.data(using: .utf8),
@@ -216,8 +253,7 @@ enum ClaudeRunwayTokenActivityParser {
             if seenMessageIDs.contains(messageID) { return (timestamp, nil) }
             seenMessageIDs.insert(messageID)
         }
-        guard let capturedAt = timestamp,
-              capturedAt <= now.addingTimeInterval(5) else {
+        guard let capturedAt = timestamp else {
             return (timestamp, nil)
         }
         let tokens = weightedTokens(usage)

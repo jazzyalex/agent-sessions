@@ -626,6 +626,175 @@ final class ClaudeRunwayParserTests: XCTestCase {
                      "an archived Desktop session should not burn a runway row")
     }
 
+    // MARK: - Per-file parse cache (perf)
+
+    /// (a) A second scan of unchanged files (same mtime+size) reuses the cached
+    /// head/tail parse and does NOT re-read: the cache miss count stays flat.
+    func testScannerCacheReusesParseForUnchangedFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cache-reuse-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        for name in ["a", "b"] {
+            let log = projectDir.appendingPathComponent("\(name).jsonl")
+            try """
+            \(userLine(sessionID: "sess-\(name)", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-20)))
+            \(assistantLine(id: "\(name)1", at: now.addingTimeInterval(-10), inputTokens: 800, sessionID: "sess-\(name)", cwd: "/tmp/proj", stopReason: "tool_use"))
+            """.write(to: log, atomically: true, encoding: .utf8)
+        }
+
+        ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        let afterFirst = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        XCTAssertEqual(afterFirst, 2, "first scan parses each of the two files exactly once")
+
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        let afterSecond = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        XCTAssertEqual(afterSecond, afterFirst,
+                       "a second scan of unchanged files must not re-read or re-parse")
+    }
+
+    /// (b) A changed mtime (or size) invalidates only that file's cache entry.
+    func testScannerCacheInvalidatesOnMtimeChange() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cache-mtime-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("x.jsonl")
+        try """
+        \(userLine(sessionID: "sess-x", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-20)))
+        \(assistantLine(id: "x1", at: now.addingTimeInterval(-10), inputTokens: 800, sessionID: "sess-x", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 1,
+                       "unchanged file parsed once across two scans")
+
+        // Touch the mtime: the (mtime,size) key changes → re-parse.
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)],
+                                              ofItemAtPath: log.path)
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 2,
+                       "a changed mtime forces exactly one re-parse of that file")
+    }
+
+    /// (b') A changed size with an unchanged mtime still invalidates — proving
+    /// size is part of the cache key, not just the modification date.
+    func testScannerCacheInvalidatesOnSizeChangeWithFixedMtime() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cache-size-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let fixedMtime = now.addingTimeInterval(-120)
+        let log = projectDir.appendingPathComponent("x.jsonl")
+        try """
+        \(userLine(sessionID: "sess-x", cwd: "/tmp/proj", text: "task", at: now.addingTimeInterval(-20)))
+        \(assistantLine(id: "x1", at: now.addingTimeInterval(-10), inputTokens: 800, sessionID: "sess-x", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: fixedMtime], ofItemAtPath: log.path)
+
+        ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 1)
+
+        // Rewrite with longer content, then restore the SAME mtime so only size
+        // differs.
+        try """
+        \(userLine(sessionID: "sess-x", cwd: "/tmp/proj", text: "task with more bytes now", at: now.addingTimeInterval(-20)))
+        \(assistantLine(id: "x2", at: now.addingTimeInterval(-10), inputTokens: 900, sessionID: "sess-x", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: fixedMtime], ofItemAtPath: log.path)
+
+        _ = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now)
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, 2,
+                       "a changed size with the same mtime must still invalidate the cache")
+    }
+
+    /// (c) Time-dependent state still advances with `now` on unchanged disk: a
+    /// working session drops out of its active window as `now` moves past it,
+    /// WITHOUT any re-read (the cache serves the parsed bytes, the verdict is
+    /// recomputed).
+    func testScannerCacheAdvancesActiveWindowAsNowMovesWithoutReread() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cache-window-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let base = Date()
+        let log = projectDir.appendingPathComponent("x.jsonl")
+        try """
+        \(userLine(sessionID: "sess-x", cwd: "/tmp/proj", text: "task", at: base.addingTimeInterval(-10)))
+        \(assistantLine(id: "x1", at: base, inputTokens: 800, sessionID: "sess-x", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        ClaudeRunwayRecentSessionScanner.resetFileCacheForTesting()
+        // 10s after the last line: within the 75s working window → present.
+        let live = ClaudeRunwayRecentSessionScanner.identities(root: root, now: base.addingTimeInterval(10))
+        XCTAssertTrue(live.contains { $0.id == "sess-x" }, "session is active within its window")
+        let missAfterLive = ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting
+        XCTAssertEqual(missAfterLive, 1)
+
+        // 200s after the last line: past the 75s window → gone, from cached bytes.
+        let stale = ClaudeRunwayRecentSessionScanner.identities(root: root, now: base.addingTimeInterval(200))
+        XCTAssertFalse(stale.contains { $0.id == "sess-x" },
+                       "the active window must advance with now, dropping the stale session")
+        XCTAssertEqual(ClaudeRunwayRecentSessionScanner.fileCacheMissCountForTesting, missAfterLive,
+                       "the verdict changed without re-reading the unchanged file")
+    }
+
+    /// (a)+(c) for the token-activity cache: an unchanged file reuses its parsed
+    /// samples across calls, and the burn-rate staleness window still decays as
+    /// `now` advances from those cached samples.
+    func testTokenSampleCacheReusesParseAndDecaysWithNow() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-cache-token-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let t2 = t0.addingTimeInterval(60)
+        try """
+        \(assistantLine(id: "A", at: t0, inputTokens: 1000))
+        \(assistantLine(id: "B", at: t1, inputTokens: 2000))
+        \(assistantLine(id: "C", at: t2, inputTokens: 3000))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        ClaudeRunwayTokenActivityParser.resetSampleCacheForTesting()
+
+        let live = ClaudeRunwayTokenActivityParser.activity(identity: identity, now: t2.addingTimeInterval(1))
+        XCTAssertNotNil(live, "a fresh burst yields a rate")
+        let missAfterLive = ClaudeRunwayTokenActivityParser.sampleCacheMissCountForTesting
+        XCTAssertEqual(missAfterLive, 1, "the file is parsed once")
+
+        _ = ClaudeRunwayTokenActivityParser.activity(identity: identity, now: t2.addingTimeInterval(1))
+        XCTAssertEqual(ClaudeRunwayTokenActivityParser.sampleCacheMissCountForTesting, missAfterLive,
+                       "a repeat call on the unchanged file reuses the cached samples")
+
+        // Advance now past the burn-sample window: the rate must decay to nil,
+        // recomputed from the cached samples with no further read.
+        let stale = ClaudeRunwayTokenActivityParser.activity(
+            identity: identity,
+            now: t2.addingTimeInterval(ClaudeRunwayTokenActivityParser.maximumSampleAge + 5))
+        XCTAssertNil(stale, "staleness advances with now from cached samples")
+        XCTAssertEqual(ClaudeRunwayTokenActivityParser.sampleCacheMissCountForTesting, missAfterLive,
+                       "no re-read occurs when the disk is unchanged")
+    }
+
     // MARK: - Helpers
 
     private func writeDesktopSidecar(root: URL, cliSessionID: String, title: String, isArchived: Bool) throws {

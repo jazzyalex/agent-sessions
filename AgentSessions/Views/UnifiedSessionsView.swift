@@ -175,6 +175,32 @@ private enum UnifiedSessionsStyle {
     static let toolbarFocusRingColor = Color(nsColor: .keyboardFocusIndicatorColor)
 }
 
+/// Memoized relative/absolute strings for the Date column. `.help()` takes an eager
+/// String (not a lazily-evaluated closure), so before this cache BOTH `Session.modifiedRelative`
+/// (lock-guarded formatter) and the absolute `Date.FormatStyle` string were computed on every
+/// body pass -- 2 formatter calls + a lock per visible row per render during fast scroll, even
+/// though only one is shown at a time. Cached per (session id, session.modifiedAt, current
+/// minute): the relative string only rolls over on minute boundaries, and the compound key
+/// invalidates immediately if a session's modifiedAt actually changes (e.g. new activity),
+/// so a cache hit is never stale. `NSCacheMemo` (LRUCache.swift) is the existing string-keyed
+/// memoization wrapper used elsewhere (SessionTranscriptBuilder, ToolTextBlockNormalizer).
+private enum DateCellStrings {
+    private struct Cached { let minuteBucket: Int64; let relative: String; let absolute: String }
+    private static let cache = NSCacheMemo<Cached>(countLimit: 4096)
+
+    static func strings(for session: Session) -> (relative: String, absolute: String) {
+        let bucket = Int64(Date().timeIntervalSinceReferenceDate / 60)
+        let key = "\(session.id)|\(session.modifiedAt.timeIntervalSinceReferenceDate)" as NSString
+        if let hit = cache.object(forKey: key), hit.minuteBucket == bucket {
+            return (hit.relative, hit.absolute)
+        }
+        let relative = session.modifiedRelative
+        let absolute = AppDateFormatting.dateTimeShort(session.modifiedAt)
+        cache.setObject(Cached(minuteBucket: bucket, relative: relative, absolute: absolute), forKey: key)
+        return (relative, absolute)
+    }
+}
+
 private struct WindowKeyObserver: NSViewRepresentable {
     var onBecameKey: ((NSWindow) -> Void)?
     var onResignedKey: ((NSWindow) -> Void)?
@@ -1029,14 +1055,14 @@ struct UnifiedSessionsView: View {
                    max: showTitle ? 2000 : 0)
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
-                // Both variants are still computed every body call (`.help` takes an
-                // eager String, not a lazily-evaluated closure, so the untaken branch's
-                // string can't be skipped) -- but `s.modifiedRelative` now reads a
-                // shared, lock-guarded RelativeDateTimeFormatter (Session.swift) instead
-                // of allocating a fresh one per call, which was the fingerprinted cost.
+                // Both strings come from DateCellStrings, memoized per (session id,
+                // modifiedAt, current minute) -- avoids recomputing the lock-guarded
+                // relative formatter and the absolute Date.FormatStyle string on every
+                // body pass during fast scroll (see DateCellStrings doc comment above).
                 let display = SessionIndexer.ModifiedDisplay(rawValue: modifiedDisplayRaw) ?? .relative
-                let primary = (display == .relative) ? s.modifiedRelative : absoluteTimeUnified(s.modifiedAt)
-                let helpText = (display == .relative) ? absoluteTimeUnified(s.modifiedAt) : s.modifiedRelative
+                let strings = DateCellStrings.strings(for: s)
+                let primary = (display == .relative) ? strings.relative : strings.absolute
+                let helpText = (display == .relative) ? strings.absolute : strings.relative
                 Text(primary)
                     .font(.system(size: 13, weight: .regular, design: .monospaced))
                     .foregroundStyle(UnifiedSessionsStyle.timestampColor)
@@ -2053,12 +2079,6 @@ struct UnifiedSessionsView: View {
 
     private var imagesToolbarHelpText: String {
         return "Show images for the selected session"
-    }
-
-    // Local helper for absolute time formatting
-    private func absoluteTimeUnified(_ date: Date?) -> String {
-        guard let date else { return "" }
-        return AppDateFormatting.dateTimeShort(date)
     }
 
 	    @MainActor

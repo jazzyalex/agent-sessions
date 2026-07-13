@@ -1,5 +1,95 @@
 import Foundation
 
+/// A file's cheap identity for cache invalidation: its content-modification date
+/// and byte size. Two reads of the same path with an unchanged `(mtime, size)`
+/// are treated as identical bytes, so an expensive head/tail parse can be reused.
+struct RunwayFileSignature: Equatable, Sendable {
+    let mtime: TimeInterval
+    let size: UInt64
+
+    /// Cheap stat (no file open) via URL resource values. Returns nil when the
+    /// file is missing or unstat-able — callers then bypass the cache and read
+    /// directly, so a stat failure never serves stale data.
+    static func read(path: String) -> RunwayFileSignature? {
+        let url = URL(fileURLWithPath: path)
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let mtime = values.contentModificationDate else {
+            return nil
+        }
+        return RunwayFileSignature(mtime: mtime.timeIntervalSinceReferenceDate,
+                                   size: UInt64(values.fileSize ?? 0))
+    }
+
+    init(mtime: TimeInterval, size: UInt64) {
+        self.mtime = mtime
+        self.size = size
+    }
+
+    init(mtime: Date, size: UInt64) {
+        self.init(mtime: mtime.timeIntervalSinceReferenceDate, size: size)
+    }
+}
+
+/// Thread-safe cache of an expensive per-file parse, keyed by the file's
+/// `(path, contentModificationDate, size)`. The runway surfaces re-scan every 5s;
+/// an unchanged file (same mtime+size) reuses its cached parse instead of
+/// re-reading and re-parsing head/tail bytes.
+///
+/// IMPORTANT: only the *time-independent* artifact of the bytes belongs here
+/// (parsed samples, metadata, raw timestamped lines). Time-dependent aggregation
+/// — staleness/active windows, burn-rate spans relative to `now` — must be
+/// recomputed by the caller each cycle from the cached artifact, so state still
+/// advances as `now` moves with the disk unchanged.
+final class RunwayFileParseCache<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: (signature: RunwayFileSignature, value: Value)] = [:]
+
+    #if DEBUG
+    /// Counts `parse` invocations (cache misses). Tests assert this does not
+    /// advance on a second scan of unchanged files.
+    private(set) var missCount = 0
+    #endif
+
+    /// Cached value for `path` when its signature is unchanged; otherwise runs
+    /// `parse`, stores, and returns it. `signature` comes from the caller's
+    /// existing stat pass so the hot path issues no extra stat.
+    func value(path: String, signature: RunwayFileSignature, parse: () -> Value) -> Value {
+        lock.lock()
+        if let entry = entries[path], entry.signature == signature {
+            let value = entry.value
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+        // Parse outside the lock — file IO must not serialize the whole cache.
+        // A concurrent miss on the same path simply parses twice and stores the
+        // same value (last writer wins); the artifact is a pure function of bytes.
+        let value = parse()
+        lock.lock()
+        entries[path] = (signature, value)
+        #if DEBUG
+        missCount += 1
+        #endif
+        lock.unlock()
+        return value
+    }
+
+    /// Drops entries whose path is not in `paths`. Called once per scan cycle
+    /// with the small in-window file set so the cache can't grow unbounded.
+    func retain(paths: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        entries = entries.filter { paths.contains($0.key) }
+    }
+
+    #if DEBUG
+    func removeAllForTesting() {
+        lock.lock(); defer { lock.unlock() }
+        entries.removeAll()
+        missCount = 0
+    }
+    #endif
+}
+
 enum RunwayAttributionConfidence: Equatable, Sendable {
     case direct
     case mixed
@@ -190,6 +280,11 @@ enum CodexRunwaySnapshotLoader {
                     now: request.now
                 )
                 let identities = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
+                // Once-per-cycle prune: keep only the small in-window path set so
+                // the per-parser sample caches track active sessions, not history.
+                let activePaths = Set(identities.flatMap { $0.logPaths })
+                CodexRunwayRateLimitParser.retainCache(paths: activePaths)
+                CodexRunwayTokenActivityParser.retainCache(paths: activePaths)
                 let directBurns = identities.compactMap {
                     CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
                 }
@@ -572,21 +667,86 @@ enum CodexRunwayCalculator {
     }
 }
 
+/// A rate-limit line parsed `now`-independently: everything except the two
+/// `now`-dependencies (the `?? now` capture fallback and the resets-in-seconds
+/// offset, both anchored on `capturedAt`) is resolved here so it can be cached
+/// across cycles. `finalize(now:)` reproduces those two exactly.
+/// File scope (not nested in the parser): a static stored property whose
+/// generic argument is a type nested in the same declaration trips a
+/// circular-reference error in the type checker.
+private enum CodexRateLimitResetSpec: Sendable {
+    case absolute(Date)
+    case relativeSeconds(Double)
+}
+
+private struct CodexRawRateLimitLine: Sendable {
+    let logPath: String
+    let capturedAtReal: Date?
+    let remainingPercent: Double
+    let resetSpec: CodexRateLimitResetSpec
+}
+
 enum CodexRunwayRateLimitParser {
     static let maximumSampleAge: TimeInterval = 75
     static let maximumPairInterval: TimeInterval = 10 * 60
 
+    private static let sampleCache = RunwayFileParseCache<[CodexRawRateLimitLine]>()
+
+    #if DEBUG
+    static var sampleCacheMissCountForTesting: Int { sampleCache.missCount }
+    static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
+    #endif
+
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 512 * 1024,
                               now: Date = Date()) -> [CodexRunwayRateLimitSample] {
+        let raw: [CodexRawRateLimitLine]
+        if let signature = RunwayFileSignature.read(path: path) {
+            raw = sampleCache.value(path: path, signature: signature) {
+                parseRawLines(fromLogPath: path, maxBytes: maxBytes)
+            }
+        } else {
+            raw = parseRawLines(fromLogPath: path, maxBytes: maxBytes)
+        }
+        return raw
+            .compactMap { finalize($0, now: now) }
+            .sorted { $0.capturedAt < $1.capturedAt }
+    }
+
+    static func retainCache(paths: Set<String>) {
+        sampleCache.retain(paths: paths)
+    }
+
+    private static func parseRawLines(fromLogPath path: String,
+                                      maxBytes: Int) -> [CodexRawRateLimitLine] {
         guard let data = tailData(path: path, maxBytes: maxBytes),
               let text = String(data: data, encoding: .utf8) else {
             return []
         }
         return text
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { parseLine(String($0), logPath: path, now: now) }
-            .sorted { $0.capturedAt < $1.capturedAt }
+            .compactMap { parseRawLine(String($0), logPath: path) }
+    }
+
+    /// Re-applies the two `now`-dependencies dropped from `parseRawLine`: the
+    /// missing-capture fallback (`capturedAtReal ?? now`), the future-timestamp
+    /// skip, and the resets-in-seconds offset relative to that capture.
+    private static func finalize(_ raw: CodexRawRateLimitLine, now: Date) -> CodexRunwayRateLimitSample? {
+        let capturedAt = raw.capturedAtReal ?? now
+        guard capturedAt <= now.addingTimeInterval(5) else { return nil }
+        let resetAt: Date
+        switch raw.resetSpec {
+        case .absolute(let date):
+            resetAt = date
+        case .relativeSeconds(let seconds):
+            resetAt = capturedAt.addingTimeInterval(seconds)
+        }
+        return CodexRunwayRateLimitSample(
+            logPath: raw.logPath,
+            capturedAt: capturedAt,
+            remainingPercent: raw.remainingPercent,
+            resetAt: resetAt
+        )
     }
 
     static func burn(identity: RunwaySessionIdentity,
@@ -616,19 +776,22 @@ enum CodexRunwayRateLimitParser {
         return nil
     }
 
-    private static func parseLine(_ line: String,
-                                  logPath: String,
-                                  now: Date) -> CodexRunwayRateLimitSample? {
+    /// `now`-independent parse of one line. The two `now`-dependencies (missing
+    /// capture fallback + resets-in-seconds offset) are deferred to `finalize`;
+    /// the future-timestamp skip is applied there too. A line is retained here
+    /// only when it would have yielded a sample for a non-future `capturedAt`,
+    /// so caching + finalizing is byte-identical to the original single pass.
+    private static func parseRawLine(_ line: String,
+                                     logPath: String) -> CodexRawRateLimitLine? {
         guard let data = line.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
         let payload = (obj["payload"] as? [String: Any]) ?? obj
-        let createdAt = flexibleDate(obj["created_at"])
+        let createdAtReal = flexibleDate(obj["created_at"])
             ?? flexibleDate(payload["created_at"])
             ?? flexibleDate(obj["timestamp"])
             ?? flexibleDate(payload["timestamp"])
-            ?? now
 
         guard let rate = (payload["rate_limits"] as? [String: Any])
             ?? (obj["rate_limits"] as? [String: Any])
@@ -638,17 +801,16 @@ enum CodexRunwayRateLimitParser {
         let limitID = (rate["limit_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard limitID == nil || limitID == "codex" || limitID == "" else { return nil }
         guard let primary = rate["primary"] as? [String: Any] else { return nil }
-        let capturedAt = flexibleDate(rate["captured_at"]) ?? createdAt
-        guard capturedAt <= now.addingTimeInterval(5) else { return nil }
+        let capturedAtReal = flexibleDate(rate["captured_at"]) ?? createdAtReal
         guard let remaining = remainingPercent(primary),
-              let resetAt = resetDate(primary, createdAt: createdAt, capturedAt: capturedAt) else {
+              let resetSpec = resetSpec(primary) else {
             return nil
         }
-        return CodexRunwayRateLimitSample(
+        return CodexRawRateLimitLine(
             logPath: logPath,
-            capturedAt: capturedAt,
+            capturedAtReal: capturedAtReal,
             remainingPercent: remaining,
-            resetAt: resetAt
+            resetSpec: resetSpec
         )
     }
 
@@ -660,19 +822,20 @@ enum CodexRunwayRateLimitParser {
         return nil
     }
 
-    private static func resetDate(_ dict: [String: Any],
-                                  createdAt: Date,
-                                  capturedAt: Date) -> Date? {
+    /// The reset resolution, `now`-independent. `resets_in_seconds` is an offset
+    /// from the (later-resolved) capture time; the absolute keys are fixed dates.
+    /// Matches the original `resetDate` key priority exactly.
+    private static func resetSpec(_ dict: [String: Any]) -> CodexRateLimitResetSpec? {
         if let seconds = double(dict["resets_in_seconds"]) {
-            return capturedAt.addingTimeInterval(seconds)
+            return .relativeSeconds(seconds)
         }
         for key in ["resets_at", "reset_at", "resetsAt", "resetAt", "resets_at_ms", "reset_at_ms"] {
             guard let value = dict[key] else { continue }
             if key.hasSuffix("_ms"), let numeric = double(value) {
-                return Date(timeIntervalSince1970: normalizeEpochSeconds(numeric))
+                return .absolute(Date(timeIntervalSince1970: normalizeEpochSeconds(numeric)))
             }
             if let date = flexibleDate(value) {
-                return date
+                return .absolute(date)
             }
         }
         return nil
@@ -726,6 +889,33 @@ enum CodexRunwayRateLimitParser {
     }
 }
 
+/// Bytes-derived, `now`-independent artifacts for one session file: header
+/// metadata plus the parsed tail lines that feed active-window detection.
+/// Cached by `(path, mtime, size)`; `hasActiveTail(from:now:)` recomputes the
+/// time-dependent verdict each cycle.
+/// File scope (not nested in the scanner): a static stored property whose
+/// generic argument is a type nested in the same declaration trips a
+/// circular-reference error in the type checker.
+private struct CodexScannerFileParse {
+    let metadata: CodexScannerSessionMetadata
+    let activeTailLines: [CodexScannerActiveTailLine]
+}
+
+private struct CodexScannerActiveTailLine {
+    let capturedAtReal: Date?
+    let isTaskComplete: Bool
+    let isWork: Bool
+}
+
+private struct CodexScannerSessionMetadata {
+    var sessionID: String?
+    var parentSessionID: String?
+    var cwd: String?
+    var nickname: String?
+    var firstUserText: String?
+    var isGoal = false
+}
+
 enum CodexRunwayRecentSessionScanner {
     static let maximumFileAge: TimeInterval = 30 * 60
     static let maximumActiveSampleAge: TimeInterval = 75
@@ -739,12 +929,12 @@ enum CodexRunwayRecentSessionScanner {
         let rootURL = root ?? URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".codex/sessions", isDirectory: true)
         let cutoff = now.addingTimeInterval(-maximumFileAge)
-        var candidates: [(url: URL, modifiedAt: Date)] = []
+        var candidates: [(url: URL, modifiedAt: Date, signature: RunwayFileSignature)] = []
 
         guard fileManager.fileExists(atPath: rootURL.path),
               let enumerator = fileManager.enumerator(
                 at: rootURL,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
               ) else {
             return []
@@ -752,31 +942,54 @@ enum CodexRunwayRecentSessionScanner {
 
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
-            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey])
             guard values?.isRegularFile == true,
                   let modifiedAt = values?.contentModificationDate,
                   modifiedAt >= cutoff else {
                 continue
             }
-            candidates.append((url, modifiedAt))
+            let signature = RunwayFileSignature(mtime: modifiedAt, size: UInt64(values?.fileSize ?? 0))
+            candidates.append((url, modifiedAt, signature))
         }
 
         let threadNames = SessionIndexer.loadCodexThreadNames(sessionsRoot: rootURL)
 
-        let recentCandidates = candidates
+        let readEntries = candidates
             .sorted { $0.modifiedAt > $1.modifiedAt }
             .prefix(maximumMetadataFiles)
-            .compactMap { candidate(for: $0.url, now: now, threadNames: threadNames) }
+        // Unchanged files reuse their head/tail parse; the now-dependent active
+        // window is recomputed below. Prune to the files actually read this cycle.
+        fileCache.retain(paths: Set(readEntries.map { $0.url.path }))
+        let recentCandidates = readEntries
+            .compactMap { candidate(for: $0.url, now: now, threadNames: threadNames, signature: $0.signature) }
         return Array(mergeParentCandidates(recentCandidates).prefix(maximumFiles))
     }
 
-    private static func candidate(for url: URL, now: Date, threadNames: [String: String]) -> RecentSessionCandidate? {
-        let metadata = metadata(from: url)
+    // The parse struct lives at file scope (not nested): a static stored
+    // property whose generic argument is a type nested in the same declaration
+    // trips a circular-reference error in the type checker.
+    private static let fileCache = RunwayFileParseCache<CodexScannerFileParse>()
+
+    #if DEBUG
+    static var fileCacheMissCountForTesting: Int { fileCache.missCount }
+    static func resetFileCacheForTesting() { fileCache.removeAllForTesting() }
+    #endif
+
+    private static func candidate(for url: URL, now: Date, threadNames: [String: String], signature: RunwayFileSignature) -> RecentSessionCandidate? {
+        let parse = fileCache.value(path: url.path, signature: signature) {
+            // Self-qualified: the unqualified name would bind to the local
+            // `metadata` below and cycle the type checker.
+            CodexScannerFileParse(
+                metadata: Self.metadata(from: url),
+                activeTailLines: activeTailLines(url: url)
+            )
+        }
+        let metadata = parse.metadata
         if let cwd = metadata.cwd,
            CodexProbeConfig.isProbeWorkingDirectory(cwd) {
             return nil
         }
-        let isActive = hasActiveTail(url: url, now: now, isGoal: metadata.isGoal)
+        let isActive = hasActiveTail(from: parse.activeTailLines, now: now)
         let fallbackID = url.deletingPathExtension().lastPathComponent
         let id = metadata.sessionID ?? fallbackID
         let customTitle = [metadata.parentSessionID, metadata.sessionID]
@@ -861,31 +1074,51 @@ enum CodexRunwayRecentSessionScanner {
         return current
     }
 
-    private static func hasActiveTail(url: URL, now: Date, isGoal: Bool) -> Bool {
+    /// The expensive, `now`-independent half of active-tail detection: read the
+    /// tail and classify the last lines. Lines that fail to parse are dropped
+    /// exactly as the reverse scan would skip them, so replaying this list in
+    /// reverse is byte-identical to the original inline scan. Cached per file.
+    private static func activeTailLines(url: URL) -> [CodexScannerActiveTailLine] {
         guard let data = CodexRunwayRateLimitParser.tailData(path: url.path, maxBytes: 256 * 1024),
               let text = String(data: data, encoding: .utf8) else {
-            return false
+            return []
         }
-
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).suffix(160)
-        var latestWorkSampleAt: Date?
-        var latestCompletionAt: Date?
-        for line in lines.reversed() {
+        var result: [CodexScannerActiveTailLine] = []
+        result.reserveCapacity(lines.count)
+        for line in lines {
             guard let data = String(line).data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 continue
             }
             let payload = (obj["payload"] as? [String: Any]) ?? obj
-            let capturedAt = CodexRunwayRateLimitParser.flexibleDate(obj["created_at"])
+            let capturedAtReal = CodexRunwayRateLimitParser.flexibleDate(obj["created_at"])
                 ?? CodexRunwayRateLimitParser.flexibleDate(payload["created_at"])
                 ?? CodexRunwayRateLimitParser.flexibleDate(obj["timestamp"])
                 ?? CodexRunwayRateLimitParser.flexibleDate(payload["timestamp"])
-            if string(payload["type"]) == "task_complete" {
-                latestCompletionAt = capturedAt ?? now
+            result.append(CodexScannerActiveTailLine(
+                capturedAtReal: capturedAtReal,
+                isTaskComplete: string(payload["type"]) == "task_complete",
+                isWork: isWorkSample(obj: obj, payload: payload)
+            ))
+        }
+        return result
+    }
+
+    /// Recomputes the active/idle verdict every cycle from the cached tail lines.
+    /// The `capturedAt ?? now` fallback and the age windows are the only
+    /// `now`-dependencies, so a session advances active→idle→gone as time passes
+    /// with the disk unchanged.
+    private static func hasActiveTail(from lines: [CodexScannerActiveTailLine], now: Date) -> Bool {
+        var latestWorkSampleAt: Date?
+        var latestCompletionAt: Date?
+        for line in lines.reversed() {
+            if line.isTaskComplete {
+                latestCompletionAt = line.capturedAtReal ?? now
                 continue
             }
-            if isWorkSample(obj: obj, payload: payload) {
-                latestWorkSampleAt = capturedAt ?? now
+            if line.isWork {
+                latestWorkSampleAt = line.capturedAtReal ?? now
                 break
             }
         }
@@ -914,13 +1147,13 @@ enum CodexRunwayRecentSessionScanner {
         return payloadType == "message"
     }
 
-    private static func metadata(from url: URL) -> SessionMetadata {
+    private static func metadata(from url: URL) -> CodexScannerSessionMetadata {
         guard let data = headData(path: url.path, maxBytes: 96 * 1024),
               let text = String(data: data, encoding: .utf8) else {
-            return SessionMetadata()
+            return CodexScannerSessionMetadata()
         }
 
-        var metadata = SessionMetadata()
+        var metadata = CodexScannerSessionMetadata()
         var capturedIdentityMetadata = false
         for line in text.split(separator: "\n", omittingEmptySubsequences: true).prefix(80) {
             guard let data = String(line).data(using: .utf8),
@@ -956,7 +1189,7 @@ enum CodexRunwayRecentSessionScanner {
         return try? handle.read(upToCount: maxBytes)
     }
 
-    private static func displayName(metadata: SessionMetadata, customTitle: String?, fallbackID: String) -> String {
+    private static func displayName(metadata: CodexScannerSessionMetadata, customTitle: String?, fallbackID: String) -> String {
         var parts: [String] = []
         if let title = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty {
@@ -1035,15 +1268,6 @@ enum CodexRunwayRecentSessionScanner {
         return nil
     }
 
-    private struct SessionMetadata {
-        var sessionID: String?
-        var parentSessionID: String?
-        var cwd: String?
-        var nickname: String?
-        var firstUserText: String?
-        var isGoal = false
-    }
-
     private struct RecentSessionCandidate {
         let sessionID: String
         let parentSessionID: String?
@@ -1054,22 +1278,70 @@ enum CodexRunwayRecentSessionScanner {
     }
 }
 
+/// A token line parsed `now`-independently. The capture time's `?? now`
+/// fallback and the future-timestamp skip are the only `now`-dependencies;
+/// both are re-applied in `finalize(now:)`, keeping a cached parse
+/// byte-identical to a fresh one for any `now`.
+/// File scope (not nested in the parser): a static stored property whose
+/// generic argument is a type nested in the same declaration trips a
+/// circular-reference error in the type checker.
+private struct CodexRawTokenLine: Sendable {
+    let logPath: String
+    let createdAtReal: Date?
+    let totalTokens: Double
+}
+
 enum CodexRunwayTokenActivityParser {
     static let maximumSampleAge: TimeInterval = 75
     static let minimumPairInterval: TimeInterval = 10
     static let maximumPairInterval: TimeInterval = 30 * 60
 
+    private static let sampleCache = RunwayFileParseCache<[CodexRawTokenLine]>()
+
+    #if DEBUG
+    static var sampleCacheMissCountForTesting: Int { sampleCache.missCount }
+    static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
+    #endif
+
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 512 * 1024,
                               now: Date = Date()) -> [CodexRunwayTokenActivitySample] {
+        let raw: [CodexRawTokenLine]
+        if let signature = RunwayFileSignature.read(path: path) {
+            raw = sampleCache.value(path: path, signature: signature) {
+                parseRawLines(fromLogPath: path, maxBytes: maxBytes)
+            }
+        } else {
+            raw = parseRawLines(fromLogPath: path, maxBytes: maxBytes)
+        }
+        return raw
+            .compactMap { finalize($0, now: now) }
+            .sorted { $0.capturedAt < $1.capturedAt }
+    }
+
+    static func retainCache(paths: Set<String>) {
+        sampleCache.retain(paths: paths)
+    }
+
+    private static func parseRawLines(fromLogPath path: String,
+                                      maxBytes: Int) -> [CodexRawTokenLine] {
         guard let data = CodexRunwayRateLimitParser.tailData(path: path, maxBytes: maxBytes),
               let text = String(data: data, encoding: .utf8) else {
             return []
         }
         return text
             .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { parseLine(String($0), logPath: path, now: now) }
-            .sorted { $0.capturedAt < $1.capturedAt }
+            .compactMap { parseRawLine(String($0), logPath: path) }
+    }
+
+    private static func finalize(_ raw: CodexRawTokenLine, now: Date) -> CodexRunwayTokenActivitySample? {
+        let capturedAt = raw.createdAtReal ?? now
+        guard capturedAt <= now.addingTimeInterval(5) else { return nil }
+        return CodexRunwayTokenActivitySample(
+            logPath: raw.logPath,
+            capturedAt: capturedAt,
+            totalTokens: raw.totalTokens
+        )
     }
 
     static func activity(identity: RunwaySessionIdentity,
@@ -1134,26 +1406,23 @@ enum CodexRunwayTokenActivityParser {
         return nil
     }
 
-    private static func parseLine(_ line: String,
-                                  logPath: String,
-                                  now: Date) -> CodexRunwayTokenActivitySample? {
+    private static func parseRawLine(_ line: String,
+                                     logPath: String) -> CodexRawTokenLine? {
         guard let data = line.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
         let payload = (obj["payload"] as? [String: Any]) ?? obj
-        let createdAt = CodexRunwayRateLimitParser.flexibleDate(obj["created_at"])
+        let createdAtReal = CodexRunwayRateLimitParser.flexibleDate(obj["created_at"])
             ?? CodexRunwayRateLimitParser.flexibleDate(payload["created_at"])
             ?? CodexRunwayRateLimitParser.flexibleDate(obj["timestamp"])
             ?? CodexRunwayRateLimitParser.flexibleDate(payload["timestamp"])
-            ?? now
-        guard createdAt <= now.addingTimeInterval(5),
-              let totalTokens = totalTokens(from: payload) ?? totalTokens(from: obj) else {
+        guard let totalTokens = totalTokens(from: payload) ?? totalTokens(from: obj) else {
             return nil
         }
-        return CodexRunwayTokenActivitySample(
+        return CodexRawTokenLine(
             logPath: logPath,
-            capturedAt: createdAt,
+            createdAtReal: createdAtReal,
             totalTokens: totalTokens
         )
     }

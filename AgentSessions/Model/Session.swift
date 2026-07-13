@@ -63,6 +63,13 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     // True when a session is effectively "housekeeping": no assistant output and no meaningful prompt content
     // (for example Codex rollouts that only captured preamble, or Claude local-command-only transcripts).
     public var isHousekeeping: Bool = false
+    // Precomputed once at construction from `events` (both initializers below), so callers
+    // that need "does this session have a tool call" (e.g. UnifiedSessionIndexer's
+    // hasCommandsOnly filter) don't rescan the full events array on every filter recompute.
+    // Always `false` when `events` is empty (lightweight/DB-hydrated-without-events rows) --
+    // callers needing a signal in that case should fall back to `lightweightCommands` instead,
+    // same as before this field existed.
+    public var hasToolCallEvent: Bool = false
     // Lightweight commands count from DB (when events are not loaded)
     public let lightweightCommands: Int?
 
@@ -150,6 +157,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
+        self.hasToolCallEvent = events.contains { $0.kind == .tool_call }
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = nil
         self.lightweightRepoName = nil
@@ -208,6 +216,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         self.fileSizeBytes = fileSizeBytes
         self.eventCount = eventCount
         self.events = events
+        self.hasToolCallEvent = events.contains { $0.kind == .tool_call }
         self.isHousekeeping = isHousekeeping
         self.lightweightCwd = cwd
         self.lightweightRepoName = repoName
@@ -258,6 +267,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case deletedAt
         // isFavorite intentionally excluded (runtime only)
         // isHousekeeping intentionally excluded (derived at parse/index time)
+        // hasToolCallEvent intentionally excluded (derived at parse/index time from events)
         // isDeleted is a computed property (deletedAt != nil)
         // isPartiallyHydrated intentionally excluded (runtime-only, never persisted)
     }
@@ -275,6 +285,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             sameEventEdge(lhs.events.first, rhs.events.first) &&
             sameEventEdge(lhs.events.last, rhs.events.last) &&
             lhs.isHousekeeping == rhs.isHousekeeping &&
+            lhs.hasToolCallEvent == rhs.hasToolCallEvent &&
             lhs.lightweightCommands == rhs.lightweightCommands &&
             lhs.lightweightCwd == rhs.lightweightCwd &&
             lhs.lightweightRepoName == rhs.lightweightRepoName &&

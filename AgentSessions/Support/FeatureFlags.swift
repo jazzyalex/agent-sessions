@@ -22,6 +22,21 @@ enum FeatureFlags {
     // Building the transcript for the session you just clicked is interactive: run it at
     // .userInitiated so it doesn't queue behind background indexing/prewarm (also .utility).
     static let lowerQoSForInteractiveTranscript = false
+    // UnifiedSessionIndexer.recomputeNow() is fired exclusively by discrete user actions
+    // (agent/source toggles, favorites-only, hideZero/hideLow/housekeeping, project-filter
+    // clear, sort) -- never by background ingest, which drives the separate $allSessions
+    // Combine pipeline that stays on backgroundIngestQueue. Run it at .userInitiated so a
+    // filter toggle doesn't queue behind background ingest on large corpora. Precedent:
+    // lowerQoSForInteractiveSearch above.
+    static let lowerQoSForInteractiveFilterRecompute = false
+    static var interactiveFilterRecomputeQueue: DispatchQueue {
+        DispatchQueue.global(qos: lowerQoSForInteractiveFilterRecompute ? .utility : .userInitiated)
+    }
+    // recomputeNow()'s debounce exists to coalesce bursts of discrete toggle clicks, not to
+    // throttle typing (typed queries flow through the separate $query Combine pipeline, not
+    // recomputeNow()). A shorter window keeps single-click toggles snappy while still
+    // coalescing rapid multi-clicks (e.g. unchecking several agent sources in a row).
+    static let fastFilterRecomputeDebounce = true
     static let throttleIndexingUIUpdates = true
     static let gatePrewarmWhileTyping = true
     static let increaseFilterDebounce = true
