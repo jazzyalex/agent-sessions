@@ -25,6 +25,20 @@ actor ClaudeWebCookieResolver {
         let sessionKey: String
     }
 
+    /// Typed read outcome so callers can tell the three failure worlds apart —
+    /// they need different remedies and must never collapse into one silent
+    /// "no session cookie" (which is how a missing Full Disk Access grant hid
+    /// behind an unusable Web API path for weeks):
+    /// - `.permissionDenied` — the cookie file exists but macOS TCC blocked the
+    ///   read → the user must grant Full Disk Access; retrying won't help.
+    /// - `.noSession` — the file was readable (or absent) but holds no live
+    ///   claude.ai `sessionKey` → the user must sign in at claude.ai in Safari.
+    enum ReadOutcome: Sendable {
+        case found(ResolvedCookie)
+        case permissionDenied
+        case noSession
+    }
+
     private var cachedCookie: ResolvedCookie?
     private var cacheExpiresAt: Date = .distantPast
     private static let cacheTTL: TimeInterval = 30 * 60  // 30 minutes
@@ -32,11 +46,24 @@ actor ClaudeWebCookieResolver {
     // MARK: - Public
 
     func resolve() async -> ResolvedCookie? {
-        if let cached = cachedCookie, Date() < cacheExpiresAt { return cached }
-        let cookie = parseSafariCookies()
-        cachedCookie = cookie
-        cacheExpiresAt = cookie != nil ? Date().addingTimeInterval(Self.cacheTTL) : .distantPast
-        return cookie
+        if case .found(let cookie) = await resolveDetailed() { return cookie }
+        return nil
+    }
+
+    /// Cause-aware resolution. Same cache as `resolve()` — only a found cookie
+    /// is cached; failures re-probe (the file read is cheap and the outcome can
+    /// change under the app: an FDA grant or a Safari sign-in).
+    func resolveDetailed() async -> ReadOutcome {
+        if let cached = cachedCookie, Date() < cacheExpiresAt { return .found(cached) }
+        let outcome = parseSafariCookiesDetailed()
+        if case .found(let cookie) = outcome {
+            cachedCookie = cookie
+            cacheExpiresAt = Date().addingTimeInterval(Self.cacheTTL)
+        } else {
+            cachedCookie = nil
+            cacheExpiresAt = .distantPast
+        }
+        return outcome
     }
 
     func invalidateCache() {
@@ -54,18 +81,49 @@ actor ClaudeWebCookieResolver {
         "Library/Cookies/Cookies.binarycookies",
     ]
 
-    private func parseSafariCookies() -> ResolvedCookie? {
+    private func parseSafariCookiesDetailed() -> ReadOutcome {
         let home = NSHomeDirectory() as NSString
+        var sawPermissionDenial = false
         for relative in Self.cookiePaths {
             let path = home.appendingPathComponent(relative)
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+            do {
+                let data = try Data(contentsOf: URL(fileURLWithPath: path))
                 os_log("ClaudeOAuth: web cookie — reading from %{public}@", log: log, type: .info, relative)
-                if let cookie = extractSessionKey(from: data) { return cookie }
+                if let cookie = extractSessionKey(from: data) { return .found(cookie) }
+                // Readable file without a live claude.ai sessionKey — keep
+                // scanning the other location, but this is a definitive
+                // "signed out of claude.ai in Safari", not a permission problem.
+            } catch {
+                if Self.isPermissionDenial(error) {
+                    // TCC blocked the read (the file exists — that's why the
+                    // error is EPERM, not ENOENT). Remember it, but keep trying
+                    // the other path: a readable legacy file with a live cookie
+                    // still wins.
+                    sawPermissionDenial = true
+                    os_log("ClaudeOAuth: web cookie — permission denied reading %{public}@ (Full Disk Access needed)",
+                           log: log, type: .info, relative)
+                }
+                // ENOENT / other read errors: fall through to the next path.
             }
         }
-        os_log("ClaudeOAuth: web cookie — no readable Cookies.binarycookies found",
+        if sawPermissionDenial { return .permissionDenied }
+        os_log("ClaudeOAuth: web cookie — no live claude.ai sessionKey found",
                log: log, type: .info)
-        return nil
+        return .noSession
+    }
+
+    /// True when a file-read error means macOS denied access (TCC / permissions)
+    /// rather than the file being absent. `Data(contentsOf:)` surfaces TCC
+    /// denials as `NSFileReadNoPermissionError` (POSIX EPERM/EACCES underneath).
+    static func isPermissionDenial(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain {
+            return ns.code == NSFileReadNoPermissionError
+        }
+        if ns.domain == NSPOSIXErrorDomain {
+            return ns.code == Int(EPERM) || ns.code == Int(EACCES)
+        }
+        return false
     }
 
     private func extractSessionKey(from data: Data) -> ResolvedCookie? {

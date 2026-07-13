@@ -175,6 +175,11 @@ actor ClaudeUsageSourceManager {
     /// Gentle, non-alarming caption for a signed-out CLI while the app's saved
     /// token still fetches — a heads-up, not a runway-hiding banner (P5).
     static let cliSignedOutAdvisory = "Claude CLI signed out — usage via the app's saved token"
+    /// Cause-aware Web API captions (2026-07-12). A TCC-denied Safari cookie
+    /// read and a signed-out Safari need OPPOSITE user actions, so they must
+    /// never collapse into a silent "no session cookie" log line.
+    static let webNeedsFullDiskAccessReason = "Web API needs Full Disk Access to read Safari's claude.ai session"
+    static let webNoSafariSessionReason = "No claude.ai session in Safari — sign in at claude.ai"
 
     /// Pure escalation predicate: escalate `.expired` to the banner only once a
     /// verified 401 has persisted from `first401At` to at least `threshold` later.
@@ -301,6 +306,12 @@ actor ClaudeUsageSourceManager {
     private var webFailureCount = 0
     private var usingWebFallback = false
     private var webRefreshTask: Task<Void, Never>?
+    /// Reentrancy guard for `performWebFetch`. Visibility transitions and the
+    /// fallback activations all schedule instant refreshes; without the guard a
+    /// burst of them runs concurrent fetches and burns webFailureCount to the
+    /// tmux-handoff threshold in milliseconds (observed live: 3 failures in
+    /// 350ms at launch).
+    private var webFetchInFlight = false
 
     private var webApiEnabled: Bool {
         UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
@@ -1016,10 +1027,31 @@ actor ClaudeUsageSourceManager {
 
     private func performWebFetch() async {
         guard shouldRun, usingWebFallback || mode == .webOnly else { return }
+        guard !webFetchInFlight else { return }
+        webFetchInFlight = true
+        defer { webFetchInFlight = false }
 
-        guard let cookie = await webCookieResolver.resolve() else {
-            os_log("ClaudeOAuth: web API — no session cookie available", log: log, type: .info)
-            await handleWebFailure(reason: "no session cookie")
+        let cookie: ClaudeWebCookieResolver.ResolvedCookie
+        switch await webCookieResolver.resolveDetailed() {
+        case .found(let resolved):
+            cookie = resolved
+        case .permissionDenied:
+            // TCC blocked the Safari cookie read — retrying can't fix this; the
+            // user must grant Full Disk Access. Say so on the surface (calm
+            // caption, never an auth banner) instead of dying as a log line.
+            os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
+                   log: log, type: .info)
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: Self.webNeedsFullDiskAccessReason, captionOnly: true))
+            await handleWebFailure(reason: "cookie read permission denied")
+            return
+        case .noSession:
+            os_log("ClaudeOAuth: web API — no claude.ai session in Safari", log: log, type: .info)
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: Self.webNoSafariSessionReason, captionOnly: true))
+            await handleWebFailure(reason: "no claude.ai session in Safari")
             return
         }
 
@@ -1036,6 +1068,12 @@ actor ClaudeUsageSourceManager {
             webFailureCount = 0
             publish(snapshot)
             await store.save(snapshot)
+            // Clear any lingering cause caption (FDA / sign-in hint) — in
+            // webOnly mode no OAuth emit ever would. Caption-only: the auth
+            // banner and legacy bools are someone else's state.
+            availabilityHandler?(ClaudeServiceAvailability(
+                cliUnavailable: false, tmuxUnavailable: false,
+                transientReason: nil, captionOnly: true))
             os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
                    log: log, type: .info, fromCache ? "true" : "false")
             scheduleWebRefresh(delay: Self.refreshInterval)
@@ -1063,7 +1101,15 @@ actor ClaudeUsageSourceManager {
             os_log("ClaudeOAuth: web API failed %d times, activating tmux fallback",
                    log: log, type: .info, webFailureCount)
             await activateTmuxFallback(reason: "web API failure #\(webFailureCount)")
-        } else {
+        }
+        // Keep the web loop alive unless tmux ACTUALLY took over (activation is
+        // usually suppressed: auth-gated or opt-in OFF). The old code stopped
+        // rescheduling after the tmux handoff attempt, stranding
+        // `usingWebFallback` with no timer — the web path never retried again,
+        // even after the user fixed the cause (granted Full Disk Access /
+        // signed in at claude.ai). When tmux did take over, OAuth recovery
+        // tears it down and web re-arms via the normal fallback activation.
+        if !usingTmuxFallback {
             scheduleWebRefresh(delay: Self.refreshInterval)
         }
     }

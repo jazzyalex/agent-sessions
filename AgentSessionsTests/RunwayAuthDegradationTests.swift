@@ -168,6 +168,23 @@ final class RunwayAuthDegradationTests: XCTestCase {
         }
     }
 
+    // MARK: - Web API cause-aware cookie read (2026-07-12)
+
+    /// TCC denial (needs Full Disk Access) must classify as a permission
+    /// problem; a missing file or network-ish error must not.
+    func testCookiePermissionDenialClassification() {
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)))
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))))
+        XCTAssertTrue(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))))
+        XCTAssertFalse(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)))
+        XCTAssertFalse(ClaudeWebCookieResolver.isPermissionDenial(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)))
+    }
+
     // MARK: - Task 14: auto-mode interactive fallback is opt-in
 
     func testTmuxFallbackPermitted() {

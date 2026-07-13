@@ -125,19 +125,7 @@ extension PreferencesView {
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
                           (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
                 if webApiEffectivelyEnabled {
-                    PreferenceCallout(iconName: "lock.shield", tint: .blue) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Web API reads the Safari session cookie for claude.ai. On macOS 14+, this requires Full Disk Access.")
-                                .font(.caption)
-                            Button("Open Full Disk Access Settings") {
-                                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            .buttonStyle(.link)
-                            .font(.caption)
-                        }
-                    }
+                    WebApiSafariStatusCallout()
                 }
                 toggleRow(
                     "Allow CLI probe fallback",
@@ -546,4 +534,77 @@ extension PreferencesView {
         }
     }
 
+}
+
+/// Web-API readiness callout: the static "requires Full Disk Access" hint plus a
+/// live, user-initiated self-test. The test walks the REAL chain — Safari cookie
+/// read → org lookup → usage fetch — and reports the first failure with its
+/// remedy, so "enabled but silently unusable" (the TCC-denied cookie read) is
+/// visible right where the toggle lives instead of dying as a log line.
+private struct WebApiSafariStatusCallout: View {
+    private enum TestState: Equatable {
+        case idle
+        case running
+        case result(String, ok: Bool)
+    }
+
+    @State private var testState: TestState = .idle
+
+    var body: some View {
+        PreferenceCallout(iconName: "lock.shield", tint: .blue) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Web API reads the Safari session cookie for claude.ai. On macOS 14+, this requires Full Disk Access.")
+                    .font(.caption)
+                HStack(spacing: 12) {
+                    Button("Open Full Disk Access Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    Button(testState == .running ? "Testing…" : "Test Web API") {
+                        runTest()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .disabled(testState == .running)
+                }
+                if case .result(let message, let ok) = testState {
+                    Label(message, systemImage: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(ok ? Color.green : Color.orange)
+                }
+            }
+        }
+    }
+
+    private func runTest() {
+        testState = .running
+        Task {
+            let outcome = await WebApiSafariStatusCallout.performTest()
+            await MainActor.run { testState = .result(outcome.message, ok: outcome.ok) }
+        }
+    }
+
+    /// End-to-end probe of the Web API chain with cause-aware messaging.
+    /// User-initiated only — never called on a timer.
+    static func performTest() async -> (message: String, ok: Bool) {
+        let resolver = ClaudeWebCookieResolver()
+        switch await resolver.resolveDetailed() {
+        case .permissionDenied:
+            return ("Full Disk Access needed — Agent Sessions can't read Safari's cookies.", false)
+        case .noSession:
+            return ("No claude.ai session in Safari — sign in at claude.ai, then retest.", false)
+        case .found(let cookie):
+            do {
+                _ = try await ClaudeWebUsageClient().fetch(sessionKey: cookie.sessionKey)
+                return ("Web API working — usage fetched from claude.ai.", true)
+            } catch ClaudeOAuthUsageClientError.unauthorized {
+                return ("Safari's claude.ai session is expired — sign in again at claude.ai.", false)
+            } catch {
+                return ("claude.ai request failed: \(error.localizedDescription)", false)
+            }
+        }
+    }
 }
