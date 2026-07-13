@@ -34,6 +34,17 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         }
     }
 
+    func testCodexSchemaDriftWorldStateEventSurvivesParsing() throws {
+        // Codex 0.144.x adds a `world_state` context-snapshot event; the payload has no
+        // role/type, so it resolves to `.meta` (non-breaking). Codex rawJSON is stored
+        // plain (not base64 like Claude), so assert against the raw line directly.
+        let url = FixturePaths.stage0FixtureURL("agents/codex/schema_drift.jsonl")
+        let idx = SessionIndexer()
+        guard let full = idx.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        let worldState = full.events.filter { $0.kind == .meta && $0.rawJSON.contains("\"type\":\"world_state\"") }
+        XCTAssertFalse(worldState.isEmpty, "world_state event should survive parsing as .meta")
+    }
+
     func testClaudeSmallPreviewAndFull() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
         guard let preview = ClaudeSessionParser.parseFile(at: url) else { return XCTFail("preview parse returned nil") }
@@ -103,6 +114,32 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
         XCTAssertFalse(metaEvents(containing: "\"subtype\":\"stop_hook_summary\"", in: full.events).isEmpty,
                        "stop_hook_summary system event should survive parsing as .meta")
+    }
+
+    func testClaudeSubagentFixtureDetectsParent() throws {
+        // Authentic subagent transcript at .../<parentUUID>/subagents/agent-<id>.jsonl.
+        // Exercises the otherwise-untested ClaudeSessionParser.detectSubagentInfo
+        // path-detection, and pins the additive agentId/attributionAgent keys that
+        // Claude subagent transcripts carry (where they actually occur, vs the main
+        // session fixture).
+        let child = "agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl"
+        let url = FixturePaths.stage0FixtureURL(child)
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertEqual(full.source, .claude)
+        XCTAssertFalse(full.events.isEmpty)
+        // Path-based parent detection + agent type from the adjacent .meta.json sidecar.
+        XCTAssertEqual(full.parentSessionID, "0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f")
+        XCTAssertEqual(full.subagentType, "general-purpose")
+        // Additive subagent keys survive parsing (Claude stores rawJSON base64-encoded).
+        func rawContains(_ needle: String) -> Bool {
+            full.events.contains { event in
+                guard let data = Data(base64Encoded: event.rawJSON),
+                      let decoded = String(data: data, encoding: .utf8) else { return false }
+                return decoded.contains(needle)
+            }
+        }
+        XCTAssertTrue(rawContains("attributionAgent"), "attributionAgent key should survive parsing")
+        XCTAssertTrue(rawContains("a0ad4f44468bdf20d"), "agentId value should survive parsing")
     }
 
     func testCopilotSmallPreviewAndFull() throws {

@@ -9,6 +9,50 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "4.3.2"
+    as_of_date_utc: "2026-07-13"
+    as_of_commit: "dad7c4e7"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.144.3"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.207"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl", "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      antigravity:
+        sessions:
+          max_verified_version: "1.0.16"
+          evidence: ["Resources/Fixtures/stage0/agents/antigravity/small.md", "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl", "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260713-173118Z-prebump/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.65"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.17.18"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json", "scripts/probe_scan_output/agent_watch/20260713-172121Z-prebump/report.json"]
+      hermes:
+        sessions:
+          max_verified_version: "0.17.0"
+          evidence: ["Resources/Fixtures/stage0/agents/hermes/small.json", "Resources/Fixtures/stage0/agents/hermes/large.json", "Resources/Fixtures/stage0/agents/hermes/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.6.11"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      cursor:
+        sessions:
+          max_verified_version: "2026.6.24"
+          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      pi:
+        sessions:
+          max_verified_version: "0.80.6"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
+          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260713-172121Z-prebump/report.json"]
+    notes:
+      - "2026-07-13 weekly format check (report scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json). Two additive schema drifts, both non-breaking: (1) Codex 0.144.x adds a `world_state` context-snapshot event whose payload has no role/type, so the parser resolves it to .meta; added a redacted world_state line to codex small + schema_drift fixtures with testCodexSchemaDriftWorldStateEventSurvivesParsing. (2) Claude subagent transcripts (~/.claude/projects/**/<parentUUID>/subagents/*.jsonl) add agentId (user/assistant/attachment) and attributionAgent (assistant) top-level keys; unknown keys are ignored by the parser and preserved in rawJSON. Added an authentic subagent fixture pair (claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl parent + <uuid>/subagents/agent-a0ad4f44468bdf20d.jsonl child, with an agent-*.meta.json sidecar) rather than sprinkling the keys onto the main-session small.jsonl, so the keys land where they really occur and the previously-untested ClaudeSessionParser.detectSubagentInfo path-detection (parentSessionID + subagentType) is exercised by testClaudeSubagentFixtureDetectsParent. Bumped Codex 0.142.5->0.144.3 and Claude 2.1.202->2.1.207 from fresh weekly real-session evidence after the fixture baseline update. Bumped OpenCode 1.17.13->1.17.18 and Pi 0.80.3->0.80.6 from prebump (scripts/probe_scan_output/agent_watch/20260713-172121Z-prebump/report.json, fresh_matches_baseline=True). Bumped Antigravity 1.0.14->1.0.16 from real-home prebump (scripts/probe_scan_output/agent_watch/20260713-173118Z-prebump/report.json, fresh_matches_baseline=True). Usage/limits probes all healthy: codex_status_probe, claude_usage_probe, claude_status ok=true, exit 0. No parser or UI change required."
+      - "Held at unchanged verified versions: Copilot 1.0.65 (upstream 1.0.70 not installed; weekly schema_diff shows no unknown types/keys), Hermes 0.17.0 (upstream 0.18.2 not installed), Cursor 2026.6.24 (upstream 2026.7.9 not installed), OpenClaw 2026.6.11 (current, supports_latest)."
   - agent_sessions_version: "4.2"
     as_of_date_utc: "2026-07-07"
     as_of_commit: "c62d81aa"
