@@ -1,3 +1,23 @@
+## 2026-07-13 11:33 · agent-support · 2026-07-13 weekly session-format check + subagent fixture
+status: done
+
+**State:** Committed & pushed to main as `62a4ef12` (dad7c4e7..62a4ef12). Two additive, non-breaking drifts handled; 5 verified versions bumped; 136 tests green; monitor re-run clean (codex+claude schema_matches_baseline=True, unknown_keys=[]).
+
+**Decided / don't redo:**
+- Codex 0.144.x `world_state` event → parser reads `type` from payload, resolves to `.meta` (non-breaking). In codex small.jsonl (baseline) + schema_drift.jsonl.
+- Claude subagent keys (agentId/attributionAgent): did NOT sprinkle onto main small.jsonl — built an authentic subagent fixture pair under `claude/subagent/<uuid>/subagents/` + `.meta.json` sidecar, which also covers the previously-untested `ClaudeSessionParser.detectSubagentInfo`. small.jsonl reverted to pristine.
+- Bumps (all fresh real-session evidence): Codex 0.142.5→0.144.3, Claude 2.1.202→2.1.207, OpenCode 1.17.13→1.17.18, Pi 0.80.3→0.80.6, Antigravity 1.0.14→1.0.16. Usage probes all healthy.
+- Baseline = evidence_fixtures minus `schema_drift.jsonl`; to clear a monitor flag the new type/keys MUST be in a non-drift fixture listed in evidence_fixtures.
+
+**Key files:**
+- `skills/agent-session-format-check/SKILL.md` — the workflow source of truth
+- `docs/agent-support/agent-support-matrix.yml` / `-ledger.yml`, `docs/agent-json-tracking.md` — version records
+- `Resources/Fixtures/stage0/agents/claude/subagent/` — new subagent fixture trio
+
+**Next:**
+1. Nothing outstanding for this task. Follow-up triggers per SKILL.md decision matrix on next weekly run.
+2. NOTE: main checkout has a parallel session's uncommitted work (Codex usage-window classification: CodexStatus/*, pbxproj, CHANGELOG.md, new CodexRateLimitWindowClassifier.swift + design spec) — NOT this session's; left untouched.
+
 ## 2026-07-12 19:08 · perf-instant · Runway idle-CPU fix landed on main; strategy doc; xhigh review
 status: done
 
