@@ -1,3 +1,23 @@
+## 2026-07-12 19:08 · perf-instant · Runway idle-CPU fix landed on main; strategy doc; xhigh review
+status: done
+
+**State:** perf/instant-2026-07-12 merged to main `bf403fe8` (c14be03b + auth fixes; 1,552 tests green; NOT pushed). QM-visible idle CPU 25–41% → ~11% median, runway parse weight ~75× down.
+
+**Decided / don't redo:**
+- Runway cache design: only bytes-derived artifacts cached (key = path+mtime+size); ALL now-dependent state recomputed per cycle — verified byte-identical by 4 independent reviewers. Don't "optimize" the per-call filter/finalize into the cache.
+- Refuted: 0.08s filter debounce is a sound trade (not a regression); RunwayFileSignature≠SessionFileStat duplication is justified (sub-second mtime needed).
+- Strategy (Marketing/STRATEGY_2026-07-12_wow-and-1k.md, untracked): NO standalone meter spinout (CodexBar/steipete 17.8k owns it), NO Tauri/Rust port; wedge = per-session burn attribution; wow = Wrapped card + shareable transcripts + Memory Inspector; growth = upstream-issue comments, awesome-claude-code #1726, homebrew-cask.
+
+**Key files:**
+- `docs/perf-2026-07-12-runway-idle-fix.md` — measurements + cache invariant
+- Worktree `/Users/alexm/Repository/Codex-History-perf` still exists (merged; removable)
+
+**Next:**
+1. Before next release: CHANGELOG/summaries bullets (shimmer/Reduce-Motion is user-visible) + inline the 3 new FeatureFlags gates per agents.md policy (~10 min).
+2. Optional review one-liners: Codex cache self-prune, `Value: Sendable`, shimmer `.tolerance` (15 findings filed, none blocking).
+3. Push main when ready. DB migration-wipe fix runs in its own task session (task_8773aec9).
+4. Careful committing in main checkout: a parallel session has uncommitted edits there (usage-auth files + pbxproj) — not this session's work.
+
 ## 2026-07-10 18:28 · usage-auth-surfacing · Unified auth surfacing + guided Fix flow across all usage meters
 status: done
 
