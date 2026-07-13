@@ -593,13 +593,18 @@ private struct WebApiSafariStatusCallout: View {
         let resolver = ClaudeWebCookieResolver()
         switch await resolver.resolveDetailed() {
         case .permissionDenied:
-            return ("Full Disk Access needed — Agent Sessions can't read Safari's cookies.", false)
+            // A visible-but-ineffective grant is common with rebuilt dev builds:
+            // TCC pins the grant to the build identity, so a stale entry shows
+            // enabled while the read stays denied. Say so, or the user loops.
+            return ("Full Disk Access needed — if already granted, remove the Agent Sessions entry and re-add this exact app.", false)
         case .noSession:
-            return ("No claude.ai session in Safari — sign in at claude.ai, then retest.", false)
+            return ("No claude.ai session in Safari — sign in at claude.ai (default profile), then retest.", false)
         case .found(let cookie):
             do {
-                _ = try await ClaudeWebUsageClient().fetch(sessionKey: cookie.sessionKey)
-                return ("Web API working — usage fetched from claude.ai.", true)
+                let result = try await ClaudeWebUsageClient().fetch(sessionKey: cookie.sessionKey)
+                return result.fromCache
+                    ? ("Web API working — served from a recent cached response.", true)
+                    : ("Web API working — usage fetched live from claude.ai.", true)
             } catch ClaudeOAuthUsageClientError.unauthorized {
                 return ("Safari's claude.ai session is expired — sign in again at claude.ai.", false)
             } catch {

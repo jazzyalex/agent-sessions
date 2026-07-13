@@ -76,6 +76,9 @@ actor ClaudeWebCookieResolver {
     /// Search paths for Safari's binarycookies file.
     /// Legacy (pre-macOS 14): ~/Library/Cookies/
     /// Sandboxed (macOS 14+): ~/Library/Containers/com.apple.Safari/.../Cookies/
+    /// Known limitation: Safari Profiles (macOS 14+) and private windows keep
+    /// their cookies outside this default store — a user signed in to claude.ai
+    /// only inside a non-default profile reads as `.noSession` here.
     private static let cookiePaths: [String] = [
         "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
         "Library/Cookies/Cookies.binarycookies",
@@ -118,7 +121,15 @@ actor ClaudeWebCookieResolver {
     static func isPermissionDenial(_ error: Error) -> Bool {
         let ns = error as NSError
         if ns.domain == NSCocoaErrorDomain {
-            return ns.code == NSFileReadNoPermissionError
+            if ns.code == NSFileReadNoPermissionError { return true }
+            // Foundation sometimes wraps the real POSIX denial in a generic
+            // read-unknown error — unwrap and re-check the underlying error so
+            // a TCC denial can't misreport as "no session in Safari".
+            if ns.code == NSFileReadUnknownError,
+               let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+                return isPermissionDenial(underlying)
+            }
+            return false
         }
         if ns.domain == NSPOSIXErrorDomain {
             return ns.code == Int(EPERM) || ns.code == Int(EACCES)

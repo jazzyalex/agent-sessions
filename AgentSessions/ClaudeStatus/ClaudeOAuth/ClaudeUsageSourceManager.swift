@@ -312,6 +312,11 @@ actor ClaudeUsageSourceManager {
     /// tmux-handoff threshold in milliseconds (observed live: 3 failures in
     /// 350ms at launch).
     private var webFetchInFlight = false
+    /// Set when a fetch request arrives while one is in flight (e.g. the user's
+    /// manual refreshNow racing the scheduled poll). The in-flight guard must
+    /// not silently swallow it — one follow-up fetch runs when the current one
+    /// completes.
+    private var webRefetchQueued = false
 
     private var webApiEnabled: Bool {
         UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled)
@@ -1027,9 +1032,18 @@ actor ClaudeUsageSourceManager {
 
     private func performWebFetch() async {
         guard shouldRun, usingWebFallback || mode == .webOnly else { return }
-        guard !webFetchInFlight else { return }
+        guard !webFetchInFlight else {
+            webRefetchQueued = true
+            return
+        }
         webFetchInFlight = true
-        defer { webFetchInFlight = false }
+        defer {
+            webFetchInFlight = false
+            if webRefetchQueued {
+                webRefetchQueued = false
+                scheduleWebRefresh(delay: 0)
+            }
+        }
 
         let cookie: ClaudeWebCookieResolver.ResolvedCookie
         switch await webCookieResolver.resolveDetailed() {
@@ -1068,9 +1082,12 @@ actor ClaudeUsageSourceManager {
             webFailureCount = 0
             publish(snapshot)
             await store.save(snapshot)
-            // Clear any lingering cause caption (FDA / sign-in hint) — in
-            // webOnly mode no OAuth emit ever would. Caption-only: the auth
-            // banner and legacy bools are someone else's state.
+            // Clear any lingering cause caption on a healthy web fetch — in
+            // webOnly mode no OAuth emit ever would, and in auto mode a serving
+            // web fallback supersedes stale degradation captions (it MAY also
+            // clear an unrelated OAuth-origin advisory; acceptable — data is
+            // flowing). Caption-only: the auth banner and legacy bools are
+            // someone else's state.
             availabilityHandler?(ClaudeServiceAvailability(
                 cliUnavailable: false, tmuxUnavailable: false,
                 transientReason: nil, captionOnly: true))
