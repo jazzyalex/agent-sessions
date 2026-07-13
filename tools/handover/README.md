@@ -8,7 +8,9 @@ see "History" below).
 
 ## Use
 Type `/handover` (or say "write a handover"). It drafts a lean entry from the session — no
-git audit — shows it for approval, then prepends it to `RepoHandover.md`. It never commits.
+git audit — and **writes it immediately** (prepends to `RepoHandover.md`), no approval prompt:
+you already opted in by running it, so it writes and reports one line, and you close/archive.
+If an entry is ever wrong you just edit the file — it's short and uncommitted. It never commits.
 
 Entries look like:
 

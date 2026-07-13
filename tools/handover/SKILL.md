@@ -7,8 +7,9 @@ description: Use when wrapping up or capturing the current state of a coding ses
 
 Append a **short**, dated entry to `RepoHandover.md` at the repo root (newest-first)
 capturing where things stand, so you or a future agent can resume. Keep it lean — a handful
-of lines, **no git audit**. Draft it from what you already know in this session; the user
-approves; you write. **Never commit.**
+of lines, **no git audit**. The user already opted in by running `/handover`, so **draft and
+write it directly — do NOT ask for approval or show a draft to confirm.** Just write, report
+one line, and stop. **Never commit.**
 
 ## Procedure
 
@@ -37,26 +38,29 @@ approves; you write. **Never commit.**
    - `slug` = the branch or plan/spec name (keep it stable — supersede-matching uses it).
    - Timestamp: `date +'%Y-%m-%d %H:%M'`.
 
-3. **Show the draft.** Press Enter to accept, or reply with edits. Keep approval light.
-
-4. **Write (prepend, newest-first).**
+3. **Write it immediately — no approval prompt.**
    - New file → create `RepoHandover.md` with this entry as its only content.
    - Existing file → **prepend** the entry above the current top entry (blank line between).
-     Don't touch older entries except in step 5.
-   - Either way, ensure the repo's `CLAUDE.md` contains this pointer (add it once, creating a
-     short `CLAUDE.md` if absent):
+     Don't touch older entries except the silent supersede below.
+   - Ensure the repo's `CLAUDE.md` contains this pointer (add it once, creating a short
+     `CLAUDE.md` if absent):
 
             > Before starting work, read the newest entry in `RepoHandover.md`.
 
-   - **Never run `git commit`** — tell the user it's written and theirs to commit.
+   - **Silent supersede:** if an older entry has the same `slug` and its status isn't already
+     `done` or `superseded-by:`, change that older entry's status line to
+     `status: superseded-by:<new-entry-date>` (one-line edit; leave its prose alone). No prompt.
+   - **Never run `git commit`.**
 
-5. **Supersede (optional).** If an older entry has the same `slug` and isn't already
-   superseded, offer to set its status line to `status: superseded-by:<new-entry-date>`
-   (a one-line edit; leave its prose alone). Only on the user's confirmation.
+4. **Report one line and stop.** e.g. `Wrote handover to RepoHandover.md (superseded the
+   previous runway-auth entry). Not committed.` Do not ask follow-up questions — the user is
+   about to close/archive the session.
 
 ## Notes
 - **Lean by default.** State + key decisions + next steps. No git verification dump, no
-  "Verified/Believed" ceremony, no risk matrix. If the user wants more detail, they'll ask.
+  "Verified/Believed" ceremony, no risk matrix.
+- If the drafted entry is wrong, the user edits the file directly — it's short and uncommitted,
+  so a bad entry is cheap. That's why no approval gate is needed.
 - Sanity-check (optional, cheap): `handover-lint.sh RepoHandover.md` — installed next to this
   skill — exits 0 when the newest entry's heading + `status:` line are well-formed.
 - Rotation: if `RepoHandover.md` passes ~1000 lines, offer (never silently) to move all but
