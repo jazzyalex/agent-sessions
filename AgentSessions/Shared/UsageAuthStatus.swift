@@ -6,6 +6,11 @@ enum AuthProvider: Equatable { case claude, codex
 
 enum UsageAuthState: Equatable {
     case ok, signedOut, expired, cliNotInstalled, needsSetup, unknown
+    /// Signed in, but the saved access token lapsed from inactivity (nothing
+    /// refreshes it between sessions — only a real Claude session does). The
+    /// account is fine and usage resumes on the next session, so this is calm
+    /// by design: no banner, no notification, no "Fix…" chip.
+    case idle
     /// States that should raise the loud banner + one-shot notification.
     var isAlarming: Bool {
         switch self { case .signedOut, .expired, .cliNotInstalled: return true
@@ -43,7 +48,9 @@ struct UsageAuthStatus: Equatable {
         case .expired: return "\(name) auth expired"
         case .cliNotInstalled: return "\(name) token needed"
         case .needsSetup: return "\(name) needs setup"
-        case .ok, .unknown: return ""
+        // Idle renders via the dedicated calm cells (footer / HUD / menu bar),
+        // never the alarming chip.
+        case .ok, .unknown, .idle: return ""
         }
     }
 
@@ -68,6 +75,13 @@ struct UsageAuthStatus: Equatable {
         switch state {
         case .ok, .unknown:
             return .init(state: state, remediation: .none, headline: "", detail: "", providerName: name)
+        case .idle:
+            // Honest, non-alarming: the account is signed in; the token just
+            // lapsed from inactivity and refreshes with the next session.
+            return .init(state: state, remediation: .none,
+                headline: "No active \(name) session",
+                detail: "Usage will update after the next \(name) session.",
+                providerName: name)
         case .signedOut:
             if claudeNoCLI {
                 return .init(state: state, remediation: ladder,
