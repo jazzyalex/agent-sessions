@@ -3667,28 +3667,19 @@ enum HUDRunwayRequestBuilder {
             }
             return observedAt
         }()
-        // The weekly `used_percent` ticks in whole integers (1% ≈ 100 min of
-        // quota, ~1% every ~1.5 min). A single tick caught by the fresh projection
-        // extrapolates to an absurd instantaneous rate (~6000 m/h). On the long
-        // (weekly) window use ONLY the smooth average-burn (used% / elapsed-this-
-        // window), which never blows up, and ignore the coarse fresh projection.
-        // Per-session burn is then attributed from smooth TOKEN activity against
-        // that meaningful provider rate. The short (5h) window measures finely, so
-        // it keeps the fresh projection and its plain reset fallback (no average-burn).
+        // While the 5h window is dropped the runway tracks the long (weekly)
+        // window, but a weekly-scaled m/h would render on a 33.6× different scale
+        // than Claude's 5h "m/h" in the same view (2383 vs 32) — same label, two
+        // meanings. So on the long window the runway switches UNIT to raw token
+        // throughput (tk/h): window-independent, never absurd, and it auto-reverts
+        // to true 5h m/h when the window returns. Run-out/projection are unused in
+        // token mode. The short (5h) window keeps the fresh projection + reset
+        // fallback exactly as before.
         let isLongWindow = windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes
-        let averageRunout = isLongWindow
-            ? RunwayBaselineMath.averageBurnRunout(
-                remainingPercent: Double(fiveHourRemainingPercent),
-                resetAt: resetAt,
-                windowLength: TimeInterval(windowMinutes * 60),
-                now: now)
-            : nil
-        // Average-burn is a now-relative estimate, so anchor observedAt at `now` on
-        // the long window; the short window keeps the projection's timestamp.
         let observedAt = isLongWindow ? now : (freshProjectionObservedAt ?? now)
-        let runoutAt = (isLongWindow ? nil : freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt })
-            ?? averageRunout
-            ?? resetAt
+        let runoutAt: Date = isLongWindow
+            ? resetAt
+            : ((freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt }) ?? resetAt)
         guard resetAt > observedAt,
               runoutAt > observedAt else {
             return nil
@@ -3700,11 +3691,11 @@ enum HUDRunwayRequestBuilder {
             resetAt: resetAt,
             currentRunoutAt: runoutAt,
             observedAt: observedAt,
-            // A real run-out estimate (average-burn on weekly, fresh projection on
-            // 5h) enables per-session token-activity attribution; the bare reset
-            // fallback leaves it off (its provider rate would be meaningless).
-            hasProjectedRunout: isLongWindow ? (averageRunout != nil) : (freshProjectionObservedAt != nil),
-            windowMinutes: windowMinutes
+            // Token mode needs no run-out estimate; the 5h path keeps its
+            // projection-driven attribution.
+            hasProjectedRunout: isLongWindow ? false : (freshProjectionObservedAt != nil),
+            windowMinutes: windowMinutes,
+            rateUnit: isLongWindow ? .tokensPerHour : .quotaMinutesPerHour
         )
         return CodexRunwaySnapshotRequest(
             baseline: baseline,
@@ -4739,6 +4730,11 @@ private struct HUDRunwayPanel: View {
     private var runwayFontSize: CGFloat { QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged) }
     private var runwayRowHeight: CGFloat { QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged) }
 
+    /// The unit every row in this snapshot reports (m/h for the 5h yardstick, or
+    /// tk/h while the 5h window is dropped). Rows carry their rate in the same
+    /// `quotaMinutesPerHour` field regardless; this decides how it's read.
+    private var rateUnit: RunwayRateUnit { snapshot.baseline.rateUnit }
+
     private var maxQuotaMinutesPerHour: Double {
         let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
         let summaryMax = snapshot.burstSummary?.quotaMinutesPerHour ?? 0
@@ -4794,25 +4790,26 @@ private struct HUDRunwayPanel: View {
             Text("—")
                 .foregroundStyle(.secondary)
         } else {
-            Text(RunwayTimeFormatting.quotaRate(quota, confidence: confidence))
+            Text(RunwayTimeFormatting.rate(quota, unit: rateUnit, confidence: confidence))
                 .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
         }
     }
 
     private func runwayRow(_ row: RunwayPauseImpactRow, index: Int) -> some View {
         GeometryReader { proxy in
-            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width)
+            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width, unit: rateUnit)
             HStack(spacing: HUDRunwayLayout.columnSpacing) {
                 Text(sessionLabel(row))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(width: titleWidth, alignment: .leading)
                 rateCell(quota: row.quotaMinutesPerHour, confidence: row.confidence)
-                    .frame(width: HUDRunwayLayout.rateWidth, alignment: .trailing)
+                    .frame(width: HUDRunwayLayout.rateWidth(for: rateUnit), alignment: .trailing)
                 HUDRunwayLoadBar(
                     quotaMinutesPerHour: row.quotaMinutesPerHour,
                     maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
                     confidence: row.confidence,
+                    unit: rateUnit,
                     animationTick: shimmer.tick,
                     index: index
                 )
@@ -4824,7 +4821,7 @@ private struct HUDRunwayPanel: View {
     private func summaryRow(_ summary: RunwayShortBurstSummary) -> some View {
         let confidence: RunwayAttributionConfidence = summary.quotaMinutesPerHour > 0 ? .mixed : .waiting
         return GeometryReader { proxy in
-            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width)
+            let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width, unit: rateUnit)
             HStack(spacing: HUDRunwayLayout.columnSpacing) {
                 Text(summaryLabel(summary))
                     .foregroundStyle(.secondary)
@@ -4832,11 +4829,12 @@ private struct HUDRunwayPanel: View {
                     .truncationMode(.middle)
                     .frame(width: titleWidth, alignment: .leading)
                 rateCell(quota: summary.quotaMinutesPerHour, confidence: confidence)
-                    .frame(width: HUDRunwayLayout.rateWidth, alignment: .trailing)
+                    .frame(width: HUDRunwayLayout.rateWidth(for: rateUnit), alignment: .trailing)
                 HUDRunwayLoadBar(
                     quotaMinutesPerHour: summary.quotaMinutesPerHour,
                     maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
                     confidence: confidence,
+                    unit: rateUnit,
                     animationTick: shimmer.tick,
                     index: snapshot.rows.count
                 )
@@ -4888,6 +4886,7 @@ private struct HUDRunwayLoadBar: View {
     let quotaMinutesPerHour: Double
     let maxQuotaMinutesPerHour: Double
     let confidence: RunwayAttributionConfidence
+    var unit: RunwayRateUnit = .quotaMinutesPerHour
     let animationTick: Int
     let index: Int
     @Environment(\.colorScheme) private var colorScheme
@@ -4900,8 +4899,17 @@ private struct HUDRunwayLoadBar: View {
             return 0
         }
         let relative = quotaMinutesPerHour / maxQuotaMinutesPerHour
-        let absolutePressure = min(1, quotaMinutesPerHour / 45)
-        let base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
+        // The absolute-pressure term (rate/45) is a 5h-m/h yardstick constant —
+        // meaningless for token throughput — so token mode fills relative-to-max
+        // only. m/h keeps the pressure anchor so a lone heavy burn still fills.
+        let base: Double
+        switch unit {
+        case .quotaMinutesPerHour:
+            let absolutePressure = min(1, quotaMinutesPerHour / 45)
+            base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
+        case .tokensPerHour:
+            base = max(0.12, relative * 0.85)
+        }
         let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
         return CGFloat(min(1, max(0.04, base * wave)))
     }
@@ -4934,26 +4942,46 @@ private struct HUDRunwayLoadBar: View {
         }
         .frame(minWidth: 62, maxWidth: .infinity)
         .frame(height: 5)
-        .accessibilityLabel(RunwayTimeFormatting.quotaRate(quotaMinutesPerHour, confidence: confidence))
+        .accessibilityLabel(RunwayTimeFormatting.rate(quotaMinutesPerHour, unit: unit, confidence: confidence))
     }
 }
 
 private enum HUDRunwayLayout {
-    // Wide enough for a 3-digit rate ("137m/h") at the larger "match main" text size.
-    static let rateWidth: CGFloat = 52
     static let minBarWidth: CGFloat = 62
     static let columnSpacing: CGFloat = 8
     static let rowHeight: CGFloat = 14
 
+    /// Rate column width. "137m/h" fits 52; token rates like "56.5M tk/h" need more.
+    static func rateWidth(for unit: RunwayRateUnit) -> CGFloat {
+        unit == .tokensPerHour ? 74 : 52
+    }
+
     /// Give the session title every point not needed by the fixed-width rate
     /// and the minimum bar, so names only truncate when they genuinely overflow.
-    static func titleWidth(for totalWidth: CGFloat) -> CGFloat {
-        let reservedWidth = rateWidth + minBarWidth + (columnSpacing * 2)
+    static func titleWidth(for totalWidth: CGFloat, unit: RunwayRateUnit) -> CGFloat {
+        let reservedWidth = rateWidth(for: unit) + minBarWidth + (columnSpacing * 2)
         return max(64, totalWidth - reservedWidth)
     }
 }
 
 private enum RunwayTimeFormatting {
+    /// Unit-aware runway rate text. The 5h yardstick reads "137m/h"; when the 5h
+    /// window is dropped the runway reports raw token throughput ("412K tk/h")
+    /// instead, so "m/h" never means two things across providers.
+    static func rate(_ value: Double,
+                     unit: RunwayRateUnit,
+                     confidence: RunwayAttributionConfidence = .mixed) -> String {
+        switch unit {
+        case .quotaMinutesPerHour:
+            return quotaRate(value, confidence: confidence)
+        case .tokensPerHour:
+            guard confidence != .waiting else { return "0 tk/h" }
+            guard confidence != .idle else { return "idle" }
+            guard value.isFinite, value >= 1 else { return "flat" }
+            return formatTokenRatePerHour(value)
+        }
+    }
+
     static func quotaRate(_ minutesPerHour: Double, confidence: RunwayAttributionConfidence = .mixed) -> String {
         // Alive but not currently burning (just appeared / awaiting a long tool):
         // a calm, honest "0m/h" rather than a spinner.

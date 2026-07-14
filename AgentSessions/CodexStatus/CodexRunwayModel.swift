@@ -105,6 +105,16 @@ enum RunwayDeadline: Equatable, Sendable {
     case unavailable
 }
 
+/// Unit a runway row's rate is expressed in. The 5h window uses the normalized
+/// quota-minutes-per-hour yardstick (60 m/h = sustainable-for-5h). When the 5h
+/// window is dropped there is no 5h budget to normalize against, so Codex rows
+/// fall back to raw token throughput (window-independent, honest) rather than a
+/// fabricated m/h that would read on a different scale than Claude's 5h rows.
+enum RunwayRateUnit: Equatable, Sendable {
+    case quotaMinutesPerHour
+    case tokensPerHour
+}
+
 struct RunwayProviderBaseline: Equatable, Sendable {
     let source: UsageTrackingSource
     let remainingPercent: Double
@@ -117,6 +127,10 @@ struct RunwayProviderBaseline: Equatable, Sendable {
     /// whether it draws down the 5h or the weekly window. Defaults to the 5h
     /// window, leaving every existing caller (incl. Claude) unchanged.
     let windowMinutes: Int
+    /// Unit the runway rows report their rate in. Defaults to the m/h yardstick;
+    /// the Codex builder switches to `.tokensPerHour` while the 5h window is
+    /// dropped so "m/h" never means two different things across providers.
+    let rateUnit: RunwayRateUnit
 
     init(source: UsageTrackingSource,
          remainingPercent: Double,
@@ -124,7 +138,8 @@ struct RunwayProviderBaseline: Equatable, Sendable {
          currentRunoutAt: Date,
          observedAt: Date,
          hasProjectedRunout: Bool = true,
-         windowMinutes: Int = 300) {
+         windowMinutes: Int = 300,
+         rateUnit: RunwayRateUnit = .quotaMinutesPerHour) {
         self.source = source
         self.remainingPercent = remainingPercent
         self.resetAt = resetAt
@@ -132,6 +147,7 @@ struct RunwayProviderBaseline: Equatable, Sendable {
         self.observedAt = observedAt
         self.hasProjectedRunout = hasProjectedRunout
         self.windowMinutes = windowMinutes
+        self.rateUnit = rateUnit
     }
 }
 
@@ -169,7 +185,11 @@ enum RunwayBaselineMath {
         let windowStart = resetAt.addingTimeInterval(-windowLength)
         let rawElapsed = now.timeIntervalSince(windowStart)
         guard rawElapsed > 0 else { return nil }
-        let elapsed = max(rawElapsed, minimumElapsed)
+        // Floor elapsed so an early-window burst can't divide by a tiny denominator
+        // and project an absurd run-out. Scale the floor to the window (1/30 of its
+        // length) so a long window smooths over hours, not the 5h-tuned 10 min; for
+        // the 5h window `windowLength/30 == 600s`, so this is unchanged there.
+        let elapsed = max(rawElapsed, max(minimumElapsed, windowLength / 30))
         let averageRatePerSecond = usedPercent / elapsed
         guard averageRatePerSecond > 0, averageRatePerSecond.isFinite else { return nil }
         let secondsToRunout = remainingPercent / averageRatePerSecond
@@ -287,16 +307,18 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
 /// activity only registers when the newest `total_tokens` sample is within
 /// `maximumSampleAge` (75s); a longer gap in output makes a cycle's aggregate
 /// read zero, so without a hold the chip blinks out and back on the 5s refresh.
-/// This keeps the last positive rate across short gaps while the provider still
-/// has active sessions, and clears once the hold window elapses (or all sessions
-/// go idle) so an idle meter never shows a stale rate.
-final class RunwayAggregateBurnHold {
+/// Pure TTL: the last positive rate is held for up to `window` seconds after the
+/// last measured sample, then self-clears. So a transient cycle with no samples
+/// can't blank the chip mid-burst, and the rate persists at most `window`s after
+/// output truly stops. `@unchecked Sendable` mirrors the sibling
+/// `RunwayFileParseCache` — a lock-guarded static touched from the loader's
+/// `DispatchQueue.global` closures.
+final class RunwayAggregateBurnHold: @unchecked Sendable {
     private let lock = NSLock()
     private var lastPositive: [String: (rate: Double, at: Date)] = [:]
 
     func resolve(key: String,
                  freshTokensPerSecond: Double,
-                 hasActiveSessions: Bool,
                  window: TimeInterval,
                  now: Date) -> Double {
         lock.lock()
@@ -305,10 +327,13 @@ final class RunwayAggregateBurnHold {
             lastPositive[key] = (freshTokensPerSecond, now)
             return freshTokensPerSecond
         }
-        guard hasActiveSessions,
-              let last = lastPositive[key],
-              now.timeIntervalSince(last.at) <= window else {
-            lastPositive[key] = nil
+        // No fresh burn this cycle: hold the last positive rate until the TTL
+        // elapses. `max(0, …)` guards sub-second clock skew between the two view
+        // loaders that share this hold; prune only once genuinely expired so a
+        // transient empty cycle can't clear a still-valid hold.
+        guard let last = lastPositive[key] else { return 0 }
+        if max(0, now.timeIntervalSince(last.at)) > window {
+            lastPositive.removeValue(forKey: key)
             return 0
         }
         return last.rate
@@ -328,6 +353,12 @@ enum CodexRunwaySnapshotLoader {
     static let burnHold = RunwayAggregateBurnHold()
     static let burnHoldWindow: TimeInterval = 120
 
+    /// Explicit per-provider hold key so a future Claude adoption of this loader
+    /// can't collide with Codex's held rate under a shared constant.
+    private static func burnHoldKey(for request: CodexRunwaySnapshotRequest) -> String {
+        "\(request.baseline.source)|\(request.recentSessionsRoot?.path ?? "")"
+    }
+
     static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -341,29 +372,43 @@ enum CodexRunwaySnapshotLoader {
                 let activePaths = Set(identities.flatMap { $0.logPaths })
                 CodexRunwayRateLimitParser.retainCache(paths: activePaths)
                 CodexRunwayTokenActivityParser.retainCache(paths: activePaths)
-                let directBurns = identities.compactMap {
-                    CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
-                }
                 // Parse each session's token activity once; both the per-session
-                // token burns and the aggregate throughput derive from it.
+                // rows/burns and the aggregate throughput derive from it.
                 let activities = CodexRunwayTokenActivityParser.activities(
                     identities: identities,
                     now: request.now
                 )
-                let tokenBurns = request.baseline.hasProjectedRunout
-                    ? CodexRunwayTokenActivityParser.burns(
+                let core: CodexRunwaySnapshot?
+                if request.baseline.rateUnit == .tokensPerHour {
+                    // 5h window dropped → no run-out to normalize against, so rows
+                    // show raw per-session token throughput (tk/h) directly from
+                    // activity. The coarse weekly %-burns (integer 1% ticks) are
+                    // deliberately not used here — they can't express a sane rate.
+                    core = CodexRunwayCalculator.tokenSnapshot(
+                        baseline: request.baseline,
                         activities: activities,
-                        baseline: request.baseline
+                        maxRows: request.maxRows
                     )
-                    : []
-                let burns = mergeBurns(directBurns: directBurns, tokenBurns: tokenBurns)
-                var snapshot = RunwaySnapshotAssembly.withPendingRows(
-                    baseline: request.baseline,
-                    snapshot: CodexRunwayCalculator.snapshot(
+                } else {
+                    let directBurns = identities.compactMap {
+                        CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
+                    }
+                    let tokenBurns = request.baseline.hasProjectedRunout
+                        ? CodexRunwayTokenActivityParser.burns(
+                            activities: activities,
+                            baseline: request.baseline
+                        )
+                        : []
+                    let burns = mergeBurns(directBurns: directBurns, tokenBurns: tokenBurns)
+                    core = CodexRunwayCalculator.snapshot(
                         baseline: request.baseline,
                         burns: burns,
                         maxRows: request.maxRows
-                    ),
+                    )
+                }
+                var snapshot = RunwaySnapshotAssembly.withPendingRows(
+                    baseline: request.baseline,
+                    snapshot: core,
                     activeIdentities: identities,
                     maxRows: request.maxRows
                 )
@@ -373,9 +418,8 @@ enum CodexRunwaySnapshotLoader {
                 // 5s refresh (a >75s pause in token output reads as zero this cycle).
                 let aggregateTokensPerSecond = activities.reduce(0) { $0 + $1.tokensPerSecond }
                 let stableTokensPerSecond = burnHold.resolve(
-                    key: request.recentSessionsRoot?.path ?? "codex",
+                    key: burnHoldKey(for: request),
                     freshTokensPerSecond: aggregateTokensPerSecond,
-                    hasActiveSessions: !identities.isEmpty,
                     window: burnHoldWindow,
                     now: request.now
                 )
@@ -665,6 +709,51 @@ enum CodexRunwayCalculator {
             baseline: baseline,
             providerRate: providerRate
         )
+        return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
+    }
+
+    /// Token-mode snapshot: rows report raw per-session token throughput
+    /// (tokens/hour) instead of the m/h yardstick — used when the active window
+    /// has no run-out to normalize against (the 5h window is dropped). There is no
+    /// deadline (the tk/h rate is the whole story); the rate rides in the row's
+    /// `quotaMinutesPerHour` field, interpreted per `baseline.rateUnit`.
+    static func tokenSnapshot(baseline: RunwayProviderBaseline,
+                              activities: [RunwaySessionActivity],
+                              maxRows: Int) -> CodexRunwaySnapshot? {
+        guard maxRows > 0 else { return nil }
+        let positive = activities.filter { $0.tokensPerSecond > 0 && $0.tokensPerSecond.isFinite }
+        guard !positive.isEmpty else {
+            return CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
+        }
+        let ranked = positive.sorted { lhs, rhs in
+            if lhs.tokensPerSecond != rhs.tokensPerSecond {
+                return lhs.tokensPerSecond > rhs.tokensPerSecond
+            }
+            if lhs.identity.isGoal != rhs.identity.isGoal {
+                return lhs.identity.isGoal && !rhs.identity.isGoal
+            }
+            return lhs.identity.displayName.localizedCaseInsensitiveCompare(rhs.identity.displayName) == .orderedAscending
+        }
+        let (visible, overflow) = RunwayOverflowRule.split(ranked, maxRows: maxRows)
+        let rows = visible.map { activity in
+            RunwayPauseImpactRow(
+                id: activity.identity.id,
+                displayName: activity.identity.displayName,
+                isGoal: activity.identity.isGoal,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: activity.tokensPerSecond * 3600,
+                confidence: .direct
+            )
+        }
+        let burstSummary = overflow.isEmpty
+            ? nil
+            : RunwayShortBurstSummary(
+                count: overflow.count,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.tokensPerSecond * 3600 }
+            )
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
 
@@ -1546,21 +1635,33 @@ enum CodexRunwayTokenActivityParser {
     }
 
     private static func totalTokens(from dict: [String: Any]) -> Double? {
-        if let direct = CodexRunwayRateLimitParser.double(dict["total_tokens"]) {
-            return direct
+        if let value = nettedTotal(from: dict) {
+            return value
         }
         if let info = dict["info"] as? [String: Any],
            let value = totalTokens(from: info) {
             return value
         }
         if let total = dict["total_token_usage"] as? [String: Any],
-           let value = CodexRunwayRateLimitParser.double(total["total_tokens"]) {
+           let value = nettedTotal(from: total) {
             return value
         }
         if let usage = dict["usage"] as? [String: Any],
-           let value = CodexRunwayRateLimitParser.double(usage["total_tokens"]) {
+           let value = nettedTotal(from: usage) {
             return value
         }
         return nil
+    }
+
+    /// `total_tokens` with cached input netted out. Codex's cumulative
+    /// `total_tokens` re-counts the entire cached context every turn, so raw
+    /// deltas between samples wildly overstate real generation (a ~200K context
+    /// re-sent 4×/min reads as ~48M tk/h). Subtracting the also-cumulative
+    /// `cached_input_tokens` makes the delta reflect fresh input + output — the
+    /// honest throughput. Falls back to the raw total when no cached field exists.
+    private static func nettedTotal(from dict: [String: Any]) -> Double? {
+        guard let total = CodexRunwayRateLimitParser.double(dict["total_tokens"]) else { return nil }
+        let cached = CodexRunwayRateLimitParser.double(dict["cached_input_tokens"]) ?? 0
+        return max(0, total - cached)
     }
 }

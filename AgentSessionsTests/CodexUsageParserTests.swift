@@ -3848,6 +3848,90 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(cleared?.aggregateTokensPerHour)
     }
 
+    func testCodexRunwayTokenModeShowsPerSessionTokenRates() async throws {
+        // Weekly window (rateUnit == .tokensPerHour): rows report raw per-session
+        // token throughput (tk/h), ranked by rate, and never the weekly-scaled m/h.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-tokenmode-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("empty-sessions", isDirectory: true)
+
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(7 * 24 * 60 * 60)
+
+        let logA = dir.appendingPathComponent("a.jsonl")
+        let logB = dir.appendingPathComponent("b.jsonl")
+        // A: 300000 tokens / 30s = 10000 tk/s. B: 60000 / 30s = 2000 tk/s.
+        try """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":400000}}}}
+        """.write(to: logA, atomically: true, encoding: .utf8)
+        try """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":10000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":70000}}}}
+        """.write(to: logB, atomically: true, encoding: .utf8)
+
+        let idA = RunwaySessionIdentity(id: "a", displayName: "Session A", isGoal: false, logPaths: [logA.path])
+        let idB = RunwaySessionIdentity(id: "b", displayName: "Session B", isGoal: false, logPaths: [logB.path])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 73, resetAt: reset,
+            currentRunoutAt: reset, observedAt: second, hasProjectedRunout: false,
+            windowMinutes: 10080, rateUnit: .tokensPerHour
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [idA, idB],
+            now: second.addingTimeInterval(1), maxRows: 5, recentSessionsRoot: root
+        )
+        CodexRunwaySnapshotLoader.burnHold.resetForTesting()
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        // Faster session ranks first; rows carry tk/h (tokensPerSecond * 3600) in
+        // the shared rate field, interpreted per the baseline's token unit.
+        XCTAssertEqual(snapshot?.rows.map(\.id), ["a", "b"])
+        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 10000 * 3600, accuracy: 1)
+        XCTAssertEqual(snapshot?.rows.last?.quotaMinutesPerHour ?? 0, 2000 * 3600, accuracy: 1)
+        XCTAssertEqual(snapshot?.rows.first?.deadline, .unavailable)
+    }
+
+    func testCodexRunwayTokenRateNetsOutCachedContext() async throws {
+        // total_tokens is cumulative and re-counts the cached context each turn, so
+        // the runway must delta (total - cached_input_tokens); otherwise a re-sent
+        // context reads as burn (the ~56M tk/h inflation).
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-cached-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("empty-sessions", isDirectory: true)
+
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(7 * 24 * 60 * 60)
+        let log = dir.appendingPathComponent("session.jsonl")
+        // Netted: 100000 → 150000 (delta 50000 / 30s = 1666.7 tk/s → 6M tk/h).
+        // Raw would be 700000 / 30s = 23333 tk/s → 84M tk/h (the inflated figure).
+        try """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":500000,"cached_input_tokens":400000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":1200000,"cached_input_tokens":1050000}}}}
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "s", displayName: "S", isGoal: false, logPaths: [log.path])
+        let baseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 73, resetAt: reset,
+            currentRunoutAt: reset, observedAt: second, hasProjectedRunout: false,
+            windowMinutes: 10080, rateUnit: .tokensPerHour
+        )
+        let request = CodexRunwaySnapshotRequest(
+            baseline: baseline, identities: [identity],
+            now: second.addingTimeInterval(1), maxRows: 5, recentSessionsRoot: root
+        )
+        CodexRunwaySnapshotLoader.burnHold.resetForTesting()
+        let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+
+        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 1666.6667 * 3600, accuracy: 100)
+        XCTAssertLessThan(snapshot?.rows.first?.quotaMinutesPerHour ?? .greatestFiniteMagnitude, 10_000_000,
+                          "Cached context must be netted out (raw would be ~84M tk/h)")
+    }
+
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-stale-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

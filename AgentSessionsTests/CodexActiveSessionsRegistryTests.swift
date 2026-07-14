@@ -2321,12 +2321,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(request?.baseline.currentRunoutAt, request?.baseline.resetAt)
     }
 
-    func testWeeklyRunwayIgnoresCoarseFreshProjectionAndUsesAverageBurn() {
-        // Regression: after OpenAI dropped the 5h window the runway tracks the
-        // weekly window, whose integer used_percent ticks 1% (~100 min of quota)
-        // at a time. A single tick caught by the fresh projection produced an
-        // absurd ~6000 m/h. On the long window the builder must ignore the coarse
-        // projection and anchor run-out to the smooth average-burn instead.
+    func testWeeklyRunwaySwitchesToTokenRateUnit() {
+        // After OpenAI dropped the 5h window the runway tracks the weekly window,
+        // whose integer used_percent can't express a sane m/h and would render on a
+        // different scale than Claude's 5h rows. The builder must switch the runway
+        // UNIT to token throughput (tk/h) and drop the projection/run-out entirely.
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let weeklyReset = now.addingTimeInterval(5 * 24 * 60 * 60) // 5 days out
         let spikyRunout = now.addingTimeInterval(30 * 60)          // 1%-tick extrapolation
@@ -2353,22 +2352,18 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             maxRows: 5
         )
 
-        let expected = RunwayBaselineMath.averageBurnRunout(
-            remainingPercent: 73,
-            resetAt: weeklyReset,
-            windowLength: TimeInterval(10080 * 60),
-            now: now
-        )
-        XCTAssertNotNil(expected)
+        XCTAssertEqual(request?.baseline.rateUnit, .tokensPerHour)
+        XCTAssertEqual(request?.baseline.hasProjectedRunout, false,
+                       "Token mode needs no run-out estimate")
         XCTAssertEqual(request?.baseline.observedAt, now)
-        XCTAssertEqual(request?.baseline.currentRunoutAt, expected)
-        XCTAssertNotEqual(request?.baseline.currentRunoutAt, spikyRunout,
-                          "Weekly window must ignore the coarse single-tick projection")
-        XCTAssertEqual(request?.baseline.hasProjectedRunout, true)
+        XCTAssertEqual(request?.baseline.currentRunoutAt, request?.baseline.resetAt,
+                       "Weekly window must not adopt the coarse single-tick projection")
+        XCTAssertNotEqual(request?.baseline.currentRunoutAt, spikyRunout)
     }
 
     func testShortWindowStillHonorsFreshProjection() {
-        // The 5h window measures finely, so a fresh projection is still used.
+        // The 5h window measures finely, so a fresh projection is still used and
+        // the runway keeps the m/h yardstick unit.
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let reset = now.addingTimeInterval(3 * 60 * 60)
         let projected = now.addingTimeInterval(90 * 60)
@@ -2393,6 +2388,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             now: now,
             maxRows: 5
         )
+        XCTAssertEqual(request?.baseline.rateUnit, .quotaMinutesPerHour)
         XCTAssertEqual(request?.baseline.currentRunoutAt, projected)
         XCTAssertEqual(request?.baseline.observedAt, now)
     }
