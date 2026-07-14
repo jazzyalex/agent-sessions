@@ -139,7 +139,7 @@ struct RunwayProviderBaseline: Equatable, Sendable {
          observedAt: Date,
          hasProjectedRunout: Bool = true,
          windowMinutes: Int = 300,
-         rateUnit: RunwayRateUnit = .quotaMinutesPerHour) {
+         rateUnit: RunwayRateUnit? = nil) {
         self.source = source
         self.remainingPercent = remainingPercent
         self.resetAt = resetAt
@@ -147,7 +147,14 @@ struct RunwayProviderBaseline: Equatable, Sendable {
         self.observedAt = observedAt
         self.hasProjectedRunout = hasProjectedRunout
         self.windowMinutes = windowMinutes
+        // Default the unit from the window length: a long (weekly) window has no 5h
+        // budget to normalize against, so it reads in tk/h; a short window uses the
+        // m/h yardstick. Deriving it here means a caller that sets a long window but
+        // forgets `rateUnit` can't silently render weekly-scaled m/h (the 33.6×
+        // mismatch this fix removes). Explicit callers still override (e.g. a future
+        // token-mode presentation on the 5h window).
         self.rateUnit = rateUnit
+            ?? (windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes ? .tokensPerHour : .quotaMinutesPerHour)
     }
 }
 
@@ -423,7 +430,12 @@ enum CodexRunwaySnapshotLoader {
                     window: burnHoldWindow,
                     now: request.now
                 )
-                if stableTokensPerSecond > 0 {
+                // Surface the "burning" chip only while the HUD still has active
+                // sessions. The hold bridges output gaps mid-work (the HUD row stays
+                // present), but once every session ends the chip clears with the
+                // runway rows instead of lingering for the full hold window — no
+                // phantom "burning" with nothing running.
+                if stableTokensPerSecond > 0, !request.identities.isEmpty {
                     snapshot?.aggregateTokensPerHour = stableTokensPerSecond * 3600
                 }
                 continuation.resume(returning: snapshot)

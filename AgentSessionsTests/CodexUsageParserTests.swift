@@ -3932,6 +3932,50 @@ final class CodexUsageParserTests: XCTestCase {
                           "Cached context must be netted out (raw would be ~84M tk/h)")
     }
 
+    func testCodexRunwayAggregateChipClearsWhenSessionsEnd() async throws {
+        // The hold bridges output gaps while a session is active, but once the HUD
+        // has no active sessions the "burning" chip clears immediately instead of
+        // lingering for the full hold window (no phantom burn with nothing running).
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-chipclear-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("empty-sessions", isDirectory: true)
+
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(7 * 24 * 60 * 60)
+        let log = dir.appendingPathComponent("session.jsonl")
+        try """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "s", displayName: "S", isGoal: false, logPaths: [log.path])
+        func request(identities: [RunwaySessionIdentity], now: Date) -> CodexRunwaySnapshotRequest {
+            CodexRunwaySnapshotRequest(
+                baseline: RunwayProviderBaseline(
+                    source: .codex, remainingPercent: 73, resetAt: reset,
+                    currentRunoutAt: reset, observedAt: second, hasProjectedRunout: false,
+                    windowMinutes: 10080
+                ),
+                identities: identities,
+                now: now,
+                maxRows: 5,
+                recentSessionsRoot: root
+            )
+        }
+        CodexRunwaySnapshotLoader.burnHold.resetForTesting()
+
+        // Active session → chip shows.
+        let active = await CodexRunwaySnapshotLoader.snapshot(for: request(identities: [identity], now: second.addingTimeInterval(1)))
+        XCTAssertEqual(active?.aggregateTokensPerHour ?? 0, 5000 * 3600, accuracy: 1)
+
+        // Sessions ended (no HUD identities) while still inside the 120s hold window
+        // → chip clears immediately rather than lingering.
+        let ended = await CodexRunwaySnapshotLoader.snapshot(for: request(identities: [], now: second.addingTimeInterval(40)))
+        XCTAssertNil(ended?.aggregateTokensPerHour)
+    }
+
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-stale-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

@@ -3692,10 +3692,10 @@ enum HUDRunwayRequestBuilder {
             currentRunoutAt: runoutAt,
             observedAt: observedAt,
             // Token mode needs no run-out estimate; the 5h path keeps its
-            // projection-driven attribution.
+            // projection-driven attribution. `rateUnit` derives from windowMinutes
+            // inside the baseline (long → tk/h), so it can't drift from the window.
             hasProjectedRunout: isLongWindow ? false : (freshProjectionObservedAt != nil),
-            windowMinutes: windowMinutes,
-            rateUnit: isLongWindow ? .tokensPerHour : .quotaMinutesPerHour
+            windowMinutes: windowMinutes
         )
         return CodexRunwaySnapshotRequest(
             baseline: baseline,
@@ -4951,9 +4951,10 @@ private enum HUDRunwayLayout {
     static let columnSpacing: CGFloat = 8
     static let rowHeight: CGFloat = 14
 
-    /// Rate column width. "137m/h" fits 52; token rates like "56.5M tk/h" need more.
+    /// Rate column width. "137m/h" fits 52; token rates like "56.5M tk/h" (and the
+    /// capped "999M"/"9.9B" forms) need more.
     static func rateWidth(for unit: RunwayRateUnit) -> CGFloat {
-        unit == .tokensPerHour ? 74 : 52
+        unit == .tokensPerHour ? 80 : 52
     }
 
     /// Give the session title every point not needed by the fixed-width rate
@@ -5017,11 +5018,17 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
         : Color(red: 0.82, green: 0.30, blue: 0.00)
 }
 
-/// Compact token-throughput label, e.g. "30K tk/h" / "1.2M tk/h". Used as the
-/// honest "burning" indicator on a limit line that has no run-out to show.
+/// Compact token-throughput label, e.g. "30K tk/h" / "1.2M tk/h" / "1.5B tk/h".
+/// Used as the honest "burning" indicator on a limit line that has no run-out to
+/// show. Magnitudes ≥100M drop the decimal (and ≥1B use "B") so the string stays
+/// short enough for the fixed-width rate column even for heavy parallel bursts.
 private func formatTokenRatePerHour(_ perHour: Double) -> String {
     let magnitude: String
-    if perHour >= 1_000_000 {
+    if perHour >= 1_000_000_000 {
+        magnitude = String(format: "%.1fB", perHour / 1_000_000_000)
+    } else if perHour >= 100_000_000 {
+        magnitude = String(format: "%.0fM", perHour / 1_000_000)
+    } else if perHour >= 1_000_000 {
         magnitude = String(format: "%.1fM", perHour / 1_000_000)
     } else if perHour >= 1_000 {
         magnitude = String(format: "%.0fK", perHour / 1_000)
