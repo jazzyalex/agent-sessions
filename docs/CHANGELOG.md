@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.4] - 2026-07-13
+
 ### Highlights
 - **Codex usage keeps working when OpenAI pauses the 5-hour limit.** OpenAI temporarily removed Codex's 5-hour rate-limit window (it's gone from the Codex app too), which left the Quota Meter mislabeling your weekly usage as "5h" with the wrong reset. Agent Sessions now detects this automatically: the 5h line reads a calm **"no limit"**, your **weekly** usage stays accurate, and everything snaps back on its own if OpenAI restores the 5h window.
 - **An honest Session Runway for Codex.** With no 5-hour budget to measure against, each active Codex session now shows its real **token throughput** (e.g. `412K tk/h`) instead of a burn rate scaled to the wrong window — a true, comparable read of what's burning right now. It returns to the familiar 5h "m/h" once the window is back.
