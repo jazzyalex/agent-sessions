@@ -21,6 +21,13 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
     /// i.e. when this turn started. Used for a provisional single-sample rate
     /// before a two-sample diff is available. nil when unknown.
     var turnStartedAt: Date?
+    /// Per-turn (incremental) per-type counts for $ pricing (Phase 2). Claude's
+    /// `message.usage` is per-call, so these are summed across a burst (not delta'd).
+    var input: Double = 0
+    var output: Double = 0
+    var cacheCreation: Double = 0
+    var cacheRead: Double = 0
+    var modelSlug: String? = nil
 }
 
 enum ClaudeRunwayTokenActivityParser {
@@ -123,7 +130,12 @@ enum ClaudeRunwayTokenActivityParser {
             identity: identity,
             tokensPerSecond: tokensPerSecond,
             sampleStart: pathActivities.map(\.activity.sampleStart).min() ?? now,
-            sampleEnd: pathActivities.map(\.activity.sampleEnd).max() ?? now
+            sampleEnd: pathActivities.map(\.activity.sampleEnd).max() ?? now,
+            inputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.inputPerSecond },
+            cachedInputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.cachedInputPerSecond },
+            outputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.outputPerSecond },
+            cacheCreationPerSecond: pathActivities.reduce(0) { $0 + $1.activity.cacheCreationPerSecond },
+            modelSlug: pathActivities.compactMap(\.activity.modelSlug).first
         )
         return (activity, provisional)
     }
@@ -190,11 +202,14 @@ enum ClaudeRunwayTokenActivityParser {
         // tokens predate the span and are excluded.
         var windowStart = last.capturedAt
         var consumed = 0.0
+        var inSum = 0.0, outSum = 0.0, ccSum = 0.0, crSum = 0.0
         var previous = last
         for sample in samples.dropLast().reversed() {
             let gap = previous.capturedAt.timeIntervalSince(sample.capturedAt)
             if gap > maximumPairInterval { break }
             consumed += previous.tokens
+            inSum += previous.input; outSum += previous.output
+            ccSum += previous.cacheCreation; crSum += previous.cacheRead
             windowStart = sample.capturedAt
             previous = sample
         }
@@ -205,7 +220,12 @@ enum ClaudeRunwayTokenActivityParser {
                 identity: identity,
                 tokensPerSecond: consumed / span,
                 sampleStart: windowStart,
-                sampleEnd: last.capturedAt
+                sampleEnd: last.capturedAt,
+                inputPerSecond: inSum / span,
+                cachedInputPerSecond: crSum / span,
+                outputPerSecond: outSum / span,
+                cacheCreationPerSecond: ccSum / span,
+                modelSlug: last.modelSlug
             ), false)
         }
 
@@ -223,7 +243,12 @@ enum ClaudeRunwayTokenActivityParser {
                     identity: identity,
                     tokensPerSecond: last.tokens / turnDuration,
                     sampleStart: started,
-                    sampleEnd: last.capturedAt
+                    sampleEnd: last.capturedAt,
+                    inputPerSecond: last.input / turnDuration,
+                    cachedInputPerSecond: last.cacheRead / turnDuration,
+                    outputPerSecond: last.output / turnDuration,
+                    cacheCreationPerSecond: last.cacheCreation / turnDuration,
+                    modelSlug: last.modelSlug
                 ), true)
             }
         }
@@ -258,11 +283,18 @@ enum ClaudeRunwayTokenActivityParser {
         }
         let tokens = weightedTokens(usage)
         guard tokens > 0 else { return (timestamp, nil) }
+        func v(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
+        let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return (timestamp, ClaudeRunwayTokenActivitySample(
             logPath: logPath,
             capturedAt: capturedAt,
             tokens: tokens,
-            turnStartedAt: turnStartedAt
+            turnStartedAt: turnStartedAt,
+            input: v("input_tokens"),
+            output: v("output_tokens"),
+            cacheCreation: v("cache_creation_input_tokens"),
+            cacheRead: v("cache_read_input_tokens"),
+            modelSlug: model
         ))
     }
 
