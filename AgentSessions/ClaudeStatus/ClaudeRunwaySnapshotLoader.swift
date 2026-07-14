@@ -45,18 +45,39 @@ enum ClaudeRunwaySnapshotLoader {
                 // giving a conservative "even-burn-to-reset" rate that the
                 // calculator still renders; it sharpens to measured velocity
                 // once a projection lands.
-                let burns = ClaudeRunwayTokenActivityParser.burns(
-                    identities: identities,
-                    baseline: request.baseline,
-                    now: request.now
-                )
-                let snapshot = RunwaySnapshotAssembly.withPendingRows(
-                    baseline: request.baseline,
-                    snapshot: CodexRunwayCalculator.snapshot(
+                // Honor the selected runway presentation (rateUnit), mirroring the
+                // Codex loader. tk/h and weekly %/h reuse the provider-agnostic
+                // calculator; the default m/h path is unchanged.
+                let activities = identities.compactMap {
+                    ClaudeRunwayTokenActivityParser.activity(identity: $0, now: request.now)
+                }
+                let core: CodexRunwaySnapshot?
+                var effectiveBaseline = request.baseline
+                switch request.baseline.rateUnit {
+                case .tokensPerHour:
+                    core = CodexRunwayCalculator.tokenSnapshot(
+                        baseline: request.baseline, activities: activities, maxRows: request.maxRows)
+                case .weeklyPercentPerHour:
+                    if let weekly = CodexRunwayCalculator.weeklySnapshot(
+                        baseline: request.baseline, activities: activities, maxRows: request.maxRows) {
+                        core = weekly
+                    } else {
+                        effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
+                        core = CodexRunwayCalculator.tokenSnapshot(
+                            baseline: effectiveBaseline, activities: activities, maxRows: request.maxRows)
+                    }
+                case .quotaMinutesPerHour:
+                    let burns = ClaudeRunwayTokenActivityParser.burns(
+                        identities: identities,
                         baseline: request.baseline,
-                        burns: burns,
-                        maxRows: request.maxRows
-                    ),
+                        now: request.now
+                    )
+                    core = CodexRunwayCalculator.snapshot(
+                        baseline: request.baseline, burns: burns, maxRows: request.maxRows)
+                }
+                let snapshot = RunwaySnapshotAssembly.withPendingRows(
+                    baseline: effectiveBaseline,
+                    snapshot: core,
                     activeIdentities: identities,
                     maxRows: request.maxRows
                 )

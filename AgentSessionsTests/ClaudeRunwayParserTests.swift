@@ -261,7 +261,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
         let row = snapshot?.rows.first { $0.id == "sess-burn" }
         XCTAssertNotNil(row, "active session should produce a row")
         XCTAssertNotEqual(row?.confidence, .waiting, "burn should render, not a waiting spinner")
-        XCTAssertGreaterThan(row?.quotaMinutesPerHour ?? 0, 0, "a real burn rate should show without a fresh projection")
+        XCTAssertGreaterThan(row?.displayRate ?? 0, 0, "a real burn rate should show without a fresh projection")
     }
 
     func testLoaderBurnSharpensWhenProjectionLands() async throws {
@@ -294,7 +294,7 @@ final class ClaudeRunwayParserTests: XCTestCase {
                 baseline: baseline, identities: [], now: now, maxRows: 4, recentSessionsRoot: root
             )
             let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
-            return snapshot?.rows.first { $0.id == "sess-sharpen" }?.quotaMinutesPerHour ?? 0
+            return snapshot?.rows.first { $0.id == "sess-sharpen" }?.displayRate ?? 0
         }
 
         let withoutProjection = await rate(hasProjection: false)

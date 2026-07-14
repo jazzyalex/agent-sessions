@@ -2878,8 +2878,8 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.rows.map(\.id), ["large", "small"])
         XCTAssertGreaterThan(snapshot?.rows.first?.gainedSeconds ?? 0, snapshot?.rows.last?.gainedSeconds ?? 0)
-        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 9, accuracy: 0.001)
-        XCTAssertEqual(snapshot?.rows.last?.quotaMinutesPerHour ?? 0, 3, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.rows.first?.displayRate ?? 0, 9, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.rows.last?.displayRate ?? 0, 3, accuracy: 0.001)
     }
 
     func testCodexRunwayCalculatorCapsDeadlineAfterReset() {
@@ -2903,7 +2903,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(row?.deadline, .afterReset)
         XCTAssertEqual(row?.gainedSeconds ?? 0, 90 * 60, accuracy: 0.001)
-        XCTAssertEqual(row?.quotaMinutesPerHour ?? 0, 60, accuracy: 0.001)
+        XCTAssertEqual(row?.displayRate ?? 0, 60, accuracy: 0.001)
     }
 
     func testCodexRunwayCalculatorShowsBurnersWhenBaselineAlreadyAfterReset() {
@@ -2961,7 +2961,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.rows.count, 1)
         XCTAssertEqual(snapshot?.burstSummary?.count, 2)
         XCTAssertEqual(snapshot?.burstSummary?.gainedSeconds ?? 0, 1012.5, accuracy: 0.1)
-        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 21.6, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.burstSummary?.displayRate ?? 0, 21.6, accuracy: 0.001)
     }
 
     func testCodexRunwayCalculatorKeepsSubMinuteBurnRowsAsNoChange() {
@@ -2986,7 +2986,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.rows.map(\.id), ["tiny"])
         XCTAssertEqual(snapshot?.rows.first?.deadline, .noChange)
         XCTAssertEqual(snapshot?.rows.first?.gainedSeconds ?? -1, 0, accuracy: 0.001)
-        XCTAssertGreaterThan(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 0)
+        XCTAssertGreaterThan(snapshot?.rows.first?.displayRate ?? 0, 0)
         XCTAssertEqual(snapshot?.rows.first?.confidence, .direct)
         XCTAssertNil(snapshot?.burstSummary)
     }
@@ -3022,7 +3022,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.burstSummary?.count, 2)
         XCTAssertEqual(snapshot?.burstSummary?.deadline, .noChange)
         XCTAssertEqual(snapshot?.burstSummary?.gainedSeconds ?? -1, 0, accuracy: 0.001)
-        XCTAssertGreaterThan(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 0)
+        XCTAssertGreaterThan(snapshot?.burstSummary?.displayRate ?? 0, 0)
     }
 
     func testCodexRunwayCalculatorPromotesSingleOverflowSessionToRow() {
@@ -3093,7 +3093,7 @@ final class CodexUsageParserTests: XCTestCase {
                 isGoal: false,
                 deadline: .noChange,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: 5,
+                displayRate: 5,
                 confidence: .direct
             )
         }
@@ -3127,7 +3127,7 @@ final class CodexUsageParserTests: XCTestCase {
                 isGoal: false,
                 deadline: .noChange,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: 5,
+                displayRate: 5,
                 confidence: .direct
             )
         }
@@ -3163,7 +3163,7 @@ final class CodexUsageParserTests: XCTestCase {
                 isGoal: false,
                 deadline: .noChange,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: 5,
+                displayRate: 5,
                 confidence: .direct
             )
         }
@@ -3171,7 +3171,7 @@ final class CodexUsageParserTests: XCTestCase {
             count: 2,
             deadline: .noChange,
             gainedSeconds: 0,
-            quotaMinutesPerHour: 7
+            displayRate: 7
         )
         let existing = CodexRunwaySnapshot(baseline: baseline, rows: existingRows, burstSummary: burnSummary)
         let pendings = ["extra-1", "extra-2", "extra-3"].map {
@@ -3187,7 +3187,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.rows.map(\.id), ["one", "two"])
         XCTAssertEqual(snapshot?.burstSummary?.count, 5)
-        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? 0, 7, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.burstSummary?.displayRate ?? 0, 7, accuracy: 0.001)
     }
 
     func testCodexRunwayLoaderUniqueIdentitiesMergePartialHudRowIntoCorrectedParent() {
@@ -3720,7 +3720,7 @@ final class CodexUsageParserTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.rows.map(\.id), ["session"])
         XCTAssertEqual(snapshot?.rows.first?.confidence, .waiting)
-        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.rows.first?.displayRate ?? -1, 0, accuracy: 0.001)
         XCTAssertNil(snapshot?.burstSummary)
     }
 
@@ -3760,7 +3760,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.rows.map(\.id), ["session-1", "session-2", "session-3", "session-4"])
         XCTAssertEqual(snapshot?.rows.map(\.confidence), [.waiting, .waiting, .waiting, .waiting])
         XCTAssertEqual(snapshot?.burstSummary?.count, 2)
-        XCTAssertEqual(snapshot?.burstSummary?.quotaMinutesPerHour ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.burstSummary?.displayRate ?? -1, 0, accuracy: 0.001)
     }
 
     func testCodexRunwayLoaderPrefersDirectPercentBurnOverTokenAllocation() async throws {
@@ -3797,7 +3797,7 @@ final class CodexUsageParserTests: XCTestCase {
         let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
 
         XCTAssertEqual(snapshot?.rows.first?.confidence, .direct)
-        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 90, accuracy: 0.001)
+        XCTAssertEqual(snapshot?.rows.first?.displayRate ?? 0, 90, accuracy: 0.001)
     }
 
     func testCodexRunwayLoaderHoldsAggregateBurnAcrossOutputGap() async throws {
@@ -3889,8 +3889,8 @@ final class CodexUsageParserTests: XCTestCase {
         // Faster session ranks first; rows carry tk/h (tokensPerSecond * 3600) in
         // the shared rate field, interpreted per the baseline's token unit.
         XCTAssertEqual(snapshot?.rows.map(\.id), ["a", "b"])
-        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 10000 * 3600, accuracy: 1)
-        XCTAssertEqual(snapshot?.rows.last?.quotaMinutesPerHour ?? 0, 2000 * 3600, accuracy: 1)
+        XCTAssertEqual(snapshot?.rows.first?.displayRate ?? 0, 10000 * 3600, accuracy: 1)
+        XCTAssertEqual(snapshot?.rows.last?.displayRate ?? 0, 2000 * 3600, accuracy: 1)
         XCTAssertEqual(snapshot?.rows.first?.deadline, .unavailable)
     }
 
@@ -3927,8 +3927,8 @@ final class CodexUsageParserTests: XCTestCase {
         CodexRunwaySnapshotLoader.burnHold.resetForTesting()
         let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
 
-        XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 1666.6667 * 3600, accuracy: 100)
-        XCTAssertLessThan(snapshot?.rows.first?.quotaMinutesPerHour ?? .greatestFiniteMagnitude, 10_000_000,
+        XCTAssertEqual(snapshot?.rows.first?.displayRate ?? 0, 1666.6667 * 3600, accuracy: 100)
+        XCTAssertLessThan(snapshot?.rows.first?.displayRate ?? .greatestFiniteMagnitude, 10_000_000,
                           "Cached context must be netted out (raw would be ~84M tk/h)")
     }
 
@@ -3974,6 +3974,45 @@ final class CodexUsageParserTests: XCTestCase {
         // → chip clears immediately rather than lingering.
         let ended = await CodexRunwaySnapshotLoader.snapshot(for: request(identities: [], now: second.addingTimeInterval(40)))
         XCTAssertNil(ended?.aggregateTokensPerHour)
+    }
+
+    func testRunwayPresentationDefaultsToFiveHour() {
+        XCTAssertEqual(RunwayPresentation.current(raw: ""), .fiveHour)
+        XCTAssertEqual(RunwayPresentation.current(raw: "garbage"), .fiveHour)
+        XCTAssertEqual(RunwayPresentation.current(raw: "weekly"), .weekly)
+        XCTAssertEqual(RunwayPresentation.allCases.count, 4)
+    }
+
+    func testWeeklySnapshotAttributesPaceByTokenShare() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(5 * 24 * 3600)
+        let runout = RunwayBaselineMath.averageBurnRunout(remainingPercent: 80, resetAt: reset,
+                        windowLength: TimeInterval(10080 * 60), now: now)!
+        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
+                        currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
+                        windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let a = RunwaySessionActivity(identity: .init(id: "a", displayName: "A", isGoal: false, logPaths: ["/a"]),
+                        tokensPerSecond: 300, sampleStart: now, sampleEnd: now)
+        let b = RunwaySessionActivity(identity: .init(id: "b", displayName: "B", isGoal: false, logPaths: ["/b"]),
+                        tokensPerSecond: 100, sampleStart: now, sampleEnd: now)
+        let snap = CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [a, b], maxRows: 5)
+        XCTAssertEqual(snap?.rows.map(\.id), ["a", "b"])
+        let total = (snap?.rows.first?.displayRate ?? 0) + (snap?.rows.last?.displayRate ?? 0)
+        XCTAssertGreaterThan(total, 0)
+        // a burns 3× b → 75% of the provider weekly pace.
+        XCTAssertEqual((snap?.rows.first?.displayRate ?? 0) / total, 0.75, accuracy: 0.01)
+    }
+
+    func testWeeklySnapshotNilWhenNoActivity() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(5 * 24 * 3600)
+        let runout = RunwayBaselineMath.averageBurnRunout(remainingPercent: 80, resetAt: reset,
+                        windowLength: TimeInterval(10080 * 60), now: now)!
+        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
+                        currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
+                        windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        // No positive token activity → nil, so the loader falls back to token mode.
+        XCTAssertNil(CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [], maxRows: 5))
     }
 
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {

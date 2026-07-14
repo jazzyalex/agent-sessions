@@ -808,8 +808,10 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var showRunwayPopover = false
+    @State private var showRunwayPresentationPopover = false
     @State private var showModePopover = false
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
@@ -1258,6 +1260,7 @@ struct AgentCockpitHUDView: View {
                             cockpitModePicker
                             if runwayControlAvailable {
                                 cockpitRunwayButton
+                                runwayPresentationButton
                             }
                             cockpitFontSizeButton
                             cockpitSettingsButton
@@ -1269,6 +1272,7 @@ struct AgentCockpitHUDView: View {
                             cockpitModePicker
                             if runwayControlAvailable {
                                 cockpitRunwayButton
+                                runwayPresentationButton
                             }
                             cockpitFontSizeButton
                             cockpitPinButton
@@ -1446,6 +1450,27 @@ struct AgentCockpitHUDView: View {
         .help("Runway drawer: choose when the session runway appears.")
         .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
             HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
+        }
+    }
+
+    private var runwayPresentationButton: some View {
+        let presentation = RunwayPresentation.current(raw: runwayPresentationRaw)
+        return Button {
+            showRunwayPresentationPopover.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "gauge.with.dots.needle.bottom.50percent")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(presentation.shortLabel)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .opacity(0.6)
+            }
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: presentation != .fiveHour, tint: nil))
+        .help("Session runway rate: 5-hour, tokens, dollars, or weekly.")
+        .popover(isPresented: $showRunwayPresentationPopover, arrowEdge: .bottom) {
+            HUDRunwayPresentationPopover(runwayPresentationRaw: $runwayPresentationRaw)
         }
     }
 
@@ -3630,6 +3655,36 @@ enum HUDRunwayIdentityReducer {
 }
 
 enum HUDRunwayRequestBuilder {
+    /// The rate unit + window a runway request should compute, resolved from the
+    /// user's preferred presentation against what the provider can actually show.
+    /// Snapshot-wide (whole provider, one unit) — never per-row.
+    struct RunwayResolvedPresentation: Equatable {
+        let rateUnit: RunwayRateUnit
+        let windowMinutes: Int
+    }
+
+    /// Pure resolver for the §5 fallback matrix (Phase 1: `$` resolves to token).
+    /// `windowMinutes` is the active-limit window length (300 or 10080).
+    static func effectivePresentation(preferred: RunwayPresentation,
+                                      source: UsageTrackingSource,
+                                      hasFiveHour: Bool,
+                                      hasWeekly: Bool,
+                                      weeklyMeasurable: Bool,
+                                      windowMinutes: Int) -> RunwayResolvedPresentation {
+        switch preferred {
+        case .token, .dollar: // $ pricing is Phase 2 → fall back to token throughput
+            return RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
+        case .fiveHour:
+            return hasFiveHour
+                ? RunwayResolvedPresentation(rateUnit: .quotaMinutesPerHour, windowMinutes: windowMinutes)
+                : RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
+        case .weekly:
+            return (hasWeekly && weeklyMeasurable)
+                ? RunwayResolvedPresentation(rateUnit: .weeklyPercentPerHour, windowMinutes: 10080)
+                : RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
+        }
+    }
+
     static func request(activeRows: [HUDRow],
                         projectedRunoutEnabled: Bool,
                         codexAgentEnabled: Bool,
@@ -3639,6 +3694,9 @@ enum HUDRunwayRequestBuilder {
                         fiveHourProjectedRunoutAt: Date?,
                         fiveHourProjectionObservedAt: Date?,
                         windowMinutes: Int = 300,
+                        presentation: RunwayPresentation = .fiveHour,
+                        weekRemainingPercent: Int = 0,
+                        weekResetText: String = "",
                         now: Date,
                         maxRows: Int,
                         forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -3685,18 +3743,43 @@ enum HUDRunwayRequestBuilder {
             return nil
         }
 
-        let baseline = RunwayProviderBaseline(
-            source: .codex,
-            remainingPercent: Double(fiveHourRemainingPercent),
-            resetAt: resetAt,
-            currentRunoutAt: runoutAt,
-            observedAt: observedAt,
-            // Token mode needs no run-out estimate; the 5h path keeps its
-            // projection-driven attribution. `rateUnit` derives from windowMinutes
-            // inside the baseline (long → tk/h), so it can't drift from the window.
-            hasProjectedRunout: isLongWindow ? false : (freshProjectionObservedAt != nil),
-            windowMinutes: windowMinutes
-        )
+        // Resolve the user's preferred presentation against what this provider can
+        // show (§5). The weekly window fields let weekly compute even while the 5h
+        // window is present; `hasFiveHour` = the active window IS the 5h window.
+        let weekResetAt = UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now)
+        let weeklyRunout = weekResetAt.flatMap {
+            RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
+                                                 resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
+        }
+        let resolved = effectivePresentation(
+            preferred: presentation, source: .codex,
+            hasFiveHour: !isLongWindow,
+            hasWeekly: weekResetAt != nil,
+            weeklyMeasurable: weeklyRunout != nil,
+            windowMinutes: windowMinutes)
+
+        let baseline: RunwayProviderBaseline
+        if resolved.rateUnit == .weeklyPercentPerHour, let weekResetAt, let weeklyRunout {
+            baseline = RunwayProviderBaseline(
+                source: .codex,
+                remainingPercent: Double(weekRemainingPercent),
+                resetAt: weekResetAt,
+                currentRunoutAt: weeklyRunout,
+                observedAt: now,
+                hasProjectedRunout: true,
+                windowMinutes: 10080,
+                rateUnit: .weeklyPercentPerHour)
+        } else {
+            baseline = RunwayProviderBaseline(
+                source: .codex,
+                remainingPercent: Double(fiveHourRemainingPercent),
+                resetAt: resetAt,
+                currentRunoutAt: runoutAt,
+                observedAt: observedAt,
+                hasProjectedRunout: resolved.rateUnit == .quotaMinutesPerHour ? (freshProjectionObservedAt != nil) : false,
+                windowMinutes: windowMinutes,
+                rateUnit: resolved.rateUnit)
+        }
         return CodexRunwaySnapshotRequest(
             baseline: baseline,
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .codex),
@@ -3713,6 +3796,9 @@ enum HUDRunwayRequestBuilder {
                               fiveHourResetText: String,
                               fiveHourProjectedRunoutAt: Date?,
                               fiveHourProjectionObservedAt: Date?,
+                              presentation: RunwayPresentation = .fiveHour,
+                              weekRemainingPercent: Int = 0,
+                              weekResetText: String = "",
                               now: Date,
                               maxRows: Int,
                               forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -3751,14 +3837,42 @@ enum HUDRunwayRequestBuilder {
             return nil
         }
 
-        let baseline = RunwayProviderBaseline(
-            source: .claude,
-            remainingPercent: Double(fiveHourRemainingPercent),
-            resetAt: resetAt,
-            currentRunoutAt: runoutAt,
-            observedAt: observedAt,
-            hasProjectedRunout: freshProjectionObservedAt != nil
-        )
+        // Claude always has a 5h ("session") window, so `.fiveHour` keeps m/h
+        // unchanged. Weekly uses the all-models weekly window fields.
+        let weekResetAt = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: weekResetText, now: now)
+        let weeklyRunout = weekResetAt.flatMap {
+            RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
+                                                 resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
+        }
+        let resolved = effectivePresentation(
+            preferred: presentation, source: .claude,
+            hasFiveHour: true,
+            hasWeekly: weekResetAt != nil,
+            weeklyMeasurable: weeklyRunout != nil,
+            windowMinutes: 300)
+
+        let baseline: RunwayProviderBaseline
+        if resolved.rateUnit == .weeklyPercentPerHour, let weekResetAt, let weeklyRunout {
+            baseline = RunwayProviderBaseline(
+                source: .claude,
+                remainingPercent: Double(weekRemainingPercent),
+                resetAt: weekResetAt,
+                currentRunoutAt: weeklyRunout,
+                observedAt: now,
+                hasProjectedRunout: true,
+                windowMinutes: 10080,
+                rateUnit: .weeklyPercentPerHour)
+        } else {
+            baseline = RunwayProviderBaseline(
+                source: .claude,
+                remainingPercent: Double(fiveHourRemainingPercent),
+                resetAt: resetAt,
+                currentRunoutAt: runoutAt,
+                observedAt: observedAt,
+                hasProjectedRunout: resolved.rateUnit == .quotaMinutesPerHour ? (freshProjectionObservedAt != nil) : false,
+                windowMinutes: 300,
+                rateUnit: resolved.rateUnit)
+        }
         return CodexRunwaySnapshotRequest(
             baseline: baseline,
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .claude),
@@ -3788,6 +3902,7 @@ private struct HUDLimitsBar: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @State private var clockNow = Date()
     @State private var isHovering = false
     @State private var isHoveringExpandedPanel = false
@@ -4029,6 +4144,9 @@ private struct HUDLimitsBar: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             windowMinutes: codexUsageModel.activeLimitWindowMinutes,
+            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
+            weekRemainingPercent: codexUsageModel.weekRemainingPercent,
+            weekResetText: codexUsageModel.weekResetText,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4045,6 +4163,9 @@ private struct HUDLimitsBar: View {
             fiveHourResetText: claudeUsageModel.sessionResetText,
             fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
+            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
+            weekRemainingPercent: claudeUsageModel.weekAllModelsRemainingPercent,
+            weekResetText: claudeUsageModel.weekAllModelsResetText,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4075,6 +4196,9 @@ private struct HUDLimitsBar: View {
                               fiveHourProjectedRunoutAt: Date?,
                               fiveHourProjectionObservedAt: Date?,
                               windowMinutes: Int = 300,
+                              presentation: RunwayPresentation = .fiveHour,
+                              weekRemainingPercent: Int = 0,
+                              weekResetText: String = "",
                               now: Date,
                               maxRows: Int,
                               forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -4088,6 +4212,9 @@ private struct HUDLimitsBar: View {
             fiveHourProjectedRunoutAt: fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: fiveHourProjectionObservedAt,
             windowMinutes: windowMinutes,
+            presentation: presentation,
+            weekRemainingPercent: weekRemainingPercent,
+            weekResetText: weekResetText,
             now: now,
             maxRows: maxRows,
             forceVisible: forceVisible
@@ -4110,6 +4237,7 @@ private struct HUDLimitsRowsPanel: View {
     @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
@@ -4321,6 +4449,9 @@ private struct HUDLimitsRowsPanel: View {
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
             windowMinutes: codexUsageModel.activeLimitWindowMinutes,
+            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
+            weekRemainingPercent: codexUsageModel.weekRemainingPercent,
+            weekResetText: codexUsageModel.weekResetText,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4337,6 +4468,9 @@ private struct HUDLimitsRowsPanel: View {
             fiveHourResetText: claudeUsageModel.sessionResetText,
             fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
+            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
+            weekRemainingPercent: claudeUsageModel.weekAllModelsRemainingPercent,
+            weekResetText: claudeUsageModel.weekAllModelsResetText,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4400,6 +4534,48 @@ private struct HUDRunwayVisibilityPopover: View {
             )) {
                 ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
                     Text(visibility.shortLabel).tag(visibility.rawValue)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(selection.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(width: 236)
+    }
+}
+
+private struct HUDRunwayPresentationPopover: View {
+    @Binding var runwayPresentationRaw: String
+
+    private var selection: RunwayPresentation {
+        RunwayPresentation.current(raw: runwayPresentationRaw)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Runway rate")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .kerning(0.4)
+
+            Picker("", selection: Binding(
+                get: { runwayPresentationRaw },
+                set: { runwayPresentationRaw = $0 }
+            )) {
+                ForEach(RunwayPresentation.allCases) { presentation in
+                    Text(presentation.shortLabel).tag(presentation.rawValue)
                 }
             }
             .labelsHidden()
@@ -4724,20 +4900,20 @@ private struct HUDRunwayPanel: View {
     /// keep an empty track, so they need no shimmer.
     private var hasAnimatedBar: Bool {
         snapshot.rows.contains { $0.confidence == .direct || $0.confidence == .mixed }
-            || (snapshot.burstSummary.map { $0.quotaMinutesPerHour > 0 } ?? false)
+            || (snapshot.burstSummary.map { $0.displayRate > 0 } ?? false)
     }
 
     private var runwayFontSize: CGFloat { QuotaMeterTextMetrics.runwayFontSize(enlarged: quotaMeterEnlarged) }
     private var runwayRowHeight: CGFloat { QuotaMeterTextMetrics.runwayRowHeight(enlarged: quotaMeterEnlarged) }
 
-    /// The unit every row in this snapshot reports (m/h for the 5h yardstick, or
-    /// tk/h while the 5h window is dropped). Rows carry their rate in the same
-    /// `quotaMinutesPerHour` field regardless; this decides how it's read.
+    /// The unit every row in this snapshot reports (m/h for the 5h yardstick, tk/h
+    /// when the 5h window is dropped, or weekly %/h). Rows carry their rate in the
+    /// same `displayRate` field regardless; this decides how it's read.
     private var rateUnit: RunwayRateUnit { snapshot.baseline.rateUnit }
 
-    private var maxQuotaMinutesPerHour: Double {
-        let rowMax = snapshot.rows.map(\.quotaMinutesPerHour).max() ?? 0
-        let summaryMax = snapshot.burstSummary?.quotaMinutesPerHour ?? 0
+    private var maxDisplayRate: Double {
+        let rowMax = snapshot.rows.map(\.displayRate).max() ?? 0
+        let summaryMax = snapshot.burstSummary?.displayRate ?? 0
         return max(1, rowMax, summaryMax)
     }
 
@@ -4803,11 +4979,11 @@ private struct HUDRunwayPanel: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(width: titleWidth, alignment: .leading)
-                rateCell(quota: row.quotaMinutesPerHour, confidence: row.confidence)
+                rateCell(quota: row.displayRate, confidence: row.confidence)
                     .frame(width: HUDRunwayLayout.rateWidth(for: rateUnit), alignment: .trailing)
                 HUDRunwayLoadBar(
-                    quotaMinutesPerHour: row.quotaMinutesPerHour,
-                    maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                    displayRate: row.displayRate,
+                    maxDisplayRate: maxDisplayRate,
                     confidence: row.confidence,
                     unit: rateUnit,
                     animationTick: shimmer.tick,
@@ -4819,7 +4995,7 @@ private struct HUDRunwayPanel: View {
     }
 
     private func summaryRow(_ summary: RunwayShortBurstSummary) -> some View {
-        let confidence: RunwayAttributionConfidence = summary.quotaMinutesPerHour > 0 ? .mixed : .waiting
+        let confidence: RunwayAttributionConfidence = summary.displayRate > 0 ? .mixed : .waiting
         return GeometryReader { proxy in
             let titleWidth = HUDRunwayLayout.titleWidth(for: proxy.size.width, unit: rateUnit)
             HStack(spacing: HUDRunwayLayout.columnSpacing) {
@@ -4828,11 +5004,11 @@ private struct HUDRunwayPanel: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(width: titleWidth, alignment: .leading)
-                rateCell(quota: summary.quotaMinutesPerHour, confidence: confidence)
+                rateCell(quota: summary.displayRate, confidence: confidence)
                     .frame(width: HUDRunwayLayout.rateWidth(for: rateUnit), alignment: .trailing)
                 HUDRunwayLoadBar(
-                    quotaMinutesPerHour: summary.quotaMinutesPerHour,
-                    maxQuotaMinutesPerHour: maxQuotaMinutesPerHour,
+                    displayRate: summary.displayRate,
+                    maxDisplayRate: maxDisplayRate,
                     confidence: confidence,
                     unit: rateUnit,
                     animationTick: shimmer.tick,
@@ -4883,8 +5059,8 @@ private struct HUDRunwayEmptyPanel: View {
 }
 
 private struct HUDRunwayLoadBar: View {
-    let quotaMinutesPerHour: Double
-    let maxQuotaMinutesPerHour: Double
+    let displayRate: Double
+    let maxDisplayRate: Double
     let confidence: RunwayAttributionConfidence
     var unit: RunwayRateUnit = .quotaMinutesPerHour
     let animationTick: Int
@@ -4892,22 +5068,22 @@ private struct HUDRunwayLoadBar: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var fillFraction: CGFloat {
-        guard quotaMinutesPerHour.isFinite,
-              quotaMinutesPerHour >= 0,
-              maxQuotaMinutesPerHour.isFinite,
-              maxQuotaMinutesPerHour > 0 else {
+        guard displayRate.isFinite,
+              displayRate >= 0,
+              maxDisplayRate.isFinite,
+              maxDisplayRate > 0 else {
             return 0
         }
-        let relative = quotaMinutesPerHour / maxQuotaMinutesPerHour
+        let relative = displayRate / maxDisplayRate
         // The absolute-pressure term (rate/45) is a 5h-m/h yardstick constant —
-        // meaningless for token throughput — so token mode fills relative-to-max
-        // only. m/h keeps the pressure anchor so a lone heavy burn still fills.
+        // meaningless for token/weekly units — so those fill relative-to-max only.
+        // m/h keeps the pressure anchor so a lone heavy burn still fills.
         let base: Double
         switch unit {
         case .quotaMinutesPerHour:
-            let absolutePressure = min(1, quotaMinutesPerHour / 45)
+            let absolutePressure = min(1, displayRate / 45)
             base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
-        case .tokensPerHour:
+        case .tokensPerHour, .weeklyPercentPerHour:
             base = max(0.12, relative * 0.85)
         }
         let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
@@ -4942,7 +5118,7 @@ private struct HUDRunwayLoadBar: View {
         }
         .frame(minWidth: 62, maxWidth: .infinity)
         .frame(height: 5)
-        .accessibilityLabel(RunwayTimeFormatting.rate(quotaMinutesPerHour, unit: unit, confidence: confidence))
+        .accessibilityLabel(RunwayTimeFormatting.rate(displayRate, unit: unit, confidence: confidence))
     }
 }
 
@@ -4952,9 +5128,13 @@ private enum HUDRunwayLayout {
     static let rowHeight: CGFloat = 14
 
     /// Rate column width. "137m/h" fits 52; token rates like "56.5M tk/h" (and the
-    /// capped "999M"/"9.9B" forms) need more.
+    /// capped "999M"/"9.9B" forms) need more; weekly "%/h" is short.
     static func rateWidth(for unit: RunwayRateUnit) -> CGFloat {
-        unit == .tokensPerHour ? 80 : 52
+        switch unit {
+        case .tokensPerHour: return 80
+        case .weeklyPercentPerHour: return 60
+        case .quotaMinutesPerHour: return 52
+        }
     }
 
     /// Give the session title every point not needed by the fixed-width rate
@@ -4980,6 +5160,11 @@ private enum RunwayTimeFormatting {
             guard confidence != .idle else { return "idle" }
             guard value.isFinite, value >= 1 else { return "flat" }
             return formatTokenRatePerHour(value)
+        case .weeklyPercentPerHour:
+            guard confidence != .waiting else { return "0%/h" }
+            guard confidence != .idle else { return "idle" }
+            guard value.isFinite, value >= 0.05 else { return "flat" }
+            return String(format: "%.1f%%/h", value)
         }
     }
 

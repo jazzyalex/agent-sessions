@@ -113,6 +113,10 @@ enum RunwayDeadline: Equatable, Sendable {
 enum RunwayRateUnit: Equatable, Sendable {
     case quotaMinutesPerHour
     case tokensPerHour
+    /// Per-session share of the weekly average burn, expressed as % of the weekly
+    /// window per hour. Used by the "weekly" runway presentation. (`.dollarsPerHour`
+    /// is Phase 2.)
+    case weeklyPercentPerHour
 }
 
 struct RunwayProviderBaseline: Equatable, Sendable {
@@ -155,6 +159,16 @@ struct RunwayProviderBaseline: Equatable, Sendable {
         // token-mode presentation on the 5h window).
         self.rateUnit = rateUnit
             ?? (windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes ? .tokensPerHour : .quotaMinutesPerHour)
+    }
+
+    /// A copy with a different rate unit — used for snapshot-wide fallback (e.g.
+    /// weekly → token when the weekly average is unmeasurable) so the whole
+    /// snapshot stays single-unit.
+    func with(rateUnit newUnit: RunwayRateUnit) -> RunwayProviderBaseline {
+        RunwayProviderBaseline(source: source, remainingPercent: remainingPercent, resetAt: resetAt,
+                               currentRunoutAt: currentRunoutAt, observedAt: observedAt,
+                               hasProjectedRunout: hasProjectedRunout, windowMinutes: windowMinutes,
+                               rateUnit: newUnit)
     }
 }
 
@@ -249,7 +263,7 @@ struct RunwayPauseImpactRow: Equatable, Identifiable, Sendable {
     let isGoal: Bool
     let deadline: RunwayDeadline
     let gainedSeconds: TimeInterval
-    let quotaMinutesPerHour: Double
+    let displayRate: Double
     let confidence: RunwayAttributionConfidence
 }
 
@@ -257,7 +271,7 @@ struct RunwayShortBurstSummary: Equatable, Sendable {
     let count: Int
     let deadline: RunwayDeadline
     let gainedSeconds: TimeInterval
-    let quotaMinutesPerHour: Double
+    let displayRate: Double
 }
 
 struct CodexRunwaySnapshot: Equatable, Sendable {
@@ -298,6 +312,7 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
         let refreshBucket = Int(now.timeIntervalSince1970 / 5)
         return [
             "\(baseline.source)",
+            "\(baseline.rateUnit)",
             String(format: "%.3f", baseline.remainingPercent),
             baseline.resetAt.timeIntervalSinceReferenceDate.description,
             baseline.currentRunoutAt.timeIntervalSinceReferenceDate.description,
@@ -386,7 +401,11 @@ enum CodexRunwaySnapshotLoader {
                     now: request.now
                 )
                 let core: CodexRunwaySnapshot?
-                if request.baseline.rateUnit == .tokensPerHour {
+                // The rendered unit comes from the snapshot's baseline; on a
+                // snapshot-wide fallback we swap it so rows never mislabel.
+                var effectiveBaseline = request.baseline
+                switch request.baseline.rateUnit {
+                case .tokensPerHour:
                     // 5h window dropped → no run-out to normalize against, so rows
                     // show raw per-session token throughput (tk/h) directly from
                     // activity. The coarse weekly %-burns (integer 1% ticks) are
@@ -396,7 +415,25 @@ enum CodexRunwaySnapshotLoader {
                         activities: activities,
                         maxRows: request.maxRows
                     )
-                } else {
+                case .weeklyPercentPerHour:
+                    // Per-session share of the weekly average burn. When the weekly
+                    // average is unmeasurable (fresh window / 0% used) fall back to
+                    // token throughput snapshot-wide (P6) with a token baseline.
+                    if let weekly = CodexRunwayCalculator.weeklySnapshot(
+                        baseline: request.baseline,
+                        activities: activities,
+                        maxRows: request.maxRows
+                    ) {
+                        core = weekly
+                    } else {
+                        effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
+                        core = CodexRunwayCalculator.tokenSnapshot(
+                            baseline: effectiveBaseline,
+                            activities: activities,
+                            maxRows: request.maxRows
+                        )
+                    }
+                case .quotaMinutesPerHour:
                     let directBurns = identities.compactMap {
                         CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
                     }
@@ -414,7 +451,7 @@ enum CodexRunwaySnapshotLoader {
                     )
                 }
                 var snapshot = RunwaySnapshotAssembly.withPendingRows(
-                    baseline: request.baseline,
+                    baseline: effectiveBaseline,
                     snapshot: core,
                     activeIdentities: identities,
                     maxRows: request.maxRows
@@ -554,7 +591,7 @@ enum RunwaySnapshotAssembly {
                     count: burnSummary.count + pendingIdentities.count,
                     deadline: burnSummary.deadline,
                     gainedSeconds: burnSummary.gainedSeconds,
-                    quotaMinutesPerHour: burnSummary.quotaMinutesPerHour
+                    displayRate: burnSummary.displayRate
                 )
             )
         }
@@ -566,7 +603,7 @@ enum RunwaySnapshotAssembly {
                 isGoal: identity.isGoal,
                 deadline: .unavailable,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: 0,
+                displayRate: 0,
                 // Idle sessions show a calm "—"; still-working ones show a spinner.
                 confidence: identity.isIdle ? .idle : .waiting
             )
@@ -578,7 +615,7 @@ enum RunwaySnapshotAssembly {
                 count: overflow.count,
                 deadline: overflow.first?.deadline ?? .unavailable,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.quotaMinutesPerHour }
+                displayRate: overflow.reduce(0) { $0 + $1.displayRate }
             )
 
         return CodexRunwaySnapshot(
@@ -685,7 +722,7 @@ enum CodexRunwayCalculator {
                     isGoal: $0.row.isGoal,
                     deadline: .afterReset,
                     gainedSeconds: 0,
-                    quotaMinutesPerHour: $0.row.quotaMinutesPerHour,
+                    displayRate: $0.row.displayRate,
                     confidence: $0.row.confidence
                 )
             }
@@ -695,7 +732,7 @@ enum CodexRunwayCalculator {
                     count: overflow.count,
                     deadline: .afterReset,
                     gainedSeconds: 0,
-                    quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.row.quotaMinutesPerHour }
+                    displayRate: overflow.reduce(0) { $0 + $1.row.displayRate }
                 )
             return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
         }
@@ -728,7 +765,7 @@ enum CodexRunwayCalculator {
     /// (tokens/hour) instead of the m/h yardstick — used when the active window
     /// has no run-out to normalize against (the 5h window is dropped). There is no
     /// deadline (the tk/h rate is the whole story); the rate rides in the row's
-    /// `quotaMinutesPerHour` field, interpreted per `baseline.rateUnit`.
+    /// `displayRate` field, interpreted per `baseline.rateUnit`.
     static func tokenSnapshot(baseline: RunwayProviderBaseline,
                               activities: [RunwaySessionActivity],
                               maxRows: Int) -> CodexRunwaySnapshot? {
@@ -754,7 +791,7 @@ enum CodexRunwayCalculator {
                 isGoal: activity.identity.isGoal,
                 deadline: .unavailable,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: activity.tokensPerSecond * 3600,
+                displayRate: activity.tokensPerSecond * 3600,
                 confidence: .direct
             )
         }
@@ -764,7 +801,61 @@ enum CodexRunwayCalculator {
                 count: overflow.count,
                 deadline: .unavailable,
                 gainedSeconds: 0,
-                quotaMinutesPerHour: overflow.reduce(0) { $0 + $1.tokensPerSecond * 3600 }
+                displayRate: overflow.reduce(0) { $0 + $1.tokensPerSecond * 3600 }
+            )
+        return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
+    }
+
+    /// Weekly-mode snapshot: each session's **share of the weekly average burn**,
+    /// as % of the weekly window per hour. The provider weekly rate comes from the
+    /// baseline (remaining% ÷ time-to-weekly-runout — the smoothed average-burn set
+    /// by the builder), attributed per session by token share. Returns `nil` when
+    /// the weekly average is unmeasurable (0% used / no run-out) so the loader can
+    /// fall back to token mode snapshot-wide. Historical share, not instantaneous
+    /// pace (labeled as such in the UI).
+    static func weeklySnapshot(baseline: RunwayProviderBaseline,
+                               activities: [RunwaySessionActivity],
+                               maxRows: Int) -> CodexRunwaySnapshot? {
+        guard maxRows > 0 else { return nil }
+        let seconds = baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
+        guard seconds > 0, baseline.remainingPercent > 0 else { return nil }
+        let providerPercentPerHour = (baseline.remainingPercent / seconds) * 3600
+        guard providerPercentPerHour > 0, providerPercentPerHour.isFinite else { return nil }
+
+        let positive = activities.filter { $0.tokensPerSecond > 0 && $0.tokensPerSecond.isFinite }
+        guard !positive.isEmpty else { return nil }
+        let totalTPS = positive.reduce(0) { $0 + $1.tokensPerSecond }
+        guard totalTPS > 0, totalTPS.isFinite else { return nil }
+
+        let ranked = positive.sorted { lhs, rhs in
+            if lhs.tokensPerSecond != rhs.tokensPerSecond {
+                return lhs.tokensPerSecond > rhs.tokensPerSecond
+            }
+            if lhs.identity.isGoal != rhs.identity.isGoal {
+                return lhs.identity.isGoal && !rhs.identity.isGoal
+            }
+            return lhs.identity.displayName.localizedCaseInsensitiveCompare(rhs.identity.displayName) == .orderedAscending
+        }
+        func rate(_ a: RunwaySessionActivity) -> Double { providerPercentPerHour * (a.tokensPerSecond / totalTPS) }
+        let (visible, overflow) = RunwayOverflowRule.split(ranked, maxRows: maxRows)
+        let rows = visible.map { a in
+            RunwayPauseImpactRow(
+                id: a.identity.id,
+                displayName: a.identity.displayName,
+                isGoal: a.identity.isGoal,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: rate(a),
+                confidence: .direct
+            )
+        }
+        let burstSummary = overflow.isEmpty
+            ? nil
+            : RunwayShortBurstSummary(
+                count: overflow.count,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: overflow.reduce(0) { $0 + rate($1) }
             )
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
@@ -788,7 +879,7 @@ enum CodexRunwayCalculator {
             isGoal: burn.identity.isGoal,
             deadline: gained < minimumDisplayedGain ? .noChange : deadline,
             gainedSeconds: gained < minimumDisplayedGain ? 0 : gained,
-            quotaMinutesPerHour: quotaMinutesPerHour(normalizedRate, windowMinutes: baseline.windowMinutes),
+            displayRate: quotaMinutesPerHour(normalizedRate, windowMinutes: baseline.windowMinutes),
             confidence: burn.confidence
         )
     }
@@ -808,7 +899,7 @@ enum CodexRunwayCalculator {
             count: impacts.count,
             deadline: gained < minimumDisplayedGain ? .noChange : deadline,
             gainedSeconds: gained < minimumDisplayedGain ? 0 : gained,
-            quotaMinutesPerHour: impacts.reduce(0) { $0 + $1.row.quotaMinutesPerHour }
+            displayRate: impacts.reduce(0) { $0 + $1.row.displayRate }
         )
     }
 

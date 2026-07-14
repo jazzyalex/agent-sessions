@@ -17,6 +17,7 @@ enum PreferencesKey {
     static let showHousekeepingSessions = "ShowHousekeepingSessions"
     static let usageDisplayMode = "UsageDisplayMode"
     static let quotaMeterRunwayVisibility = "QuotaMeterRunwayVisibility"
+    static let quotaMeterRunwayPresentation = "QuotaMeterRunwayPresentation"
     static let usageLimitNotificationsEnabled = "UsageLimitNotificationsEnabled"
     static let usageLimitNotificationVisualEnabled = "UsageLimitNotificationVisualEnabled"
     static let usageLimitNotificationSoundEnabled = "UsageLimitNotificationSoundEnabled"

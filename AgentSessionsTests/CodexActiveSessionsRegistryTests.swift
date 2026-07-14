@@ -2393,6 +2393,55 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(request?.baseline.observedAt, now)
     }
 
+    func testEffectivePresentationMatrix() {
+        typealias B = HUDRunwayRequestBuilder
+        // 5h preferred: present → m/h; dropped → token.
+        XCTAssertEqual(B.effectivePresentation(preferred: .fiveHour, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .quotaMinutesPerHour)
+        XCTAssertEqual(B.effectivePresentation(preferred: .fiveHour, source: .codex, hasFiveHour: false, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 10080).rateUnit, .tokensPerHour)
+        // token / dollar (Phase 1) → token.
+        XCTAssertEqual(B.effectivePresentation(preferred: .token, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .tokensPerHour)
+        XCTAssertEqual(B.effectivePresentation(preferred: .dollar, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .tokensPerHour)
+        // weekly: measurable → weekly (window 10080); unmeasurable / no window → token.
+        let wk = B.effectivePresentation(preferred: .weekly, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300)
+        XCTAssertEqual(wk.rateUnit, .weeklyPercentPerHour)
+        XCTAssertEqual(wk.windowMinutes, 10080)
+        XCTAssertEqual(B.effectivePresentation(preferred: .weekly, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: false, windowMinutes: 300).rateUnit, .tokensPerHour)
+        XCTAssertEqual(B.effectivePresentation(preferred: .weekly, source: .claude, hasFiveHour: true, hasWeekly: false, weeklyMeasurable: false, windowMinutes: 300).rateUnit, .tokensPerHour)
+    }
+
+    func testRequestIDChangesWithRateUnit() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        func mk(_ u: RunwayRateUnit) -> CodexRunwaySnapshotRequest {
+            CodexRunwaySnapshotRequest(
+                baseline: RunwayProviderBaseline(source: .codex, remainingPercent: 50, resetAt: reset,
+                    currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: u),
+                identities: [], now: now, maxRows: 5)
+        }
+        XCTAssertNotEqual(mk(.quotaMinutesPerHour).id, mk(.tokensPerHour).id)
+        XCTAssertNotEqual(mk(.tokensPerHour).id, mk(.weeklyPercentPerHour).id)
+    }
+
+    func testWeeklyPresentationBuildsWeeklyBaseline() {
+        // Preferred .weekly with a measurable weekly window → weekly baseline
+        // (10080-min window, weeklyPercentPerHour), even while the 5h window is present.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let fiveReset = now.addingTimeInterval(3 * 60 * 60)
+        let weekReset = now.addingTimeInterval(5 * 24 * 60 * 60)
+        let row = makeHUDRow(id: "active-row", project: "Alpha", name: "Active Work",
+                             state: .active, resolvedSessionID: "active-session", logPath: "/tmp/active.jsonl")
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [row], projectedRunoutEnabled: true, codexAgentEnabled: true, codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67, fiveHourResetText: iso8601(fiveReset),
+            fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
+            windowMinutes: 300, presentation: .weekly,
+            weekRemainingPercent: 73, weekResetText: iso8601(weekReset),
+            now: now, maxRows: 5)
+        XCTAssertEqual(request?.baseline.rateUnit, .weeklyPercentPerHour)
+        XCTAssertEqual(request?.baseline.windowMinutes, 10080)
+        XCTAssertEqual(request?.baseline.remainingPercent, 73)
+    }
+
     func testRunwayRequestIDChangesWhenDisplayNameChanges() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let baseline = RunwayProviderBaseline(

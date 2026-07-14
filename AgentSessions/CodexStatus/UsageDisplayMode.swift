@@ -149,3 +149,50 @@ enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
         QuotaMeterRunwayVisibility(rawValue: raw) ?? .automatic
     }
 }
+
+/// Which rate the Session Runway rows report. `$` (`.dollar`) resolves to token
+/// throughput in Phase 1 (pricing is Phase 2); the case exists so the toolbar
+/// control and preference are forward-compatible.
+enum RunwayPresentation: String, CaseIterable, Identifiable {
+    case fiveHour = "5h"
+    case token = "token"
+    case dollar = "dollar"
+    case weekly = "weekly"
+
+    static let storageKey = PreferencesKey.quotaMeterRunwayPresentation
+    var id: String { rawValue }
+
+    /// Compact label for the toolbar pill.
+    var shortLabel: String {
+        switch self {
+        case .fiveHour: return "5h"
+        case .token: return "tk"
+        case .dollar: return "$"
+        case .weekly: return "Wk"
+        }
+    }
+
+    /// Full name shown in the popover.
+    var title: String {
+        switch self {
+        case .fiveHour: return "5-Hour Burn"
+        case .token: return "Token Burn"
+        case .dollar: return "Dollar Burn"
+        case .weekly: return "Weekly Burn"
+        }
+    }
+
+    /// One-line explanation under the active option.
+    var detail: String {
+        switch self {
+        case .fiveHour: return "Quota-minutes per hour against the 5-hour window."
+        case .token: return "Tokens generated per hour, per session."
+        case .dollar: return "Estimated API-equivalent cost per hour."
+        case .weekly: return "Share of average weekly burn."
+        }
+    }
+
+    static func current(raw: String) -> RunwayPresentation {
+        RunwayPresentation(rawValue: raw) ?? .fiveHour
+    }
+}
