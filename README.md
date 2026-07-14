@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.2/AgentSessions-4.3.2.dmg"><b>Download Agent Sessions 4.3.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.4/AgentSessions-4.4.dmg"><b>Download Agent Sessions 4.4 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.3.2** — A much quieter Quota Meter: the usage meters stop re-parsing your whole session history every few seconds while idle, cutting idle CPU from roughly 25–41% down to about 11%. Plus a more resilient Claude Web API path and a calm "no active session" state for expired logins. [See what's new ↓](#whats-new-in-432)
+> **New in 4.4** — Codex usage keeps working when OpenAI pauses the 5-hour limit: Agent Sessions detects the change, shows a calm "no limit" for 5h while keeping your weekly usage accurate, and the Session Runway shows honest per-session token throughput instead of a misleading rate. [See what's new ↓](#whats-new-in-44)
 
 ## Overview
 
@@ -71,6 +71,19 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 - The only network activity is optional Sparkle update checks.
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
+
+## What's New in 4.4
+
+**TL;DR** - Codex usage keeps working when OpenAI pauses the 5-hour limit. Agent Sessions detects the change, shows a calm "no limit" for 5h while keeping your weekly usage accurate, and the Session Runway shows honest per-session token throughput instead of a misleading rate.
+
+**Highlights:** OpenAI temporarily removed Codex's 5-hour rate-limit window, which left the Quota Meter mislabeling weekly usage as "5h" with the wrong reset. Agent Sessions now recognizes this automatically — the 5h line reads a calm **"no limit"**, your **weekly** usage stays accurate, and it snaps back on its own when OpenAI restores the window. With no 5-hour budget to measure against, each active Codex session's runway now shows its real **token throughput** (e.g. `412K tk/h`) instead of a burn rate scaled to the wrong window, and a new **format guardrail** shows "can't verify" rather than a wrong number if a provider changes its usage data unexpectedly.
+
+New in 4.4:
+- **Codex 5-hour drop handled** — auto-detects when OpenAI pauses the 5h window; shows "no limit" for 5h, keeps weekly accurate, and self-recovers when it returns.
+- **Honest Session Runway for Codex** — active sessions show real token throughput (`412K tk/h`) while the 5h window is gone; reverts to the familiar 5h "m/h" once it's back.
+- **Format guardrail** — shows "can't verify" instead of a wrong number when a provider's usage format changes unexpectedly.
+
+Previous release — 4.3.2: A much quieter Quota Meter. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## What's New in 4.3.2
 
@@ -138,7 +151,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.3.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.3.2/AgentSessions-4.3.2.dmg)
+1. [Download AgentSessions-4.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.4/AgentSessions-4.4.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
