@@ -283,7 +283,51 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     }
 }
 
+/// Thread-safe hold for the aggregate token-throughput "burning" chip. Token
+/// activity only registers when the newest `total_tokens` sample is within
+/// `maximumSampleAge` (75s); a longer gap in output makes a cycle's aggregate
+/// read zero, so without a hold the chip blinks out and back on the 5s refresh.
+/// This keeps the last positive rate across short gaps while the provider still
+/// has active sessions, and clears once the hold window elapses (or all sessions
+/// go idle) so an idle meter never shows a stale rate.
+final class RunwayAggregateBurnHold {
+    private let lock = NSLock()
+    private var lastPositive: [String: (rate: Double, at: Date)] = [:]
+
+    func resolve(key: String,
+                 freshTokensPerSecond: Double,
+                 hasActiveSessions: Bool,
+                 window: TimeInterval,
+                 now: Date) -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        if freshTokensPerSecond > 0 {
+            lastPositive[key] = (freshTokensPerSecond, now)
+            return freshTokensPerSecond
+        }
+        guard hasActiveSessions,
+              let last = lastPositive[key],
+              now.timeIntervalSince(last.at) <= window else {
+            lastPositive[key] = nil
+            return 0
+        }
+        return last.rate
+    }
+
+    #if DEBUG
+    func resetForTesting() {
+        lock.lock(); defer { lock.unlock() }
+        lastPositive.removeAll()
+    }
+    #endif
+}
+
 enum CodexRunwaySnapshotLoader {
+    /// Bridges brief gaps in token output so the "burning" chip stays steady
+    /// instead of flickering with the 5s refresh (see `RunwayAggregateBurnHold`).
+    static let burnHold = RunwayAggregateBurnHold()
+    static let burnHoldWindow: TimeInterval = 120
+
     static func snapshot(for request: CodexRunwaySnapshotRequest) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
@@ -325,9 +369,18 @@ enum CodexRunwaySnapshotLoader {
                 )
                 // Aggregate token throughput (fine-grained, window-independent) — an
                 // honest "burning" signal for a limit line with no run-out to show.
+                // Held across brief output gaps so the chip doesn't flicker with the
+                // 5s refresh (a >75s pause in token output reads as zero this cycle).
                 let aggregateTokensPerSecond = activities.reduce(0) { $0 + $1.tokensPerSecond }
-                if aggregateTokensPerSecond > 0 {
-                    snapshot?.aggregateTokensPerHour = aggregateTokensPerSecond * 3600
+                let stableTokensPerSecond = burnHold.resolve(
+                    key: request.recentSessionsRoot?.path ?? "codex",
+                    freshTokensPerSecond: aggregateTokensPerSecond,
+                    hasActiveSessions: !identities.isEmpty,
+                    window: burnHoldWindow,
+                    now: request.now
+                )
+                if stableTokensPerSecond > 0 {
+                    snapshot?.aggregateTokensPerHour = stableTokensPerSecond * 3600
                 }
                 continuation.resume(returning: snapshot)
             }

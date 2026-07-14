@@ -3667,27 +3667,26 @@ enum HUDRunwayRequestBuilder {
             }
             return observedAt
         }()
-        let observedAt = freshProjectionObservedAt ?? now
-        // The weekly `used_percent` ticks in whole integers (~1% every ~1.5 min), so
-        // per-session DIRECT %-burns barely register — they burst huge on a tick and
-        // read zero otherwise, which is why session rows flicker/vanish. Attribute
-        // burn from smooth TOKEN activity instead. That needs a meaningful provider
-        // rate, so when there's no fresh measured projection, derive run-out from
-        // average usage so far this window (like Claude), scaled to the active window.
-        // Only the long (weekly) window needs the average-burn fallback: its coarse
-        // integer % defeats direct/projection burn measurement, so a real provider
-        // rate here is what lets token-activity attribution populate the runway. The
-        // 5h window measures fine directly, so it keeps the plain reset fallback.
-        let needsAverageBurn = freshProjectionObservedAt == nil
-            && windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes
-        let averageRunout = needsAverageBurn
+        // The weekly `used_percent` ticks in whole integers (1% ≈ 100 min of
+        // quota, ~1% every ~1.5 min). A single tick caught by the fresh projection
+        // extrapolates to an absurd instantaneous rate (~6000 m/h). On the long
+        // (weekly) window use ONLY the smooth average-burn (used% / elapsed-this-
+        // window), which never blows up, and ignore the coarse fresh projection.
+        // Per-session burn is then attributed from smooth TOKEN activity against
+        // that meaningful provider rate. The short (5h) window measures finely, so
+        // it keeps the fresh projection and its plain reset fallback (no average-burn).
+        let isLongWindow = windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes
+        let averageRunout = isLongWindow
             ? RunwayBaselineMath.averageBurnRunout(
                 remainingPercent: Double(fiveHourRemainingPercent),
                 resetAt: resetAt,
                 windowLength: TimeInterval(windowMinutes * 60),
                 now: now)
             : nil
-        let runoutAt = (freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt })
+        // Average-burn is a now-relative estimate, so anchor observedAt at `now` on
+        // the long window; the short window keeps the projection's timestamp.
+        let observedAt = isLongWindow ? now : (freshProjectionObservedAt ?? now)
+        let runoutAt = (isLongWindow ? nil : freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt })
             ?? averageRunout
             ?? resetAt
         guard resetAt > observedAt,
@@ -3701,10 +3700,10 @@ enum HUDRunwayRequestBuilder {
             resetAt: resetAt,
             currentRunoutAt: runoutAt,
             observedAt: observedAt,
-            // A real run-out estimate (fresh projection OR average-burn) is what
-            // enables per-session token-activity attribution; the bare reset
+            // A real run-out estimate (average-burn on weekly, fresh projection on
+            // 5h) enables per-session token-activity attribution; the bare reset
             // fallback leaves it off (its provider rate would be meaningless).
-            hasProjectedRunout: freshProjectionObservedAt != nil || averageRunout != nil,
+            hasProjectedRunout: isLongWindow ? (averageRunout != nil) : (freshProjectionObservedAt != nil),
             windowMinutes: windowMinutes
         )
         return CodexRunwaySnapshotRequest(

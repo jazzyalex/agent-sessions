@@ -3800,6 +3800,54 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.rows.first?.quotaMinutesPerHour ?? 0, 90, accuracy: 0.001)
     }
 
+    func testCodexRunwayLoaderHoldsAggregateBurnAcrossOutputGap() async throws {
+        // A gap in token output longer than maximumSampleAge (75s) makes a cycle's
+        // aggregate read zero; the burn-rate chip must hold the last rate across
+        // that gap (until the hold window elapses) instead of flickering out.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-burnhold-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("empty-sessions", isDirectory: true)
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(3 * 60 * 60)
+        let text = """
+        {"timestamp":"\(iso(first))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100000}}}}
+        {"timestamp":"\(iso(second))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session", isGoal: false, logPaths: [log.path])
+        func request(now: Date) -> CodexRunwaySnapshotRequest {
+            CodexRunwaySnapshotRequest(
+                baseline: RunwayProviderBaseline(
+                    source: .codex, remainingPercent: 45, resetAt: reset,
+                    currentRunoutAt: reset, observedAt: second, hasProjectedRunout: false
+                ),
+                identities: [identity],
+                now: now,
+                maxRows: 3,
+                recentSessionsRoot: root
+            )
+        }
+        CodexRunwaySnapshotLoader.burnHold.resetForTesting()
+
+        // Cycle 1: newest sample fresh (<75s) → real rate measured (150k / 30s).
+        let live = await CodexRunwaySnapshotLoader.snapshot(for: request(now: second.addingTimeInterval(1)))
+        XCTAssertEqual(live?.aggregateTokensPerHour ?? 0, 5000 * 3600, accuracy: 1)
+
+        // Cycle 2: newest sample now 90s old → this cycle measures zero, but the
+        // hold keeps the last rate so the chip stays put.
+        let held = await CodexRunwaySnapshotLoader.snapshot(for: request(now: second.addingTimeInterval(90)))
+        XCTAssertEqual(held?.aggregateTokensPerHour ?? 0, 5000 * 3600, accuracy: 1)
+
+        // Cycle 3: past the hold window (120s) → the rate clears.
+        let cleared = await CodexRunwaySnapshotLoader.snapshot(for: request(now: second.addingTimeInterval(200)))
+        XCTAssertNil(cleared?.aggregateTokensPerHour)
+    }
+
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-stale-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

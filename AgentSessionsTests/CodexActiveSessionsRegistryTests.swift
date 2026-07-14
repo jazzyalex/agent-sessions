@@ -2321,6 +2321,82 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(request?.baseline.currentRunoutAt, request?.baseline.resetAt)
     }
 
+    func testWeeklyRunwayIgnoresCoarseFreshProjectionAndUsesAverageBurn() {
+        // Regression: after OpenAI dropped the 5h window the runway tracks the
+        // weekly window, whose integer used_percent ticks 1% (~100 min of quota)
+        // at a time. A single tick caught by the fresh projection produced an
+        // absurd ~6000 m/h. On the long window the builder must ignore the coarse
+        // projection and anchor run-out to the smooth average-burn instead.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let weeklyReset = now.addingTimeInterval(5 * 24 * 60 * 60) // 5 days out
+        let spikyRunout = now.addingTimeInterval(30 * 60)          // 1%-tick extrapolation
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active Work",
+            state: .active,
+            resolvedSessionID: "active-session",
+            logPath: "/tmp/active.jsonl"
+        )
+
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [row],
+            projectedRunoutEnabled: true,
+            codexAgentEnabled: true,
+            codexUsageEnabled: true,
+            fiveHourRemainingPercent: 73,
+            fiveHourResetText: iso8601(weeklyReset),
+            fiveHourProjectedRunoutAt: spikyRunout,
+            fiveHourProjectionObservedAt: now, // fresh (< 3 min)
+            windowMinutes: 10080,
+            now: now,
+            maxRows: 5
+        )
+
+        let expected = RunwayBaselineMath.averageBurnRunout(
+            remainingPercent: 73,
+            resetAt: weeklyReset,
+            windowLength: TimeInterval(10080 * 60),
+            now: now
+        )
+        XCTAssertNotNil(expected)
+        XCTAssertEqual(request?.baseline.observedAt, now)
+        XCTAssertEqual(request?.baseline.currentRunoutAt, expected)
+        XCTAssertNotEqual(request?.baseline.currentRunoutAt, spikyRunout,
+                          "Weekly window must ignore the coarse single-tick projection")
+        XCTAssertEqual(request?.baseline.hasProjectedRunout, true)
+    }
+
+    func testShortWindowStillHonorsFreshProjection() {
+        // The 5h window measures finely, so a fresh projection is still used.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let projected = now.addingTimeInterval(90 * 60)
+        let row = makeHUDRow(
+            id: "active-row",
+            project: "Alpha",
+            name: "Active Work",
+            state: .active,
+            resolvedSessionID: "active-session",
+            logPath: "/tmp/active.jsonl"
+        )
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [row],
+            projectedRunoutEnabled: true,
+            codexAgentEnabled: true,
+            codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67,
+            fiveHourResetText: iso8601(reset),
+            fiveHourProjectedRunoutAt: projected,
+            fiveHourProjectionObservedAt: now,
+            windowMinutes: 300,
+            now: now,
+            maxRows: 5
+        )
+        XCTAssertEqual(request?.baseline.currentRunoutAt, projected)
+        XCTAssertEqual(request?.baseline.observedAt, now)
+    }
+
     func testRunwayRequestIDChangesWhenDisplayNameChanges() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let baseline = RunwayProviderBaseline(
