@@ -3,6 +3,36 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [4.3.2] - 2026-07-12
+### Highlights
+- **A much quieter Quota Meter.** The usage meters were re-reading and re-parsing your entire session history every few seconds while idle. They now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release) so your machine stays cool and quiet. The "active burn" shimmer also pauses when nothing is burning and honors **Reduce Motion**.
+
+### Bug Fixes
+- Claude usage over the **Web API** path is far more resilient: when Full Disk Access isn't granted it now shows a clear cause instead of failing silently, retries recover instead of stalling after a few failures, and a new **Test Web API** button in Preferences → Usage Tracking runs an end-to-end self-check.
+- An **idle, expired Claude token** now shows a calm "no active session" state instead of a misleading error.
+
+## [4.3.1] - 2026-07-10
+### Highlights
+- **A rebuilt first run.** The setup experience is now a single, focused screen — live session count, per-agent toggles, and the Quota Meter always in view — plus a **What's New** panel that surfaces changes when you update and in-app **feedback** you can send without leaving the app.
+- **One-click "Fix" for usage tracking.** When Agent Sessions can't read your Claude or Codex usage — an expired login or a signed-out CLI — every usage surface (menu bar, cockpit meter, window footer) now shows a **Fix…** button that opens a guided dialog: it explains what's wrong and walks you through the solutions in order (re-authenticate → Web API or CLI-probe fallback → recheck), so you're never stuck at a broken meter.
+
+### Bug Fixes
+- Expired Claude no longer shows a misleading **"0%"** — the Quota Meter, menu bar, and cockpit now show an honest "reconnecting" state and then a clear "sign-in needed" prompt instead of reading as quota-exhausted.
+- Usage returns after `claude auth login` **without relaunching** — on the next refresh, or on its own within ~30 seconds.
+- The "session expired" sign-in prompt now appears **promptly** (~90 seconds) instead of after several minutes of silent "reconnecting."
+- The Quota Meter / Runway **"active burn"** countdown no longer lingers after a session goes idle — it clears shortly after you stop.
+- Runway **"+N sessions"** overflow now counts hidden idle sessions, and a lone hidden session is promoted to a real row instead of "+1."
+- Sessions with **non-ASCII (multi-byte) transcripts** are no longer hidden by a too-strict decode.
+- **Settings** opens to the requested pane even when the window is already open.
+
+### Improvements
+- Cleaner window footer — the usage strip drops its grey background bar.
+
+## [4.3] - 2026-07-09
+### Highlights
+- **Usage tracking that never cries wolf.** When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet "signed out" state instead of a scary error), and shows clear in-app **sign-in remediation** right in the usage strips and menu bar so you know exactly how to get your quota readings back.
+
 ### Runway auth — graceful degradation & guided CLI fallback (P1–P4)
 - **Cold-start fallback fix (P1):** on a fresh launch with no cached snapshot, a transient first-poll OAuth miss (e.g. the Keychain read racing app launch) no longer immediately spawns the interactive tmux `/usage` probe — which could open a Safari OAuth sign-in for an already-signed-in user. The fallback is deferred through the 90s cold-start window while the healthy OAuth path retries; the Keychain read also retries once on a transient `.unreadable`.
 - **Cause-aware degradation (P2):** transient failures (5xx / network / 429) show a calm "temporarily unavailable — retrying" caption in the strip, menu bar, and Cockpit instead of the alarming banner, and clear on the next good fetch. A verified 401 flips the internal `.expired` verdict immediately (preserving tmux-suppression) but the published banner is debounced behind a 5-minute clock, so a brief blip stays calm and only a persistent 401 escalates.
@@ -16,21 +46,14 @@ All notable changes to this project will be documented in this file.
 - Closed several probe hazards found during hardening: cold-start tmux hangs, probe reentrancy, orphaned live tmux probes (SIGKILL-escalate past the retry cap), and spawning a `/status` or `/usage` tmux probe while signed out. A permission-gated one-shot "signed out" notification fires at most once.
 - Non-interactive, browser-safe delegated token refresh; cold-start tmux fallback deferred so a valid-token relaunch never opens browser auth.
 
-### UI & other changes
-- Cockpit: segmented cockpit-view popover matching the Runway drawer style; ⇧⌘M now cycles cockpit views. Auth remediation renders in the usage strips and menu bar (`AuthRemediationBanner`).
-- Transcript: unified palette and native list/transcript separator; shared layout tokens. Removed dead `ClaudeUsageStripView`.
+### Improvements
+- Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views. Auth remediation renders in the usage strips and menu bar (`AuthRemediationBanner`).
+- Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look. Removed dead `ClaudeUsageStripView`.
+- Usage probing is gentler on your machine — auth-status re-checks are throttled on the healthy path, and stale background probes are cleaned up instead of piling up.
 
 ### Bug Fixes
 - Session view: restored visible click-and-drag text selection in the Rich Session transcript.
 - Filter: archived Codex sessions now appear in the Archived filter regardless of (often NULL) surface metadata — the filter keys off file path instead.
-
-## [4.3.2] - 2026-07-12
-### Highlights
-- **A much quieter Quota Meter.** The usage meters were re-reading and re-parsing your entire session history every few seconds while idle. They now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release) so your machine stays cool and quiet. The "active burn" shimmer also pauses when nothing is burning and honors **Reduce Motion**.
-
-### Bug Fixes
-- Claude usage over the **Web API** path is far more resilient: when Full Disk Access isn't granted it now shows a clear cause instead of failing silently, retries recover instead of stalling after a few failures, and a new **Test Web API** button in Preferences → Usage Tracking runs an end-to-end self-check.
-- An **idle, expired Claude token** now shows a calm "no active session" state instead of a misleading error.
 
 ## [4.2] - 2026-07-06
 ### Highlights

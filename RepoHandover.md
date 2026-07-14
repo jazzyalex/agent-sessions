@@ -1,3 +1,44 @@
+## 2026-07-13 18:58 · codex-usage-window · Codex 5h-drop: length-based window routing
+status: done
+
+**State:** Shipped to main (pushed): `44339507` (main fix) + `982350ae` (follow-up); full suite green (1571). OpenAI temporarily dropped Codex's 5h window (weekly now arrives in `primary`, `secondary` null) → parsers mislabeled weekly as "5h". Now routed by `window_minutes` length (not slot) via new `CodexRateLimitWindowClassifier` across all 4 parse sites; drift guardrail; runway re-pointed to weekly when 5h absent; 3-state display (real% / "no limit" / "can't verify"). Auto-recovers when the 5h window returns.
+
+**Decided / don't redo:**
+- Route by length, NOT slot. No-length response → historical positional fallback; reset-distance deliberately unused (it broke length-less CLI-RPC fixtures).
+- "can't verify" is ONLY partial drift (one good + one drifted). Fully-unplaceable response → nil → **reconnecting**, never the alarm (`982350ae` reverted the over-eager zero-window surfacing that misfired during the normal Codex connect window; length-less lone CLI-RPC window was the trigger).
+- Claude "no active session" after (re)launch = transient token-refresh reconnect, NOT a regression (chased hard; keychain/signature theories were wrong; `ClaudeStatus/` unchanged since v4.3.2). Wait it out before diagnosing.
+- Keep the 5h m/h "yardstick" via `RunwayProviderBaseline.windowMinutes` (default 300 → Claude untouched).
+
+**Key files:**
+- `AgentSessions/CodexStatus/CodexRateLimitWindowClassifier.swift` — shared length classifier + guardrail.
+- 4 parse sites: `CodexStatusService`, `CodexCLIRPCProbe`, `CodexOAuth/CodexOAuthUsageFetcher`, `CodexRunwayModel`.
+- `AgentSessions/Views/{CockpitFooterView,AgentCockpitHUDView}.swift` — display states + presentationState reconnecting guard.
+- `docs/superpowers/specs/2026-07-13-codex-usage-window-classification-design.md` — design + known limitations.
+
+**Next:**
+1. Confirm the CLI-RPC `window_minutes` field name against a live `/status` RPC (currently guessed camelCase; length-less path falls through safely).
+2. Optional: weekly-projection precision — thread exact-Double remaining-% through the snapshot so the ▸ run-out token fires on the weekly window (deferred; rows still render).
+3. `CHANGELOG.md` [Unreleased] entry for this fix (left to owner; still uncommitted along with `RepoHandover.md`).
+
+## 2026-07-13 18:01 · migration-corpus-guardrail · Corpus-preserving reindex primitive + guardrail
+status: done
+
+**State:** Shipped to main (pushed). Schema-migration wipe markers no longer need to nuke the FTS corpus: added `reindexSessionMeta(sources:)` that re-derives `session_meta` only, plus a guardrail comment at the marker site and `MigrationCorpusPreservationTests`. 1554 tests green. Commits: `3e549ca3` (code), `38225903` (parallel blog/spec docs), `2246d81a` (parallel perf handover).
+
+**Decided / don't redo:**
+- Scope kept deliberately minimal (owner's call): helper + guardrail test ONLY. NO rewrite of the 5 existing wipe markers (one-time, already applied — near-zero value) and NO progress UI.
+- Root insight: only `session_meta` must be wiped to force a re-derive — the core indexer's "missing hydrated" supplement repopulates it. Wiping `session_search`/`session_tool_io` was pure collateral and the actual cause of "search returns nothing" after an upgrade.
+- Only Claude/Codex/OpenClaw have core `session_meta` writers; the other 7 sources get meta from the search-ingest pass (reparse in place, corpus never emptied). So no source's sessions vanish after a meta-only wipe.
+- Guardrail is by-example + at-site comment, NOT mechanical. A dev bypassing the primitive with a raw corpus DELETE won't trip the test — mechanical enforcement would need a typed migration registry (the refactor the owner declined).
+
+**Key files:**
+- `AgentSessions/Indexing/DB.swift` — `reindexSessionMeta` (instance + `private static` bootstrap-callable form), guardrail comment at the marker block (~L375), `rowCountForTesting` (DEBUG).
+- `AgentSessionsTests/Indexing/MigrationCorpusPreservationTests.swift` — corpus-preservation contract test.
+
+**Next:**
+1. Future parse-derived `session_meta` column → add a marker that calls `try reindexSessionMeta(db, sources:)` in bootstrap; do NOT copy the old wipe markers.
+2. If the corpus-wipe footgun recurs, escalate to a typed migration registry (each marker declares scope; a test asserts none wipes the corpus).
+
 ## 2026-07-13 11:33 · agent-support · 2026-07-13 weekly session-format check + subagent fixture
 status: done
 
