@@ -291,10 +291,12 @@ actor CodexCLIRPCProbe {
 
         snap.usageFormatSuspect = routing.suspect
 
-        // Surface a "can't verify" verdict even when nothing was placeable, so a
-        // fully-uninterpretable response reaches the UI (as the suspect state)
-        // instead of silently vanishing into "stale previous data".
-        guard hasData || snap.usageFormatSuspect else { return nil }
+        // A response with NOTHING placeable is treated as "no data" — fall through
+        // so the app shows its calm reconnecting state, never an alarming
+        // "can't verify". This is the common case for the CLI-RPC probe during the
+        // connect window (a lone window with no readable length). A partial-suspect
+        // response still surfaces via hasData.
+        guard hasData else { return nil }
 
         snap.limitsSource = .cliRPC
         snap.eventTimestamp = Date()

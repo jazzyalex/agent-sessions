@@ -262,10 +262,13 @@ actor CodexOAuthUsageFetcher {
         }
         snap.usageFormatSuspect = routing.suspect
 
-        // Surface a "can't verify" verdict even when nothing was placeable, so a
-        // fully-uninterpretable response reaches the UI (as the suspect state)
-        // instead of silently vanishing into "stale previous data".
-        guard hasData || snap.usageFormatSuspect else { return nil }
+        // A response with NOTHING placeable is treated as "no data" — fall through
+        // so the app shows its calm reconnecting state, never an alarming
+        // "can't verify". (Surfacing zero-window suspect misfired during the normal
+        // connect window, e.g. a length-less lone CLI window.) A partial-suspect
+        // response still surfaces via hasData: the good window shows, the drifted
+        // one is flagged.
+        guard hasData else { return nil }
         snap.limitsSource = .oauth
         snap.eventTimestamp = Date()
         return snap

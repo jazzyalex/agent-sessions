@@ -112,7 +112,13 @@ struct QuotaData: Equatable {
     var presentationState: PresentationState {
         if let auth = authStatus, auth.state.isAlarming { return .needsAction(auth) }
         if let auth = authStatus, auth.state == .idle { return .idle(auth) }
-        if !hasUsageData || dataIsStale || transientReason != nil { return .reconnecting }
+        // A suspect verdict with nothing placeable means "can't read it right now",
+        // not trustworthy live data — show the calm reconnecting cell rather than an
+        // alarming "can't verify" (which misfired during the normal connect window).
+        if !hasUsageData || dataIsStale || transientReason != nil
+            || (usageFormatSuspect && !hasFiveHourRateLimit && !hasWeekRateLimit) {
+            return .reconnecting
+        }
         return .live
     }
 

@@ -469,20 +469,19 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.usageFormatSuspect, true, "Garbage window trips the guardrail; the good one still shows")
     }
 
-    func testOAuthFullyUninterpretableSurfacesSuspectNotNil() {
-        // Both windows uninterpretable → nothing placeable, but the snapshot must
-        // still surface (as suspect) rather than vanish into stale data.
+    func testOAuthFullyUninterpretableReturnsNilSoUIStaysReconnecting() {
+        // Nothing placeable → return nil so the app shows its calm reconnecting
+        // state, NOT an alarming "can't verify". A length-less/garbage lone window
+        // (common on the CLI-RPC/OAuth path during the connect window) must not
+        // hijack the meter. Partial drift still surfaces (covered separately).
         let raw = CodexOAuthRawUsageResponse(
             rateLimit: .init(
                 primaryWindow: .init(usedPercent: 5, resetAt: 1_800_000_000, limitWindowSeconds: 999_999_999),
                 secondaryWindow: nil
             )
         )
-        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
-        XCTAssertNotNil(snapshot, "A suspect-only response still surfaces")
-        XCTAssertEqual(snapshot?.usageFormatSuspect, true)
-        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false)
-        XCTAssertEqual(snapshot?.hasWeekRateLimit, false)
+        XCTAssertNil(CodexOAuthUsageFetcher.normalizeForTesting(raw),
+                     "A zero-window (suspect) response falls through instead of surfacing 'can't verify'")
     }
 
     func testClassifierLoneLengthlessPrimaryIsSuspect() {
