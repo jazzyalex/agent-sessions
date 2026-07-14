@@ -2426,9 +2426,13 @@ actor CodexStatusService {
             dest.weekResetText = ""
             dest.weekLimitsSource = nil
         }
-        // A live probe/API is authoritative for the format verdict: whatever it
-        // could or couldn't interpret this fetch is what we display.
-        dest.usageFormatSuspect = source.usageFormatSuspect
+        // Only a complete authoritative fetch (OAuth/CLI-RPC, which pass
+        // `replacesMissingWindows`) evaluates the format verdict. Fragment probes
+        // (tmux /status via parseStatusJSON) never compute `usageFormatSuspect`,
+        // so they must not clobber a real "can't verify" back to false.
+        if replacesMissingWindows {
+            dest.usageFormatSuspect = source.usageFormatSuspect
+        }
         dest.limitsSource = aggregateLimitsSource(for: dest)
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
         dest.eventTimestamp = Date()

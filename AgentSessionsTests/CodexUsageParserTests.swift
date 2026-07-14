@@ -568,6 +568,54 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(merged.fiveHourRemainingPercent, 40)
     }
 
+    func testFragmentMergeDoesNotClearSuspectVerdict() async {
+        // parseStatusJSON (tmux /status) never computes a format verdict, so a
+        // fragment merge must not clobber a real "can't verify" set by the last
+        // authoritative (OAuth/CLI-RPC) fetch back to false.
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(
+                weekRemainingPercent: 88,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .oauth,
+                limitsSource: .oauth,
+                usageFormatSuspect: true
+            )
+        )
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                weekRemainingPercent: 80,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .statusProbe,
+                limitsSource: .statusProbe
+            ),
+            requirePositivePercent: true
+        )
+        XCTAssertTrue(merged.usageFormatSuspect, "Fragment merge must not clear a real suspect verdict")
+    }
+
+    func testAuthoritativeMergeUpdatesSuspectVerdict() async {
+        // A complete authoritative fetch (replacesMissingWindows) owns the format
+        // verdict — it both sets and clears `usageFormatSuspect`.
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(usageFormatSuspect: true)
+        )
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                weekRemainingPercent: 80,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .oauth,
+                limitsSource: .oauth
+            ),
+            replacesMissingWindows: true
+        )
+        XCTAssertFalse(merged.usageFormatSuspect, "Authoritative fetch clears a stale suspect verdict")
+    }
+
     func testStatusProbeParserMarksReturnedWindowsAsAvailable() async {
         let json = """
         {

@@ -28,6 +28,21 @@ enum UsageStaleThresholds {
     static let unavailableCopy = "Unavailable in recent logs"
 }
 
+/// Single source of truth for "dropped window" copy so the strip, menu bar,
+/// footer, and HUD panels can't drift (previously "can't verify" vs "can't
+/// verify format"). A provider that omits a window renders the calm `noLimit`;
+/// a payload we couldn't confidently classify renders `cantVerify`.
+enum UsageLimitAbsenceCopy {
+    static let noLimit = "no limit"
+    static let cantVerify = "can't verify"
+    /// Longer help/tooltip form for the suspect state (menu title, strip help).
+    static let suspectHelp = "Codex changed its usage format — can't verify"
+
+    /// Inline label for an absent window: `cantVerify` when the format is
+    /// suspect, else the calm `noLimit`.
+    static func label(suspect: Bool) -> String { suspect ? cantVerify : noLimit }
+}
+
 func isResetInfoUnavailable(raw: String) -> Bool {
     raw.trimmingCharacters(in: .whitespacesAndNewlines) == UsageStaleThresholds.unavailableCopy
 }

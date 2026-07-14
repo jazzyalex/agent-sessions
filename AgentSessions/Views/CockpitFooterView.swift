@@ -443,7 +443,17 @@ private struct IndexingIndicator: View {
         let fiveUsed = fiveAvailable ? clampPercent(100 - fiveLeft) : 0
         let weekUsed = weekAvailable ? clampPercent(100 - weekLeft) : 0
 
-        let bottleneckKind: BottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
+        // A dropped/unavailable window is never the bottleneck (its pinned-to-0
+        // `used` would otherwise win the `>=` tie at a fresh reset and render the
+        // fill bar as empty). Mirror HUDLimitsProviderText.bottleneckIs5h.
+        let bottleneckKind: BottleneckKind
+        if fiveAvailable && !weekAvailable {
+            bottleneckKind = .fiveHour
+        } else if weekAvailable && !fiveAvailable {
+            bottleneckKind = .week
+        } else {
+            bottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
+        }
         let bottleneckUsed = max(fiveUsed, weekUsed)
         let bottleneckLeft = (bottleneckKind == .fiveHour) ? fiveLeft : weekLeft
 

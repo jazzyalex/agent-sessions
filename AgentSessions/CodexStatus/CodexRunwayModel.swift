@@ -237,6 +237,11 @@ struct CodexRunwaySnapshot: Equatable, Sendable {
     let baseline: RunwayProviderBaseline
     let rows: [RunwayPauseImpactRow]
     let burstSummary: RunwayShortBurstSummary?
+    /// Aggregate token throughput (tokens/hour) across active sessions this cycle.
+    /// Drives the honest "burning" indicator on a limit line that has no run-out to
+    /// show — e.g. the 5h line while the 5h window is dropped (a run-out time there
+    /// would be a lie). nil when nothing is actively burning.
+    var aggregateTokensPerHour: Double? = nil
 }
 
 struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
@@ -295,15 +300,20 @@ enum CodexRunwaySnapshotLoader {
                 let directBurns = identities.compactMap {
                     CodexRunwayRateLimitParser.burn(identity: $0, now: request.now)
                 }
+                // Parse each session's token activity once; both the per-session
+                // token burns and the aggregate throughput derive from it.
+                let activities = CodexRunwayTokenActivityParser.activities(
+                    identities: identities,
+                    now: request.now
+                )
                 let tokenBurns = request.baseline.hasProjectedRunout
                     ? CodexRunwayTokenActivityParser.burns(
-                        identities: identities,
-                        baseline: request.baseline,
-                        now: request.now
+                        activities: activities,
+                        baseline: request.baseline
                     )
                     : []
                 let burns = mergeBurns(directBurns: directBurns, tokenBurns: tokenBurns)
-                let snapshot = RunwaySnapshotAssembly.withPendingRows(
+                var snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: request.baseline,
                     snapshot: CodexRunwayCalculator.snapshot(
                         baseline: request.baseline,
@@ -313,6 +323,12 @@ enum CodexRunwaySnapshotLoader {
                     activeIdentities: identities,
                     maxRows: request.maxRows
                 )
+                // Aggregate token throughput (fine-grained, window-independent) — an
+                // honest "burning" signal for a limit line with no run-out to show.
+                let aggregateTokensPerSecond = activities.reduce(0) { $0 + $1.tokensPerSecond }
+                if aggregateTokensPerSecond > 0 {
+                    snapshot?.aggregateTokensPerHour = aggregateTokensPerSecond * 3600
+                }
                 continuation.resume(returning: snapshot)
             }
         }
@@ -1401,12 +1417,24 @@ enum CodexRunwayTokenActivityParser {
     static func burns(identities: [RunwaySessionIdentity],
                       baseline: RunwayProviderBaseline,
                       now: Date = Date()) -> [RunwaySessionBurn] {
+        burns(activities: activities(identities: identities, now: now), baseline: baseline)
+    }
+
+    /// Per-identity token activity, computed once per cycle so callers that need
+    /// both the per-session burns and the aggregate throughput don't parse each
+    /// session log twice (see `CodexRunwaySnapshotLoader.snapshot`).
+    static func activities(identities: [RunwaySessionIdentity],
+                           now: Date = Date()) -> [RunwaySessionActivity] {
+        identities.compactMap { activity(identity: $0, now: now) }
+    }
+
+    static func burns(activities: [RunwaySessionActivity],
+                      baseline: RunwayProviderBaseline) -> [RunwaySessionBurn] {
         let currentSeconds = baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
         guard currentSeconds > 0, baseline.remainingPercent > 0 else { return [] }
         let providerRate = baseline.remainingPercent / currentSeconds
         guard providerRate > 0, providerRate.isFinite else { return [] }
 
-        let activities = identities.compactMap { activity(identity: $0, now: now) }
         let totalTokenRate = activities.reduce(0) { $0 + $1.tokensPerSecond }
         guard totalTokenRate > 0, totalTokenRate.isFinite else { return [] }
 

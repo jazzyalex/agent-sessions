@@ -518,15 +518,16 @@ final class StatusItemController: NSObject {
     /// Per-line presentation for the Codex 5h/Wk menu rows: real data uses the
     /// existing `resetLine`; a recognized absence (provider intentionally
     /// omitted the window, e.g. OpenAI pausing the 5h limit) reads "no limit";
-    /// a suspect payload (couldn't confidently classify it) reads "can't verify
-    /// format" instead of a dead "0%" line.
+    /// a suspect payload (couldn't confidently classify it) reads "can't verify"
+    /// instead of a dead "0%" line. Before the first successful poll we show a
+    /// neutral "—" rather than falsely asserting "no limit".
     private func codexResetMenuTitle(label: String, percent: Int, reset: String, has: Bool) -> String {
         if has {
             return resetLine(label: label, percent: percent, reset: reset)
-        } else if codexStatus.usageFormatSuspect {
-            return "\(label) can't verify format"
+        } else if codexStatus.lastUpdate == nil {
+            return "\(label) —"
         } else {
-            return "\(label) no limit"
+            return "\(label) \(UsageLimitAbsenceCopy.label(suspect: codexStatus.usageFormatSuspect))"
         }
     }
 

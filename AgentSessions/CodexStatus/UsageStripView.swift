@@ -84,6 +84,17 @@ struct UsageStripView: View {
     private func codexMeter(title: String, percent: Int, reset: String, has: Bool) -> some View {
         if has {
             UsageMeter(title: title, percent: percent, reset: reset, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+        } else if codexStatus.lastUpdate == nil {
+            // No successful poll yet — never assert "no limit" before data loads
+            // (mirrors the footer's "Waiting"); the Updating badge signals progress.
+            HStack(spacing: UsageMeterLayout.itemSpacing) {
+                Text(title)
+                    .font(.footnote).bold()
+                    .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
+                Text("—")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         } else if codexStatus.usageFormatSuspect {
             HStack(spacing: UsageMeterLayout.itemSpacing) {
                 Text(title)
@@ -95,14 +106,14 @@ struct UsageStripView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .help("Codex changed its usage format — can't verify")
+                    .help(UsageLimitAbsenceCopy.suspectHelp)
             }
         } else {
             HStack(spacing: UsageMeterLayout.itemSpacing) {
                 Text(title)
                     .font(.footnote).bold()
                     .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
-                Text("no limit")
+                Text(UsageLimitAbsenceCopy.noLimit)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

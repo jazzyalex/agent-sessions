@@ -3398,6 +3398,11 @@ private struct HUDLimitsProviderEntry {
     let fiveHourProjectedRunoutAt: Date?
     let fiveHourProjectionObservedAt: Date?
     var fiveHourOnTrackObservedAt: Date? = nil
+    /// Aggregate token throughput (tk/h) for this provider's active sessions.
+    /// Shown on the 5h line when that window is dropped — an honest "burning"
+    /// signal in place of a fictitious run-out. Read by every HUD limits surface
+    /// (bar, rows panel, detail panel) so they stay consistent.
+    var aggregateTokensPerHour: Double? = nil
     /// CLI auth status for this provider; when alarming, HUDLimitsBar swaps the
     /// meter text for an AuthRemediationBanner. Left nil by callers (e.g. the
     /// rows panel) that don't render the banner.
@@ -3818,6 +3823,10 @@ private struct HUDLimitsBar: View {
         quotaMeterVisibleRunwaySnapshot(from: claudeRunwaySnapshot, visibility: runwayVisibility)
     }
 
+    private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
+        source == .claude ? visibleClaudeRunwaySnapshot : visibleCodexRunwaySnapshot
+    }
+
     private var hasActiveProjection: Bool {
         guard projectedRunoutEnabled else { return false }
         return entries.contains { entry in
@@ -3894,6 +3903,7 @@ private struct HUDLimitsBar: View {
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
+                aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState
             ))
@@ -3910,6 +3920,7 @@ private struct HUDLimitsBar: View {
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
+                aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
             ))
@@ -4142,6 +4153,7 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
+                aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState
             ))
@@ -4158,6 +4170,7 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
                 fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
+                aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
             ))
@@ -4525,7 +4538,7 @@ private struct HUDLimitsDetailPanel: View {
                     .frame(minHeight: 22)
                 case .live:
                     // Grid keeps the "5h:" / "Wk:" columns aligned within a provider row.
-                    Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 0) {
+                    Grid(alignment: .leading, horizontalSpacing: HUDLimitsColumnLayout.detailGridSpacing, verticalSpacing: 0) {
                         detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
                     }
                     .padding(.horizontal, 10)
@@ -4598,14 +4611,32 @@ private struct HUDLimitsDetailPanel: View {
                 // Lead with the calm "no limit", then the burn indicator — instead
                 // of the confusing "— ▶2h 25m no limit". Span the three 5h columns
                 // so the phrase reads cleanly without truncation.
+                // No 5h limit → no run-out to project (a "▶Xh" here would be a lie).
+                // Instead show honest token throughput ("30K tk/h") when a session is
+                // actively burning — magnitude of burn without a fictitious deadline.
+                let burnRate = entry.aggregateTokensPerHour
+                let spansThree = (projection != nil || reserveProjectionSlot)
+                // Pin the spanning cell to the exact width of the columns it covers
+                // so the variable-width burn chip can't stretch the shared Grid
+                // tracks and reflow the whole panel as burn starts/stops.
+                let spanWidth = spansThree
+                    ? HUDLimitsColumnLayout.detailFiveHourPercentWidth
+                        + HUDLimitsColumnLayout.detailFiveHourProjectionWidth
+                        + HUDLimitsColumnLayout.detailFiveHourResetWidth
+                        + HUDLimitsColumnLayout.detailGridSpacing * 2
+                    : HUDLimitsColumnLayout.detailFiveHourPercentWidth
+                        + HUDLimitsColumnLayout.detailFiveHourResetWidth
+                        + HUDLimitsColumnLayout.detailGridSpacing
                 HStack(spacing: 6) {
-                    Text("5h: \(suspect ? "can't verify" : "no limit")")
+                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
                         .foregroundStyle(.secondary)
-                    if let projection {
-                        HUDLimitsProjectionToken(projection: projection, reserve: false)
+                    if let burnRate, burnRate > 0 {
+                        Text(formatTokenRatePerHour(burnRate))
+                            .foregroundStyle(hudProjectionColor(colorScheme))
                     }
                 }
-                .gridCellColumns((projection != nil || reserveProjectionSlot) ? 3 : 2)
+                .frame(width: spanWidth, alignment: .leading)
+                .gridCellColumns(spansThree ? 3 : 2)
             } else {
                 HStack(spacing: 0) {
                     Text("5h: ")
@@ -4959,6 +4990,20 @@ private func hudProjectionColor(_ colorScheme: ColorScheme) -> Color {
         : Color(red: 0.82, green: 0.30, blue: 0.00)
 }
 
+/// Compact token-throughput label, e.g. "30K tk/h" / "1.2M tk/h". Used as the
+/// honest "burning" indicator on a limit line that has no run-out to show.
+private func formatTokenRatePerHour(_ perHour: Double) -> String {
+    let magnitude: String
+    if perHour >= 1_000_000 {
+        magnitude = String(format: "%.1fM", perHour / 1_000_000)
+    } else if perHour >= 1_000 {
+        magnitude = String(format: "%.0fK", perHour / 1_000)
+    } else {
+        magnitude = String(format: "%.0f", perHour)
+    }
+    return "\(magnitude) tk/h"
+}
+
 /// Quota Meter type scale. Standard keeps the established sizes; Enlarged raises
 /// every Quota Meter font by one point (provider rows and Session Runway alike),
 /// preserving the runway-one-below-provider relationship, and scales the compact
@@ -5012,6 +5057,9 @@ private enum HUDLimitsColumnLayout {
     static let detailSeparatorWidth: CGFloat = 7
     static let detailWeekPercentWidth: CGFloat = 58
     static let detailWeekResetWidth: CGFloat = 106
+    /// Inter-column spacing of the detail-panel Grid. Used both to build the Grid
+    /// and to size the absent-5h cell that spans several columns (see detailRow).
+    static let detailGridSpacing: CGFloat = 6
 }
 
 private struct HUDLimitsProjectionToken: View {
@@ -5288,11 +5336,21 @@ private struct HUDLimitsProviderText: View {
     private var fiveHourProjectionLabel: String? {
         guard showProjection else { return nil }
         guard projectedRunoutEnabled else { return nil }
+        // No 5h limit → no run-out to project (a "▶Xh" here is a lie); the burn chip
+        // takes its place instead.
+        guard !fiveAbsent else { return nil }
         return formatUsageProjectionLabel(
             runoutAt: entry.fiveHourProjectedRunoutAt,
             observedAt: entry.fiveHourProjectionObservedAt,
             now: now
         )
+    }
+
+    /// Honest "burning" indicator for a dropped 5h window: token throughput, not a
+    /// fictitious run-out time. Only while a session is actively burning.
+    private var fiveHourBurnChip: String? {
+        guard fiveAbsent, let rate = entry.aggregateTokensPerHour, rate > 0 else { return nil }
+        return formatTokenRatePerHour(rate)
     }
 
     // A fresh measured burn that projects run-out at/after reset: working, but
@@ -5306,7 +5364,7 @@ private struct HUDLimitsProviderText: View {
     // Reset labels carry their own "↻ " prefix so the calm absent states can
     // drop it ("no limit" / "can't verify" read wrong with a reset glyph).
     private func fiveHourResetLabel() -> String? {
-        if fiveAbsent { return suspect ? "can't verify" : "no limit" }
+        if fiveAbsent { return UsageLimitAbsenceCopy.label(suspect: suspect) }
         if isResetInfoUnavailable(raw: entry.fiveHourResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
         let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return "↻ —" }
@@ -5317,7 +5375,7 @@ private struct HUDLimitsProviderText: View {
     }
 
     private func weekResetLabel() -> String? {
-        if weekAbsent { return suspect ? "can't verify" : "no limit" }
+        if weekAbsent { return UsageLimitAbsenceCopy.label(suspect: suspect) }
         if isResetInfoUnavailable(raw: entry.weekResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
         let raw = entry.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return "↻ —" }
@@ -5345,20 +5403,45 @@ private struct HUDLimitsProviderText: View {
         // as burn starts/stops. minimumScaleFactor (applied by the caller) remains the
         // fallback for rare over-long content (transient "100%", stale copy).
         let scale = QuotaMeterTextMetrics.columnScale(enlarged: enlarged)
+        // Combined width of the three 5h columns (+ their inter-column gaps) so the
+        // dropped-5h span can occupy the same footprint and keep "|" / the Wk
+        // columns aligned with a normal row.
+        let fiveHourRegionWidth: CGFloat = showResets
+            ? HUDLimitsColumnLayout.compactFiveHourPercentWidth
+                + HUDLimitsColumnLayout.compactFiveHourProjectionWidth
+                + HUDLimitsColumnLayout.compactFiveHourResetWidth
+                + HUDLimitsColumnLayout.compactSpacing * 2
+            : HUDLimitsColumnLayout.compactFiveHourPercentWidth
+                + HUDLimitsColumnLayout.compactFiveHourProjectionWidth
+                + HUDLimitsColumnLayout.compactSpacing
         HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
-            HStack(spacing: 0) {
-                Text("5h: ")
-                Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
-                    .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
-            }
-            .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
+            if fiveAbsent {
+                // Dropped 5h window: one spanning unit "5h: no limit  30K tk/h"
+                // (state first), sized to the combined 5h region so the variable-
+                // width burn chip has room instead of colliding with "no limit".
+                HStack(spacing: 6 * scale) {
+                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
+                        .foregroundStyle(.secondary)
+                    if let chip = fiveHourBurnChip {
+                        Text(chip).foregroundStyle(hudProjectionColor(colorScheme))
+                    }
+                }
+                .frame(width: fiveHourRegionWidth * scale, alignment: .leading)
+            } else {
+                HStack(spacing: 0) {
+                    Text("5h: ")
+                    Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                        .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                }
+                .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
 
-            HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true, onTrack: fiveHourOnTrack)
-                .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale)
+                HUDLimitsProjectionToken(projection: fiveHourProjectionLabel, idleMarker: true, onTrack: fiveHourOnTrack)
+                    .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale, alignment: .leading)
 
-            if showResets, let r = fiveHourResetLabel() {
-                Text(r)
-                    .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
+                if showResets, let r = fiveHourResetLabel() {
+                    Text(r)
+                        .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
+                }
             }
 
             Text("|")
@@ -5410,18 +5493,30 @@ private struct HUDLimitsProviderText: View {
                     HStack(spacing: 6) {
                         if !onlyBottleneck || bottleneckIs5h {
                             HStack(spacing: 4) {
-                                HStack(spacing: 0) {
-                                    Text("5h: ")
-                                    Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
-                                        .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
-                                    if let projection = fiveHourProjectionLabel {
-                                        Text(" \(projection)")
-                                            .fontWeight(.bold)
+                                if fiveAbsent {
+                                    // Dropped 5h window: state first, then the burn
+                                    // chip — "5h: no limit  30K tk/h" — never the
+                                    // jumbled "— 30K tk/h no limit".
+                                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
+                                        .foregroundStyle(.secondary)
+                                    if let chip = fiveHourBurnChip {
+                                        Text(chip)
                                             .foregroundStyle(hudProjectionColor(colorScheme))
                                     }
-                                }
-                                if showResets, let r = fiveHourResetLabel() {
-                                    Text(r)
+                                } else {
+                                    HStack(spacing: 0) {
+                                        Text("5h: ")
+                                        Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                                            .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                                        if let projection = fiveHourProjectionLabel {
+                                            Text(" \(projection)")
+                                                .fontWeight(.bold)
+                                                .foregroundStyle(hudProjectionColor(colorScheme))
+                                        }
+                                    }
+                                    if showResets, let r = fiveHourResetLabel() {
+                                        Text(r)
+                                    }
                                 }
                             }
                         }
