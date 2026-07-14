@@ -242,6 +242,10 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
     let logPath: String
     let capturedAt: Date
     let totalTokens: Double
+    var input: Double = 0
+    var cachedInput: Double = 0
+    var output: Double = 0
+    var modelSlug: String? = nil
 }
 
 struct RunwaySessionActivity: Equatable, Sendable {
@@ -1612,6 +1616,13 @@ private struct CodexRawTokenLine: Sendable {
     let logPath: String
     let createdAtReal: Date?
     let totalTokens: Double
+    // Cumulative per-type counts for $ pricing (0 when the line's `info` is null /
+    // pre-per-type format). `input` includes cached; `cachedInput` is the cached
+    // subset. `modelSlug` is resolved cross-line (token_count lines don't carry it).
+    let input: Double
+    let cachedInput: Double
+    let output: Double
+    let modelSlug: String?
 }
 
 enum CodexRunwayTokenActivityParser {
@@ -1652,9 +1663,21 @@ enum CodexRunwayTokenActivityParser {
               let text = String(data: data, encoding: .utf8) else {
             return []
         }
-        return text
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { parseRawLine(String($0), logPath: path) }
+        // Codex logs the model on `turn_context` lines, not on `token_count`
+        // lines, so track the latest-seen model in file order and stamp it onto
+        // subsequent token lines. Pure function of the bytes → still cacheable.
+        var out: [CodexRawTokenLine] = []
+        var lastModel: String?
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let data = String(raw).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let payload = (obj["payload"] as? [String: Any]) ?? obj
+            if let m = modelSlug(from: payload) ?? modelSlug(from: obj) { lastModel = m }
+            if let line = tokenLine(obj: obj, payload: payload, logPath: path, model: lastModel) {
+                out.append(line)
+            }
+        }
+        return out
     }
 
     private static func finalize(_ raw: CodexRawTokenLine, now: Date) -> CodexRunwayTokenActivitySample? {
@@ -1663,7 +1686,11 @@ enum CodexRunwayTokenActivityParser {
         return CodexRunwayTokenActivitySample(
             logPath: raw.logPath,
             capturedAt: capturedAt,
-            totalTokens: raw.totalTokens
+            totalTokens: raw.totalTokens,
+            input: raw.input,
+            cachedInput: raw.cachedInput,
+            output: raw.output,
+            modelSlug: raw.modelSlug
         )
     }
 
@@ -1680,7 +1707,12 @@ enum CodexRunwayTokenActivityParser {
             identity: identity,
             tokensPerSecond: tokensPerSecond,
             sampleStart: pathActivities.map(\.sampleStart).min() ?? now,
-            sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now
+            sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now,
+            inputPerSecond: pathActivities.reduce(0) { $0 + $1.inputPerSecond },
+            cachedInputPerSecond: pathActivities.reduce(0) { $0 + $1.cachedInputPerSecond },
+            outputPerSecond: pathActivities.reduce(0) { $0 + $1.outputPerSecond },
+            cacheCreationPerSecond: pathActivities.reduce(0) { $0 + $1.cacheCreationPerSecond },
+            modelSlug: pathActivities.compactMap(\.modelSlug).first
         )
     }
 
@@ -1735,19 +1767,19 @@ enum CodexRunwayTokenActivityParser {
                 identity: identity,
                 tokensPerSecond: delta / elapsed,
                 sampleStart: previous.capturedAt,
-                sampleEnd: current.capturedAt
+                sampleEnd: current.capturedAt,
+                inputPerSecond: max(0, current.input - previous.input) / elapsed,
+                cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) / elapsed,
+                outputPerSecond: max(0, current.output - previous.output) / elapsed,
+                cacheCreationPerSecond: 0,
+                modelSlug: current.modelSlug
             )
         }
         return nil
     }
 
-    private static func parseRawLine(_ line: String,
-                                     logPath: String) -> CodexRawTokenLine? {
-        guard let data = line.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        let payload = (obj["payload"] as? [String: Any]) ?? obj
+    private static func tokenLine(obj: [String: Any], payload: [String: Any],
+                                  logPath: String, model: String?) -> CodexRawTokenLine? {
         let createdAtReal = CodexRunwayRateLimitParser.flexibleDate(obj["created_at"])
             ?? CodexRunwayRateLimitParser.flexibleDate(payload["created_at"])
             ?? CodexRunwayRateLimitParser.flexibleDate(obj["timestamp"])
@@ -1755,11 +1787,39 @@ enum CodexRunwayTokenActivityParser {
         guard let totalTokens = totalTokens(from: payload) ?? totalTokens(from: obj) else {
             return nil
         }
+        let perType = perTypeTokens(from: payload) ?? perTypeTokens(from: obj)
         return CodexRawTokenLine(
             logPath: logPath,
             createdAtReal: createdAtReal,
-            totalTokens: totalTokens
+            totalTokens: totalTokens,
+            input: perType?.input ?? 0,
+            cachedInput: perType?.cachedInput ?? 0,
+            output: perType?.output ?? 0,
+            modelSlug: model
         )
+    }
+
+    /// Cumulative per-type counts (input incl. cached, cached subset, output),
+    /// walking the same nesting as `totalTokens`. nil when the object has no
+    /// per-type breakdown (e.g. `info: null`), so $ pricing degrades to token.
+    private static func perTypeTokens(from dict: [String: Any]) -> (input: Double, cachedInput: Double, output: Double)? {
+        if let t = perTypeDirect(from: dict) { return t }
+        if let info = dict["info"] as? [String: Any], let t = perTypeTokens(from: info) { return t }
+        if let total = dict["total_token_usage"] as? [String: Any], let t = perTypeDirect(from: total) { return t }
+        if let usage = dict["usage"] as? [String: Any], let t = perTypeDirect(from: usage) { return t }
+        return nil
+    }
+
+    private static func perTypeDirect(from dict: [String: Any]) -> (input: Double, cachedInput: Double, output: Double)? {
+        guard let input = CodexRunwayRateLimitParser.double(dict["input_tokens"]),
+              let output = CodexRunwayRateLimitParser.double(dict["output_tokens"]) else { return nil }
+        let cached = CodexRunwayRateLimitParser.double(dict["cached_input_tokens"]) ?? 0
+        return (input, cached, output)
+    }
+
+    private static func modelSlug(from dict: [String: Any]) -> String? {
+        guard let m = dict["model"] as? String, !m.isEmpty else { return nil }
+        return m
     }
 
     private static func totalTokens(from dict: [String: Any]) -> Double? {
