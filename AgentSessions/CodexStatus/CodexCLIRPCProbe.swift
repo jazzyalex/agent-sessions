@@ -200,6 +200,55 @@ actor CodexCLIRPCProbe {
         }
     }
 
+    /// Extracts `usedPercent` (Int or Double) from a raw window dict and
+    /// converts it to the classifier's `remainingPercent` convention. Not
+    /// clamped here — the classifier treats out-of-range values as suspect;
+    /// clamping happens only once a routed result is stored on the snapshot.
+    private nonisolated static func extractRemainingPercent(_ window: [String: Any]) -> Double? {
+        if let usedPercent = window["usedPercent"] as? Int {
+            return 100 - Double(usedPercent)
+        }
+        if let usedPercent = window["usedPercent"] as? Double {
+            return 100 - usedPercent
+        }
+        return nil
+    }
+
+    /// Extracts `resetsAt` (Int epoch seconds) from a raw window dict.
+    private nonisolated static func extractResetAt(_ window: [String: Any]) -> Date? {
+        guard let resetsAt = window["resetsAt"] as? Int else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(resetsAt))
+    }
+
+    /// Extracts a declared window length in minutes. The app-server's field
+    /// name for this is unconfirmed, so this tries several plausible
+    /// candidates before giving up; when every window returns nil the router
+    /// falls back to the legacy positional mapping (primary=5h, secondary=weekly).
+    private nonisolated static func extractWindowMinutes(_ window: [String: Any]) -> Int? {
+        for key in ["windowMinutes", "windowSizeMinutes", "windowMinutesTotal"] {
+            if let minutes = window[key] as? Int { return minutes }
+            if let minutes = window[key] as? Double { return Int(minutes.rounded()) }
+        }
+        for key in ["windowSizeSeconds", "windowSeconds"] {
+            if let seconds = window[key] as? Int { return seconds / 60 }
+            if let seconds = window[key] as? Double { return Int((seconds / 60).rounded()) }
+        }
+        return nil
+    }
+
+    /// Builds a classifier input from a raw `primary`/`secondary` window dict.
+    /// Returns nil when the dict itself is absent, or present but carries none
+    /// of the three signals the classifier can use — an absent window is
+    /// never suspect, only an unclassifiable-but-present one is.
+    private nonisolated static func makeWindowInput(_ window: [String: Any]?) -> CodexRateLimitWindowInput? {
+        guard let window else { return nil }
+        let remainingPercent = extractRemainingPercent(window)
+        let resetAt = extractResetAt(window)
+        let windowMinutes = extractWindowMinutes(window)
+        guard remainingPercent != nil || resetAt != nil || windowMinutes != nil else { return nil }
+        return CodexRateLimitWindowInput(remainingPercent: remainingPercent, resetAt: resetAt, windowMinutes: windowMinutes)
+    }
+
     private nonisolated static func parseRateLimitsResponseData(_ data: Data) -> CodexUsageSnapshot? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = json["result"] as? [String: Any] else { return nil }
@@ -207,46 +256,45 @@ actor CodexCLIRPCProbe {
         // result.rateLimits matches the GetAccountRateLimitsResponse schema
         let rateLimits = (result["rateLimits"] as? [String: Any]) ?? result
 
+        // Route by window length, not slot position — see
+        // CodexRateLimitWindowClassifier for why `primary`/`secondary` can no
+        // longer be trusted to mean "5h"/"weekly" (OpenAI can drop the 5h
+        // window entirely, which moves the weekly window into `primary`).
+        let primaryInput = makeWindowInput(rateLimits["primary"] as? [String: Any])
+        let secondaryInput = makeWindowInput(rateLimits["secondary"] as? [String: Any])
+        let routing = CodexRateLimitWindowClassifier.route(primaryInput, secondaryInput)
+
         var snap = CodexUsageSnapshot()
         var hasData = false
 
-        if let primary = rateLimits["primary"] as? [String: Any] {
-            if let usedPercent = primary["usedPercent"] as? Int {
-                snap.fiveHourRemainingPercent = max(0, min(100, 100 - usedPercent))
-                snap.hasFiveHourRateLimit = true
-                hasData = true
-            } else if let usedPercent = primary["usedPercent"] as? Double {
-                snap.fiveHourRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
-                snap.hasFiveHourRateLimit = true
-                hasData = true
+        if let fiveHour = routing.fiveHour {
+            hasData = true
+            if let rp = fiveHour.remainingPercent {
+                snap.fiveHourRemainingPercent = max(0, min(100, Int(rp.rounded())))
             }
-            if let resetsAt = primary["resetsAt"] as? Int {
-                let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
-                snap.fiveHourResetText = formatResetISO8601(date)
-                snap.hasFiveHourRateLimit = true
-                hasData = true
+            snap.hasFiveHourRateLimit = true
+            if let resetAt = fiveHour.resetAt {
+                snap.fiveHourResetText = formatResetISO8601(resetAt)
             }
         }
 
-        if let secondary = rateLimits["secondary"] as? [String: Any] {
-            if let usedPercent = secondary["usedPercent"] as? Int {
-                snap.weekRemainingPercent = max(0, min(100, 100 - usedPercent))
-                snap.hasWeekRateLimit = true
-                hasData = true
-            } else if let usedPercent = secondary["usedPercent"] as? Double {
-                snap.weekRemainingPercent = max(0, min(100, 100 - Int(usedPercent.rounded())))
-                snap.hasWeekRateLimit = true
-                hasData = true
+        if let weekly = routing.weekly {
+            hasData = true
+            if let rp = weekly.remainingPercent {
+                snap.weekRemainingPercent = max(0, min(100, Int(rp.rounded())))
             }
-            if let resetsAt = secondary["resetsAt"] as? Int {
-                let date = Date(timeIntervalSince1970: TimeInterval(resetsAt))
-                snap.weekResetText = formatResetISO8601(date)
-                snap.hasWeekRateLimit = true
-                hasData = true
+            snap.hasWeekRateLimit = true
+            if let resetAt = weekly.resetAt {
+                snap.weekResetText = formatResetISO8601(resetAt)
             }
         }
 
-        guard hasData else { return nil }
+        snap.usageFormatSuspect = routing.suspect
+
+        // Surface a "can't verify" verdict even when nothing was placeable, so a
+        // fully-uninterpretable response reaches the UI (as the suspect state)
+        // instead of silently vanishing into "stale previous data".
+        guard hasData || snap.usageFormatSuspect else { return nil }
 
         snap.limitsSource = .cliRPC
         snap.eventTimestamp = Date()

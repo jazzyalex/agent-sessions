@@ -272,6 +272,12 @@ func formatUsageProjectionLabel(runoutAt: Date?,
     let minutes = max(1, Int(ceil(seconds / 60)))
     if minutes < 60 { return "▸\(minutes)m" }
     let hours = minutes / 60
+    // A weekly-window run-out can be days out; render days rather than "▸167h".
+    if hours >= 24 {
+        let days = hours / 24
+        let remainingHours = hours % 24
+        return remainingHours == 0 ? "▸\(days)d" : "▸\(days)d \(remainingHours)h"
+    }
     let remainingMinutes = minutes % 60
     if remainingMinutes == 0 { return "▸\(hours)h" }
     return "▸\(hours)h \(remainingMinutes)m"

@@ -61,6 +61,14 @@ struct QuotaData: Equatable {
     /// the slower 5-minute auth-expiry escalation raises the loud remediation —
     /// so a QM user is never left with a silently-frozen meter.
     var dataIsStale: Bool = false
+    /// Whether each window has a classified limit this snapshot. A dropped window
+    /// (e.g. OpenAI pausing the 5h limit) is excluded from the bottleneck/critical
+    /// math and shown as unavailable rather than a false "100% used → critical".
+    /// Defaults true so Claude and any existing caller are unchanged.
+    var hasFiveHourRateLimit: Bool = true
+    var hasWeekRateLimit: Bool = true
+    /// Provider sent rate-limit data we couldn't confidently interpret.
+    var usageFormatSuspect: Bool = false
 
     var hasUsageData: Bool {
         switch provider {
@@ -136,7 +144,10 @@ struct QuotaData: Equatable {
             isUpdating: model.isUpdating,
             fiveHourProjectedRunoutAt: model.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: model.fiveHourProjectionObservedAt,
-            authStatus: model.authStatus
+            authStatus: model.authStatus,
+            hasFiveHourRateLimit: model.hasFiveHourRateLimit,
+            hasWeekRateLimit: model.hasWeekRateLimit,
+            usageFormatSuspect: model.usageFormatSuspect
         )
     }
 
@@ -411,6 +422,11 @@ private struct IndexingIndicator: View {
 	    private var presentation: Presentation {
 		        let fiveResetRaw = data.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
 		        let weekResetRaw = data.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
+		        // A dropped window (no classified limit, e.g. OpenAI pausing the 5h
+		        // window) has no trustworthy percent — exclude it from the
+		        // bottleneck/critical math so it can't masquerade as "100% used".
+		        let fiveAvailable = data.hasFiveHourRateLimit
+		        let weekAvailable = data.hasWeekRateLimit
 		        let fiveUnavailable = isResetInfoUnavailable(raw: fiveResetRaw)
 		        let weekUnavailable = isResetInfoUnavailable(raw: weekResetRaw)
 		        let hasUsageData = data.hasUsageData
@@ -418,8 +434,8 @@ private struct IndexingIndicator: View {
 
         let fiveLeft = hasUsageData ? clampPercent(data.fiveHourRemainingPercent) : 0
         let weekLeft = hasUsageData ? clampPercent(data.weekRemainingPercent) : 0
-        let fiveUsed = clampPercent(100 - fiveLeft)
-        let weekUsed = clampPercent(100 - weekLeft)
+        let fiveUsed = fiveAvailable ? clampPercent(100 - fiveLeft) : 0
+        let weekUsed = weekAvailable ? clampPercent(100 - weekLeft) : 0
 
         let bottleneckKind: BottleneckKind = (fiveUsed >= weekUsed) ? .fiveHour : .week
         let bottleneckUsed = max(fiveUsed, weekUsed)
@@ -486,8 +502,8 @@ private struct IndexingIndicator: View {
 		            barFillPercent: barFillPercent,
 		            barFillColor: isCritical ? .red : .secondary,
 		            bottleneckUsedPercent: hasResetInfo ? bottleneckUsed : 0,
-		            fiveHourPercentLabelText: (!hasUsageData || fiveUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
-		            weekPercentLabelText: (!hasUsageData || weekUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
+		            fiveHourPercentLabelText: (!fiveAvailable || !hasUsageData || fiveUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: fiveLeft))%",
+		            weekPercentLabelText: (!weekAvailable || !hasUsageData || weekUnavailable) ? "--" : "\(mode.numericPercent(fromLeft: weekLeft))%",
 		            fiveHourResetLabelText: fiveResetDisplayText,
 		            weekResetLabelText: weekResetDisplayText,
 		            fiveHourProjectionLabelText: projectedRunoutEnabled

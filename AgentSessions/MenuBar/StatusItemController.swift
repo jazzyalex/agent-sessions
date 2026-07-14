@@ -256,8 +256,8 @@ final class StatusItemController: NSObject {
             // Reset lines open Usage Tracking preferences because they control probes and refresh details.
             if codexTrackingEnabled && (source == .codex || source == .both) {
                 menu.addItem(makeTitleItem("Codex"))
-                menu.addItem(makeActionItem(title: resetLine(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openUsagePreferences)))
-                menu.addItem(makeActionItem(title: resetLine(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)), action: #selector(openUsagePreferences)))
+                menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "5h:", percent: codexStatus.fiveHourRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .codex, raw: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasFiveHourRateLimit), action: #selector(openUsagePreferences)))
+                menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasWeekRateLimit), action: #selector(openUsagePreferences)))
                 // Reset credits (free "reset your usage now" grants), shown only when present.
                 if let creditsSummary = CodexResetCredits.menuSummaryLine(codexStatus.resetCredits, now: Date()) {
                     menu.addItem(makeTitleItem("Reset credits"))
@@ -513,6 +513,21 @@ final class StatusItemController: NSObject {
         let clampedLeft = max(0, min(100, percent))
         let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
         return "\(label) \(displayPercent)% \(mode.suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
+    }
+
+    /// Per-line presentation for the Codex 5h/Wk menu rows: real data uses the
+    /// existing `resetLine`; a recognized absence (provider intentionally
+    /// omitted the window, e.g. OpenAI pausing the 5h limit) reads "no limit";
+    /// a suspect payload (couldn't confidently classify it) reads "can't verify
+    /// format" instead of a dead "0%" line.
+    private func codexResetMenuTitle(label: String, percent: Int, reset: String, has: Bool) -> String {
+        if has {
+            return resetLine(label: label, percent: percent, reset: reset)
+        } else if codexStatus.usageFormatSuspect {
+            return "\(label) can't verify format"
+        } else {
+            return "\(label) no limit"
+        }
     }
 
     private func claudeResetLine(label: String, percent: Int, reset: String) -> String {

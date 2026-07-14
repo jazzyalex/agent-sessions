@@ -84,6 +84,11 @@ struct CodexUsageSnapshot: Equatable {
     var hasWeekRateLimit: Bool = false
     var weekLimitsSource: CodexLimitsSource? = nil
     var limitsSource: CodexLimitsSource? = nil
+    /// True when the provider sent rate-limit data we could not confidently
+    /// interpret (an unclassifiable window, an out-of-range percentage, or two
+    /// windows of the same class). Drives the UI "can't verify" state so an empty
+    /// slot never shows a guessed number. See `CodexRateLimitWindowClassifier`.
+    var usageFormatSuspect: Bool = false
     var usageLine: String? = nil
     var accountLine: String? = nil
     var modelLine: String? = nil
@@ -149,6 +154,23 @@ final class CodexUsageModel: ObservableObject {
     @Published var fiveHourResetText: String = ""
     @Published var weekRemainingPercent: Int = 0
     @Published var weekResetText: String = ""
+    /// Whether each display line has a classified window this snapshot. When a
+    /// line has no window and `usageFormatSuspect` is false, the UI shows a calm
+    /// "no limit" state (the provider intentionally omitted it, e.g. OpenAI
+    /// pausing the 5h window); when suspect is true it shows "can't verify".
+    @Published var hasFiveHourRateLimit: Bool = false
+    @Published var hasWeekRateLimit: Bool = false
+    /// Provider sent rate-limit data we couldn't confidently interpret. See
+    /// `CodexRateLimitWindowClassifier`.
+    @Published var usageFormatSuspect: Bool = false
+    /// The window sessions currently draw down — the 5h window when present, else
+    /// the weekly window. The runway/projection follow this, so the runway keeps
+    /// showing sessions (now consuming the weekly cap) when the 5h window is
+    /// dropped. `windowMinutes` scales the m/h yardstick (300 = 5h, 10080 = weekly).
+    @Published var activeLimitRemainingPercent: Int = 0
+    @Published var activeLimitResetText: String = ""
+    @Published var activeLimitWindowMinutes: Int = 300
+    @Published var hasActiveLimit: Bool = false
     @Published var limitsSource: CodexLimitsSource? = nil
     @Published var usageLine: String? = nil
     @Published var accountLine: String? = nil
@@ -486,6 +508,20 @@ final class CodexUsageModel: ObservableObject {
     }
 #endif
 
+    /// The window sessions currently draw down: the 5h window when present, else
+    /// the weekly window. Returns the canonical window length (300 = 5h,
+    /// 10080 = weekly) so the runway m/h keeps its absolute yardstick.
+    /// `hasLimit` is false when neither window classified.
+    private static func activeLimit(for s: CodexUsageSnapshot) -> (remainingPercent: Int, resetText: String, windowMinutes: Int, hasLimit: Bool) {
+        if s.hasFiveHourRateLimit {
+            return (s.fiveHourRemainingPercent, s.fiveHourResetText, 300, true)
+        }
+        if s.hasWeekRateLimit {
+            return (s.weekRemainingPercent, s.weekResetText, 10080, true)
+        }
+        return (0, "", 300, false)
+    }
+
     private func apply(_ s: CodexUsageSnapshot) {
         let now = Date()
         let observedAt = s.eventTimestamp ?? now
@@ -495,6 +531,19 @@ final class CodexUsageModel: ObservableObject {
         weekRemainingPercent = clampPercent(s.weekRemainingPercent)
         fiveHourResetText = s.fiveHourResetText
         weekResetText = s.weekResetText
+        hasFiveHourRateLimit = s.hasFiveHourRateLimit
+        hasWeekRateLimit = s.hasWeekRateLimit
+        usageFormatSuspect = s.usageFormatSuspect
+        // The active limit is the window sessions currently draw down: the 5h
+        // window when present, else the weekly window (OpenAI dropped the 5h
+        // window on 2026-07-13). The runway/projection follow it while the 5h/Wk
+        // display lines stay literal.
+        let active = Self.activeLimit(for: s)
+        activeLimitRemainingPercent = clampPercent(active.remainingPercent)
+        activeLimitResetText = active.resetText
+        activeLimitWindowMinutes = active.windowMinutes
+        hasActiveLimit = active.hasLimit
+        let activeFreshness = s.hasFiveHourRateLimit ? fiveHourFreshness : weeklyFreshness
         limitsSource = s.limitsSource
         usageLine = s.usageLine
         accountLine = s.accountLine
@@ -506,12 +555,15 @@ final class CodexUsageModel: ObservableObject {
         lastOutputTokens = s.lastOutputTokens
         lastReasoningOutputTokens = s.lastReasoningOutputTokens
         lastTotalTokens = s.lastTotalTokens
+        // Projection tracks the active limit (5h when present, else weekly), so a
+        // running session's projected run-out follows the window it actually
+        // draws down. Fields stay named `fiveHour*` for continuity.
         let projectionEstimate = fiveHourProjectionTracker.update(with: UsageLimitProjectionSample(
             source: .codex,
-            remainingPercent: s.fiveHourRemainingPercent,
-            resetText: s.fiveHourResetText,
-            hasRateLimit: s.hasFiveHourRateLimit,
-            freshness: fiveHourFreshness,
+            remainingPercent: active.remainingPercent,
+            resetText: active.resetText,
+            hasRateLimit: active.hasLimit,
+            freshness: activeFreshness,
             observedAt: observedAt
         ), now: now)
         fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
@@ -1657,6 +1709,10 @@ struct RateLimitSummary {
     var stale: Bool
     var sourceFile: URL?
     var missingRateLimits: Bool = false
+    /// Set when length-based routing saw uninterpretable window data (see
+    /// `CodexRateLimitWindowClassifier.route`). Propagated to the snapshot's
+    /// `usageFormatSuspect`.
+    var suspect: Bool = false
 }
 
 // MARK: - Service
@@ -1723,9 +1779,9 @@ actor CodexStatusService {
         self.snapshot = snapshot
     }
 
-    func mergeRateLimitSnapshotForTesting(_ source: CodexUsageSnapshot, requirePositivePercent: Bool = false) -> CodexUsageSnapshot {
+    func mergeRateLimitSnapshotForTesting(_ source: CodexUsageSnapshot, requirePositivePercent: Bool = false, replacesMissingWindows: Bool = false) -> CodexUsageSnapshot {
         var merged = snapshot
-        mergeRateLimitSnapshot(source, into: &merged, requirePositivePercent: requirePositivePercent)
+        mergeRateLimitSnapshot(source, into: &merged, requirePositivePercent: requirePositivePercent, replacesMissingWindows: replacesMissingWindows)
         return self.snapshot
     }
 
@@ -2332,32 +2388,47 @@ actor CodexStatusService {
             return nil
         }
         var merged = snapshot
-        mergeRateLimitSnapshot(preferredSnap, into: &merged)
+        // OAuth/CLI-RPC return the provider's complete current windows, so a window
+        // absent here means the provider dropped it — replace (clear), don't merge.
+        mergeRateLimitSnapshot(preferredSnap, into: &merged, replacesMissingWindows: true)
         return preferredSnap
     }
 
     /// Merges rate-limit fields from `source` into `dest`, commits to `snapshot`,
     /// and notifies the UI. 0% remains valid for exhausted buckets when the probe
     /// actually returned a percentage, but reset-only probe fragments are ignored.
-    private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false) {
+    private func mergeRateLimitSnapshot(_ source: CodexUsageSnapshot, into dest: inout CodexUsageSnapshot, requirePositivePercent: Bool = false, replacesMissingWindows: Bool = false) {
         let shouldMergeFiveHour = source.hasFiveHourRateLimit && (!requirePositivePercent || source.fiveHourRemainingPercent >= 0)
         if shouldMergeFiveHour {
             dest.fiveHourRemainingPercent = clampPercent(source.fiveHourRemainingPercent)
-        }
-        if shouldMergeFiveHour {
             dest.hasFiveHourRateLimit = true
             if !source.fiveHourResetText.isEmpty { dest.fiveHourResetText = source.fiveHourResetText }
             dest.fiveHourLimitsSource = source.fiveHourLimitsSource ?? source.limitsSource
+        } else if replacesMissingWindows && !source.hasFiveHourRateLimit {
+            // A complete authoritative fetch that no longer reports this window
+            // (e.g. OpenAI dropped the 5h limit) must clear the stale value, or the
+            // UI freezes a ghost "5h X%" instead of showing "no limit". Fragment
+            // sources (tmux /status) never pass this flag, so they stay additive.
+            dest.fiveHourRemainingPercent = 0
+            dest.hasFiveHourRateLimit = false
+            dest.fiveHourResetText = ""
+            dest.fiveHourLimitsSource = nil
         }
         let shouldMergeWeek = source.hasWeekRateLimit && (!requirePositivePercent || source.weekRemainingPercent >= 0)
         if shouldMergeWeek {
             dest.weekRemainingPercent = clampPercent(source.weekRemainingPercent)
-        }
-        if shouldMergeWeek {
             dest.hasWeekRateLimit = true
             if !source.weekResetText.isEmpty { dest.weekResetText = source.weekResetText }
             dest.weekLimitsSource = source.weekLimitsSource ?? source.limitsSource
+        } else if replacesMissingWindows && !source.hasWeekRateLimit {
+            dest.weekRemainingPercent = 0
+            dest.hasWeekRateLimit = false
+            dest.weekResetText = ""
+            dest.weekLimitsSource = nil
         }
+        // A live probe/API is authoritative for the format verdict: whatever it
+        // could or couldn't interpret this fetch is what we display.
+        dest.usageFormatSuspect = source.usageFormatSuspect
         dest.limitsSource = aggregateLimitsSource(for: dest)
         dest.usageLine = nil  // Fresh data from probe/API; clear any stale marker
         dest.eventTimestamp = Date()
@@ -2377,6 +2448,17 @@ actor CodexStatusService {
             s.hasFiveHourRateLimit = true
             s.fiveHourLimitsSource = .jsonlFallback
         }
+        if canApplyFiveHourFallback,
+           summary.fiveHour.remainingPercent == nil,
+           summary.fiveHour.resetAt == nil {
+            // The latest rate_limits no longer carries a 5h window (OpenAI dropped
+            // it) — clear any value JSONL previously owned so the UI shows "no
+            // limit" rather than a frozen ghost. No-op when nothing was set.
+            s.fiveHourRemainingPercent = 0
+            s.hasFiveHourRateLimit = false
+            s.fiveHourResetText = ""
+            s.fiveHourLimitsSource = nil
+        }
         let canApplyWeekFallback = !isAuthoritativeLimitsSource(s.weekLimitsSource)
         if canApplyWeekFallback, let p = summary.weekly.remainingPercent {
             s.weekRemainingPercent = clampPercent(p)
@@ -2387,6 +2469,20 @@ actor CodexStatusService {
             s.weekResetText = formatResetISO8601(resetAt)
             s.hasWeekRateLimit = true
             s.weekLimitsSource = .jsonlFallback
+        }
+        if canApplyWeekFallback,
+           summary.weekly.remainingPercent == nil,
+           summary.weekly.resetAt == nil {
+            s.weekRemainingPercent = 0
+            s.hasWeekRateLimit = false
+            s.weekResetText = ""
+            s.weekLimitsSource = nil
+        }
+        // Only let the JSONL verdict drive the suspect flag when JSONL actually
+        // contributed a window; an authoritative live source that owns both
+        // windows keeps its own (already-merged) verdict.
+        if canApplyFiveHourFallback || canApplyWeekFallback {
+            s.usageFormatSuspect = summary.suspect
         }
         s.usageLine = summary.stale ? "Usage is stale (>3m)" : nil
         s.eventTimestamp = summary.eventTimestamp
@@ -3510,12 +3606,49 @@ actor CodexStatusService {
     private func makeRateLimitSummary(rate: [String: Any], createdAt: Date, sourceFile: URL) -> RateLimitSummary? {
         let capturedAt = decodeFlexibleDate(rate["captured_at"] as Any?) ?? createdAt
         if capturedAt > Date() { return nil }
-        let primary = rate["primary"] as? [String: Any]
-        let secondary = rate["secondary"] as? [String: Any]
-        let five = decodeWindow(primary, created: createdAt, capturedAt: capturedAt)
-        let week = decodeWindow(secondary, created: createdAt, capturedAt: capturedAt)
+        let primary = decodeWindow(rate["primary"] as? [String: Any], created: createdAt, capturedAt: capturedAt)
+        let secondary = decodeWindow(rate["secondary"] as? [String: Any], created: createdAt, capturedAt: capturedAt)
+        // Route by window length, not slot: OpenAI can move the weekly window into
+        // `primary` (nulling `secondary`) when it drops the 5h window. Classifying
+        // by window_minutes keeps each window on its own line and auto-recovers.
+        let routing = CodexRateLimitWindowClassifier.route(
+            Self.windowInput(from: primary),
+            Self.windowInput(from: secondary)
+        )
         let stale = Date().timeIntervalSince(capturedAt) > 3 * 60
-        return RateLimitSummary(fiveHour: five, weekly: week, eventTimestamp: capturedAt, stale: stale, sourceFile: sourceFile)
+        return RateLimitSummary(
+            fiveHour: Self.windowInfo(from: routing.fiveHour),
+            weekly: Self.windowInfo(from: routing.weekly),
+            eventTimestamp: capturedAt,
+            stale: stale,
+            sourceFile: sourceFile,
+            suspect: routing.suspect
+        )
+    }
+
+    /// Adapt a decoded JSONL window into classifier input. A window carrying no
+    /// percent, reset, or length carried no signal — treat it as absent (nil) so
+    /// an empty `secondary` is not mistaken for suspect data.
+    private static func windowInput(from info: RateLimitWindowInfo) -> CodexRateLimitWindowInput? {
+        if info.remainingPercent == nil, info.resetAt == nil, info.windowMinutes == nil {
+            return nil
+        }
+        return CodexRateLimitWindowInput(
+            remainingPercent: info.remainingPercent.map(Double.init),
+            resetAt: info.resetAt,
+            windowMinutes: info.windowMinutes
+        )
+    }
+
+    private static func windowInfo(from input: CodexRateLimitWindowInput?) -> RateLimitWindowInfo {
+        guard let input else {
+            return RateLimitWindowInfo(remainingPercent: nil, resetAt: nil, windowMinutes: nil)
+        }
+        return RateLimitWindowInfo(
+            remainingPercent: input.remainingPercent.map { Int($0.rounded()) },
+            resetAt: input.resetAt,
+            windowMinutes: input.windowMinutes
+        )
     }
 
     private func normalizeLimitID(_ any: Any?) -> String? {
@@ -3586,7 +3719,10 @@ actor CodexStatusService {
         else if let i = dict["resets_in_seconds"] as? Int { resetsVal = Double(i) }
         else if let n = dict["resets_in_seconds"] as? NSNumber { resetsVal = n.doubleValue }
 
-        let minutes = dict["window_minutes"] as? Int
+        // Coerce Int/Double/NSNumber/String — the routing classifier keys on this,
+        // and `as? Int` alone would silently drop a JSON float and fall back to the
+        // positional mapping.
+        let minutes = intValue(dict["window_minutes"])
 
         var resetAt: Date?
         if let delta = resetsVal {

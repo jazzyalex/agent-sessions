@@ -227,35 +227,69 @@ actor CodexOAuthUsageFetcher {
         var snap = CodexUsageSnapshot()
         var hasData = false
 
-        if let primary = rl.primaryWindow {
-            if let used = primary.usedPercent {
-                snap.fiveHourRemainingPercent = max(0, min(100, 100 - used))
-                snap.hasFiveHourRateLimit = true
-                hasData = true
-            }
-            if let epoch = primary.resetAt {
-                snap.fiveHourResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
-                snap.hasFiveHourRateLimit = true
-                hasData = true
-            }
-        }
-        if let secondary = rl.secondaryWindow {
-            if let used = secondary.usedPercent {
-                snap.weekRemainingPercent = max(0, min(100, 100 - used))
-                snap.hasWeekRateLimit = true
-                hasData = true
-            }
-            if let epoch = secondary.resetAt {
-                snap.weekResetText = formatResetISO8601(Date(timeIntervalSince1970: TimeInterval(epoch)))
-                snap.hasWeekRateLimit = true
-                hasData = true
-            }
-        }
+        // Route by window *length*, not slot position — see
+        // CodexRateLimitWindowClassifier for why: the provider does not
+        // reliably send the 5h window in `primary_window` and the weekly
+        // window in `secondary_window`.
+        let routing = CodexRateLimitWindowClassifier.route(
+            windowInput(from: rl.primaryWindow),
+            windowInput(from: rl.secondaryWindow)
+        )
 
-        guard hasData else { return nil }
+        if let fiveHour = routing.fiveHour {
+            if let remaining = fiveHour.remainingPercent {
+                snap.fiveHourRemainingPercent = max(0, min(100, Int(remaining.rounded())))
+                snap.hasFiveHourRateLimit = true
+                hasData = true
+            }
+            if let resetAt = fiveHour.resetAt {
+                snap.fiveHourResetText = formatResetISO8601(resetAt)
+                snap.hasFiveHourRateLimit = true
+                hasData = true
+            }
+        }
+        if let weekly = routing.weekly {
+            if let remaining = weekly.remainingPercent {
+                snap.weekRemainingPercent = max(0, min(100, Int(remaining.rounded())))
+                snap.hasWeekRateLimit = true
+                hasData = true
+            }
+            if let resetAt = weekly.resetAt {
+                snap.weekResetText = formatResetISO8601(resetAt)
+                snap.hasWeekRateLimit = true
+                hasData = true
+            }
+        }
+        snap.usageFormatSuspect = routing.suspect
+
+        // Surface a "can't verify" verdict even when nothing was placeable, so a
+        // fully-uninterpretable response reaches the UI (as the suspect state)
+        // instead of silently vanishing into "stale previous data".
+        guard hasData || snap.usageFormatSuspect else { return nil }
         snap.limitsSource = .oauth
         snap.eventTimestamp = Date()
         return snap
+    }
+
+    /// Adapts one raw window DTO into the shared classifier's input shape.
+    /// Returns nil when the window is absent, or present but carries none of
+    /// the three signals the classifier uses — both are "no window here",
+    /// which `route` treats as absent rather than suspect.
+    private nonisolated static func windowInput(
+        from window: CodexOAuthRawUsageResponse.RawWindowDetails?
+    ) -> CodexRateLimitWindowInput? {
+        guard let window else { return nil }
+        guard window.usedPercent != nil || window.resetAt != nil || window.limitWindowSeconds != nil else {
+            return nil
+        }
+        return CodexRateLimitWindowInput(
+            // Intentionally not clamped: the classifier's sanity check flags
+            // an out-of-[0,100] value as suspect. Clamping happens only when
+            // the routed result is stored into the snapshot above.
+            remainingPercent: window.usedPercent.map { 100 - Double($0) },
+            resetAt: window.resetAt.map { Date(timeIntervalSince1970: TimeInterval($0)) },
+            windowMinutes: window.limitWindowSeconds.map { $0 / 60 }
+        )
     }
 
 #if DEBUG

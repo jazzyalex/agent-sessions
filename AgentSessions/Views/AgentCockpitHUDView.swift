@@ -3384,6 +3384,14 @@ private struct HUDLimitsProviderEntry {
     let weekLeft: Int
     let fiveHourResetText: String
     let weekResetText: String
+    /// Whether each window has a classified limit this snapshot. A dropped window
+    /// (e.g. OpenAI pausing the 5h limit) renders a calm "no limit" rather than a
+    /// misleading "0%". Defaults true so Claude / other callers are unchanged.
+    var hasFiveHourRateLimit: Bool = true
+    var hasWeekRateLimit: Bool = true
+    /// Provider sent rate-limit data we couldn't confidently interpret → the
+    /// absent line reads "can't verify" instead of the calm "no limit".
+    var usageFormatSuspect: Bool = false
     let isInitialLoading: Bool
     /// For Codex: the JSONL event timestamp. For Claude: the last poll time.
     let lastDataTimestamp: Date?
@@ -3625,9 +3633,14 @@ enum HUDRunwayRequestBuilder {
                         fiveHourResetText: String,
                         fiveHourProjectedRunoutAt: Date?,
                         fiveHourProjectionObservedAt: Date?,
+                        windowMinutes: Int = 300,
                         now: Date,
                         maxRows: Int,
                         forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
+        // The `fiveHour*` params carry the *active* limit window — the 5h window
+        // when present, else the weekly window (OpenAI can drop the 5h window).
+        // `windowMinutes` is that window's length (300 = 5h, 10080 = weekly) and
+        // scales the m/h yardstick. Resets parse the same regardless of `kind`.
         // When the user forces the drawer on, build the request even at 0%
         // remaining so any active session still shows a real runway row.
         guard codexAgentEnabled,
@@ -3662,7 +3675,8 @@ enum HUDRunwayRequestBuilder {
             resetAt: resetAt,
             currentRunoutAt: runoutAt,
             observedAt: observedAt,
-            hasProjectedRunout: freshProjectionObservedAt != nil
+            hasProjectedRunout: freshProjectionObservedAt != nil,
+            windowMinutes: windowMinutes
         )
         return CodexRunwaySnapshotRequest(
             baseline: baseline,
@@ -3848,6 +3862,9 @@ private struct HUDLimitsBar: View {
                 weekLeft: codexUsageModel.weekRemainingPercent,
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
                 weekResetText: codexUsageModel.weekResetText,
+                hasFiveHourRateLimit: codexUsageModel.hasFiveHourRateLimit,
+                hasWeekRateLimit: codexUsageModel.hasWeekRateLimit,
+                usageFormatSuspect: codexUsageModel.usageFormatSuspect,
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
@@ -3974,15 +3991,19 @@ private struct HUDLimitsBar: View {
     }
 
     private var codexRunwayRequest: CodexRunwaySnapshotRequest? {
+        // Feed the runway the active limit window (5h when present, else weekly),
+        // with its length so the m/h yardstick stays absolute. When OpenAI drops
+        // the 5h window the runway keeps showing sessions burning the weekly cap.
         return Self.runwayRequest(
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
             codexAgentEnabled: codexAgentEnabled,
             codexUsageEnabled: codexUsageEnabled,
-            fiveHourRemainingPercent: codexUsageModel.fiveHourRemainingPercent,
-            fiveHourResetText: codexUsageModel.fiveHourResetText,
+            fiveHourRemainingPercent: codexUsageModel.activeLimitRemainingPercent,
+            fiveHourResetText: codexUsageModel.activeLimitResetText,
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
+            windowMinutes: codexUsageModel.activeLimitWindowMinutes,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4028,6 +4049,7 @@ private struct HUDLimitsBar: View {
                               fiveHourResetText: String,
                               fiveHourProjectedRunoutAt: Date?,
                               fiveHourProjectionObservedAt: Date?,
+                              windowMinutes: Int = 300,
                               now: Date,
                               maxRows: Int,
                               forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -4040,6 +4062,7 @@ private struct HUDLimitsBar: View {
             fiveHourResetText: fiveHourResetText,
             fiveHourProjectedRunoutAt: fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: fiveHourProjectionObservedAt,
+            windowMinutes: windowMinutes,
             now: now,
             maxRows: maxRows,
             forceVisible: forceVisible
@@ -4087,6 +4110,9 @@ private struct HUDLimitsRowsPanel: View {
                 weekLeft: codexUsageModel.weekRemainingPercent,
                 fiveHourResetText: codexUsageModel.fiveHourResetText,
                 weekResetText: codexUsageModel.weekResetText,
+                hasFiveHourRateLimit: codexUsageModel.hasFiveHourRateLimit,
+                hasWeekRateLimit: codexUsageModel.hasWeekRateLimit,
+                usageFormatSuspect: codexUsageModel.usageFormatSuspect,
                 isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
                 lastDataTimestamp: codexUsageModel.lastEventTimestamp,
                 fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
@@ -4508,8 +4534,14 @@ private struct HUDLimitsDetailPanel: View {
 
     @ViewBuilder
     private func detailRow(entry: HUDLimitsProviderEntry, reserveProjectionSlot: Bool) -> some View {
-        let fiveUnavail = isResetInfoUnavailable(raw: entry.fiveHourResetText)
-        let weekUnavail = isResetInfoUnavailable(raw: entry.weekResetText)
+        // Three distinct states per window: present (percent + reset), a dropped
+        // window → calm "no limit" (or "can't verify" when the format is suspect),
+        // and a present-but-stale reset → the existing "--"/unavailable copy.
+        let suspect = entry.usageFormatSuspect
+        let fiveAbsent = !entry.hasFiveHourRateLimit
+        let weekAbsent = !entry.hasWeekRateLimit
+        let fiveStale = !fiveAbsent && isResetInfoUnavailable(raw: entry.fiveHourResetText)
+        let weekStale = !weekAbsent && isResetInfoUnavailable(raw: entry.weekResetText)
         let projection = projectedRunoutEnabled
             ? formatUsageProjectionLabel(
                 runoutAt: entry.fiveHourProjectedRunoutAt,
@@ -4535,15 +4567,19 @@ private struct HUDLimitsDetailPanel: View {
             .frame(width: 14, height: 14)
             HStack(spacing: 0) {
                 Text("5h: ")
-                Text(fiveUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
-                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                if fiveAbsent {
+                    Text("—").foregroundStyle(.secondary)
+                } else {
+                    Text(fiveStale ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
+                        .foregroundStyle(fiveStale ? Color.secondary : hudPctColor(entry.fiveHourLeft))
+                }
             }
             .frame(width: HUDLimitsColumnLayout.detailFiveHourPercentWidth, alignment: .leading)
             if projection != nil || reserveProjectionSlot {
                 HUDLimitsProjectionToken(projection: projection, reserve: reserveProjectionSlot)
                     .frame(width: HUDLimitsColumnLayout.detailFiveHourProjectionWidth, alignment: .leading)
             }
-            Text("↻ \(fiveResetText(entry: entry, unavailable: fiveUnavail))")
+            Text(fiveAbsent ? (suspect ? "can't verify" : "no limit") : "↻ \(fiveResetText(entry: entry, unavailable: fiveStale))")
                 .foregroundStyle(.secondary)
                 .frame(width: HUDLimitsColumnLayout.detailFiveHourResetWidth, alignment: .leading)
             Text("|")
@@ -4551,11 +4587,15 @@ private struct HUDLimitsDetailPanel: View {
                 .frame(width: HUDLimitsColumnLayout.detailSeparatorWidth, alignment: .center)
             HStack(spacing: 0) {
                 Text("Wk: ")
-                Text(weekUnavail ? "--" : "\(mode.numericPercent(fromLeft: entry.weekLeft))%")
-                    .foregroundStyle(hudPctColor(entry.weekLeft))
+                if weekAbsent {
+                    Text("—").foregroundStyle(.secondary)
+                } else {
+                    Text(weekStale ? "--" : "\(mode.numericPercent(fromLeft: entry.weekLeft))%")
+                        .foregroundStyle(weekStale ? Color.secondary : hudPctColor(entry.weekLeft))
+                }
             }
             .frame(width: HUDLimitsColumnLayout.detailWeekPercentWidth, alignment: .leading)
-            Text("↻ \(weekResetText(entry: entry, unavailable: weekUnavail))")
+            Text(weekAbsent ? (suspect ? "can't verify" : "no limit") : "↻ \(weekResetText(entry: entry, unavailable: weekStale))")
                 .foregroundStyle(.secondary)
                 .frame(width: HUDLimitsColumnLayout.detailWeekResetWidth, alignment: .leading)
         }
@@ -5182,12 +5222,30 @@ private struct HUDLimitsProviderText: View {
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
 
     // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
-    private var bottleneckIs5h: Bool { entry.fiveHourLeft <= entry.weekLeft }
-    private var fiveUnavailable: Bool { isResetInfoUnavailable(raw: entry.fiveHourResetText) }
-    private var weekUnavailable: Bool { isResetInfoUnavailable(raw: entry.weekResetText) }
+    private var bottleneckIs5h: Bool {
+        // A dropped window is never the bottleneck: if the 5h window is gone the
+        // weekly window is; if the weekly window is gone the 5h window is.
+        guard entry.hasFiveHourRateLimit else { return false }
+        guard entry.hasWeekRateLimit else { return true }
+        return entry.fiveHourLeft <= entry.weekLeft
+    }
+    // Three distinct states per window: present, a dropped window → calm "no limit"
+    // ("can't verify" when suspect), and a present-but-stale reset → "--"/unavailable.
+    // A dropped window is excluded from the bottleneck (see `bottleneckIs5h`).
+    private var suspect: Bool { entry.usageFormatSuspect }
+    private var fiveAbsent: Bool { !entry.hasFiveHourRateLimit }
+    private var weekAbsent: Bool { !entry.hasWeekRateLimit }
+    private var fiveStale: Bool { !fiveAbsent && isResetInfoUnavailable(raw: entry.fiveHourResetText) }
+    private var weekStale: Bool { !weekAbsent && isResetInfoUnavailable(raw: entry.weekResetText) }
 
     private func pct(_ left: Int) -> Int { mode.numericPercent(fromLeft: left) }
-    private func pctLabel(_ left: Int, unavailable: Bool) -> String { unavailable ? "--" : "\(pct(left))%" }
+    private func percentText(left: Int, absent: Bool, stale: Bool) -> String {
+        if absent { return "—" }
+        return stale ? "--" : "\(pct(left))%"
+    }
+    private func percentColor(left: Int, absent: Bool, stale: Bool) -> Color {
+        (absent || stale) ? .secondary : hudPctColor(left)
+    }
     private var fiveHourProjectionLabel: String? {
         guard showProjection else { return nil }
         guard projectedRunoutEnabled else { return nil }
@@ -5206,24 +5264,28 @@ private struct HUDLimitsProviderText: View {
         return usageOnTrackIsFresh(observedAt: entry.fiveHourOnTrackObservedAt, now: now)
     }
 
+    // Reset labels carry their own "↻ " prefix so the calm absent states can
+    // drop it ("no limit" / "can't verify" read wrong with a reset glyph).
     private func fiveHourResetLabel() -> String? {
-        if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
+        if fiveAbsent { return suspect ? "can't verify" : "no limit" }
+        if isResetInfoUnavailable(raw: entry.fiveHourResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
         let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return "—" }
+        guard !raw.isEmpty else { return "↻ —" }
         let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now)
-        if let relative = formatRelativeTimeUntil(date, now: now) { return relative }
+        if let relative = formatRelativeTimeUntil(date, now: now) { return "↻ \(relative)" }
         let fallback = UsageResetText.displayText(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now)
-        return fallback.isEmpty ? "—" : fallback
+        return "↻ \(fallback.isEmpty ? "—" : fallback)"
     }
 
     private func weekResetLabel() -> String? {
-        if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
+        if weekAbsent { return suspect ? "can't verify" : "no limit" }
+        if isResetInfoUnavailable(raw: entry.weekResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
         let raw = entry.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return "—" }
+        guard !raw.isEmpty else { return "↻ —" }
         let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now)
-        if let weekly = formatWeeklyReset(date, now: now) { return weekly }
+        if let weekly = formatWeeklyReset(date, now: now) { return "↻ \(weekly)" }
         let fallback = UsageResetText.displayText(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now)
-        return fallback.isEmpty ? "—" : fallback
+        return "↻ \(fallback.isEmpty ? "—" : fallback)"
     }
 
     // Matches CockpitFooterView.QuotaWidget.formatRelativeTimeUntil exactly
@@ -5247,8 +5309,8 @@ private struct HUDLimitsProviderText: View {
         HStack(spacing: HUDLimitsColumnLayout.compactSpacing * scale) {
             HStack(spacing: 0) {
                 Text("5h: ")
-                Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
-                    .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                    .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
             }
             .frame(width: HUDLimitsColumnLayout.compactFiveHourPercentWidth * scale, alignment: .leading)
 
@@ -5256,7 +5318,7 @@ private struct HUDLimitsProviderText: View {
                 .frame(width: HUDLimitsColumnLayout.compactFiveHourProjectionWidth * scale)
 
             if showResets, let r = fiveHourResetLabel() {
-                Text("↻ \(r)")
+                Text(r)
                     .frame(width: HUDLimitsColumnLayout.compactFiveHourResetWidth * scale, alignment: .leading)
             }
 
@@ -5266,13 +5328,13 @@ private struct HUDLimitsProviderText: View {
 
             HStack(spacing: 0) {
                 Text("Wk: ")
-                Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
-                    .foregroundStyle(hudPctColor(entry.weekLeft))
+                Text(percentText(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
+                    .foregroundStyle(percentColor(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
             }
             .frame(width: HUDLimitsColumnLayout.compactWeekPercentWidth * scale, alignment: .leading)
 
             if showResets, let r = weekResetLabel() {
-                Text("↻ \(r)")
+                Text(r)
                     .frame(width: HUDLimitsColumnLayout.compactWeekResetWidth * scale, alignment: .leading)
             }
         }
@@ -5311,8 +5373,8 @@ private struct HUDLimitsProviderText: View {
                             HStack(spacing: 4) {
                                 HStack(spacing: 0) {
                                     Text("5h: ")
-                                    Text(pctLabel(entry.fiveHourLeft, unavailable: fiveUnavailable))
-                                        .foregroundStyle(hudPctColor(entry.fiveHourLeft))
+                                    Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
+                                        .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
                                     if let projection = fiveHourProjectionLabel {
                                         Text(" \(projection)")
                                             .fontWeight(.bold)
@@ -5320,7 +5382,7 @@ private struct HUDLimitsProviderText: View {
                                     }
                                 }
                                 if showResets, let r = fiveHourResetLabel() {
-                                    Text("↻ \(r)")
+                                    Text(r)
                                 }
                             }
                         }
@@ -5331,11 +5393,11 @@ private struct HUDLimitsProviderText: View {
                             HStack(spacing: 4) {
                                 HStack(spacing: 0) {
                                     Text("Wk: ")
-                                    Text(pctLabel(entry.weekLeft, unavailable: weekUnavailable))
-                                        .foregroundStyle(hudPctColor(entry.weekLeft))
+                                    Text(percentText(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
+                                        .foregroundStyle(percentColor(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
                                 }
                                 if showResets, let r = weekResetLabel() {
-                                    Text("↻ \(r)")
+                                    Text(r)
                                 }
                             }
                         }

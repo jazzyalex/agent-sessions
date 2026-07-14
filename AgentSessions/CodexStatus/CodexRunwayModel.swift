@@ -112,19 +112,26 @@ struct RunwayProviderBaseline: Equatable, Sendable {
     let currentRunoutAt: Date
     let observedAt: Date
     let hasProjectedRunout: Bool
+    /// Length of the window this baseline represents (300 = 5h, 10080 = weekly).
+    /// Scales the absolute m/h yardstick so the same real burn reads the same
+    /// whether it draws down the 5h or the weekly window. Defaults to the 5h
+    /// window, leaving every existing caller (incl. Claude) unchanged.
+    let windowMinutes: Int
 
     init(source: UsageTrackingSource,
          remainingPercent: Double,
          resetAt: Date,
          currentRunoutAt: Date,
          observedAt: Date,
-         hasProjectedRunout: Bool = true) {
+         hasProjectedRunout: Bool = true,
+         windowMinutes: Int = 300) {
         self.source = source
         self.remainingPercent = remainingPercent
         self.resetAt = resetAt
         self.currentRunoutAt = currentRunoutAt
         self.observedAt = observedAt
         self.hasProjectedRunout = hasProjectedRunout
+        self.windowMinutes = windowMinutes
     }
 }
 
@@ -611,7 +618,7 @@ enum CodexRunwayCalculator {
             isGoal: burn.identity.isGoal,
             deadline: gained < minimumDisplayedGain ? .noChange : deadline,
             gainedSeconds: gained < minimumDisplayedGain ? 0 : gained,
-            quotaMinutesPerHour: quotaMinutesPerHour(normalizedRate),
+            quotaMinutesPerHour: quotaMinutesPerHour(normalizedRate, windowMinutes: baseline.windowMinutes),
             confidence: burn.confidence
         )
     }
@@ -656,9 +663,16 @@ enum CodexRunwayCalculator {
         }
     }
 
-    private static func quotaMinutesPerHour(_ percentPerSecond: Double) -> Double {
-        // One hundred percent of a 5h window is 300 quota minutes.
-        percentPerSecond * 3 * 3600
+    private static func quotaMinutesPerHour(_ percentPerSecond: Double, windowMinutes: Int) -> Double {
+        // Quota-minutes burned per hour = (percent/sec) × (minutes per 1% of the
+        // window) × 3600, where minutesPerPercent = windowMinutes / 100. This keeps
+        // the reading on the yardstick the user knows: 60 m/h == burning at exactly
+        // the sustainable pace for the active window (100% of the window consumed
+        // over its own length), whether that window is the 5h or the weekly one.
+        // (Not a claim that the same token burn yields the same absolute m/h across
+        // windows — the 5h and weekly quotas are set independently — only that the
+        // sustainable-pace anchor is preserved when the 5h window is dropped.)
+        percentPerSecond * (Double(windowMinutes) / 100.0) * 3600
     }
 
     private struct Impact {
@@ -800,10 +814,14 @@ enum CodexRunwayRateLimitParser {
         }
         let limitID = (rate["limit_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard limitID == nil || limitID == "codex" || limitID == "" else { return nil }
-        guard let primary = rate["primary"] as? [String: Any] else { return nil }
         let capturedAtReal = flexibleDate(rate["captured_at"]) ?? createdAtReal
-        guard let remaining = remainingPercent(primary),
-              let resetSpec = resetSpec(primary) else {
+        // Track the same window the status line shows: the short (5h) window when
+        // present, else the long (weekly) window. When OpenAI drops the 5h window
+        // the weekly window is what sessions burn, so the runway follows it instead
+        // of vanishing. Classifying by window_minutes stays now-independent.
+        guard let window = activeWindow(rate),
+              let remaining = remainingPercent(window),
+              let resetSpec = resetSpec(window) else {
             return nil
         }
         return CodexRawRateLimitLine(
@@ -812,6 +830,25 @@ enum CodexRunwayRateLimitParser {
             remainingPercent: remaining,
             resetSpec: resetSpec
         )
+    }
+
+    /// The window whose burn the runway should track: short (5h-class) when
+    /// present, else long (weekly-class), matching the active status line. Reads
+    /// window_minutes only (now-independent), falling back to `primary` for legacy
+    /// lines that omit it.
+    private static func activeWindow(_ rate: [String: Any]) -> [String: Any]? {
+        let primary = rate["primary"] as? [String: Any]
+        let secondary = rate["secondary"] as? [String: Any]
+        if windowClass(primary) == .short { return primary }
+        if windowClass(secondary) == .short { return secondary }
+        if windowClass(primary) == .long { return primary }
+        if windowClass(secondary) == .long { return secondary }
+        return primary
+    }
+
+    private static func windowClass(_ dict: [String: Any]?) -> CodexRateLimitWindowClass? {
+        guard let dict, let minutes = double(dict["window_minutes"]), minutes > 0 else { return nil }
+        return CodexRateLimitWindowClassifier.classify(windowMinutes: Int(minutes))
     }
 
     private static func remainingPercent(_ dict: [String: Any]) -> Double? {

@@ -61,8 +61,8 @@ struct UsageStripView: View {
                     .foregroundStyle(stripMonochrome ? Color.secondary : brandColor)
                     .frame(width: labelWidth, alignment: .leading)
             }
-            UsageMeter(title: "5h", percent: codexStatus.fiveHourRemainingPercent, reset: codexStatus.fiveHourResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
-            UsageMeter(title: "Wk", percent: codexStatus.weekRemainingPercent, reset: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+            codexMeter(title: "5h", percent: codexStatus.fiveHourRemainingPercent, reset: codexStatus.fiveHourResetText, has: codexStatus.hasFiveHourRateLimit)
+            codexMeter(title: "Wk", percent: codexStatus.weekRemainingPercent, reset: codexStatus.weekResetText, has: codexStatus.hasWeekRateLimit)
             Spacer(minLength: 0)
             if codexStatus.isUpdating {
                 UpdatingBadge()
@@ -70,6 +70,40 @@ struct UsageStripView: View {
                       Date().timeIntervalSince(eff) > 30 * 60 {
                 Text("Last updated: \(timeAgo(eff))")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Per-line presentation (5h / Wk independently): real data renders the
+    /// existing `UsageMeter`; a recognized absence (provider intentionally
+    /// omitted the window, e.g. OpenAI pausing the 5h limit) renders a calm
+    /// "no limit" line; a suspect payload (we couldn't confidently classify it)
+    /// renders "—" with a warning affordance rather than a dead "0%" meter.
+    @ViewBuilder
+    private func codexMeter(title: String, percent: Int, reset: String, has: Bool) -> some View {
+        if has {
+            UsageMeter(title: title, percent: percent, reset: reset, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp)
+        } else if codexStatus.usageFormatSuspect {
+            HStack(spacing: UsageMeterLayout.itemSpacing) {
+                Text(title)
+                    .font(.footnote).bold()
+                    .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
+                Text("—")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help("Codex changed its usage format — can't verify")
+            }
+        } else {
+            HStack(spacing: UsageMeterLayout.itemSpacing) {
+                Text(title)
+                    .font(.footnote).bold()
+                    .frame(width: UsageMeterLayout.titleWidth, alignment: .leading)
+                Text("no limit")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }

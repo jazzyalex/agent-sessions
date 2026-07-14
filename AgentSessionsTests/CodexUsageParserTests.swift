@@ -325,6 +325,250 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertFalse(CodexCLIRPCProbe.appServerArgumentsForTesting.contains("--session-source"))
     }
 
+    // MARK: - Length-based window classification
+    //
+    // 2026-07-13: OpenAI dropped the 5h window; the weekly window (window_minutes
+    // 10080) moved into the `primary` slot with `secondary` null. Windows must be
+    // routed by length, not slot position, and uninterpretable data must not show
+    // a guessed number.
+
+    func testClassifierRoutesByLengthNotSlotPosition() {
+        // Weekly window in the "primary" argument, short window in "secondary".
+        let long = CodexRateLimitWindowInput(remainingPercent: 88, resetAt: nil, windowMinutes: 10080)
+        let short = CodexRateLimitWindowInput(remainingPercent: 40, resetAt: nil, windowMinutes: 300)
+        let routing = CodexRateLimitWindowClassifier.route(long, short)
+        XCTAssertEqual(routing.fiveHour?.windowMinutes, 300)
+        XCTAssertEqual(routing.weekly?.windowMinutes, 10080)
+        XCTAssertFalse(routing.suspect)
+    }
+
+    func testClassifierDroppedFiveHourKeepsWeeklyOnlyNotSuspect() {
+        let weekly = CodexRateLimitWindowInput(remainingPercent: 88, resetAt: nil, windowMinutes: 10080)
+        let routing = CodexRateLimitWindowClassifier.route(weekly, nil)
+        XCTAssertNil(routing.fiveHour, "No short window classified")
+        XCTAssertEqual(routing.weekly?.remainingPercent, 88)
+        XCTAssertFalse(routing.suspect, "A missing window is absence, not suspect")
+    }
+
+    func testClassifierLengthlessResponseFallsBackToPositional() {
+        // No window declares a length (legacy source): keep primary=5h, secondary=weekly.
+        let a = CodexRateLimitWindowInput(remainingPercent: 96, resetAt: nil, windowMinutes: nil)
+        let b = CodexRateLimitWindowInput(remainingPercent: 99, resetAt: nil, windowMinutes: nil)
+        let routing = CodexRateLimitWindowClassifier.route(a, b)
+        XCTAssertEqual(routing.fiveHour?.remainingPercent, 96)
+        XCTAssertEqual(routing.weekly?.remainingPercent, 99)
+        XCTAssertFalse(routing.suspect)
+    }
+
+    func testClassifierUnclassifiableLengthIsSuspectButShowsGoodWindow() {
+        let garbage = CodexRateLimitWindowInput(remainingPercent: 50, resetAt: nil, windowMinutes: 9_999_999)
+        let weekly = CodexRateLimitWindowInput(remainingPercent: 88, resetAt: nil, windowMinutes: 10080)
+        let routing = CodexRateLimitWindowClassifier.route(garbage, weekly)
+        XCTAssertTrue(routing.suspect, "An implausible window length is suspect")
+        XCTAssertNil(routing.fiveHour)
+        XCTAssertEqual(routing.weekly?.windowMinutes, 10080, "The valid weekly window is still shown")
+    }
+
+    func testClassifierOutOfRangePercentIsSuspect() {
+        let bad = CodexRateLimitWindowInput(remainingPercent: 250, resetAt: nil, windowMinutes: 300)
+        let routing = CodexRateLimitWindowClassifier.route(bad, nil)
+        XCTAssertTrue(routing.suspect)
+        XCTAssertNil(routing.fiveHour)
+    }
+
+    func testClassifierTwoWindowsOfSameClassAreSuspect() {
+        let longA = CodexRateLimitWindowInput(remainingPercent: 80, resetAt: nil, windowMinutes: 10080)
+        let longB = CodexRateLimitWindowInput(remainingPercent: 70, resetAt: nil, windowMinutes: 20160)
+        let routing = CodexRateLimitWindowClassifier.route(longA, longB)
+        XCTAssertTrue(routing.suspect, "Two long windows can't be disambiguated")
+    }
+
+    func testJSONLDroppedFiveHourRoutesWeeklyWindowToWeeklyLine() async throws {
+        let now = Date()
+        let ts = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let weeklyReset = Int(now.addingTimeInterval(6 * 24 * 3600).timeIntervalSince1970)
+        // Live 2026-07-13 shape: weekly window (10080) in `primary`, no `secondary`.
+        let line: [String: Any] = [
+            "timestamp": ts,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": [
+                        "used_percent": 12.0,
+                        "window_minutes": 10080,
+                        "resets_at": weeklyReset
+                    ]
+                    // `secondary` intentionally omitted (null in the wild)
+                ]
+            ]
+        ]
+        let url = try writeTempJSONL([line])
+        defer { try? FileManager.default.removeItem(at: url) }
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+        XCTAssertNotNil(summary)
+        XCTAssertNil(summary?.fiveHour.remainingPercent, "No 5h window → 5h line stays empty")
+        XCTAssertEqual(summary?.weekly.remainingPercent, 88, "Weekly window shown on the weekly line, not mislabeled 5h")
+        XCTAssertEqual(summary?.suspect, false, "A recognized dropped-5h shape is not suspect")
+    }
+
+    func testJSONLFiveHourRestoredRoutesBothWindows() async throws {
+        let now = Date()
+        let ts = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2))
+        let fiveHourReset = Int(now.addingTimeInterval(3 * 3600).timeIntervalSince1970)
+        let weeklyReset = Int(now.addingTimeInterval(6 * 24 * 3600).timeIntervalSince1970)
+        let line: [String: Any] = [
+            "timestamp": ts,
+            "type": "event_msg",
+            "payload": [
+                "type": "token_count",
+                "rate_limits": [
+                    "limit_id": "codex",
+                    "primary": ["used_percent": 30.0, "window_minutes": 300, "resets_at": fiveHourReset],
+                    "secondary": ["used_percent": 12.0, "window_minutes": 10080, "resets_at": weeklyReset]
+                ]
+            ]
+        ]
+        let url = try writeTempJSONL([line])
+        defer { try? FileManager.default.removeItem(at: url) }
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let summary = await service.parseTokenCountTailForTesting(url: url)
+        XCTAssertEqual(summary?.fiveHour.remainingPercent, 70, "5h window restored → 5h line populated (auto-recovery)")
+        XCTAssertEqual(summary?.weekly.remainingPercent, 88)
+        XCTAssertEqual(summary?.suspect, false)
+    }
+
+    func testOAuthDroppedFiveHourRoutesWeeklyWindowToWeeklyLine() {
+        // primary_window carries the weekly window (limit_window_seconds 604800),
+        // secondary_window null. It must land on the weekly line, not "5h".
+        let raw = CodexOAuthRawUsageResponse(
+            rateLimit: .init(
+                primaryWindow: .init(usedPercent: 12, resetAt: 1_800_000_000, limitWindowSeconds: 604_800),
+                secondaryWindow: nil
+            )
+        )
+        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false, "No 5h window")
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, true)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 88)
+        XCTAssertEqual(snapshot?.usageFormatSuspect, false)
+    }
+
+    func testOAuthPartlyUninterpretableIsSuspectButShowsGoodWindow() {
+        let raw = CodexOAuthRawUsageResponse(
+            rateLimit: .init(
+                primaryWindow: .init(usedPercent: 12, resetAt: 1_800_000_000, limitWindowSeconds: 604_800),
+                secondaryWindow: .init(usedPercent: 5, resetAt: 1_800_100_000, limitWindowSeconds: 999_999_999)
+            )
+        )
+        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, true)
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 88)
+        XCTAssertEqual(snapshot?.usageFormatSuspect, true, "Garbage window trips the guardrail; the good one still shows")
+    }
+
+    func testOAuthFullyUninterpretableSurfacesSuspectNotNil() {
+        // Both windows uninterpretable → nothing placeable, but the snapshot must
+        // still surface (as suspect) rather than vanish into stale data.
+        let raw = CodexOAuthRawUsageResponse(
+            rateLimit: .init(
+                primaryWindow: .init(usedPercent: 5, resetAt: 1_800_000_000, limitWindowSeconds: 999_999_999),
+                secondaryWindow: nil
+            )
+        )
+        let snapshot = CodexOAuthUsageFetcher.normalizeForTesting(raw)
+        XCTAssertNotNil(snapshot, "A suspect-only response still surfaces")
+        XCTAssertEqual(snapshot?.usageFormatSuspect, true)
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false)
+        XCTAssertEqual(snapshot?.hasWeekRateLimit, false)
+    }
+
+    func testClassifierLoneLengthlessPrimaryIsSuspect() {
+        // Dropped-5h on a length-less source: a lone primary window can't be
+        // confirmed as 5h, so it is suspect rather than positionally mislabeled.
+        let lone = CodexRateLimitWindowInput(remainingPercent: 88, resetAt: nil, windowMinutes: nil)
+        let routing = CodexRateLimitWindowClassifier.route(lone, nil)
+        XCTAssertTrue(routing.suspect)
+        XCTAssertNil(routing.fiveHour)
+        XCTAssertNil(routing.weekly)
+    }
+
+    func testClassifierLoneLengthlessSecondaryIsWeekly() {
+        let lone = CodexRateLimitWindowInput(remainingPercent: 99, resetAt: nil, windowMinutes: nil)
+        let routing = CodexRateLimitWindowClassifier.route(nil, lone)
+        XCTAssertEqual(routing.weekly?.remainingPercent, 99)
+        XCTAssertNil(routing.fiveHour)
+        XCTAssertFalse(routing.suspect)
+    }
+
+    func testAuthoritativeReplaceClearsDroppedFiveHourWindow() async {
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        // Seed a snapshot where the 5h window was present from an earlier poll.
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 40,
+                fiveHourResetText: "2026-07-13T18:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .oauth,
+                weekRemainingPercent: 88,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .oauth,
+                limitsSource: .oauth
+            )
+        )
+        // Next complete authoritative fetch has only the weekly window (5h dropped).
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                weekRemainingPercent: 86,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .oauth,
+                limitsSource: .oauth
+            ),
+            replacesMissingWindows: true
+        )
+        XCTAssertFalse(merged.hasFiveHourRateLimit, "Dropped 5h window is cleared, not frozen")
+        XCTAssertEqual(merged.fiveHourRemainingPercent, 0)
+        XCTAssertEqual(merged.fiveHourResetText, "")
+        XCTAssertNil(merged.fiveHourLimitsSource)
+        XCTAssertTrue(merged.hasWeekRateLimit, "Weekly window preserved/updated")
+        XCTAssertEqual(merged.weekRemainingPercent, 86)
+    }
+
+    func testFragmentMergeDoesNotClearMissingWindow() async {
+        // A tmux /status fragment (requirePositivePercent, not a complete fetch)
+        // must stay additive — it never clears a window it simply didn't parse.
+        let service = CodexStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        await service.setSnapshotForTesting(
+            CodexUsageSnapshot(
+                fiveHourRemainingPercent: 40,
+                fiveHourResetText: "2026-07-13T18:00:00Z",
+                hasFiveHourRateLimit: true,
+                fiveHourLimitsSource: .jsonlFallback,
+                weekRemainingPercent: 88,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .jsonlFallback,
+                limitsSource: .jsonlFallback
+            )
+        )
+        let merged = await service.mergeRateLimitSnapshotForTesting(
+            CodexUsageSnapshot(
+                weekRemainingPercent: 80,
+                weekResetText: "2026-07-19T00:00:00Z",
+                hasWeekRateLimit: true,
+                weekLimitsSource: .statusProbe,
+                limitsSource: .statusProbe
+            ),
+            requirePositivePercent: true
+        )
+        XCTAssertTrue(merged.hasFiveHourRateLimit, "Fragment must not clear the unparsed 5h window")
+        XCTAssertEqual(merged.fiveHourRemainingPercent, 40)
+    }
+
     func testStatusProbeParserMarksReturnedWindowsAsAvailable() async {
         let json = """
         {
