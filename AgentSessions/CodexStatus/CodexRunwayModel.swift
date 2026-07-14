@@ -254,10 +254,11 @@ struct RunwaySessionActivity: Equatable, Sendable {
     let tokensPerSecond: Double
     let sampleStart: Date
     let sampleEnd: Date
-    /// Per-type token rates for $ pricing (Phase 2). Default 0 so existing token/
-    /// weekly callers are unchanged; the parsers set these when computing a pair.
-    /// Codex: input = all input (incl. cached), cachedInput = cached_input. Claude:
-    /// input = fresh input only, cachedInput = cache_read, cacheCreation = cache_creation.
+    /// Per-type token rates for $ pricing (Phase 2), normalized to ONE shape across
+    /// providers so dollarSnapshot prices with no subtraction: `inputPerSecond` is
+    /// FRESH (non-cached) input; `cachedInputPerSecond` is cached-input reads;
+    /// `cacheCreationPerSecond` is Claude cache writes (0 for Codex). Default 0 so
+    /// existing token/weekly callers are unchanged.
     var inputPerSecond: Double = 0
     var cachedInputPerSecond: Double = 0
     var outputPerSecond: Double = 0
@@ -433,17 +434,24 @@ enum CodexRunwaySnapshotLoader {
                         maxRows: request.maxRows
                     )
                 case .dollarsPerHour:
-                    // $ pricing is wired once the price table + dollarSnapshot land;
-                    // until then (and whenever a model is unpriced) render tk/h with
-                    // a token baseline so rows never mislabel. Unreachable today —
-                    // effectivePresentation only resolves $ → dollarsPerHour once a
-                    // usable price table exists.
-                    effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
-                    core = CodexRunwayCalculator.tokenSnapshot(
-                        baseline: effectiveBaseline,
+                    // Per-session $/h from the price table. When a model is unpriced
+                    // (or there's no activity) fall back to token snapshot-wide (P1)
+                    // with a token baseline so rows never mislabel.
+                    if let dollars = CodexRunwayCalculator.dollarSnapshot(
+                        baseline: request.baseline,
                         activities: activities,
+                        priceTable: RunwayPriceTable.shared,
                         maxRows: request.maxRows
-                    )
+                    ) {
+                        core = dollars
+                    } else {
+                        effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
+                        core = CodexRunwayCalculator.tokenSnapshot(
+                            baseline: effectiveBaseline,
+                            activities: activities,
+                            maxRows: request.maxRows
+                        )
+                    }
                 case .weeklyPercentPerHour:
                     // Per-session share of the weekly average burn. When the weekly
                     // average is unmeasurable (fresh window / 0% used) fall back to
@@ -885,6 +893,63 @@ enum CodexRunwayCalculator {
                 deadline: .unavailable,
                 gainedSeconds: 0,
                 displayRate: overflow.reduce(0) { $0 + rate($1) }
+            )
+        return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
+    }
+
+    /// $-mode snapshot: each session's API-equivalent cost per hour, priced from
+    /// per-type token rates × the price table. Per-type rates are pre-normalized to
+    /// FRESH input + cached-read + output + cache-creation, so pricing is a plain
+    /// sum (no subtraction). Returns `nil` when there's no positive activity OR any
+    /// active model is unpriced — so the loader falls back to token snapshot-wide
+    /// (never a per-row unit mix). $/h is intentionally non-proportional to tk/h
+    /// (which nets out cache) because cache reads/writes cost real money.
+    static func dollarSnapshot(baseline: RunwayProviderBaseline,
+                               activities: [RunwaySessionActivity],
+                               priceTable: RunwayPriceTable,
+                               maxRows: Int) -> CodexRunwaySnapshot? {
+        guard maxRows > 0 else { return nil }
+        let positive = activities.filter {
+            ($0.inputPerSecond + $0.cachedInputPerSecond + $0.outputPerSecond + $0.cacheCreationPerSecond) > 0
+        }
+        guard !positive.isEmpty else { return nil }
+
+        var priced: [(activity: RunwaySessionActivity, dollarsPerHour: Double)] = []
+        for a in positive {
+            guard let p = priceTable.price(forModel: a.modelSlug) else { return nil }
+            let perSecond = a.inputPerSecond * p.inputPerMTok / 1_000_000
+                + a.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
+                + a.outputPerSecond * p.outputPerMTok / 1_000_000
+                + a.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
+            guard perSecond.isFinite else { return nil }
+            priced.append((a, perSecond * 3600))
+        }
+        let ranked = priced.sorted { lhs, rhs in
+            if lhs.dollarsPerHour != rhs.dollarsPerHour { return lhs.dollarsPerHour > rhs.dollarsPerHour }
+            if lhs.activity.identity.isGoal != rhs.activity.identity.isGoal {
+                return lhs.activity.identity.isGoal && !rhs.activity.identity.isGoal
+            }
+            return lhs.activity.identity.displayName.localizedCaseInsensitiveCompare(rhs.activity.identity.displayName) == .orderedAscending
+        }
+        let (visible, overflow) = RunwayOverflowRule.split(ranked, maxRows: maxRows)
+        let rows = visible.map { e in
+            RunwayPauseImpactRow(
+                id: e.activity.identity.id,
+                displayName: e.activity.identity.displayName,
+                isGoal: e.activity.identity.isGoal,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: e.dollarsPerHour,
+                confidence: .direct
+            )
+        }
+        let burstSummary = overflow.isEmpty
+            ? nil
+            : RunwayShortBurstSummary(
+                count: overflow.count,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: overflow.reduce(0) { $0 + $1.dollarsPerHour }
             )
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
@@ -1768,7 +1833,10 @@ enum CodexRunwayTokenActivityParser {
                 tokensPerSecond: delta / elapsed,
                 sampleStart: previous.capturedAt,
                 sampleEnd: current.capturedAt,
-                inputPerSecond: max(0, current.input - previous.input) / elapsed,
+                // FRESH (non-cached) input, so both providers share one shape and
+                // dollarSnapshot prices per-type with no subtraction. Codex
+                // `input_tokens` includes cached, so subtract cached here.
+                inputPerSecond: max(0, (current.input - current.cachedInput) - (previous.input - previous.cachedInput)) / elapsed,
                 cachedInputPerSecond: max(0, current.cachedInput - previous.cachedInput) / elapsed,
                 outputPerSecond: max(0, current.output - previous.output) / elapsed,
                 cacheCreationPerSecond: 0,

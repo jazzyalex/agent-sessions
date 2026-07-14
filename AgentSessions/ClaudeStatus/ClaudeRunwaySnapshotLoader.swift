@@ -58,11 +58,16 @@ enum ClaudeRunwaySnapshotLoader {
                     core = CodexRunwayCalculator.tokenSnapshot(
                         baseline: request.baseline, activities: activities, maxRows: request.maxRows)
                 case .dollarsPerHour:
-                    // $ pricing wired once the price table + dollarSnapshot land;
-                    // until then render tk/h with a token baseline (no mislabel).
-                    effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
-                    core = CodexRunwayCalculator.tokenSnapshot(
-                        baseline: effectiveBaseline, activities: activities, maxRows: request.maxRows)
+                    if let dollars = CodexRunwayCalculator.dollarSnapshot(
+                        baseline: request.baseline, activities: activities,
+                        priceTable: RunwayPriceTable.shared, maxRows: request.maxRows) {
+                        core = dollars
+                    } else {
+                        // Unpriced model / no activity → token snapshot-wide (P1).
+                        effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
+                        core = CodexRunwayCalculator.tokenSnapshot(
+                            baseline: effectiveBaseline, activities: activities, maxRows: request.maxRows)
+                    }
                 case .weeklyPercentPerHour:
                     if let weekly = CodexRunwayCalculator.weeklySnapshot(
                         baseline: request.baseline, activities: activities, maxRows: request.maxRows) {

@@ -4015,6 +4015,71 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertNil(CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [], maxRows: 5))
     }
 
+    func testPriceTableBundledAndPrefixMatch() {
+        let t = RunwayPriceTable.makeForTesting()
+        XCTAssertFalse(t.isEmpty)
+        // Tier keys cover every current generation via longest-prefix.
+        XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.outputPerMTok, 15.0)
+        XCTAssertEqual(t.price(forModel: "claude-sonnet-4-5-20250929")?.outputPerMTok, 15.0)
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 75.0)
+        XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
+        XCTAssertNotNil(t.price(forModel: "claude-fable-5"))     // Fable 5
+        XCTAssertNotNil(t.price(forModel: "gpt-5.6"))            // Codex gpt-5.6 → gpt-5
+        XCTAssertNotNil(t.price(forModel: "gpt-5.6-codex"))
+        XCTAssertNil(t.price(forModel: "totally-unknown-model"))
+        XCTAssertNil(t.price(forModel: nil))
+    }
+
+    func testPriceTableRejectsMalformedAndUnrecognizedVersion() {
+        let t = RunwayPriceTable.makeForTesting()
+        let before = t.revision
+        XCTAssertFalse(t.loadForTesting(json: Data("not json".utf8)))
+        let futureVersion = #"{"version":999,"models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0,"outputPerMTok":1}}}"#
+        XCTAssertFalse(t.loadForTesting(json: Data(futureVersion.utf8)))
+        XCTAssertEqual(t.revision, before, "rejected manifests must not change the table")
+        let ok = #"{"version":1,"models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        XCTAssertTrue(t.loadForTesting(json: Data(ok.utf8)))
+        XCTAssertEqual(t.price(forModel: "zzz-model")?.inputPerMTok, 9)
+        XCTAssertGreaterThan(t.revision, before)
+    }
+
+    func testDollarSnapshotPricesPerTypeIncludingCache() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 50, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: .dollarsPerHour)
+        let table = RunwayPriceTable.makeForTesting()   // claude-sonnet-4: 3 / 0.3 / 15
+        // Cache-heavy: netted tk/h would ignore the 1000/s cache reads, but $ prices them.
+        let a = RunwaySessionActivity(
+            identity: .init(id: "a", displayName: "A", isGoal: false, logPaths: ["/a"]),
+            tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 10, cachedInputPerSecond: 1000, outputPerSecond: 10,
+            cacheCreationPerSecond: 0, modelSlug: "claude-sonnet-4-5")
+        let snap = CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], priceTable: table, maxRows: 5)
+        let inputCost: Double = 10.0 * 3.0
+        let cachedCost: Double = 1000.0 * 0.3
+        let outputCost: Double = 10.0 * 15.0
+        let expected: Double = (inputCost + cachedCost + outputCost) / 1_000_000.0 * 3600.0
+        XCTAssertEqual(snap?.rows.first?.displayRate ?? 0, expected, accuracy: 1e-6)
+        // Cache dominates the cost, so $/h is NOT proportional to the netted tk/h.
+        XCTAssertGreaterThan(snap?.rows.first?.displayRate ?? 0, 0)
+    }
+
+    func testDollarSnapshotNilWhenModelUnpriced() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 50, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: .dollarsPerHour)
+        let table = RunwayPriceTable.makeForTesting()
+        let a = RunwaySessionActivity(
+            identity: .init(id: "a", displayName: "A", isGoal: false, logPaths: ["/a"]),
+            tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 10, cachedInputPerSecond: 0, outputPerSecond: 10,
+            cacheCreationPerSecond: 0, modelSlug: "no-such-model")
+        // Any unpriced active model → nil so the loader falls back to token snapshot-wide.
+        XCTAssertNil(CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], priceTable: table, maxRows: 5))
+    }
+
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-stale-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

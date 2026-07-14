@@ -2395,18 +2395,28 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
 
     func testEffectivePresentationMatrix() {
         typealias B = HUDRunwayRequestBuilder
+        func resolve(_ p: RunwayPresentation, hasFiveHour: Bool = true, hasWeekly: Bool = true,
+                     weeklyMeasurable: Bool = true, dollarPriceable: Bool = true,
+                     windowMinutes: Int = 300) -> RunwayRateUnit {
+            B.effectivePresentation(preferred: p, hasFiveHour: hasFiveHour, hasWeekly: hasWeekly,
+                                    weeklyMeasurable: weeklyMeasurable, dollarPriceable: dollarPriceable,
+                                    windowMinutes: windowMinutes).rateUnit
+        }
         // 5h preferred: present → m/h; dropped → token.
-        XCTAssertEqual(B.effectivePresentation(preferred: .fiveHour, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .quotaMinutesPerHour)
-        XCTAssertEqual(B.effectivePresentation(preferred: .fiveHour, source: .codex, hasFiveHour: false, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 10080).rateUnit, .tokensPerHour)
-        // token / dollar (Phase 1) → token.
-        XCTAssertEqual(B.effectivePresentation(preferred: .token, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .tokensPerHour)
-        XCTAssertEqual(B.effectivePresentation(preferred: .dollar, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300).rateUnit, .tokensPerHour)
+        XCTAssertEqual(resolve(.fiveHour), .quotaMinutesPerHour)
+        XCTAssertEqual(resolve(.fiveHour, hasFiveHour: false, windowMinutes: 10080), .tokensPerHour)
+        // token → token.
+        XCTAssertEqual(resolve(.token), .tokensPerHour)
+        // dollar: priceable → $; not priceable → token.
+        XCTAssertEqual(resolve(.dollar, dollarPriceable: true), .dollarsPerHour)
+        XCTAssertEqual(resolve(.dollar, dollarPriceable: false), .tokensPerHour)
         // weekly: measurable → weekly (window 10080); unmeasurable / no window → token.
-        let wk = B.effectivePresentation(preferred: .weekly, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: true, windowMinutes: 300)
+        let wk = B.effectivePresentation(preferred: .weekly, hasFiveHour: true, hasWeekly: true,
+                                         weeklyMeasurable: true, dollarPriceable: true, windowMinutes: 300)
         XCTAssertEqual(wk.rateUnit, .weeklyPercentPerHour)
         XCTAssertEqual(wk.windowMinutes, 10080)
-        XCTAssertEqual(B.effectivePresentation(preferred: .weekly, source: .codex, hasFiveHour: true, hasWeekly: true, weeklyMeasurable: false, windowMinutes: 300).rateUnit, .tokensPerHour)
-        XCTAssertEqual(B.effectivePresentation(preferred: .weekly, source: .claude, hasFiveHour: true, hasWeekly: false, weeklyMeasurable: false, windowMinutes: 300).rateUnit, .tokensPerHour)
+        XCTAssertEqual(resolve(.weekly, weeklyMeasurable: false), .tokensPerHour)
+        XCTAssertEqual(resolve(.weekly, hasWeekly: false, weeklyMeasurable: false), .tokensPerHour)
     }
 
     func testRequestIDChangesWithRateUnit() {

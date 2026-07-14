@@ -3663,17 +3663,22 @@ enum HUDRunwayRequestBuilder {
         let windowMinutes: Int
     }
 
-    /// Pure resolver for the §5 fallback matrix (Phase 1: `$` resolves to token).
-    /// `windowMinutes` is the active-limit window length (300 or 10080).
+    /// Pure resolver for the §5 fallback matrix. `windowMinutes` is the active-limit
+    /// window length (300 or 10080). `dollarPriceable` = a usable price table exists
+    /// (per-model gaps fall back later, snapshot-wide, in the loader).
     static func effectivePresentation(preferred: RunwayPresentation,
-                                      source: UsageTrackingSource,
                                       hasFiveHour: Bool,
                                       hasWeekly: Bool,
                                       weeklyMeasurable: Bool,
+                                      dollarPriceable: Bool,
                                       windowMinutes: Int) -> RunwayResolvedPresentation {
         switch preferred {
-        case .token, .dollar: // $ pricing is Phase 2 → fall back to token throughput
+        case .token:
             return RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
+        case .dollar:
+            return dollarPriceable
+                ? RunwayResolvedPresentation(rateUnit: .dollarsPerHour, windowMinutes: windowMinutes)
+                : RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
         case .fiveHour:
             return hasFiveHour
                 ? RunwayResolvedPresentation(rateUnit: .quotaMinutesPerHour, windowMinutes: windowMinutes)
@@ -3746,16 +3751,19 @@ enum HUDRunwayRequestBuilder {
         // Resolve the user's preferred presentation against what this provider can
         // show (§5). The weekly window fields let weekly compute even while the 5h
         // window is present; `hasFiveHour` = the active window IS the 5h window.
-        let weekResetAt = UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now)
+        // Weekly-window fields are only needed for the weekly presentation.
+        let weekResetAt = presentation == .weekly
+            ? UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now) : nil
         let weeklyRunout = weekResetAt.flatMap {
             RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
                                                  resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
         }
         let resolved = effectivePresentation(
-            preferred: presentation, source: .codex,
+            preferred: presentation,
             hasFiveHour: !isLongWindow,
             hasWeekly: weekResetAt != nil,
             weeklyMeasurable: weeklyRunout != nil,
+            dollarPriceable: !RunwayPriceTable.shared.isEmpty,
             windowMinutes: windowMinutes)
 
         let baseline: RunwayProviderBaseline
@@ -3839,16 +3847,18 @@ enum HUDRunwayRequestBuilder {
 
         // Claude always has a 5h ("session") window, so `.fiveHour` keeps m/h
         // unchanged. Weekly uses the all-models weekly window fields.
-        let weekResetAt = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: weekResetText, now: now)
+        let weekResetAt = presentation == .weekly
+            ? UsageResetText.resetDate(kind: "Wk", source: .claude, raw: weekResetText, now: now) : nil
         let weeklyRunout = weekResetAt.flatMap {
             RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
                                                  resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
         }
         let resolved = effectivePresentation(
-            preferred: presentation, source: .claude,
+            preferred: presentation,
             hasFiveHour: true,
             hasWeekly: weekResetAt != nil,
             weeklyMeasurable: weeklyRunout != nil,
+            dollarPriceable: !RunwayPriceTable.shared.isEmpty,
             windowMinutes: 300)
 
         let baseline: RunwayProviderBaseline

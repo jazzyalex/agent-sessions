@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "updated": "2026-07-14",
+  "_note": "USD per million tokens. Served read-only to Agent Sessions' $ burn (no user data is sent). Keyed by TIER so longest-prefix covers every generation (claude-sonnet → claude-sonnet-5, gpt-5 → gpt-5.6). Anthropic are tier list prices; claude-fable and OpenAI gpt-5.x/o-series are estimates — edit here to update clients without an app release.",
+  "models": {
+    "claude-opus":      { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
+    "claude-sonnet":    { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
+    "claude-haiku":     { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,  "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25 },
+    "claude-fable":     { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
+    "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
+    "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
+    "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0 },
+    "gpt-5":            { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
+    "gpt-4":            { "inputPerMTok": 2.5,  "cachedInputPerMTok": 1.25,  "outputPerMTok": 10.0, "cacheWritePerMTok": null },
+    "o4-mini":          { "inputPerMTok": 1.1,  "cachedInputPerMTok": 0.275, "outputPerMTok": 4.4,  "cacheWritePerMTok": null },
+    "o3":               { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 8.0,  "cacheWritePerMTok": null }
+  }
+}

@@ -68,7 +68,7 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 - Reads local session folders you choose, plus supported default CLI locations.
 - Builds local indexes/databases for search and navigation.
 - Explicit actions may open Terminal/iTerm2 resume commands or run status/probe cleanup workflows.
-- The only network activity is optional Sparkle update checks.
+- The only network activity is optional Sparkle update checks and an optional read-only fetch of a public model-price list (for the runway's $ estimate) — neither sends any personal or session data.
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 

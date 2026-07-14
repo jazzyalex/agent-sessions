@@ -16,7 +16,7 @@ Agent Sessions is a local-first app.
 
 ## Data sharing
 - No data is sent to any server.
-- The only network activity is optional update checking (Sparkle), if enabled.
+- The only network activity is optional update checking (Sparkle), if enabled, and an optional read-only fetch of a public model-price list (used for the Session Runway's "$" cost estimate). Both are plain downloads of public files — no personal or session data is transmitted.
 
 ## Contact
 jazzyalex@gmail.com

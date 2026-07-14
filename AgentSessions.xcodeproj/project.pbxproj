@@ -81,6 +81,7 @@
 		27BB05A35A471ED1FFC1C708 /* AntigravityTranscriptParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5C3395AC2B4F1F9896C8D8 /* AntigravityTranscriptParser.swift */; };
 		27D65795FBB9A8C67FA36577 /* ClaudeRunwaySnapshotLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49D561C823DF3D2B9F08E1E /* ClaudeRunwaySnapshotLoader.swift */; };
 		288E91B39896BB860B423D66 /* ClaudeSessionIDHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC22A5E02E467F75F38C932 /* ClaudeSessionIDHelper.swift */; };
+		28E99A62167E3F8259961EBB /* RunwayPriceTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349A78100A34B0CEF7C7EB9E /* RunwayPriceTable.swift */; };
 		2945B436E48D3A77B56E83F9 /* HermesResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F9C389CE8ABE2E70026198C /* HermesResumeCommandBuilder.swift */; };
 		29842731F65B52E09B2A273D /* AppearanceHostingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D41C7E29CA7A68BEC72BA4 /* AppearanceHostingView.swift */; };
 		2B31E3D104D74827B0E65D5E /* CodexResumeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E8EFD200FFA4B90BCCF3434 /* CodexResumeSheet.swift */; };
@@ -580,6 +581,7 @@
 		33F7F485EB415C40F4533771 /* OpenCodeResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/OpenCodeResume/OpenCodeResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		3461C92597A6EC663D5D67EB /* HermesSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/HermesSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		34627A0B9E81ED0AF4C56B67 /* FilterEngine.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/FilterEngine.swift; sourceTree = SOURCE_ROOT; };
+		349A78100A34B0CEF7C7EB9E /* RunwayPriceTable.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/CodexStatus/RunwayPriceTable.swift; sourceTree = SOURCE_ROOT; };
 		35186F4194824F3250DE3B8E /* AppRuntime.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppRuntime.swift; path = AgentSessions/Support/AppRuntime.swift; sourceTree = SOURCE_ROOT; };
 		3637ADBFD4A6E452C2DBD289 /* SearchIngestService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/SearchIngestService.swift; sourceTree = SOURCE_ROOT; };
 		364AF61D9D3F6BB2B413B5D3 /* PerfQuickWinsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PerfQuickWinsTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1148,6 +1150,7 @@
 			isa = PBXGroup;
 			children = (
 				45CEF7FD23330F5BE08568E3 /* CodexAuthClassifier.swift */,
+				349A78100A34B0CEF7C7EB9E /* RunwayPriceTable.swift */,
 			);
 			name = CodexStatus;
 			sourceTree = "<group>";
@@ -2511,6 +2514,7 @@
 				889F6602F41809A8B65DF958 /* OnboardingListTopSlot.swift in Sources */,
 				64B0D48B02D0AD6562C32697 /* AnimatedGIFView.swift in Sources */,
 				BDA985A3E15FD2AB2574324A /* CodexRateLimitWindowClassifier.swift in Sources */,
+				28E99A62167E3F8259961EBB /* RunwayPriceTable.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
