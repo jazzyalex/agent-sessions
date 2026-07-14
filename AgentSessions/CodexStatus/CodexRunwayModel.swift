@@ -114,9 +114,11 @@ enum RunwayRateUnit: Equatable, Sendable {
     case quotaMinutesPerHour
     case tokensPerHour
     /// Per-session share of the weekly average burn, expressed as % of the weekly
-    /// window per hour. Used by the "weekly" runway presentation. (`.dollarsPerHour`
-    /// is Phase 2.)
+    /// window per hour. Used by the "weekly" runway presentation.
     case weeklyPercentPerHour
+    /// Per-session API-equivalent cost per hour (tokens × per-model prices). Used
+    /// by the "$" presentation; falls back to token when no price table is usable.
+    case dollarsPerHour
 }
 
 struct RunwayProviderBaseline: Equatable, Sendable {
@@ -244,9 +246,20 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
 
 struct RunwaySessionActivity: Equatable, Sendable {
     let identity: RunwaySessionIdentity
+    /// Netted throughput (drives tk/h) — unchanged from Phase 1.
     let tokensPerSecond: Double
     let sampleStart: Date
     let sampleEnd: Date
+    /// Per-type token rates for $ pricing (Phase 2). Default 0 so existing token/
+    /// weekly callers are unchanged; the parsers set these when computing a pair.
+    /// Codex: input = all input (incl. cached), cachedInput = cached_input. Claude:
+    /// input = fresh input only, cachedInput = cache_read, cacheCreation = cache_creation.
+    var inputPerSecond: Double = 0
+    var cachedInputPerSecond: Double = 0
+    var outputPerSecond: Double = 0
+    var cacheCreationPerSecond: Double = 0
+    /// Per-session model slug (latest seen) for price lookup. nil → $ unpriceable.
+    var modelSlug: String? = nil
 }
 
 struct RunwaySessionBurn: Equatable, Sendable {
@@ -412,6 +425,18 @@ enum CodexRunwaySnapshotLoader {
                     // deliberately not used here — they can't express a sane rate.
                     core = CodexRunwayCalculator.tokenSnapshot(
                         baseline: request.baseline,
+                        activities: activities,
+                        maxRows: request.maxRows
+                    )
+                case .dollarsPerHour:
+                    // $ pricing is wired once the price table + dollarSnapshot land;
+                    // until then (and whenever a model is unpriced) render tk/h with
+                    // a token baseline so rows never mislabel. Unreachable today —
+                    // effectivePresentation only resolves $ → dollarsPerHour once a
+                    // usable price table exists.
+                    effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
+                    core = CodexRunwayCalculator.tokenSnapshot(
+                        baseline: effectiveBaseline,
                         activities: activities,
                         maxRows: request.maxRows
                     )

@@ -5083,7 +5083,7 @@ private struct HUDRunwayLoadBar: View {
         case .quotaMinutesPerHour:
             let absolutePressure = min(1, displayRate / 45)
             base = max(0.12, (relative * 0.60) + (absolutePressure * 0.30))
-        case .tokensPerHour, .weeklyPercentPerHour:
+        case .tokensPerHour, .weeklyPercentPerHour, .dollarsPerHour:
             base = max(0.12, relative * 0.85)
         }
         let wave = 0.82 + 0.18 * sin(Double(animationTick + index * 3) * 0.9)
@@ -5133,6 +5133,7 @@ private enum HUDRunwayLayout {
         switch unit {
         case .tokensPerHour: return 80
         case .weeklyPercentPerHour: return 60
+        case .dollarsPerHour: return 72
         case .quotaMinutesPerHour: return 52
         }
     }
@@ -5165,6 +5166,13 @@ private enum RunwayTimeFormatting {
             guard confidence != .idle else { return "idle" }
             guard value.isFinite, value >= 0.05 else { return "flat" }
             return String(format: "%.1f%%/h", value)
+        case .dollarsPerHour:
+            guard confidence != .waiting else { return "$0/h" }
+            guard confidence != .idle else { return "idle" }
+            guard value.isFinite, value >= 0.005 else { return "flat" }
+            if value >= 1000 { return String(format: "$%.1fK/h", value / 1000) }
+            if value >= 100 { return String(format: "$%.0f/h", value) }
+            return String(format: "$%.2f/h", value)
         }
     }
 

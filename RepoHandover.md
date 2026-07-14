@@ -1,3 +1,19 @@
+## 2026-07-14 14:19 · opencode-qm-usage · Research: OpenCode usage/limits in Quota Meter
+status: in-progress
+
+**State:** Research/eval only, no code changes. OpenCode is already first-class for history (parser + `opencode.db` SQLite reader + JSON) AND already in the QM live-session list (`supportsLiveSessionSource(.opencode)==true`; PresenceEngine discovers opencode via ps/lsof; Cockpit `supportedSources` includes `.opencode`). The ONLY missing piece vs Codex/Claude is **usage** (5h/week limits + Session Runway).
+
+**Decided / don't redo:**
+- The blocker for an opencode usage bar is the **consumption number**, NOT the runway. Codex reads logged `rate_limit` events from its own jsonl; Claude reads `api.anthropic.com/api/oauth/usage`. OpenCode exposes neither — no local window-consumption, and the Zen balance API is still an open/unscheduled request ([sst/opencode #10448](https://github.com/anomalyco/opencode/issues/10448)). CodexBar got the same ask ([#1006](https://github.com/steipete/CodexBar/issues/1006)) and closed it without shipping.
+- OpenCode Go/Zen has the same window shape ($12/5h, $30/wk, $60/mo) but usage is dashboard-only. BYO-key users (the majority, incl. this repo owner — `~/.local/share/opencode/auth.json` = anthropic only) have **no window to meter at all**.
+- Local message files DO carry per-msg `tokens{input,output,reasoning,cache}` + `cost` + `time`+`sessionID` (verified on disk) → a token-burn meter is computable offline. BUT observed `cost:0` on a Zen (`providerID:opencode`, `big-pickle`) msg → local cost may not populate for Go; token→$ conversion would drift. Any locally-computed bar is an ESTIMATE, not provider-authoritative like Codex/Claude — reputational risk with this accuracy-minded audience.
+- Growth verdict: don't build the meter for stars. The high-leverage free move is a community post about EXISTING opencode support (history+search+resume+live sessions). Reserve the usage-meter build for when #10448 ships (then "first authoritative opencode usage tracker" is a real headline; CodexBar punted).
+
+**Next:**
+1. If pursuing: $5 Go spike to verify whether opencode writes non-zero local `cost` for Go usage — that single fact decides estimate-bar viability vs wait-for-#10448.
+2. Marketing: reusable OC-outreach prompt was drafted in-chat (accurate do-not-claim block: NO opencode usage/quota/runway claims). Offer to save as `Marketing/PROMPT_opencode-outreach.md` and/or run it to produce Reddit + X drafts.
+3. Parser note if building token-burn: `OpenCodeSessionParser`/`OpenCodeSqliteReader` read message PARTS, not message-level `tokens`/`cost` — that's the extension point.
+
 ## 2026-07-13 18:58 · codex-usage-window · Codex 5h-drop: length-based window routing
 status: done
 
