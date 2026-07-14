@@ -3663,7 +3663,28 @@ enum HUDRunwayRequestBuilder {
             return observedAt
         }()
         let observedAt = freshProjectionObservedAt ?? now
-        let runoutAt = freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt } ?? resetAt
+        // The weekly `used_percent` ticks in whole integers (~1% every ~1.5 min), so
+        // per-session DIRECT %-burns barely register — they burst huge on a tick and
+        // read zero otherwise, which is why session rows flicker/vanish. Attribute
+        // burn from smooth TOKEN activity instead. That needs a meaningful provider
+        // rate, so when there's no fresh measured projection, derive run-out from
+        // average usage so far this window (like Claude), scaled to the active window.
+        // Only the long (weekly) window needs the average-burn fallback: its coarse
+        // integer % defeats direct/projection burn measurement, so a real provider
+        // rate here is what lets token-activity attribution populate the runway. The
+        // 5h window measures fine directly, so it keeps the plain reset fallback.
+        let needsAverageBurn = freshProjectionObservedAt == nil
+            && windowMinutes >= CodexRateLimitWindowClassifier.shortLongSplitMinutes
+        let averageRunout = needsAverageBurn
+            ? RunwayBaselineMath.averageBurnRunout(
+                remainingPercent: Double(fiveHourRemainingPercent),
+                resetAt: resetAt,
+                windowLength: TimeInterval(windowMinutes * 60),
+                now: now)
+            : nil
+        let runoutAt = (freshProjectionObservedAt.flatMap { _ in fiveHourProjectedRunoutAt })
+            ?? averageRunout
+            ?? resetAt
         guard resetAt > observedAt,
               runoutAt > observedAt else {
             return nil
@@ -3675,7 +3696,10 @@ enum HUDRunwayRequestBuilder {
             resetAt: resetAt,
             currentRunoutAt: runoutAt,
             observedAt: observedAt,
-            hasProjectedRunout: freshProjectionObservedAt != nil,
+            // A real run-out estimate (fresh projection OR average-burn) is what
+            // enables per-session token-activity attribution; the bare reset
+            // fallback leaves it off (its provider rate would be meaningless).
+            hasProjectedRunout: freshProjectionObservedAt != nil || averageRunout != nil,
             windowMinutes: windowMinutes
         )
         return CodexRunwaySnapshotRequest(
@@ -4281,15 +4305,19 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     private var codexRunwayRequest: CodexRunwaySnapshotRequest? {
+        // Feed the active limit window (5h when present, else weekly) — using
+        // fiveHourRemainingPercent here fails the `> 0` guard once the 5h window
+        // is dropped, which killed the runway entirely.
         return HUDLimitsBar.runwayRequest(
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
             codexAgentEnabled: codexAgentEnabled,
             codexUsageEnabled: codexUsageEnabled,
-            fiveHourRemainingPercent: codexUsageModel.fiveHourRemainingPercent,
-            fiveHourResetText: codexUsageModel.fiveHourResetText,
+            fiveHourRemainingPercent: codexUsageModel.activeLimitRemainingPercent,
+            fiveHourResetText: codexUsageModel.activeLimitResetText,
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
             fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
+            windowMinutes: codexUsageModel.activeLimitWindowMinutes,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -4565,23 +4593,34 @@ private struct HUDLimitsDetailPanel: View {
                 }
             }
             .frame(width: 14, height: 14)
-            HStack(spacing: 0) {
-                Text("5h: ")
-                if fiveAbsent {
-                    Text("—").foregroundStyle(.secondary)
-                } else {
+            if fiveAbsent {
+                // No 5h limit, but a session may still be burning the (weekly) cap.
+                // Lead with the calm "no limit", then the burn indicator — instead
+                // of the confusing "— ▶2h 25m no limit". Span the three 5h columns
+                // so the phrase reads cleanly without truncation.
+                HStack(spacing: 6) {
+                    Text("5h: \(suspect ? "can't verify" : "no limit")")
+                        .foregroundStyle(.secondary)
+                    if let projection {
+                        HUDLimitsProjectionToken(projection: projection, reserve: false)
+                    }
+                }
+                .gridCellColumns((projection != nil || reserveProjectionSlot) ? 3 : 2)
+            } else {
+                HStack(spacing: 0) {
+                    Text("5h: ")
                     Text(fiveStale ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
                         .foregroundStyle(fiveStale ? Color.secondary : hudPctColor(entry.fiveHourLeft))
                 }
+                .frame(width: HUDLimitsColumnLayout.detailFiveHourPercentWidth, alignment: .leading)
+                if projection != nil || reserveProjectionSlot {
+                    HUDLimitsProjectionToken(projection: projection, reserve: reserveProjectionSlot)
+                        .frame(width: HUDLimitsColumnLayout.detailFiveHourProjectionWidth, alignment: .leading)
+                }
+                Text("↻ \(fiveResetText(entry: entry, unavailable: fiveStale))")
+                    .foregroundStyle(.secondary)
+                    .frame(width: HUDLimitsColumnLayout.detailFiveHourResetWidth, alignment: .leading)
             }
-            .frame(width: HUDLimitsColumnLayout.detailFiveHourPercentWidth, alignment: .leading)
-            if projection != nil || reserveProjectionSlot {
-                HUDLimitsProjectionToken(projection: projection, reserve: reserveProjectionSlot)
-                    .frame(width: HUDLimitsColumnLayout.detailFiveHourProjectionWidth, alignment: .leading)
-            }
-            Text(fiveAbsent ? (suspect ? "can't verify" : "no limit") : "↻ \(fiveResetText(entry: entry, unavailable: fiveStale))")
-                .foregroundStyle(.secondary)
-                .frame(width: HUDLimitsColumnLayout.detailFiveHourResetWidth, alignment: .leading)
             Text("|")
                 .foregroundStyle(Color.primary.opacity(0.25))
                 .frame(width: HUDLimitsColumnLayout.detailSeparatorWidth, alignment: .center)
