@@ -3983,6 +3983,62 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(RunwayPresentation.allCases.count, 4)
     }
 
+    // MARK: - Quota Meter chrome
+
+    /// An install that predates the key reads as `.onDemand` — upgrading users
+    /// land on the no-hover-resize behavior rather than inheriting the defect.
+    func testQuotaMeterChromeDefaultsToOnDemand() {
+        XCTAssertEqual(QuotaMeterChrome.current(raw: ""), .onDemand)
+        XCTAssertEqual(QuotaMeterChrome.current(raw: "garbage"), .onDemand)
+        XCTAssertEqual(QuotaMeterChrome.current(raw: "always"), .always)
+        XCTAssertEqual(QuotaMeterChrome.current(raw: "on_hover"), .onHover)
+        XCTAssertEqual(QuotaMeterChrome.current(raw: "on_demand"), .onDemand)
+        XCTAssertEqual(QuotaMeterChrome.allCases.count, 3)
+    }
+
+    /// The core promise: only `.onHover` lets a dwelling pointer put chrome on
+    /// screen. If this ever passes for `.always`/`.onDemand` on the dwell alone,
+    /// the window resizes under the mouse again.
+    func testQuotaMeterChromeOnlyHoverRevealsOnDwell() {
+        XCTAssertFalse(QuotaMeterChrome.onDemand.showsChrome(pointerDwelled: true, demandRevealed: false))
+        XCTAssertTrue(QuotaMeterChrome.onHover.showsChrome(pointerDwelled: true, demandRevealed: false))
+
+        // .always ignores both triggers entirely.
+        XCTAssertTrue(QuotaMeterChrome.always.showsChrome(pointerDwelled: false, demandRevealed: false))
+
+        // A right-click reveals on-demand chrome, and does nothing under hover.
+        XCTAssertTrue(QuotaMeterChrome.onDemand.showsChrome(pointerDwelled: false, demandRevealed: true))
+        XCTAssertFalse(QuotaMeterChrome.onHover.showsChrome(pointerDwelled: false, demandRevealed: true))
+    }
+
+    func testQuotaMeterChromeHintOnlyTeachesOnDemandUntilUsed() {
+        // Shown while dwelling, before the gesture has ever been used.
+        XCTAssertTrue(QuotaMeterChrome.onDemand.showsRightClickHint(pointerDwelled: true, demandRevealed: false, retired: false))
+
+        // Retired once the user has revealed chrome themselves.
+        XCTAssertFalse(QuotaMeterChrome.onDemand.showsRightClickHint(pointerDwelled: true, demandRevealed: false, retired: true))
+
+        // Never competes with the chrome it is advertising, and needs the dwell.
+        XCTAssertFalse(QuotaMeterChrome.onDemand.showsRightClickHint(pointerDwelled: true, demandRevealed: true, retired: false))
+        XCTAssertFalse(QuotaMeterChrome.onDemand.showsRightClickHint(pointerDwelled: false, demandRevealed: false, retired: false))
+
+        // Modes with visible controls have nothing to teach.
+        XCTAssertFalse(QuotaMeterChrome.always.showsRightClickHint(pointerDwelled: true, demandRevealed: false, retired: false))
+        XCTAssertFalse(QuotaMeterChrome.onHover.showsRightClickHint(pointerDwelled: true, demandRevealed: false, retired: false))
+    }
+
+    /// No pointer bookkeeping on an idle pinned window: `.always` never needs the
+    /// dwell, and `.onDemand` stops needing it once the hint retires.
+    func testQuotaMeterChromeArmsDwellTimerOnlyWhenConsumed() {
+        XCTAssertFalse(QuotaMeterChrome.always.armsDwellTimer(hintRetired: false))
+        XCTAssertFalse(QuotaMeterChrome.always.armsDwellTimer(hintRetired: true))
+
+        XCTAssertTrue(QuotaMeterChrome.onHover.armsDwellTimer(hintRetired: true))
+
+        XCTAssertTrue(QuotaMeterChrome.onDemand.armsDwellTimer(hintRetired: false))
+        XCTAssertFalse(QuotaMeterChrome.onDemand.armsDwellTimer(hintRetired: true))
+    }
+
     func testWeeklySnapshotAttributesPaceByTokenShare() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(5 * 24 * 3600)

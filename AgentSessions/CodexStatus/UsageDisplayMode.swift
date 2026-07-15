@@ -101,6 +101,100 @@ enum QuotaMeterOnTrackGlyph: String, CaseIterable, Identifiable {
     }
 }
 
+/// When the Quota Meter reveals its chrome layer — the toolbar plus the
+/// reset-credits line, which are shown and hidden together.
+///
+/// The governing rule is that the Quota Meter never resizes from *passive*
+/// pointer movement. `.onHover` is the one mode that opts into it; `.onDemand`
+/// trades it for a deliberate right-click. Data may always resize the window
+/// (the runway drawer, credits arriving) — that is not what this governs.
+///
+/// The rule exists because of dragging. The window is movable by its background
+/// (`isMovableByWindowBackground`), so repositioning this pinned widget means
+/// putting the pointer on it — which under hover-reveal resizes it mid-grab,
+/// shifting the very thing being aimed at. The pointer's job here is to move the
+/// window; right-click's job is to summon controls. Anything that re-couples
+/// chrome to plain hover brings the fight over the drag target back.
+enum QuotaMeterChrome: String, CaseIterable, Identifiable {
+    case always
+    case onHover = "on_hover"
+    case onDemand = "on_demand"
+
+    static let storageKey = PreferencesKey.quotaMeterChrome
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .always:
+            return "Always"
+        case .onHover:
+            return "On Hover"
+        case .onDemand:
+            return "On Demand"
+        }
+    }
+
+    /// One-line explanation shown under the selector for the active option.
+    var detail: String {
+        switch self {
+        case .always:
+            return "Toolbar stays visible. The window never resizes under the pointer."
+        case .onHover:
+            return "Toolbar appears while the pointer rests on the window, resizing it."
+        case .onDemand:
+            return "Toolbar appears on right-click, then collapses when the pointer leaves."
+        }
+    }
+
+    /// The single decision point for whether chrome is on screen. Each mode
+    /// reads exactly one trigger, which is what keeps the pointer from moving
+    /// the window in the two modes that promise it won't.
+    func showsChrome(pointerDwelled: Bool, demandRevealed: Bool) -> Bool {
+        switch self {
+        case .always:
+            return true
+        case .onHover:
+            return pointerDwelled
+        case .onDemand:
+            return demandRevealed
+        }
+    }
+
+    /// The "Right-click for controls" hint: `.onDemand` only, while the pointer
+    /// is dwelling, the chrome isn't already out, and the lesson hasn't landed.
+    func showsRightClickHint(pointerDwelled: Bool, demandRevealed: Bool, retired: Bool) -> Bool {
+        guard self == .onDemand else { return false }
+        return pointerDwelled && !demandRevealed && !retired
+    }
+
+    /// Only `.onDemand` reveals on an explicit right-click.
+    var respondsToRightClick: Bool { self == .onDemand }
+
+    /// Whether the dwell timer has a consumer. `.always` shows chrome
+    /// unconditionally and `.onDemand` stops caring once its hint retires, so
+    /// neither should arm a timer on an idle pinned window.
+    func armsDwellTimer(hintRetired: Bool) -> Bool {
+        switch self {
+        case .always:
+            return false
+        case .onHover:
+            return true
+        case .onDemand:
+            return !hintRetired
+        }
+    }
+
+    /// Defaults to `.onDemand`, including for existing installs that predate the
+    /// key. Hover-reveal is not a preference being overridden but a defect being
+    /// retired — it resizes the window mid-drag — and the on-hover hint teaches
+    /// the replacement gesture at exactly the moment a user reaches for the
+    /// missing toolbar.
+    static func current(raw: String) -> QuotaMeterChrome {
+        QuotaMeterChrome(rawValue: raw) ?? .onDemand
+    }
+}
+
 enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
     case automatic = "auto"
     case alwaysOn = "always_on"

@@ -29,6 +29,10 @@ enum PreferencesKey {
     static let usageLimitCockpitProjectionEnabled = "UsageLimitCockpitProjectionEnabled"
     static let quotaMeterEnlarged = "QuotaMeterEnlarged"
     static let quotaMeterOnTrackGlyph = "QuotaMeterOnTrackGlyph"
+    static let quotaMeterChrome = "QuotaMeterChrome"
+    /// Retires the "Right-click for controls" hint once the user has revealed
+    /// the chrome themselves — the lesson only needs teaching once.
+    static let quotaMeterChromeRevealedOnce = "QuotaMeterChromeRevealedOnce"
     static let usageLimitNotificationExhaustedEnabled = "UsageLimitNotificationExhaustedEnabled"
     static let usageLimitNotificationFiveHourResetEnabled = "UsageLimitNotificationFiveHourResetEnabled"
     static let usageLimitDiagnosticsCodexSource = "UsageLimitDiagnosticsCodexSource"

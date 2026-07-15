@@ -30,7 +30,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) var cockpitHUDDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) var cockpitCompactBaselineRows: Int = 4
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) var cockpitShowTabSubtitleInFullMode: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) var cockpitShowLimitsFooter: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) var cockpitReduceTransparency: Bool = true
@@ -99,6 +99,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.usageLimitNotificationProjectedEnabled) var usageLimitNotificationProjectedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) var usageLimitCockpitProjectionEnabled: Bool = true
     @AppStorage(PreferencesKey.quotaMeterEnlarged) var quotaMeterEnlarged: Bool = false
+    @AppStorage(PreferencesKey.quotaMeterChrome) var quotaMeterChromeRaw: String = QuotaMeterChrome.onDemand.rawValue
     @AppStorage(PreferencesKey.usageLimitNotificationExhaustedEnabled) var usageLimitNotificationExhaustedEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationFiveHourResetEnabled) var usageLimitNotificationFiveHourResetEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitDiagnosticsCodexSource) var usageLimitDiagnosticsCodexSource: String = ""
@@ -759,6 +760,8 @@ struct PreferencesView: View {
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
         quotaMeterEnlarged = false
+        quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
+        UserDefaults.standard.set(false, forKey: PreferencesKey.quotaMeterChromeRevealedOnce)
         quotaMeterRunwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
         quotaMeterOnTrackGlyphRaw = QuotaMeterOnTrackGlyph.smile.rawValue
 

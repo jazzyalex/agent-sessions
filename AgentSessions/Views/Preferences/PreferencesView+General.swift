@@ -227,6 +227,26 @@ extension PreferencesView {
                     .frame(maxWidth: 240)
                     .help("Enlarged raises every Quota Meter font by one point (provider rows and Session Runway alike) for easier reading, keeping the same relative scale.")
                 }
+
+                labeledRow("Toolbar") {
+                    Picker("", selection: Binding(
+                        get: { QuotaMeterChrome.current(raw: quotaMeterChromeRaw) },
+                        set: { quotaMeterChromeRaw = $0.rawValue }
+                    )) {
+                        ForEach(QuotaMeterChrome.allCases) { chrome in
+                            Text(chrome.title).tag(chrome)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
+                    .help("Controls when the Quota Meter toolbar and reset-credits line appear.")
+                }
+
+                Text(QuotaMeterChrome.current(raw: quotaMeterChromeRaw).detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

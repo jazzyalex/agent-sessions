@@ -210,23 +210,6 @@ enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Compact label for the toolbar pill (full names live in the popover).
-    var shortLabel: String {
-        switch self {
-        case .full: return "Full"
-        case .compact: return "Compact"
-        case .limits: return "Meter"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .full: return "rectangle.split.3x1"
-        case .compact: return "rectangle.compress.vertical"
-        case .limits: return "gauge.with.dots.needle.50percent"
-        }
-    }
-
     var usesCompactChrome: Bool {
         switch self {
         case .full: return false
@@ -723,7 +706,10 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompact) private var legacyCompactMode: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
+    /// Defaults on: with it off, `compactBodyMinHeight` reserves the baseline row
+    /// count no matter how few sessions exist, so a mode named Compact sat on a
+    /// tall blank box whenever the list was short or empty.
+    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = true
 
@@ -750,7 +736,16 @@ struct AgentCockpitHUDView: View {
     @State private var hiddenPriorityChurnDetected: Bool = false
     @State private var highlightedRowIDs: Set<String> = []
     @State private var isCockpitWindowKey: Bool = true
-    @State private var isCompactWindowHovered: Bool = false
+    /// Pointer has rested on the window past the dwell. Reveals chrome under
+    /// `.onHover`; under `.onDemand` it only surfaces the hint, since the whole
+    /// point of that mode is that the pointer alone changes nothing.
+    @State private var pointerDwelled: Bool = false
+    /// Chrome was revealed by an explicit right-click (`.onDemand` only).
+    @State private var demandRevealed: Bool = false
+    /// Pointer is within the HUD. Tracked separately from `pointerDwelled` so a
+    /// popover closing can re-evaluate the collapse without waiting for a hover
+    /// transition that may never come.
+    @State private var isPointerInsideWindow: Bool = false
     @State private var compactToolbarHideTask: Task<Void, Never>? = nil
     @State private var compactToolbarRevealTask: Task<Void, Never>? = nil
     @State private var staleAutoCollapsedProjects: Set<String> = []
@@ -797,6 +792,27 @@ struct AgentCockpitHUDView: View {
         AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? (legacyCompactMode ? .compact : .full)
     }
 
+    /// Chrome modes are a Quota Meter concern only. Full has a permanent
+    /// toolbar; Compact keeps its own hover-reveal.
+    private var quotaMeterChrome: QuotaMeterChrome {
+        QuotaMeterChrome.current(raw: quotaMeterChromeRaw)
+    }
+
+    private var resolvedShowsCompactToolbar: Bool {
+        guard isCompact else { return true }
+        guard isLimitsOnly else { return pointerDwelled }
+        return quotaMeterChrome.showsChrome(pointerDwelled: pointerDwelled, demandRevealed: demandRevealed)
+    }
+
+    private var showsRightClickHint: Bool {
+        guard isLimitsOnly else { return false }
+        return quotaMeterChrome.showsRightClickHint(
+            pointerDwelled: pointerDwelled,
+            demandRevealed: demandRevealed,
+            retired: quotaMeterChromeRevealedOnce
+        )
+    }
+
     private var isCompact: Bool {
         hudDisplayMode.usesCompactChrome
     }
@@ -824,8 +840,11 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
+    @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
+    @AppStorage(PreferencesKey.quotaMeterChromeRevealedOnce) private var quotaMeterChromeRevealedOnce = false
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
+    @State private var showChromePopover = false
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
@@ -902,7 +921,7 @@ struct AgentCockpitHUDView: View {
         let displayState = presentationState.inputs == currentPresentationInputs
             ? presentationState
             : Self.makePresentationState(from: currentPresentationInputs)
-        let showsCompactToolbar = !isCompact || isCompactWindowHovered
+        let showsCompactToolbar = resolvedShowsCompactToolbar
 
         return configuredHUDContent(
             snapshot: snapshot,
@@ -1004,6 +1023,42 @@ struct AgentCockpitHUDView: View {
         .onHover { hovering in
             handleCompactWindowHoverChange(hovering)
         }
+        // Dismissing a popover from outside the HUD produces no hover event, so
+        // re-run the collapse decision once it closes.
+        .onChange(of: isToolbarPopoverOpen) { _, open in
+            guard !open, !isPointerInsideWindow else { return }
+            handleCompactWindowHoverChange(false)
+        }
+        // The mode is changed *from the toolbar*, so the new mode must not yank
+        // the toolbar — and the popover anchored to it — out from under the
+        // pointer. Hand it an already-revealed state to land in; the ordinary
+        // pointer-out collapse takes over from there.
+        .onChange(of: quotaMeterChromeRaw) { _, _ in
+            guard isLimitsOnly, isPointerInsideWindow || showChromePopover else { return }
+            switch quotaMeterChrome {
+            case .always:
+                break
+            case .onHover:
+                pointerDwelled = true
+            case .onDemand:
+                demandRevealed = true
+            }
+        }
+        // Both are overlays, never members of the layout: the no-expansion
+        // promise of .onDemand is structural, not a rule a later edit has to
+        // remember.
+        .applyIf(quotaMeterChrome.respondsToRightClick && isLimitsOnly) { view in
+            view.overlay(HUDRightClickCatcher(onRightClick: revealChromeOnDemand))
+        }
+        .overlay(alignment: .bottom) {
+            if showsRightClickHint {
+                HUDRightClickHintPill()
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showsRightClickHint)
         .onPreferenceChange(LimitsContentHeightKey.self) { height in
             guard height.isFinite, height > 0 else { return }
             limitsContentHeight = height
@@ -1083,7 +1138,10 @@ struct AgentCockpitHUDView: View {
             }
 
             if isLimitsOnly {
-                HUDLimitsRowsPanel(activeRows: displayState.rowsForDisplay)
+                HUDLimitsRowsPanel(
+                    activeRows: displayState.rowsForDisplay,
+                    showsChrome: showsCompactToolbar
+                )
             } else {
                 bodyList(
                     visibleRows: displayState.visibleRows,
@@ -1122,15 +1180,27 @@ struct AgentCockpitHUDView: View {
         )
     }
 
+    /// Whether the dwell has anyone listening. Compact always listens; the Quota
+    /// Meter only does when its chrome mode reads the pointer at all.
+    private var dwellTimerArmed: Bool {
+        guard isCompact else { return false }
+        guard isLimitsOnly else { return true }
+        return quotaMeterChrome.armsDwellTimer(hintRetired: quotaMeterChromeRevealedOnce)
+    }
+
+    /// A toolbar popover is its own window, so reaching for it reads as leaving
+    /// the HUD. Collapsing then would yank the chrome out from under the popover
+    /// still anchored to it.
+    private var isToolbarPopoverOpen: Bool {
+        showRunwayPopover || showRunwayPresentationPopover || showChromePopover
+    }
+
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
+        isPointerInsideWindow = hovering
         guard isCompact else {
             cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
-            if isCompactWindowHovered {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isCompactWindowHovered = false
-                }
-            }
+            clearRevealState()
             return
         }
 
@@ -1140,12 +1210,13 @@ struct AgentCockpitHUDView: View {
             // does not depend on window focus, so it works on a pinned,
             // non-active window.
             cancelCompactToolbarHideTask()
-            guard !isCompactWindowHovered, compactToolbarRevealTask == nil else { return }
+            guard dwellTimerArmed else { return }
+            guard !pointerDwelled, compactToolbarRevealTask == nil else { return }
             compactToolbarRevealTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    isCompactWindowHovered = true
+                    pointerDwelled = true
                 }
                 compactToolbarRevealTask = nil
             }
@@ -1153,17 +1224,42 @@ struct AgentCockpitHUDView: View {
         }
 
         // Hover out: drop a pending dwell, then collapse promptly so the window
-        // returns to its compact widget footprint.
+        // returns to its compact widget footprint. On-demand chrome collapses on
+        // the same path — revealing it is deliberate, dismissing it needn't be.
         cancelCompactToolbarRevealTask()
         cancelCompactToolbarHideTask()
-        guard isCompactWindowHovered else { return }
+        guard pointerDwelled || demandRevealed else { return }
+        guard !isToolbarPopoverOpen else { return }
         compactToolbarHideTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
-                isCompactWindowHovered = false
+                pointerDwelled = false
+                demandRevealed = false
             }
             compactToolbarHideTask = nil
+        }
+    }
+
+    private func clearRevealState() {
+        guard pointerDwelled || demandRevealed else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            pointerDwelled = false
+            demandRevealed = false
+        }
+    }
+
+    /// Explicit reveal. Retires the hint on first use — once you have found the
+    /// gesture, the pill has nothing left to teach.
+    private func revealChromeOnDemand() {
+        guard quotaMeterChrome.respondsToRightClick, isLimitsOnly else { return }
+        cancelCompactToolbarHideTask()
+        if !quotaMeterChromeRevealedOnce {
+            quotaMeterChromeRevealedOnce = true
+        }
+        guard !demandRevealed else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            demandRevealed = true
         }
     }
 
@@ -1171,13 +1267,13 @@ struct AgentCockpitHUDView: View {
         guard isCompact else {
             cancelCompactToolbarRevealTask()
             cancelCompactToolbarHideTask()
-            if isCompactWindowHovered {
-                isCompactWindowHovered = false
-            }
+            pointerDwelled = false
+            demandRevealed = false
             return
         }
         cancelCompactToolbarRevealTask()
-        isCompactWindowHovered = false
+        pointerDwelled = false
+        demandRevealed = false
     }
 
     private func cancelCompactToolbarHideTask() {
@@ -1273,8 +1369,8 @@ struct AgentCockpitHUDView: View {
 
                 if isLimitsOnly {
                     // Sheds the text-size toggle, then the runway group, as width
-                    // runs out. Pin survives to the last rung; the destinations
-                    // zone is outside ViewThatFits and never drops.
+                    // runs out. Chrome and pin survive to the last rung; the
+                    // destinations zone is outside ViewThatFits and never drops.
                     ViewThatFits(in: .horizontal) {
                         limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: true)
                         limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: false)
@@ -1374,6 +1470,25 @@ struct AgentCockpitHUDView: View {
         .help(quotaMeterEnlarged ? "Switch to Standard text size" : "Switch to Enlarged text size")
     }
 
+    /// The toolbar's own visibility control. Load-bearing: with no context menu,
+    /// the toolbar is the only control surface the Quota Meter has, so it has to
+    /// carry the switch that hides it — otherwise turning it off means a
+    /// round-trip through Settings, and `.onDemand` has no visible way back.
+    private var cockpitChromeButton: some View {
+        let chrome = quotaMeterChrome
+        return Button {
+            showChromePopover.toggle()
+        } label: {
+            Image(systemName: "rectangle.topthird.inset.filled")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: chrome != .always, tint: nil))
+        .help("Toolbar: \(chrome.title) — choose when this toolbar appears.")
+        .popover(isPresented: $showChromePopover, arrowEdge: .bottom) {
+            HUDChromeVisibilityPopover(quotaMeterChromeRaw: $quotaMeterChromeRaw)
+        }
+    }
+
     private var cockpitPinButton: some View {
         Button {
             isPinned.toggle()
@@ -1450,19 +1565,23 @@ struct AgentCockpitHUDView: View {
             .frame(width: 1, height: 16)
     }
 
-    /// One rung of the Quota Meter's trailing cluster. The hairline only earns
-    /// its place when something precedes pin.
+    /// One rung of the Quota Meter's trailing cluster. The chrome button is never
+    /// shed — it is the only way back from `.onDemand`, so it outranks even the
+    /// runway controls when width runs short.
     private func limitsToolbarCluster(showRunway: Bool, showFontSize: Bool) -> some View {
         HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
             if showRunway {
                 runwayGroup
             }
-            if showFontSize {
-                cockpitFontSizeButton
+            // Presentation pair: how the window renders itself, as opposed to
+            // what it reports.
+            HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
+                if showFontSize {
+                    cockpitFontSizeButton
+                }
+                cockpitChromeButton
             }
-            if showRunway || showFontSize {
-                toolbarHairline
-            }
+            toolbarHairline
             cockpitPinButton
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -1620,6 +1739,18 @@ struct AgentCockpitHUDView: View {
             .keyboardShortcut("m", modifiers: [.command, .shift])
             .frame(width: 0, height: 0)
             .opacity(0)
+
+            // Compact chrome has no close button for AppKit to press, so the
+            // standard ⌘W reaches performClose and merely beeps. Full keeps its
+            // titlebar button and must not get a second handler.
+            if isCompact {
+                Button("") {
+                    AppWindowRouter.closeAgentCockpitWindow()
+                }
+                .keyboardShortcut("w", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+            }
 
             ForEach(1...9, id: \.self) { n in
                 Button("") {
@@ -3472,6 +3603,85 @@ private struct LimitsContentHeightKey: PreferenceKey {
     }
 }
 
+/// Teaches the one gesture that `.onDemand` chrome depends on. Drawn as an
+/// overlay so it can never affect layout, and retired for good once the user
+/// right-clicks.
+private struct HUDRightClickHintPill: View {
+    var body: some View {
+        Text("Right-click for controls")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+            )
+    }
+}
+
+/// Catches a right-click (or control-click) anywhere it is layered over, while
+/// staying invisible to every other event.
+///
+/// SwiftUI has no right-click hook short of `.contextMenu`, which would insist
+/// on presenting a menu. This exists so the Quota Meter can reveal its real
+/// toolbar instead — one set of controls, not a menu duplicating them.
+private struct HUDRightClickCatcher: NSViewRepresentable {
+    let onRightClick: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = RightClickView()
+        view.onRightClick = onRightClick
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? RightClickView)?.onRightClick = onRightClick
+    }
+
+    final class RightClickView: NSView {
+        var onRightClick: (() -> Void)?
+
+        /// Claims the point only for right-mouse events, so left-clicks,
+        /// buttons underneath, and the double-click probe pass straight through
+        /// as if this view were not here.
+        ///
+        /// Load-bearing: this view covers the whole window, and the window is
+        /// dragged by its background. Returning self for a left-click would
+        /// swallow the drag and make the Quota Meter unmovable.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent, isRightClick(event) else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            onRightClick?()
+        }
+
+        /// AppKit does not reliably synthesize `rightMouseDown` for a
+        /// control-click on a view that also accepts left clicks, so handle the
+        /// modifier form explicitly.
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.control) {
+                onRightClick?()
+                return
+            }
+            super.mouseDown(with: event)
+        }
+
+        private func isRightClick(_ event: NSEvent) -> Bool {
+            switch event.type {
+            case .rightMouseDown, .rightMouseUp, .rightMouseDragged:
+                return true
+            case .leftMouseDown, .leftMouseUp:
+                return event.modifierFlags.contains(.control)
+            default:
+                return false
+            }
+        }
+    }
+}
+
 private enum HUDExpansionDirection {
     case up
     case down
@@ -4232,6 +4442,9 @@ private struct HUDLimitsBar: View {
 
 private struct HUDLimitsRowsPanel: View {
     let activeRows: [HUDRow]
+    /// The reset-credits line is part of the chrome layer, revealed and hidden
+    /// with the toolbar rather than on its own hover.
+    let showsChrome: Bool
     @EnvironmentObject private var codexUsageModel: CodexUsageModel
     @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled = false
@@ -4246,7 +4459,6 @@ private struct HUDLimitsRowsPanel: View {
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
     @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
-    @State private var isHovering = false
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
     private var runwayVisibility: QuotaMeterRunwayVisibility {
@@ -4330,7 +4542,7 @@ private struct HUDLimitsRowsPanel: View {
                         }
                         row(entry: entry)
                         if entry.source == .codex,
-                           isHovering,
+                           showsChrome,
                            let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: clockNow) {
                             HStack(spacing: 0) {
                                 Text(creditsLine)
@@ -4355,7 +4567,6 @@ private struct HUDLimitsRowsPanel: View {
                     .preference(key: LimitsContentHeightKey.self, value: proxy.size.height)
             }
         )
-        .onHover { isHovering = $0 }
         .onReceive(Self.clockTimer) { clockNow = $0 }
         .onTapGesture(count: 2) {
             if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
@@ -4517,6 +4728,48 @@ private struct HUDLimitsExpandedPanel: View {
     }
 }
 
+private struct HUDChromeVisibilityPopover: View {
+    @Binding var quotaMeterChromeRaw: String
+
+    private var selection: QuotaMeterChrome {
+        QuotaMeterChrome.current(raw: quotaMeterChromeRaw)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Toolbar")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .kerning(0.4)
+
+            Picker("", selection: Binding(
+                get: { quotaMeterChromeRaw },
+                set: { quotaMeterChromeRaw = $0 }
+            )) {
+                ForEach(QuotaMeterChrome.allCases) { chrome in
+                    Text(chrome.title).tag(chrome.rawValue)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(selection.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(width: 236)
+    }
+}
+
 private struct HUDRunwayVisibilityPopover: View {
     @Binding var runwayVisibilityRaw: String
 
@@ -4667,7 +4920,10 @@ private struct HUDLimitsDetailPanel: View {
                         detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
                     }
                     .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity)
+                    // `.leading` is load-bearing: maxWidth alone centers, which left
+                    // the provider rows indented while the reset-credits line below
+                    // them — and every other case in this switch — sat flush left.
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if entry.source == .codex,
                    let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: now) {
