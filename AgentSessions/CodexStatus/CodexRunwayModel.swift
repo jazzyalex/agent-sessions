@@ -248,23 +248,85 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
     var modelSlug: String? = nil
 }
 
+/// One model's slice of a session's token rate, in the same normalized per-type
+/// shape as `RunwaySessionActivity`.
+///
+/// A session routinely burns SEVERAL models at once: a session's subagent
+/// transcripts fold into the parent identity as extra log paths (see the recent-
+/// session scanners), and an orchestrator on one model commonly drives subagents on
+/// a cheaper one. Summing all their tokens and pricing the total at any single model
+/// misprices every other slice — biased toward whichever path sorts first, which is
+/// always the parent. `$` therefore prices each slice at its own model and sums.
+struct RunwayModelComponent: Equatable, Sendable {
+    let modelSlug: String?
+    let inputPerSecond: Double        // FRESH (non-cached) input
+    let cachedInputPerSecond: Double
+    let outputPerSecond: Double
+    let cacheCreationPerSecond: Double
+
+    var totalPerSecond: Double {
+        inputPerSecond + cachedInputPerSecond + outputPerSecond + cacheCreationPerSecond
+    }
+}
+
 struct RunwaySessionActivity: Equatable, Sendable {
     let identity: RunwaySessionIdentity
     /// Netted throughput (drives tk/h) — unchanged from Phase 1.
     let tokensPerSecond: Double
     let sampleStart: Date
     let sampleEnd: Date
-    /// Per-type token rates for $ pricing (Phase 2), normalized to ONE shape across
-    /// providers so dollarSnapshot prices with no subtraction: `inputPerSecond` is
-    /// FRESH (non-cached) input; `cachedInputPerSecond` is cached-input reads;
-    /// `cacheCreationPerSecond` is Claude cache writes (0 for Codex). Default 0 so
-    /// existing token/weekly callers are unchanged.
-    var inputPerSecond: Double = 0
-    var cachedInputPerSecond: Double = 0
-    var outputPerSecond: Double = 0
-    var cacheCreationPerSecond: Double = 0
-    /// Per-session model slug (latest seen) for price lookup. nil → $ unpriceable.
-    var modelSlug: String? = nil
+    /// Per-model slices — the SINGLE source of truth for rates. `$` prices each at
+    /// its own model; the totals below are derived from these at init, so tk/h and
+    /// `$` can never end up describing different token volumes. There is
+    /// deliberately no session-level `modelSlug`: a session can burn several models
+    /// at once, and any single "representative" slug invites pricing the totals with
+    /// it — which is exactly the parent-biased blend this type exists to prevent.
+    let components: [RunwayModelComponent]
+    /// Session totals across every model, normalized to ONE shape across providers
+    /// so pricing needs no subtraction: `inputPerSecond` is FRESH (non-cached)
+    /// input; `cachedInputPerSecond` is cached-input reads; `cacheCreationPerSecond`
+    /// is Claude cache writes (0 for Codex). Derived — never set directly.
+    let inputPerSecond: Double
+    let cachedInputPerSecond: Double
+    let outputPerSecond: Double
+    let cacheCreationPerSecond: Double
+
+    init(identity: RunwaySessionIdentity,
+         tokensPerSecond: Double,
+         sampleStart: Date,
+         sampleEnd: Date,
+         components: [RunwayModelComponent]) {
+        self.identity = identity
+        self.tokensPerSecond = tokensPerSecond
+        self.sampleStart = sampleStart
+        self.sampleEnd = sampleEnd
+        self.components = components
+        self.inputPerSecond = components.reduce(0) { $0 + $1.inputPerSecond }
+        self.cachedInputPerSecond = components.reduce(0) { $0 + $1.cachedInputPerSecond }
+        self.outputPerSecond = components.reduce(0) { $0 + $1.outputPerSecond }
+        self.cacheCreationPerSecond = components.reduce(0) { $0 + $1.cacheCreationPerSecond }
+    }
+
+    /// Single-model convenience — one transcript on one model, the common case.
+    init(identity: RunwaySessionIdentity,
+         tokensPerSecond: Double,
+         sampleStart: Date,
+         sampleEnd: Date,
+         inputPerSecond: Double = 0,
+         cachedInputPerSecond: Double = 0,
+         outputPerSecond: Double = 0,
+         cacheCreationPerSecond: Double = 0,
+         modelSlug: String? = nil) {
+        self.init(identity: identity,
+                  tokensPerSecond: tokensPerSecond,
+                  sampleStart: sampleStart,
+                  sampleEnd: sampleEnd,
+                  components: [RunwayModelComponent(modelSlug: modelSlug,
+                                                    inputPerSecond: inputPerSecond,
+                                                    cachedInputPerSecond: cachedInputPerSecond,
+                                                    outputPerSecond: outputPerSecond,
+                                                    cacheCreationPerSecond: cacheCreationPerSecond)])
+    }
 }
 
 struct RunwaySessionBurn: Equatable, Sendable {
@@ -922,14 +984,23 @@ enum CodexRunwayCalculator {
     /// it, and subtracting it would understate the bill.
     static func dollarsPerHour(for activity: RunwaySessionActivity,
                                priceTable: RunwayPriceTable) -> Double? {
-        let perType = activity.inputPerSecond + activity.cachedInputPerSecond
-            + activity.outputPerSecond + activity.cacheCreationPerSecond
-        guard perType > 0, let p = priceTable.price(forModel: activity.modelSlug) else { return nil }
-        let perSecond = activity.inputPerSecond * p.inputPerMTok / 1_000_000
-            + activity.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
-            + activity.outputPerSecond * p.outputPerMTok / 1_000_000
-            + activity.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
-        guard perSecond.isFinite else { return nil }
+        var perSecond = 0.0
+        var pricedAnything = false
+        for component in activity.components {
+            // A zero-rate slice costs nothing, so it can't make the session
+            // unpriceable even if its model is unknown.
+            guard component.totalPerSecond > 0 else { continue }
+            // Any *contributing* slice we can't price makes the whole session
+            // unpriceable: pricing only the known slices would silently understate
+            // the session rather than drop it honestly.
+            guard let p = priceTable.price(forModel: component.modelSlug) else { return nil }
+            perSecond += component.inputPerSecond * p.inputPerMTok / 1_000_000
+                + component.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
+                + component.outputPerSecond * p.outputPerMTok / 1_000_000
+                + component.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
+            pricedAnything = true
+        }
+        guard pricedAnything, perSecond.isFinite else { return nil }
         return perSecond * 3600
     }
 
@@ -1968,11 +2039,10 @@ enum CodexRunwayTokenActivityParser {
             tokensPerSecond: tokensPerSecond,
             sampleStart: pathActivities.map(\.sampleStart).min() ?? now,
             sampleEnd: pathActivities.map(\.sampleEnd).max() ?? now,
-            inputPerSecond: pathActivities.reduce(0) { $0 + $1.inputPerSecond },
-            cachedInputPerSecond: pathActivities.reduce(0) { $0 + $1.cachedInputPerSecond },
-            outputPerSecond: pathActivities.reduce(0) { $0 + $1.outputPerSecond },
-            cacheCreationPerSecond: pathActivities.reduce(0) { $0 + $1.cacheCreationPerSecond },
-            modelSlug: pathActivities.compactMap(\.modelSlug).first
+            // Each contributing path keeps its OWN model, so $ prices a parent and
+            // its subagents at their real rates instead of blending them all into
+            // whichever path happened to sort first. Totals derive from these.
+            components: pathActivities.flatMap(\.components)
         )
     }
 

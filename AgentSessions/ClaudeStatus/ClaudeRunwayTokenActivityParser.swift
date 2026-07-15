@@ -140,11 +140,11 @@ enum ClaudeRunwayTokenActivityParser {
             tokensPerSecond: tokensPerSecond,
             sampleStart: pathActivities.map(\.activity.sampleStart).min() ?? now,
             sampleEnd: pathActivities.map(\.activity.sampleEnd).max() ?? now,
-            inputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.inputPerSecond },
-            cachedInputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.cachedInputPerSecond },
-            outputPerSecond: pathActivities.reduce(0) { $0 + $1.activity.outputPerSecond },
-            cacheCreationPerSecond: pathActivities.reduce(0) { $0 + $1.activity.cacheCreationPerSecond },
-            modelSlug: pathActivities.compactMap(\.activity.modelSlug).first
+            // Subagent transcripts fold into the parent identity as extra paths and
+            // routinely run a cheaper model than the orchestrator, so each path keeps
+            // its own model for pricing rather than being blended into the parent's.
+            // Totals derive from these.
+            components: pathActivities.flatMap(\.activity.components)
         )
         return (activity, provisional)
     }
@@ -199,6 +199,15 @@ enum ClaudeRunwayTokenActivityParser {
         }
     }
 
+    /// Per-model token accumulator for one burst.
+    private struct BurstTokens {
+        var input = 0.0, output = 0.0, cacheCreation = 0.0, cacheRead = 0.0
+        mutating func add(_ s: ClaudeRunwayTokenActivitySample) {
+            input += s.input; output += s.output
+            cacheCreation += s.cacheCreation; cacheRead += s.cacheRead
+        }
+    }
+
     private static func pathActivity(identity: RunwaySessionIdentity,
                                      samples: [ClaudeRunwayTokenActivitySample],
                                      now: Date) -> (activity: RunwaySessionActivity, provisional: Bool)? {
@@ -210,30 +219,42 @@ enum ClaudeRunwayTokenActivityParser {
         // tokens predate the span and are excluded.
         var windowStart = last.capturedAt
         var consumed = 0.0
-        var inSum = 0.0, outSum = 0.0, ccSum = 0.0, crSum = 0.0
+        // A burst can straddle a model switch, so keep each turn's tokens under the
+        // model that actually produced them. Pricing the whole burst at the newest
+        // turn's model would misprice every earlier turn in it. These buckets are the
+        // only per-type accumulator — the activity's totals derive from them.
+        var byModel: [String?: BurstTokens] = [:]
         var previous = last
         for sample in samples.dropLast().reversed() {
             let gap = previous.capturedAt.timeIntervalSince(sample.capturedAt)
             if gap > maximumPairInterval { break }
             consumed += previous.tokens
-            inSum += previous.input; outSum += previous.output
-            ccSum += previous.cacheCreation; crSum += previous.cacheRead
+            var bucket = byModel[previous.modelSlug] ?? BurstTokens()
+            bucket.add(previous)
+            byModel[previous.modelSlug] = bucket
             windowStart = sample.capturedAt
             previous = sample
         }
 
         let span = last.capturedAt.timeIntervalSince(windowStart)
         if span >= minimumPairInterval, consumed > 0 {
+            // Sorted so the component order (and thus Equatable) is deterministic;
+            // the $ sum itself is order-independent.
+            let components = byModel
+                .sorted { ($0.key ?? "") < ($1.key ?? "") }
+                .map { model, t in
+                    RunwayModelComponent(modelSlug: model,
+                                         inputPerSecond: t.input / span,
+                                         cachedInputPerSecond: t.cacheRead / span,
+                                         outputPerSecond: t.output / span,
+                                         cacheCreationPerSecond: t.cacheCreation / span)
+                }
             return (RunwaySessionActivity(
                 identity: identity,
                 tokensPerSecond: consumed / span,
                 sampleStart: windowStart,
                 sampleEnd: last.capturedAt,
-                inputPerSecond: inSum / span,
-                cachedInputPerSecond: crSum / span,
-                outputPerSecond: outSum / span,
-                cacheCreationPerSecond: ccSum / span,
-                modelSlug: last.modelSlug
+                components: components
             ), false)
         }
 

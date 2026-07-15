@@ -4247,6 +4247,120 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertTrue(samples.isEmpty, "no token_count lines → no samples")
     }
 
+    /// Regression: a session's subagent transcripts fold into the parent identity as
+    /// extra log paths and routinely run a cheaper model. Summing every path's tokens
+    /// and pricing the total at one model (the parent's — it always sorts first)
+    /// misprices every subagent slice. Measured 1.13x overstatement on a real
+    /// opus-parent/sonnet-subagent session; up to 10x for a fable orchestrator
+    /// driving haiku subagents.
+    func testDollarSnapshotPricesEachModelComponentAtItsOwnRate() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let baseline = RunwayProviderBaseline(source: .claude, remainingPercent: 50, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: .dollarsPerHour)
+        let table = RunwayPriceTable.makeForTesting()
+
+        // Opus parent + sonnet subagent, each burning 100 output tok/s.
+        let opus = RunwayModelComponent(modelSlug: "claude-opus-4-8", inputPerSecond: 0,
+                                        cachedInputPerSecond: 0, outputPerSecond: 100, cacheCreationPerSecond: 0)
+        let sonnet = RunwayModelComponent(modelSlug: "claude-sonnet-5", inputPerSecond: 0,
+                                          cachedInputPerSecond: 0, outputPerSecond: 100, cacheCreationPerSecond: 0)
+        let activity = RunwaySessionActivity(
+            identity: .init(id: "s", displayName: "S", isGoal: false, logPaths: ["/p", "/p/subagents/a"]),
+            tokensPerSecond: 200, sampleStart: now, sampleEnd: now,
+            components: [opus, sonnet])
+        // Totals derive from components — they cannot drift from what $ prices.
+        XCTAssertEqual(activity.outputPerSecond, 200)
+
+        // Correct: 100*25 (opus out) + 100*15 (sonnet out), per second → /1e6 * 3600.
+        let expected: Double = (100.0 * 25.0 + 100.0 * 15.0) / 1_000_000.0 * 3600.0
+        let snap = CodexRunwayCalculator.dollarSnapshot(
+            baseline: baseline, activities: [activity], priceTable: table, maxRows: 5)
+        XCTAssertEqual(snap?.snapshot.rows.first?.displayRate ?? 0, expected, accuracy: 1e-9)
+
+        // The old behaviour priced all 200 tok/s at the parent's model. Pin that the
+        // blended figure is NOT what we produce.
+        let blended: Double = (200.0 * 25.0) / 1_000_000.0 * 3600.0
+        XCTAssertNotEqual(snap?.snapshot.rows.first?.displayRate ?? 0, blended, accuracy: 1e-9)
+        XCTAssertLessThan(snap?.snapshot.rows.first?.displayRate ?? 0, blended,
+                          "blending subagent tokens into the parent's model overstates cost")
+    }
+
+    /// Pins the WIRING, not just the calculator: two real transcripts on different
+    /// models, folded into one identity the way a parent + its subagents are, driven
+    /// through `activity(identity:)`. Without this, deleting the `components:` line
+    /// from the aggregate silently reverts to blending every subagent's tokens into
+    /// whichever path sorts first — and every other test still passes.
+    func testCodexRunwayMultiPathIdentityKeepsPerPathModels() throws {
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-multipath-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let reset = t0.addingTimeInterval(5 * 60 * 60)
+        func tok(_ at: Date, _ input: Int, _ cached: Int, _ output: Int, _ total: Int) -> String {
+            "{\"timestamp\":\"\(iso(at))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":\(input),\"cached_input_tokens\":\(cached),\"output_tokens\":\(output),\"total_tokens\":\(total)}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        }
+        func write(_ name: String, model: String) throws -> String {
+            let url = dir.appendingPathComponent(name)
+            let ctx = "{\"timestamp\":\"\(iso(t0))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"\(model)\"}}"
+            // 0 → 300 output over 30s on each path = 10 output tok/s each.
+            let text = ctx + "\n" + tok(t0, 0, 0, 0, 0) + "\n" + tok(t0.addingTimeInterval(30), 0, 0, 300, 300)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return url.path
+        }
+        // Expensive "parent" sorts first (a.jsonl) — exactly the bias that misprices.
+        let parent = try write("a-parent.jsonl", model: "gpt-5.6-sol")
+        let child = try write("b-child.jsonl", model: "gpt-5.6-luna")
+
+        let identity = RunwaySessionIdentity(id: "s", displayName: "S", isGoal: false,
+                                             logPaths: [parent, child])
+        let activity = CodexRunwayTokenActivityParser.activity(
+            identity: identity, now: t0.addingTimeInterval(31))
+
+        let models = Set((activity?.components ?? []).map { $0.modelSlug })
+        XCTAssertEqual(models, ["gpt-5.6-sol", "gpt-5.6-luna"],
+                       "each path must keep its own model, not collapse to the first")
+        XCTAssertEqual(activity?.outputPerSecond ?? 0, 20, accuracy: 0.001, "totals still sum both paths")
+
+        // sol out $30/MTok, luna out $6/MTok → 10*30 + 10*6, NOT 20*30.
+        let table = RunwayPriceTable.makeForTesting()
+        let expected: Double = (10.0 * 30.0 + 10.0 * 6.0) / 1_000_000.0 * 3600.0
+        let blended: Double = (20.0 * 30.0) / 1_000_000.0 * 3600.0
+        let rate = CodexRunwayCalculator.dollarsPerHour(for: activity!, priceTable: table)
+        XCTAssertEqual(rate ?? 0, expected, accuracy: 1e-9)
+        XCTAssertLessThan(rate ?? 0, blended, "blending the child into the parent's model overstates cost")
+    }
+
+    /// A zero-rate slice can't make a session unpriceable, but a *contributing* slice
+    /// we can't price must drop the whole session rather than silently understate it.
+    func testDollarSnapshotComponentPriceabilityRules() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let baseline = RunwayProviderBaseline(source: .claude, remainingPercent: 50, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: .dollarsPerHour)
+        let table = RunwayPriceTable.makeForTesting()
+        let known = RunwayModelComponent(modelSlug: "claude-sonnet-5", inputPerSecond: 0,
+                                         cachedInputPerSecond: 0, outputPerSecond: 100, cacheCreationPerSecond: 0)
+        let idleUnknown = RunwayModelComponent(modelSlug: "who-knows", inputPerSecond: 0,
+                                               cachedInputPerSecond: 0, outputPerSecond: 0, cacheCreationPerSecond: 0)
+        let busyUnknown = RunwayModelComponent(modelSlug: "who-knows", inputPerSecond: 0,
+                                               cachedInputPerSecond: 0, outputPerSecond: 100, cacheCreationPerSecond: 0)
+        func activity(_ components: [RunwayModelComponent]) -> RunwaySessionActivity {
+            RunwaySessionActivity(
+                identity: .init(id: "s", displayName: "S", isGoal: false, logPaths: ["/p"]),
+                tokensPerSecond: 100, sampleStart: now, sampleEnd: now,
+                components: components)
+        }
+        // A zero-rate unknown slice costs nothing → still priceable.
+        XCTAssertNotNil(CodexRunwayCalculator.dollarsPerHour(
+            for: activity([known, idleUnknown]), priceTable: table))
+        // A burning unknown slice → drop the session (never understate).
+        XCTAssertNil(CodexRunwayCalculator.dollarsPerHour(
+            for: activity([known, busyUnknown]), priceTable: table))
+    }
+
     /// A stale cached manifest must never shadow a corrected bundled table.
     func testPriceTableIgnoresOlderCachedManifest() {
         let t = RunwayPriceTable.makeForTesting()   // bundled, updated 2026-07-14
