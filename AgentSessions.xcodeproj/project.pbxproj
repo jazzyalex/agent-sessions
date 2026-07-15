@@ -126,6 +126,7 @@
 		478AE7D719F6ABC1FC0BF640 /* ClaudeCredentialFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31086333420388C187C641BA /* ClaudeCredentialFingerprint.swift */; };
 		490E6DB11885C1FB80E4255E /* ClaudeDesktopSessionTitlesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B9C9D402F27FBCA010B635 /* ClaudeDesktopSessionTitlesTests.swift */; };
 		4962A769E93CA92892463295 /* SearchTextMatcherMemoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DDAD9E23BEFCF48EE10A173 /* SearchTextMatcherMemoTests.swift */; };
+		4975E6E741246F858DF12F13 /* HUDLimitsResizeAnchorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F5E0F747BD65EAE9D778D1 /* HUDLimitsResizeAnchorTests.swift */; };
 		4AC0F0F49ECBF771CFB7D777 /* HermesCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51D4C7236AF88FD7A139C43B /* HermesCLIEnvironment.swift */; };
 		4AE2E9940B9A7A5FEB3CA32F /* OnboardingContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C09E04E00723C1B1342D3234 /* OnboardingContent.swift */; };
 		4BC76223F69D38B16BAC7DD6 /* ProgressThrottler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0FF569592BFE502A97E9AE /* ProgressThrottler.swift */; };
@@ -876,6 +877,7 @@
 		CLC000020000000000000002 /* ClaudeStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeStatusService.swift; sourceTree = SOURCE_ROOT; };
 		CLC000020000000000000003 /* claude_usage_capture.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = AgentSessions/Resources/claude_usage_capture.sh; sourceTree = SOURCE_ROOT; };
 		D08E626D5410489B595FF4D1 /* TranscriptSelectionCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/TranscriptSelectionCoordinator.swift; sourceTree = SOURCE_ROOT; };
+		D0F5E0F747BD65EAE9D778D1 /* HUDLimitsResizeAnchorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/HUDLimitsResizeAnchorTests.swift; sourceTree = SOURCE_ROOT; };
 		D2A4B0DBEB6CE6812D3332F8 /* PiSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/PiSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		D2BB94A3759137164517CC64 /* ProbeCleanupHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/ProbeCleanupHelpers.swift; sourceTree = SOURCE_ROOT; };
 		D3A22B30681A2A49CB452C34 /* CursorBackendDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Cursor/CursorBackendDetector.swift; sourceTree = SOURCE_ROOT; };
@@ -1560,6 +1562,7 @@
 				C6867B3DAF9FC5641E44D7B7 /* OnboardingFeedbackTriggerTests.swift */,
 				9CE5CCF20371FD6964A2F122 /* FeedbackSubmitterTests.swift */,
 				DEC41AB43321902E3C6F23FA /* OnboardingQuotaMeterCardTests.swift */,
+				D0F5E0F747BD65EAE9D778D1 /* HUDLimitsResizeAnchorTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2647,6 +2650,7 @@
 				0BED60C79B044F149BEF273F /* FeedbackSubmitterTests.swift in Sources */,
 				D5541F1B264AF5605E439D82 /* MigrationCorpusPreservationTests.swift in Sources */,
 				D9874EC8E224CA4488E0841C /* OnboardingQuotaMeterCardTests.swift in Sources */,
+				4975E6E741246F858DF12F13 /* HUDLimitsResizeAnchorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

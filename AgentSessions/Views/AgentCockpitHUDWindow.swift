@@ -1,6 +1,27 @@
 import SwiftUI
 import AppKit
 
+/// Which edge stays put when the Quota Meter window resizes.
+///
+/// The window is a pinned widget the user parks somewhere deliberate, so a
+/// reveal/collapse round trip has to leave it exactly where it started. Growth
+/// direction is chosen from the screen room available — near the bottom of the
+/// display it grows *upward*, pinning its bottom edge — so the matching shrink
+/// cannot simply pin the top: it has to release whichever edge that growth
+/// pinned. Deciding independently is what made the window walk up the screen by
+/// one toolbar height per right-click.
+enum HUDLimitsResizeAnchor {
+    /// - Parameters:
+    ///   - isGrowing: target height exceeds the current height.
+    ///   - growsDown: for a growth, whether there is room to expand downward.
+    ///   - lastGrowAnchoredTop: what the most recent growth decided; a shrink
+    ///     mirrors it instead of re-deciding.
+    /// - Returns: true when the top edge stays fixed and the bottom edge moves.
+    static func anchorsTop(isGrowing: Bool, growsDown: Bool, lastGrowAnchoredTop: Bool) -> Bool {
+        isGrowing ? growsDown : lastGrowAnchoredTop
+    }
+}
+
 struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
     let isPinned: Bool
     let shownSessionCount: Int
@@ -141,6 +162,9 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let compactDisabledCalloutHeight: CGFloat = 56
         private let fullDefaultFrameSize = NSSize(width: 644, height: 320)
         private var cachedFrameByMode: [Mode: NSRect] = [:]
+        /// Which edge the last Quota Meter *growth* pinned, so the matching
+        /// shrink can release the same one. See `HUDLimitsResizeAnchor`.
+        private var lastLimitsGrowAnchoredTop: Bool = true
         private var lastAppliedCompactToolbarVisibility: Bool?
         private var lastAppliedCompactPreferredRows: Int?
         private var lastAppliedCompactAutoFitEnabled: Bool?
@@ -696,7 +720,19 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             frame.size.width = targetWidth
             frame.size.height = targetHeight
-            if shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight) {
+
+            // Reveal and collapse must pin the same edge, or the window walks.
+            // Growth picks its direction from available screen room; the shrink
+            // has to mirror that choice rather than decide for itself.
+            let isGrowing = targetHeight > oldHeight
+            if isGrowing {
+                lastLimitsGrowAnchoredTop = shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight)
+            }
+            if HUDLimitsResizeAnchor.anchorsTop(
+                isGrowing: isGrowing,
+                growsDown: lastLimitsGrowAnchoredTop,
+                lastGrowAnchoredTop: lastLimitsGrowAnchoredTop
+            ) {
                 frame.origin.y += oldHeight - targetHeight
             }
             // Animate only when the toolbar is toggling, so the window resize
@@ -705,6 +741,11 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             setWindowFrame(frame, display: true, animate: animated)
         }
 
+        /// Whether the window grows downward (top edge pinned) given the room
+        /// available on screen. Only meaningful while growing — the caller must
+        /// not consult it on a shrink, where its `guard` would answer `true`
+        /// unconditionally and pin the top regardless of which edge the matching
+        /// growth actually pinned.
         private func shouldGrowLimitsWindowDown(window: NSWindow, targetHeight: CGFloat) -> Bool {
             guard targetHeight > window.frame.height,
                   let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
