@@ -48,22 +48,34 @@ enum ClaudeRunwaySnapshotLoader {
                 // Honor the selected runway presentation (rateUnit), mirroring the
                 // Codex loader. tk/h and weekly %/h reuse the provider-agnostic
                 // calculator; the default m/h path is unchanged.
+                // Once-per-cycle prune for every presentation, not just the quota
+                // path, so the sample cache tracks active sessions, not history.
+                ClaudeRunwayTokenActivityParser.retainCache(
+                    paths: Set(identities.flatMap { $0.logPaths })
+                )
                 let activities = identities.compactMap {
                     ClaudeRunwayTokenActivityParser.activity(identity: $0, now: request.now)
                 }
                 let core: CodexRunwaySnapshot?
                 var effectiveBaseline = request.baseline
+                // Identities eligible for a pending row; $ mode narrows it to the
+                // ones it can price so a dropped session never shows "$0/h".
+                var pendingIdentities = identities
                 switch request.baseline.rateUnit {
                 case .tokensPerHour:
                     core = CodexRunwayCalculator.tokenSnapshot(
                         baseline: request.baseline, activities: activities, maxRows: request.maxRows)
                 case .dollarsPerHour:
+                    // Lazy, self-throttling (<=1/day): only fetch the price manifest
+                    // once someone actually uses the $ presentation.
+                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
                     if let dollars = CodexRunwayCalculator.dollarSnapshot(
                         baseline: request.baseline, activities: activities,
                         priceTable: RunwayPriceTable.shared, maxRows: request.maxRows) {
-                        core = dollars
+                        core = dollars.snapshot
+                        pendingIdentities = identities.filter { !dollars.unpriceableIDs.contains($0.id) }
                     } else {
-                        // Unpriced model / no activity → token snapshot-wide (P1).
+                        // Nothing priceable at all → token snapshot-wide (P1).
                         effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
                         core = CodexRunwayCalculator.tokenSnapshot(
                             baseline: effectiveBaseline, activities: activities, maxRows: request.maxRows)
@@ -89,7 +101,7 @@ enum ClaudeRunwaySnapshotLoader {
                 let snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: effectiveBaseline,
                     snapshot: core,
-                    activeIdentities: identities,
+                    activeIdentities: pendingIdentities,
                     maxRows: request.maxRows
                 )
                 continuation.resume(returning: snapshot)

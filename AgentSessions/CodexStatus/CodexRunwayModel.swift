@@ -422,6 +422,9 @@ enum CodexRunwaySnapshotLoader {
                 // The rendered unit comes from the snapshot's baseline; on a
                 // snapshot-wide fallback we swap it so rows never mislabel.
                 var effectiveBaseline = request.baseline
+                // Identities eligible for a pending row. $ mode narrows this to the
+                // ones it can actually price (see .dollarsPerHour below).
+                var pendingIdentities = identities
                 switch request.baseline.rateUnit {
                 case .tokensPerHour:
                     // 5h window dropped → no run-out to normalize against, so rows
@@ -434,16 +437,23 @@ enum CodexRunwaySnapshotLoader {
                         maxRows: request.maxRows
                     )
                 case .dollarsPerHour:
-                    // Per-session $/h from the price table. When a model is unpriced
-                    // (or there's no activity) fall back to token snapshot-wide (P1)
-                    // with a token baseline so rows never mislabel.
+                    // Lazy, self-throttling (<=1/day): the price manifest is only
+                    // ever fetched once someone actually uses the $ presentation.
+                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
+                    // Per-session $/h from the price table. Sessions we can't price
+                    // are dropped; only when NOTHING is priceable do we fall back to
+                    // token snapshot-wide (P1) with a token baseline so rows never
+                    // mislabel.
                     if let dollars = CodexRunwayCalculator.dollarSnapshot(
                         baseline: request.baseline,
                         activities: activities,
                         priceTable: RunwayPriceTable.shared,
                         maxRows: request.maxRows
                     ) {
-                        core = dollars
+                        core = dollars.snapshot
+                        // A dropped session must not reappear as a "$0/h" pending row
+                        // while it's actively burning. Idle sessions keep their "—".
+                        pendingIdentities = identities.filter { !dollars.unpriceableIDs.contains($0.id) }
                     } else {
                         effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
                         core = CodexRunwayCalculator.tokenSnapshot(
@@ -490,7 +500,7 @@ enum CodexRunwaySnapshotLoader {
                 var snapshot = RunwaySnapshotAssembly.withPendingRows(
                     baseline: effectiveBaseline,
                     snapshot: core,
-                    activeIdentities: identities,
+                    activeIdentities: pendingIdentities,
                     maxRows: request.maxRows
                 )
                 // Aggregate token throughput (fine-grained, window-independent) — an
@@ -897,33 +907,59 @@ enum CodexRunwayCalculator {
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
 
-    /// $-mode snapshot: each session's API-equivalent cost per hour, priced from
-    /// per-type token rates × the price table. Per-type rates are pre-normalized to
-    /// FRESH input + cached-read + output + cache-creation, so pricing is a plain
-    /// sum (no subtraction). Returns `nil` when there's no positive activity OR any
-    /// active model is unpriced — so the loader falls back to token snapshot-wide
-    /// (never a per-row unit mix). $/h is intentionally non-proportional to tk/h
-    /// (which nets out cache) because cache reads/writes cost real money.
+    /// $/h for a single session, or nil when it can't be priced: no per-type
+    /// breakdown (legacy Codex `token_count` lines carry only a flat total) or an
+    /// unknown model slug. Per-type rates are pre-normalized to FRESH input +
+    /// cached-read + output + cache-creation, so pricing is a plain sum (no
+    /// subtraction). $/h is intentionally non-proportional to tk/h (which nets out
+    /// cache) because cache reads/writes cost real money.
+    ///
+    /// Reasoning tokens are NOT a separate term here, and that is correct rather
+    /// than an omission: Codex reports `reasoning_output_tokens` as a SUBSET of
+    /// `output_tokens` (verified — `total_tokens == input_tokens + output_tokens`,
+    /// with reasoning already inside output), and providers bill reasoning at the
+    /// output rate. So output already carries it; adding reasoning would double-count
+    /// it, and subtracting it would understate the bill.
+    static func dollarsPerHour(for activity: RunwaySessionActivity,
+                               priceTable: RunwayPriceTable) -> Double? {
+        let perType = activity.inputPerSecond + activity.cachedInputPerSecond
+            + activity.outputPerSecond + activity.cacheCreationPerSecond
+        guard perType > 0, let p = priceTable.price(forModel: activity.modelSlug) else { return nil }
+        let perSecond = activity.inputPerSecond * p.inputPerMTok / 1_000_000
+            + activity.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
+            + activity.outputPerSecond * p.outputPerMTok / 1_000_000
+            + activity.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
+        guard perSecond.isFinite else { return nil }
+        return perSecond * 3600
+    }
+
+    /// $-mode snapshot: each session's API-equivalent cost per hour. Prices every
+    /// session it can and DROPS the ones it can't (unknown model / no per-type
+    /// data), returning nil only when nothing at all is priceable — then the loader
+    /// falls back to token snapshot-wide (never a per-row unit mix). Dropping rather
+    /// than nil-ing on the first unpriceable session keeps the unit stable: one
+    /// unpriceable session flipping in and out of activity used to flap the whole
+    /// provider between $ and tk/h every refresh.
+    ///
+    /// `unpriceableIDs` is returned rather than recomputed by callers so there is a
+    /// single source of truth for what was dropped: the loader MUST keep these out
+    /// of the pending rows, or a dropped session reappears as "$0/h" while it is
+    /// genuinely burning.
     static func dollarSnapshot(baseline: RunwayProviderBaseline,
                                activities: [RunwaySessionActivity],
                                priceTable: RunwayPriceTable,
-                               maxRows: Int) -> CodexRunwaySnapshot? {
+                               maxRows: Int) -> (snapshot: CodexRunwaySnapshot, unpriceableIDs: Set<String>)? {
         guard maxRows > 0 else { return nil }
-        let positive = activities.filter {
-            ($0.inputPerSecond + $0.cachedInputPerSecond + $0.outputPerSecond + $0.cacheCreationPerSecond) > 0
-        }
-        guard !positive.isEmpty else { return nil }
-
         var priced: [(activity: RunwaySessionActivity, dollarsPerHour: Double)] = []
-        for a in positive {
-            guard let p = priceTable.price(forModel: a.modelSlug) else { return nil }
-            let perSecond = a.inputPerSecond * p.inputPerMTok / 1_000_000
-                + a.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
-                + a.outputPerSecond * p.outputPerMTok / 1_000_000
-                + a.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
-            guard perSecond.isFinite else { return nil }
-            priced.append((a, perSecond * 3600))
+        var unpriceableIDs: Set<String> = []
+        for a in activities {
+            if let rate = dollarsPerHour(for: a, priceTable: priceTable) {
+                priced.append((a, rate))
+            } else {
+                unpriceableIDs.insert(a.identity.id)
+            }
         }
+        guard !priced.isEmpty else { return nil }
         let ranked = priced.sorted { lhs, rhs in
             if lhs.dollarsPerHour != rhs.dollarsPerHour { return lhs.dollarsPerHour > rhs.dollarsPerHour }
             if lhs.activity.identity.isGoal != rhs.activity.identity.isGoal {
@@ -951,7 +987,7 @@ enum CodexRunwayCalculator {
                 gainedSeconds: 0,
                 displayRate: overflow.reduce(0) { $0 + $1.dollarsPerHour }
             )
-        return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
+        return (CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary), unpriceableIDs)
     }
 
     private static func impactRow(baseline: RunwayProviderBaseline,
@@ -1240,6 +1276,12 @@ enum CodexRunwayRateLimitParser {
         let offset = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
         try? handle.seek(toOffset: offset)
         return try? handle.readToEnd()
+    }
+
+    fileprivate static func headData(path: String, maxBytes: Int) -> Data? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: maxBytes)
     }
 
     fileprivate static func double(_ value: Any?) -> Double? {
@@ -1540,7 +1582,7 @@ enum CodexRunwayRecentSessionScanner {
     }
 
     private static func metadata(from url: URL) -> CodexScannerSessionMetadata {
-        guard let data = headData(path: url.path, maxBytes: 96 * 1024),
+        guard let data = CodexRunwayRateLimitParser.headData(path: url.path, maxBytes: 96 * 1024),
               let text = String(data: data, encoding: .utf8) else {
             return CodexScannerSessionMetadata()
         }
@@ -1573,12 +1615,6 @@ enum CodexRunwayRecentSessionScanner {
             }
         }
         return metadata
-    }
-
-    private static func headData(path: String, maxBytes: Int) -> Data? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-        return try? handle.read(upToCount: maxBytes)
     }
 
     private static func displayName(metadata: CodexScannerSessionMetadata, customTitle: String?, fallbackID: String) -> String {
@@ -1688,9 +1724,21 @@ private struct CodexRawTokenLine: Sendable {
     let cachedInput: Double
     let output: Double
     let modelSlug: String?
+
+    func withModelSlug(_ model: String?) -> CodexRawTokenLine {
+        CodexRawTokenLine(logPath: logPath, createdAtReal: createdAtReal, totalTokens: totalTokens,
+                          input: input, cachedInput: cachedInput, output: output, modelSlug: model)
+    }
 }
 
 enum CodexRunwayTokenActivityParser {
+    /// Upper bound on the backward hunt for a `turn_context`. Past this we give up
+    /// and the session goes unpriced (dropped from $, still shown in tk/h) rather
+    /// than risk pricing it at a guessed model.
+    static let modelScanCap = 64 * 1024 * 1024
+    /// Overlap re-read when scanning newly-appended bytes, so a `turn_context` that
+    /// straddles the previous scan frontier isn't split into two unparseable halves.
+    static let modelScanOverlap = 64 * 1024
     static let maximumSampleAge: TimeInterval = 75
     static let minimumPairInterval: TimeInterval = 10
     static let maximumPairInterval: TimeInterval = 30 * 60
@@ -1713,14 +1761,110 @@ enum CodexRunwayTokenActivityParser {
         } else {
             raw = parseRawLines(fromLogPath: path, maxBytes: maxBytes)
         }
-        return raw
+        return resolveModel(raw, path: path)
             .compactMap { finalize($0, now: now) }
             .sorted { $0.capturedAt < $1.capturedAt }
     }
 
+    /// Guarantee every sample carries the session model so `$` pricing never nils
+    /// out intermittently. `turn_context` is the sole model carrier and recurs per
+    /// turn, but the token tail (`maxBytes`) can miss it when one turn dumps more
+    /// than the window — then `raw` comes back all-nil and, under the "any unpriced
+    /// active model → whole provider falls back to tk/h" rule, the Codex runway
+    /// *flaps* between $ and tk/h as that session goes active/idle. Resolution order:
+    /// the tail's own model (cheapest, also refreshes the cache) → a per-path cache
+    /// (a session is single-model, so once known it stays known) → a head read
+    /// (first `turn_context`, past the large `session_meta`). The cache means the
+    /// expensive head read happens at most once per session.
+    private static func resolveModel(_ raw: [CodexRawTokenLine], path: String) -> [CodexRawTokenLine] {
+        // No samples → nothing to stamp, and no reason to pay for a scan.
+        guard !raw.isEmpty else { return raw }
+        if let tailModel = raw.last(where: { $0.modelSlug != nil })?.modelSlug {
+            // Everything after this `turn_context` is inside the tail and carries no
+            // other one, so it is the newest in the whole file — current as of EOF.
+            rememberModel(tailModel, path: path, scannedThrough: fileSize(path: path))
+            return raw
+        }
+        guard let model = sessionModel(path: path) else { return raw }
+        return raw.map { $0.modelSlug == nil ? $0.withModelSlug(model) : $0 }
+    }
+
+    /// The session's current model when the token tail carried none.
+    ///
+    /// The cache records how far the file had been scanned when the model was
+    /// established, and every later cycle scans ONLY the bytes appended since. That
+    /// frontier is what keeps a `/model` switch from being missed: consulting a
+    /// cached model without re-checking new bytes would keep pricing at the old
+    /// model for the rest of a long turn (the switch's `turn_context` is outside the
+    /// tail, so nothing else would ever notice it). Never holds the lock across I/O.
+    private static func sessionModel(path: String) -> String? {
+        guard let size = fileSize(path: path) else { return nil }   // transient; retry next cycle
+        modelCacheLock.lock()
+        let entry = modelCacheByPath[path]
+        modelCacheLock.unlock()
+
+        if let entry, entry.scannedThrough <= size {
+            guard entry.scannedThrough < size else { return entry.model }  // nothing appended
+            // Re-read a small overlap: the previous frontier may have landed
+            // mid-line, and a `turn_context` straddling it would otherwise be lost.
+            let from = entry.scannedThrough > UInt64(modelScanOverlap)
+                ? entry.scannedThrough - UInt64(modelScanOverlap)
+                : 0
+            guard let delta = readRange(path: path, from: from, to: size) else { return entry.model }
+            let model = lastTurnContextModel(in: delta) ?? entry.model
+            rememberModel(model, path: path, scannedThrough: size)
+            return model
+        }
+
+        // Cold cache, or the file shrank (rotated/truncated) — hunt from scratch.
+        let lookup = currentModel(fromLogPath: path)
+        guard lookup.didRead else { return nil }   // read failed; don't remember it
+        rememberModel(lookup.model, path: path, scannedThrough: size)
+        return lookup.model
+    }
+
     static func retainCache(paths: Set<String>) {
         sampleCache.retain(paths: paths)
+        modelCacheLock.lock()
+        modelCacheByPath = modelCacheByPath.filter { paths.contains($0.key) }
+        modelCacheLock.unlock()
     }
+
+    /// Per-path model plus the byte offset it was established at. `model == nil`
+    /// records a scanned-but-genuinely-model-less file, so we stop re-scanning it,
+    /// while `scannedThrough` still lets a later-appended `turn_context` be found.
+    private struct ModelCacheEntry {
+        let model: String?
+        let scannedThrough: UInt64
+    }
+    private static let modelCacheLock = NSLock()
+    private static var modelCacheByPath: [String: ModelCacheEntry] = [:]
+
+    private static func rememberModel(_ model: String?, path: String, scannedThrough: UInt64?) {
+        guard let scannedThrough else { return }
+        modelCacheLock.lock()
+        modelCacheByPath[path] = ModelCacheEntry(model: model, scannedThrough: scannedThrough)
+        modelCacheLock.unlock()
+    }
+
+    private static func fileSize(path: String) -> UInt64? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.seekToEnd()
+    }
+
+    private static func readRange(path: String, from: UInt64, to: UInt64) -> Data? {
+        guard to > from, let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        try? handle.seek(toOffset: from)
+        return try? handle.read(upToCount: Int(to - from))
+    }
+
+    #if DEBUG
+    static func resetModelCacheForTesting() {
+        modelCacheLock.lock(); modelCacheByPath.removeAll(); modelCacheLock.unlock()
+    }
+    #endif
 
     private static func parseRawLines(fromLogPath path: String,
                                       maxBytes: Int) -> [CodexRawTokenLine] {
@@ -1742,7 +1886,58 @@ enum CodexRunwayTokenActivityParser {
                 out.append(line)
             }
         }
+        // Backfill token lines that precede the tail's first `turn_context` with the
+        // first in-tail model (a session is effectively single-model). When the tail
+        // has no model at all — one turn dumped more than `maxBytes` — `out` stays
+        // all-nil and `resolveModel` fills it from the cache or file head. Pure
+        // function of the bytes → still cacheable.
+        if let sessionModel = out.first(where: { $0.modelSlug != nil })?.modelSlug {
+            for i in out.indices where out[i].modelSlug == nil {
+                out[i] = out[i].withModelSlug(sessionModel)
+            }
+        }
         return out
+    }
+
+    /// The session's CURRENT model: the model on the **last** `turn_context` in the
+    /// file. Used only when the 512 KB token tail carried none, so widen the window
+    /// progressively until one appears — a single turn can dump megabytes between
+    /// `turn_context` lines.
+    ///
+    /// Taking the LAST one, not the file's first, is the whole point: after a
+    /// mid-session `/model` switch the first `turn_context` holds the model the
+    /// session STARTED with, so pricing from it misprices every token for the rest
+    /// of a long turn (e.g. a switch to gpt-5.6-luna still billed at gpt-5.6-sol —
+    /// 5x). The result is cached, so this runs at most once per unresolved stretch.
+    ///
+    /// `didRead` separates "scanned the bytes, no `turn_context` there" (cacheable)
+    /// from "couldn't read the file" (transient), so only the former is remembered.
+    private static func currentModel(fromLogPath path: String) -> (model: String?, didRead: Bool) {
+        var window = 2 * 1024 * 1024   // the 512KB token tail already came up empty
+        while true {
+            guard let data = CodexRunwayRateLimitParser.tailData(path: path, maxBytes: window) else {
+                return (nil, false)
+            }
+            if let model = lastTurnContextModel(in: data) { return (model, true) }
+            // Short read ⇒ that was the whole file, so no `turn_context` exists at all.
+            if data.count < window { return (nil, true) }
+            guard window < modelScanCap else { return (nil, true) }
+            window = min(window * 4, modelScanCap)
+        }
+    }
+
+    /// Scans lines back-to-front for the newest `turn_context` carrying a model. The
+    /// substring prefilter keeps this from JSON-parsing millions of unrelated lines.
+    private static func lastTurnContextModel(in data: Data) -> String? {
+        let text = String(decoding: data, as: UTF8.self)
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
+            guard raw.contains("turn_context") else { continue }
+            guard let d = String(raw).data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+            let payload = (obj["payload"] as? [String: Any]) ?? obj
+            if let m = modelSlug(from: payload) ?? modelSlug(from: obj) { return m }
+        }
+        return nil
     }
 
     private static func finalize(_ raw: CodexRawTokenLine, now: Date) -> CodexRunwayTokenActivitySample? {

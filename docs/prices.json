@@ -1,18 +1,24 @@
 {
   "version": 1,
   "updated": "2026-07-14",
-  "_note": "USD per million tokens. Served read-only to Agent Sessions' $ burn (no user data is sent). Keyed by TIER so longest-prefix covers every generation (claude-sonnet → claude-sonnet-5, gpt-5 → gpt-5.6). Anthropic are tier list prices; claude-fable and OpenAI gpt-5.x/o-series are estimates — edit here to update clients without an app release.",
+  "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn (no user data is sent). Verified 2026-07-14 from platform.claude.com/docs/en/about-claude/pricing and developers.openai.com/api/docs/pricing. Keyed by TIER so longest-prefix covers every generation (claude-sonnet → claude-sonnet-5, gpt-5.6-sol exact, gpt-5 → any other gpt-5.x); legacy keys are kept so an older model is priced rather than dropped from the $ view. cachedInputPerMTok = cache-hit read (0.1x input); cacheWritePerMTok = 5-minute cache write (1.25x input) — only ever consumed for Claude, since Codex logs carry no cache-creation tokens. Sonnet 5 is at introductory $2/$10 through 2026-08-31; the stable $3/$15 is listed here — set claude-sonnet to 2.0/0.2/10.0/2.5 if you want the promo reflected, and revert on 2026-09-01. IMPORTANT: clients only accept a manifest whose 'updated' is >= their bundled table's, so always advance 'updated' when editing. Edit this file to update clients with no app release.",
   "models": {
-    "claude-opus":      { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
-    "claude-sonnet":    { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
-    "claude-haiku":     { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,  "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25 },
-    "claude-fable":     { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
+    "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25 },
+    "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
+    "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25 },
+    "claude-fable":    { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5 },
+    "claude-mythos":   { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5 },
+    "claude-opus-4-1":  { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
     "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
     "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
     "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0 },
-    "gpt-5":            { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
-    "gpt-4":            { "inputPerMTok": 2.5,  "cachedInputPerMTok": 1.25,  "outputPerMTok": 10.0, "cacheWritePerMTok": null },
-    "o4-mini":          { "inputPerMTok": 1.1,  "cachedInputPerMTok": 0.275, "outputPerMTok": 4.4,  "cacheWritePerMTok": null },
-    "o3":               { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 8.0,  "cacheWritePerMTok": null }
+    "gpt-5.6-sol":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 },
+    "gpt-5.6-terra":   { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.125 },
+    "gpt-5.6-luna":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 6.0,  "cacheWritePerMTok": 1.25 },
+    "gpt-5.6":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 },
+    "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null },
+    "gpt-5.4-mini":    { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 4.5,  "cacheWritePerMTok": null },
+    "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null },
+    "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null }
   }
 }

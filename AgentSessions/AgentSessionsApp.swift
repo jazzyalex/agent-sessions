@@ -700,9 +700,11 @@ extension AgentSessionsApp {
         ensureStatusItemController()
         setupMenuBarDefaultsObserverIfNeeded()
         updateUsageModels()
-        // Refresh the runway $-burn price list (read-only GET of a public manifest;
-        // no user data sent). Bundled defaults work offline until this lands.
-        RunwayPriceTable.shared.refreshInBackground()
+        // NOTE: the runway $-burn price list is deliberately NOT fetched here. It
+        // refreshes lazily, only once the $ presentation is actually used, so the
+        // app makes no network call for a feature you never open — which is what
+        // README/PRIVACY promise ("optional read-only fetch"). See the
+        // `.dollarsPerHour` branch in the runway loaders.
         setupMainWindowCloseObserverIfNeeded()
 
         let unified = unifiedIndexer()

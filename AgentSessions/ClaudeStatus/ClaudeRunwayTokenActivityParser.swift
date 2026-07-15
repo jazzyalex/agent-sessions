@@ -51,6 +51,15 @@ enum ClaudeRunwayTokenActivityParser {
 
     private static let sampleCache = RunwayFileParseCache<[ClaudeRunwayTokenActivitySample]>()
 
+    /// Once-per-cycle prune: keep only the small in-window path set so the sample
+    /// cache tracks active sessions rather than all history. The loader calls this
+    /// for every presentation — `burns()` (the quota path) is no longer the only
+    /// caller, or $/token/weekly users would accumulate an entry per session ever
+    /// parsed. Mirrors `CodexRunwayTokenActivityParser.retainCache`.
+    static func retainCache(paths: Set<String>) {
+        sampleCache.retain(paths: paths)
+    }
+
     #if DEBUG
     static var sampleCacheMissCountForTesting: Int { sampleCache.missCount }
     static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
@@ -146,9 +155,8 @@ enum ClaudeRunwayTokenActivityParser {
     static func burns(identities: [RunwaySessionIdentity],
                       baseline: RunwayProviderBaseline,
                       now: Date = Date()) -> [RunwaySessionBurn] {
-        // Once-per-cycle prune: keep only the small in-window path set so the
-        // sample cache tracks the active sessions rather than all history.
-        sampleCache.retain(paths: Set(identities.flatMap { $0.logPaths }))
+        // The prune is the loader's job now (it runs once per cycle for every
+        // presentation), so this path no longer repeats it with the same paths.
         let currentSeconds = baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
         guard currentSeconds > 0, baseline.remainingPercent > 0 else { return [] }
         let providerRate = baseline.remainingPercent / currentSeconds

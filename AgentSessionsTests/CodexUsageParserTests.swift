@@ -4018,14 +4018,20 @@ final class CodexUsageParserTests: XCTestCase {
     func testPriceTableBundledAndPrefixMatch() {
         let t = RunwayPriceTable.makeForTesting()
         XCTAssertFalse(t.isEmpty)
-        // Tier keys cover every current generation via longest-prefix.
+        // Tier keys cover every current generation via longest-prefix (verified
+        // 2026-07-14 against the official pricing pages).
         XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.outputPerMTok, 15.0)
         XCTAssertEqual(t.price(forModel: "claude-sonnet-4-5-20250929")?.outputPerMTok, 15.0)
-        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 75.0)
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 25.0)   // Opus dropped to $5/$25
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
-        XCTAssertNotNil(t.price(forModel: "claude-fable-5"))     // Fable 5
-        XCTAssertNotNil(t.price(forModel: "gpt-5.6"))            // Codex gpt-5.6 → gpt-5
-        XCTAssertNotNil(t.price(forModel: "gpt-5.6-codex"))
+        XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
+        // Codex tiers price distinctly via longest-prefix.
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-sol")?.outputPerMTok, 30.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-terra")?.outputPerMTok, 15.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.outputPerMTok, 6.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.4-mini")?.inputPerMTok, 0.75)        // longer prefix beats gpt-5.4
+        XCTAssertEqual(t.price(forModel: "gpt-5-codex")?.inputPerMTok, 1.25)         // falls back to gpt-5
         XCTAssertNil(t.price(forModel: "totally-unknown-model"))
         XCTAssertNil(t.price(forModel: nil))
     }
@@ -4037,7 +4043,11 @@ final class CodexUsageParserTests: XCTestCase {
         let futureVersion = #"{"version":999,"models":{"x":{"inputPerMTok":1,"cachedInputPerMTok":0,"outputPerMTok":1}}}"#
         XCTAssertFalse(t.loadForTesting(json: Data(futureVersion.utf8)))
         XCTAssertEqual(t.revision, before, "rejected manifests must not change the table")
-        let ok = #"{"version":1,"models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        // Undated manifests sort oldest and are refused, so a live manifest must
+        // carry an `updated` at least as new as the bundled table's.
+        let undated = #"{"version":1,"models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
+        XCTAssertFalse(t.loadForTesting(json: Data(undated.utf8)))
+        let ok = #"{"version":1,"updated":"2099-01-01","models":{"zzz-model":{"inputPerMTok":9,"cachedInputPerMTok":1,"outputPerMTok":9}}}"#
         XCTAssertTrue(t.loadForTesting(json: Data(ok.utf8)))
         XCTAssertEqual(t.price(forModel: "zzz-model")?.inputPerMTok, 9)
         XCTAssertGreaterThan(t.revision, before)
@@ -4060,12 +4070,13 @@ final class CodexUsageParserTests: XCTestCase {
         let cachedCost: Double = 1000.0 * 0.3
         let outputCost: Double = 10.0 * 15.0
         let expected: Double = (inputCost + cachedCost + outputCost) / 1_000_000.0 * 3600.0
-        XCTAssertEqual(snap?.rows.first?.displayRate ?? 0, expected, accuracy: 1e-6)
+        XCTAssertEqual(snap?.snapshot.rows.first?.displayRate ?? 0, expected, accuracy: 1e-6)
         // Cache dominates the cost, so $/h is NOT proportional to the netted tk/h.
-        XCTAssertGreaterThan(snap?.rows.first?.displayRate ?? 0, 0)
+        XCTAssertGreaterThan(snap?.snapshot.rows.first?.displayRate ?? 0, 0)
+        XCTAssertEqual(snap?.unpriceableIDs, [], "a fully priced set drops nothing")
     }
 
-    func testDollarSnapshotNilWhenModelUnpriced() {
+    func testDollarSnapshotNilWhenNothingPriceable() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(3600)
         let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 50, resetAt: reset,
@@ -4076,8 +4087,276 @@ final class CodexUsageParserTests: XCTestCase {
             tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
             inputPerSecond: 10, cachedInputPerSecond: 0, outputPerSecond: 10,
             cacheCreationPerSecond: 0, modelSlug: "no-such-model")
-        // Any unpriced active model → nil so the loader falls back to token snapshot-wide.
+        // Nothing priceable at all → nil so the loader falls back to token snapshot-wide.
         XCTAssertNil(CodexRunwayCalculator.dollarSnapshot(baseline: baseline, activities: [a], priceTable: table, maxRows: 5))
+    }
+
+    /// Route B: one unpriceable session must NOT drag the whole provider to tk/h.
+    /// Previously any unpriced model returned nil → snapshot-wide token fallback, so
+    /// a session flipping between active and idle flapped the unit every refresh.
+    func testDollarSnapshotDropsUnpriceableAndKeepsPricedRows() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(3600)
+        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 50, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now, windowMinutes: 300, rateUnit: .dollarsPerHour)
+        let table = RunwayPriceTable.makeForTesting()
+        let priced = RunwaySessionActivity(
+            identity: .init(id: "priced", displayName: "Priced", isGoal: false, logPaths: ["/p"]),
+            tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 10, cachedInputPerSecond: 0, outputPerSecond: 10,
+            cacheCreationPerSecond: 0, modelSlug: "claude-sonnet-5")
+        let unknownModel = RunwaySessionActivity(
+            identity: .init(id: "unknown", displayName: "Unknown", isGoal: false, logPaths: ["/u"]),
+            tokensPerSecond: 20, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 10, cachedInputPerSecond: 0, outputPerSecond: 10,
+            cacheCreationPerSecond: 0, modelSlug: "no-such-model")
+        // Legacy Codex log format: throughput but no per-type breakdown → unpriceable.
+        let noPerType = RunwaySessionActivity(
+            identity: .init(id: "legacy", displayName: "Legacy", isGoal: false, logPaths: ["/l"]),
+            tokensPerSecond: 500, sampleStart: now, sampleEnd: now,
+            inputPerSecond: 0, cachedInputPerSecond: 0, outputPerSecond: 0,
+            cacheCreationPerSecond: 0, modelSlug: "claude-sonnet-5")
+
+        let snap = CodexRunwayCalculator.dollarSnapshot(
+            baseline: baseline, activities: [priced, unknownModel, noPerType], priceTable: table, maxRows: 5)
+        XCTAssertNotNil(snap, "a priceable peer must keep the snapshot in $")
+        XCTAssertEqual(snap?.snapshot.rows.map(\.id), ["priced"], "only the priceable session gets a $ row")
+
+        // The dropped set comes back with the snapshot (single source of truth) so
+        // the loader can keep them out of pending rows — otherwise they'd render
+        // "$0/h" while actively burning.
+        XCTAssertEqual(snap?.unpriceableIDs, ["unknown", "legacy"])
+
+        // Pin the ACTUAL bug, not just the calculator: feeding every active identity
+        // to withPendingRows (what the loader does) must not resurrect a dropped
+        // session as a zero-dollar row. Previously each unpriceable session came back
+        // with displayRate 0 → "$0/h" beside a real $ row.
+        let allIdentities = [priced, unknownModel, noPerType].map(\.identity)
+        let leaked = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline, snapshot: snap?.snapshot,
+            activeIdentities: allIdentities, maxRows: 5)
+        XCTAssertEqual(Set(leaked?.rows.map(\.id) ?? []), ["priced", "unknown", "legacy"],
+                       "unfiltered identities leak dropped sessions back in as $0 rows")
+
+        // With the loader's filter applied, only the priceable session survives.
+        let filtered = allIdentities.filter { !(snap?.unpriceableIDs.contains($0.id) ?? false) }
+        let clean = RunwaySnapshotAssembly.withPendingRows(
+            baseline: baseline, snapshot: snap?.snapshot,
+            activeIdentities: filtered, maxRows: 5)
+        XCTAssertEqual(clean?.rows.map(\.id), ["priced"])
+        XCTAssertTrue(clean?.rows.allSatisfy { $0.displayRate > 0 } ?? false,
+                      "no $0/h row may survive in the $ view")
+    }
+
+    /// Regression: after a mid-session `/model` switch, tokens must be priced at the
+    /// CURRENT model. Resolving from the file's FIRST turn_context returned the model
+    /// the session started with, so a switch to a cheap tier stayed billed at the
+    /// expensive one for the rest of a long turn (gpt-5.6-sol $5/$30 vs luna $1/$6).
+    func testCodexRunwayModelUsesLatestTurnContextAfterModelSwitch() throws {
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-switch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let ctxOld = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let ctxNew = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\"}}"
+        let tok1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let tok2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        // sol first, then the user switches to luna; a long turn follows, so BOTH
+        // turn_context lines sit outside the token tail.
+        let text = ctxOld + "\n" + ctxNew + "\n" + tok1 + "\n" + tok2
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let tailBytes = (tok1 + "\n" + tok2).utf8.count
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, maxBytes: tailBytes, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-luna" },
+                      "must price at the switched-to model, not the session's first")
+    }
+
+    /// Regression for the *stale cache* path: the earlier switch test cleared the
+    /// cache first, so it never exercised the case that actually breaks — a model
+    /// already cached from a previous cycle. Consulting that cache without
+    /// re-checking newly-appended bytes keeps pricing at the OLD model for the rest
+    /// of a long turn, because the switch's `turn_context` is outside the token tail
+    /// and nothing else would ever notice it.
+    func testCodexRunwayModelSwitchDetectedWithWarmCache() throws {
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-warm-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let reset = t0.addingTimeInterval(5 * 60 * 60)
+        func tok(_ at: Date, _ input: Int, _ cached: Int, _ output: Int, _ total: Int) -> String {
+            "{\"timestamp\":\"\(iso(at))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":\(input),\"cached_input_tokens\":\(cached),\"output_tokens\":\(output),\"total_tokens\":\(total)}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        }
+        let ctxSol = "{\"timestamp\":\"\(iso(t0))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let tok1 = tok(t0, 1000, 800, 100, 1100)
+        let tok2 = tok(t0.addingTimeInterval(30), 2000, 1600, 200, 2200)
+
+        // Cycle 1: the tail sees sol → cache warms to sol.
+        try (ctxSol + "\n" + tok1 + "\n" + tok2).write(to: log, atomically: true, encoding: .utf8)
+        let first = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: t0.addingTimeInterval(31))
+        XCTAssertTrue(first.allSatisfy { $0.modelSlug == "gpt-5.6-sol" }, "cache should warm to sol")
+
+        // The user switches to luna, then a long turn appends past the tail window.
+        let ctxLuna = "{\"timestamp\":\"\(iso(t0.addingTimeInterval(40)))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-luna\"}}"
+        let tok3 = tok(t0.addingTimeInterval(60), 3000, 2400, 300, 3300)
+        let tok4 = tok(t0.addingTimeInterval(90), 4000, 3200, 400, 4400)
+        let appended = "\n" + ctxLuna + "\n" + tok3 + "\n" + tok4
+        let handle = try FileHandle(forWritingTo: log)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(appended.utf8))
+        try handle.close()
+
+        // Cycle 2: tail covers only tok3/tok4 — no turn_context — and the cache is
+        // warm with the STALE sol. It must still resolve to luna.
+        let tailBytes = (tok3 + "\n" + tok4).utf8.count
+        let second = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, maxBytes: tailBytes, now: t0.addingTimeInterval(91))
+        XCTAssertEqual(second.count, 2)
+        XCTAssertTrue(second.allSatisfy { $0.modelSlug == "gpt-5.6-luna" },
+                      "a warm cache must not mask a /model switch in newly-appended bytes")
+    }
+
+    /// A log with no token lines must not trigger a head read at all — there are no
+    /// samples to stamp, and paying a 1MB read per 5s refresh for nothing is waste.
+    func testCodexRunwayNoTokenLinesResolvesWithoutHeadRead() throws {
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-notok-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        // turn_context only — a started session that hasn't emitted token_count yet.
+        let text = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(
+            fromLogPath: log.path, now: first.addingTimeInterval(1))
+        XCTAssertTrue(samples.isEmpty, "no token_count lines → no samples")
+    }
+
+    /// A stale cached manifest must never shadow a corrected bundled table.
+    func testPriceTableIgnoresOlderCachedManifest() {
+        let t = RunwayPriceTable.makeForTesting()   // bundled, updated 2026-07-14
+        let opusBefore = t.price(forModel: "claude-opus-4-8")?.outputPerMTok
+        let stale = #"{"version":1,"updated":"2020-01-01","models":{"claude-opus":{"inputPerMTok":99,"cachedInputPerMTok":9,"outputPerMTok":999}}}"#
+        XCTAssertFalse(t.loadForTesting(json: Data(stale.utf8)),
+                       "a manifest older than the bundled table must be rejected")
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, opusBefore)
+        let newer = #"{"version":1,"updated":"2099-01-01","models":{"claude-opus":{"inputPerMTok":7,"cachedInputPerMTok":1,"outputPerMTok":33}}}"#
+        XCTAssertTrue(t.loadForTesting(json: Data(newer.utf8)))
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 33)
+    }
+
+    /// Legacy keys must still price (and must not shadow current-generation slugs).
+    func testPriceTableLegacyKeysPriceWithoutShadowingCurrent() {
+        let t = RunwayPriceTable.makeForTesting()
+        XCTAssertEqual(t.price(forModel: "claude-3-5-sonnet-20241022")?.outputPerMTok, 15.0)
+        XCTAssertEqual(t.price(forModel: "claude-3-5-haiku-20241022")?.outputPerMTok, 4.0)
+        XCTAssertEqual(t.price(forModel: "claude-3-opus-20240229")?.outputPerMTok, 75.0)
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-1-20250805")?.outputPerMTok, 75.0)
+        // The deprecated claude-opus-4-1 key must NOT capture current Opus.
+        XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 25.0)
+    }
+
+    /// Regression: Codex logs the model only on `turn_context` (once per turn) while
+    /// token counts stream on separate `token_count` lines. When one turn dumps more
+    /// than the read window, the tail holds token lines but no `turn_context`, so every
+    /// sample used to get `modelSlug == nil` → `price(nil)` == nil → `dollarSnapshot`
+    /// nils out and the WHOLE Codex provider fell back to tk/h. The model must now be
+    /// recovered by widening the scan beyond the token tail so pricing survives.
+    func testCodexRunwayModelResolvedBeyondTailWhenTailLacksTurnContext() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-headmodel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let pad = String(repeating: "x", count: 4000)   // push turn_context out of the token tail
+        let ctx = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\",\"cwd\":\"\(pad)\"}}"
+        let tok1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let tok2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let text = ctx + "\n" + tok1 + "\n" + tok2   // no trailing newline
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        // maxBytes = exactly the two token lines → the tail excludes the padded turn_context.
+        let tailBytes = (tok1 + "\n" + tok2).utf8.count
+        let samples = CodexRunwayTokenActivityParser.recentSamples(fromLogPath: log.path, maxBytes: tailBytes, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(samples.count, 2, "both token lines should parse")
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-sol" },
+                      "model must be resolved from the file head when the tail lacks a turn_context")
+    }
+
+    /// Regression for the observed $/tk flap: Codex's `session_meta` first line is
+    /// tens of KB (tool schemas), so the first `turn_context` (the only model
+    /// carrier) sits well past 64 KB. When a large session is parsed cold and the
+    /// token tail also lacks a `turn_context`, a 64 KB head read missed the model →
+    /// nil → the whole Codex provider flapped to tk/h whenever that session was
+    /// active. The head read must clear a large `session_meta`.
+    func testCodexRunwayModelResolvedPastLargeSessionMeta() throws {
+        CodexRunwayTokenActivityParser.resetModelCacheForTesting()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-bigmeta-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        // ~70KB session_meta — larger than the old 64KB head window.
+        let bigMeta = "{\"timestamp\":\"\(iso(first))\",\"type\":\"session_meta\",\"payload\":{\"model_provider\":\"openai\",\"pad\":\"\(String(repeating: "x", count: 70000))\"}}"
+        let ctx = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let tok1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let tok2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let text = bigMeta + "\n" + ctx + "\n" + tok1 + "\n" + tok2
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        // Small tail → excludes session_meta AND the turn_context; only token lines.
+        let tailBytes = (tok1 + "\n" + tok2).utf8.count
+        let samples = CodexRunwayTokenActivityParser.recentSamples(fromLogPath: log.path, maxBytes: tailBytes, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-sol" },
+                      "head read must clear a >64KB session_meta to find the first turn_context model")
+    }
+
+    /// Regression: token lines that precede the tail's first `turn_context` are stamped
+    /// via backfill from the first in-tail model (a session is effectively single-model).
+    func testCodexRunwayModelBackfilledForLinesBeforeTailTurnContext() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-backfill-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let log = dir.appendingPathComponent("session.jsonl")
+        let first = Date(timeIntervalSince1970: 2_000_000)
+        let second = first.addingTimeInterval(30)
+        let reset = first.addingTimeInterval(5 * 60 * 60)
+        let tok1 = "{\"timestamp\":\"\(iso(first))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":800,\"output_tokens\":100,\"total_tokens\":1100}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let ctx = "{\"timestamp\":\"\(iso(first))\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6-sol\"}}"
+        let tok2 = "{\"timestamp\":\"\(iso(second))\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1600,\"output_tokens\":200,\"total_tokens\":2200}},\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":55.0,\"window_minutes\":300,\"resets_at\":\"\(iso(reset))\"}}}}"
+        let text = tok1 + "\n" + ctx + "\n" + tok2   // token line BEFORE the turn_context
+        try text.write(to: log, atomically: true, encoding: .utf8)
+
+        let samples = CodexRunwayTokenActivityParser.recentSamples(fromLogPath: log.path, now: second.addingTimeInterval(1))
+
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertTrue(samples.allSatisfy { $0.modelSlug == "gpt-5.6-sol" },
+                      "the leading token line must be backfilled with the session model")
     }
 
     func testCodexRunwayParserIgnoresStaleRateLimitSamples() throws {
