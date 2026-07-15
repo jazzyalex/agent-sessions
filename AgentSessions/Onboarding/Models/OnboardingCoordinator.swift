@@ -34,6 +34,12 @@ final class OnboardingCoordinator: ObservableObject {
     /// accidental ✕ never costs a strike.
     @Published var feedbackCardSuppressedThisLaunch: Bool = false
 
+    /// Presents the Quota Meter explainer sheet (from the Quota Meter card).
+    @Published var isQuotaMeterPromoPresented: Bool = false
+
+    /// Hides the Quota Meter card for the rest of this launch.
+    @Published var quotaMeterCardSuppressedThisLaunch: Bool = false
+
     private let defaults: UserDefaults
     private let currentMajorMinorProvider: () -> String?
     private let isFreshInstallProvider: () -> Bool
@@ -190,6 +196,78 @@ final class OnboardingCoordinator: ObservableObject {
     func suppressFeedbackCardThisLaunch() {
         feedbackCardSuppressedThisLaunch = true
     }
+
+    // MARK: - Quota Meter activation
+
+    /// Whether the Quota Meter card should occupy the session-list top slot.
+    ///
+    /// Slot order is What's New > Quota Meter > feedback: activation before
+    /// extraction. Feedback waits for 10 sessions or 14 days anyway, so in
+    /// practice it rarely competes.
+    ///
+    /// The environmental facts are passed in rather than read here — the view
+    /// owns the indexers, and this stays a pure state machine.
+    ///
+    /// - Parameters:
+    ///   - hasCodexOrClaudeSessions: the Quota Meter reports Codex and Claude
+    ///     quota only, so it is noise to anyone without those sessions.
+    ///   - isQuotaMeterActive: usage tracking on *and* the cockpit opened at
+    ///     least once. Tracking alone is not "using it" — that is precisely the
+    ///     audience that has the data flowing but has never seen the window.
+    func shouldShowQuotaMeterCard(hasCodexOrClaudeSessions: Bool, isQuotaMeterActive: Bool) -> Bool {
+        guard whatsNewMajorMinor == nil else { return false }
+        guard !quotaMeterCardSuppressedThisLaunch else { return false }
+        guard !didPresentFreshInstallThisLaunch else { return false }
+        guard hasCodexOrClaudeSessions, !isQuotaMeterActive else { return false }
+
+        switch defaults.onboardingQuotaMeterAskState {
+        case .activated, .dismissedForever:
+            return false
+        case .notAsked:
+            return true
+        case .dismissedOnce:
+            // Eligible again only after a major.minor bump since the dismissal.
+            guard let current = currentMajorMinorProvider(),
+                  defaults.onboardingQuotaMeterDeclinedAtMajorMinor != current else {
+                return false
+            }
+            return true
+        }
+    }
+
+    /// Soft-dismiss the card (its ✕). Costs a strike, since unlike the feedback
+    /// card there is no second surface where a real decline is recorded.
+    func suppressQuotaMeterCardThisLaunch() {
+        quotaMeterCardSuppressedThisLaunch = true
+        recordQuotaMeterDeclined()
+    }
+
+    /// The user opened the Quota Meter — never ask again.
+    func recordQuotaMeterActivated() {
+        defaults.onboardingQuotaMeterAskState = .activated
+        isQuotaMeterPromoPresented = false
+    }
+
+    /// Dismissed: ask once more after the next major.minor bump, then never again.
+    func recordQuotaMeterDeclined() {
+        switch defaults.onboardingQuotaMeterAskState {
+        case .notAsked:
+            defaults.onboardingQuotaMeterAskState = .dismissedOnce
+            defaults.onboardingQuotaMeterDeclinedAtMajorMinor = currentMajorMinorProvider()
+        case .dismissedOnce:
+            defaults.onboardingQuotaMeterAskState = .dismissedForever
+        case .activated, .dismissedForever:
+            break
+        }
+    }
+
+    /// Records that the cockpit has been seen, retiring the card's audience test.
+    func noteCockpitOpened() {
+        guard !defaults.onboardingCockpitEverOpened else { return }
+        defaults.onboardingCockpitEverOpened = true
+    }
+
+    var hasEverOpenedCockpit: Bool { defaults.onboardingCockpitEverOpened }
 
     private func usageTriggerMet() -> Bool {
         if defaults.onboardingSessionsOpenedCount >= 10 { return true }

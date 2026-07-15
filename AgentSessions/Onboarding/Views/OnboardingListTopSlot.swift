@@ -1,14 +1,38 @@
 import SwiftUI
 
-/// Lightweight container mounted at the top of the session list. It hosts either
-/// the What's New card or the feedback card (never both — What's New wins) and
-/// carries the sheets for the compact What's New panel and the standalone
-/// feedback prompt. Renders nothing when there is nothing to show.
+/// Lightweight container mounted at the top of the session list. It hosts exactly
+/// one card — What's New, then Quota Meter, then feedback — and carries the
+/// sheets for the compact What's New panel, the Quota Meter explainer, and the
+/// standalone feedback prompt. Renders nothing when there is nothing to show.
+///
+/// Order is activation before extraction: the Quota Meter card asks the user to
+/// try something, the feedback card asks them for something. Feedback waits for
+/// 10 sessions or 14 days regardless, so the two rarely compete.
 struct OnboardingListTopSlot: View {
     @ObservedObject var coordinator: OnboardingCoordinator
+    /// The Quota Meter reports Codex and Claude quota only — it is noise to
+    /// anyone without those sessions.
+    let hasCodexOrClaudeSessions: Bool
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
+
+    private var usageEnabled: Bool { codexUsageEnabled || claudeUsageEnabled }
+
+    /// Tracking alone is not "using it": the data flows but the window may never
+    /// have been opened. Both must be true to retire the card.
+    private var isQuotaMeterActive: Bool {
+        usageEnabled && coordinator.hasEverOpenedCockpit
+    }
+
+    private var showsQuotaMeterCard: Bool {
+        coordinator.shouldShowQuotaMeterCard(
+            hasCodexOrClaudeSessions: hasCodexOrClaudeSessions,
+            isQuotaMeterActive: isQuotaMeterActive
+        )
+    }
 
     var body: some View {
         Group {
@@ -22,6 +46,15 @@ struct OnboardingListTopSlot: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            } else if showsQuotaMeterCard {
+                QuotaMeterCard(
+                    palette: palette,
+                    needsUsageEnabled: !usageEnabled,
+                    onOpen: { coordinator.isQuotaMeterPromoPresented = true },
+                    onDismiss: { coordinator.suppressQuotaMeterCardThisLaunch() }
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             } else if coordinator.shouldShowFeedbackCard() {
                 FeedbackCard(
                     palette: palette,
@@ -32,6 +65,50 @@ struct OnboardingListTopSlot: View {
                 .padding(.top, 8)
             }
         }
+    }
+}
+
+/// Dismissible "Track your Codex and Claude quota" banner.
+struct QuotaMeterCard: View {
+    let palette: OnboardingPalette
+    let needsUsageEnabled: Bool
+    var onOpen: () -> Void
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "gauge.with.dots.needle.50percent")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(palette.accentBlue)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Know your quota before it runs out")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("A pinned window with Codex and Claude limits, and how fast each session burns them.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(needsUsageEnabled ? "Turn on" : "Show me", action: onOpen)
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
     }
 }
 
@@ -62,6 +139,46 @@ extension View {
                     onFinished: { coordinator.isFeedbackPromptPresented = false }
                 )
             }
+            .sheet(isPresented: Binding(
+                get: { coordinator.isQuotaMeterPromoPresented },
+                set: { coordinator.isQuotaMeterPromoPresented = $0 }
+            )) {
+                QuotaMeterPromoActivator(coordinator: coordinator)
+            }
+    }
+}
+
+/// Owns the one side-effectful step the promo has: turning usage tracking on and
+/// putting the Quota Meter on screen. Kept out of `QuotaMeterPromoView` so that
+/// view stays presentation-only, and kept here because the sheet's host is the
+/// list pane, which is always mounted.
+private struct QuotaMeterPromoActivator: View {
+    @ObservedObject var coordinator: OnboardingCoordinator
+    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
+
+    var body: some View {
+        QuotaMeterPromoView(
+            coordinator: coordinator,
+            needsUsageEnabled: !(codexUsageEnabled || claudeUsageEnabled),
+            onActivate: activate,
+            onClose: { coordinator.isQuotaMeterPromoPresented = false }
+        )
+    }
+
+    private func activate() {
+        // Enable before opening: the Quota Meter renders "Usage tracking is off"
+        // otherwise, which would make the promo deliver an empty box.
+        codexUsageEnabled = true
+        claudeUsageEnabled = true
+        hudDisplayModeRaw = AgentCockpitHUDDisplayMode.limits.rawValue
+        UserDefaults.standard.set(
+            AgentCockpitHUDDisplayMode.limits.usesCompactChrome,
+            forKey: PreferencesKey.Cockpit.hudCompact
+        )
+        coordinator.recordQuotaMeterActivated()
+        AppWindowRouter.showAgentCockpitWindow()
     }
 }
 

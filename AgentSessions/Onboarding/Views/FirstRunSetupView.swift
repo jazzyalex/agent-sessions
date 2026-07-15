@@ -87,6 +87,7 @@ struct FirstRunSetupView: View {
         .frame(minWidth: 680, minHeight: 720)
         .task { await availabilityModel.refreshIfNeeded() }
         .onAppear {
+            seedQuotaMeterOnForFreshInstall()
             loadIndexedSessionsSnapshotIfNeeded()
             handleSessionDataUpdate()
         }
@@ -225,6 +226,22 @@ struct FirstRunSetupView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(palette.rowStroke, lineWidth: 1)
         )
+    }
+
+    /// Fresh installs land with the Quota Meter already on. The switch below is
+    /// the highest-leverage lever the feature has, and off-by-default silently
+    /// loses everyone who clicks straight through — onboarding never asks again.
+    ///
+    /// Only seeds when neither key has ever been written, so it can never
+    /// overturn a deliberate choice, and the switch stays the user's to flip
+    /// before leaving this screen. Enabling tracking does not open any window;
+    /// it only starts usage probes.
+    private func seedQuotaMeterOnForFreshInstall() {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: PreferencesKey.codexUsageEnabled) == nil,
+              defaults.object(forKey: PreferencesKey.claudeUsageEnabled) == nil else { return }
+        codexUsageEnabled = true
+        claudeUsageEnabled = true
     }
 
     /// Enables/disables the Quota Meter as a whole from a single switch.

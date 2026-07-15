@@ -10,6 +10,22 @@ extension UserDefaults {
         static let sessionsOpenedCount = "OnboardingSessionsOpenedCount"
         static let feedbackAskState = "OnboardingFeedbackAskState"
         static let feedbackDeclinedAtMajorMinor = "OnboardingFeedbackDeclinedAtMajorMinor"
+        static let quotaMeterAskState = "OnboardingQuotaMeterAskState"
+        static let quotaMeterDeclinedAtMajorMinor = "OnboardingQuotaMeterDeclinedAtMajorMinor"
+        static let cockpitEverOpened = "OnboardingCockpitEverOpened"
+    }
+
+    /// Lifecycle of the Quota Meter activation card. Mirrors `FeedbackAskState`:
+    /// one soft strike, a second chance after a version bump, then silence.
+    enum QuotaMeterAskState: String {
+        /// Not yet shown — eligible once the audience test passes.
+        case notAsked
+        /// Dismissed once — eligible again after the next major.minor bump.
+        case dismissedOnce
+        /// Dismissed a second time (after a bump) — never ask again.
+        case dismissedForever
+        /// The user opened the Quota Meter — never ask again.
+        case activated
     }
 
     /// Lifecycle state of the one-time native feedback ask.
@@ -76,5 +92,25 @@ extension UserDefaults {
     var onboardingFeedbackDeclinedAtMajorMinor: String? {
         get { string(forKey: OnboardingKeys.feedbackDeclinedAtMajorMinor) }
         set { set(newValue, forKey: OnboardingKeys.feedbackDeclinedAtMajorMinor) }
+    }
+
+    /// Lifecycle of the Quota Meter activation card.
+    var onboardingQuotaMeterAskState: QuotaMeterAskState {
+        get { QuotaMeterAskState(rawValue: string(forKey: OnboardingKeys.quotaMeterAskState) ?? "") ?? .notAsked }
+        set { set(newValue.rawValue, forKey: OnboardingKeys.quotaMeterAskState) }
+    }
+
+    /// The major.minor at which the user last dismissed the Quota Meter card.
+    var onboardingQuotaMeterDeclinedAtMajorMinor: String? {
+        get { string(forKey: OnboardingKeys.quotaMeterDeclinedAtMajorMinor) }
+        set { set(newValue, forKey: OnboardingKeys.quotaMeterDeclinedAtMajorMinor) }
+    }
+
+    /// True once the cockpit window has ever been opened. Distinguishes the
+    /// "usage tracking is on but they've never actually seen it" audience from
+    /// people already using the feature.
+    var onboardingCockpitEverOpened: Bool {
+        get { bool(forKey: OnboardingKeys.cockpitEverOpened) }
+        set { set(newValue, forKey: OnboardingKeys.cockpitEverOpened) }
     }
 }
