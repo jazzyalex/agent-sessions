@@ -3,8 +3,8 @@
 Verify agent session format compatibility for Agent Sessions. Use when any agent CLI
 updates, when monitoring flags drift, or when bumping max verified versions.
 
-Covers: session schema, usage/limits tracking, storage backends, and discovery path
-contracts for all supported agents.
+Covers: session schema, usage/limits tracking, model price freshness, storage backends,
+and discovery path contracts for all supported agents.
 
 ## How to use
 
@@ -36,6 +36,13 @@ Key fields per agent in the report:
   `codex_status_probe`, `claude_usage_probe`, and `claude_status` every run (SKILL.md §1 step 3, §2)
 - `weekly.discovery_path_contract` — does the storage layout still match expectations?
 
+Not covered by the scan — check by hand (SKILL.md §2a, monthly + on any model launch):
+- **Model price freshness** for the runway `$` burn. No probe catches this: prices drift
+  with no schema change, and stale prices render a wrong number rather than an error.
+  Verify `docs/prices.json` + `RunwayPriceTable.bundledJSON` against the official
+  Anthropic/OpenAI pricing pages, confirm every model slug the local CLIs emit resolves
+  to a key, and **advance `updated`** on any edit or the correction is ignored.
+
 ## Full auto-update workflow
 
 Use this prompt in a new session to run the complete cycle:
@@ -61,6 +68,10 @@ This triggers the following automated sequence:
    Exit 0 = safe to bump. Exit 2 = schema mismatch. Exit 3 = driver failed. Exit 4 = config error.
 4. **Bump verified versions** in matrix/ledger/tracking docs (only for agents that passed prebump or have fresh weekly evidence).
 5. **Investigate** medium/high agents that need fixture work or re-auth.
+6. **Model price freshness** (SKILL.md §2a) — monthly, and whenever a scan surfaces a
+   new model slug. The scan cannot flag this: a price change breaks no schema and trips
+   no probe, so the `$` burn just quietly reports the wrong number. A new slug with no
+   table key is dropped from `$` entirely.
 
 ### Decision matrix
 

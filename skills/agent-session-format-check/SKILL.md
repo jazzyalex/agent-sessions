@@ -182,6 +182,74 @@ after re-authentication. The Swift side silently retains the last known good sna
 
 ---
 
+## 2a  Model Price Freshness (Session Runway `$` burn)
+
+The runway's `$` presentation prices per-type token rates against a model table, so it
+drifts whenever a provider changes prices or ships a model slug we don't know — with no
+schema change and no failing probe. Nothing else in this scan catches it. Unlike a
+broken probe, **stale prices fail silently**: the number still renders, just wrong.
+
+**Sources of truth (fetch these, don't recall them):**
+- Anthropic — <https://platform.claude.com/docs/en/about-claude/pricing>
+- OpenAI — <https://developers.openai.com/api/docs/pricing>
+
+**The table lives in two places that MUST stay identical:**
+- `docs/prices.json` — served to clients from GitHub Pages (corrects shipped apps with
+  no release)
+- `RunwayPriceTable.bundledJSON` in `AgentSessions/CodexStatus/RunwayPriceTable.swift`
+  — the compiled-in default (offline / pre-first-fetch)
+
+### Checks
+1. **Prices unchanged?** Compare every key's `inputPerMTok` / `cachedInputPerMTok` /
+   `outputPerMTok` / `cacheWritePerMTok` against the official pages. Anthropic cache
+   columns are derived: read = 0.1x input, 5m write = 1.25x input.
+2. **New model slugs?** Any tier we don't have a key for is **dropped from `$`** (it
+   still shows in `tk/h`), so a new model silently disappears from the cost view.
+   Check what the local CLIs actually emit rather than guessing:
+   ```bash
+   # Codex: the model lives on turn_context lines
+   grep -ho '"model":"[^"]*"' ~/.codex/sessions/$(date +%Y/%m)/*/*.jsonl | sort -u
+   # Claude: message.model on assistant lines
+   find ~/.claude/projects -name '*.jsonl' -mtime -7 -print0 \
+     | xargs -0 -n1 jq -r 'select(.type=="assistant") | .message.model' 2>/dev/null | sort -u
+   ```
+   Every slug returned must resolve via longest-prefix against a table key.
+
+   **Known slugs that look alarming but are fine** (verified 2026-07-14):
+   - `<synthetic>` (Claude) — not a model. It appears on assistant lines and does
+     carry a `usage` object, but every field is **0**, so it forms a zero-rate
+     component and `dollarsPerHour` skips it. Do NOT "fix" this by adding a price
+     key; the zero-rate exemption is what keeps it from dropping the whole session.
+     If Claude ever gives `<synthetic>` real tokens, that exemption stops applying
+     and every Claude session would vanish from `$` — re-check this if it changes.
+   - `gpt-5.6-codex` (Codex) — no key of its own; resolves to the `gpt-5.6` fallback
+     (sol pricing). OpenAI publishes no separate `-codex` rate, so that is the best
+     available assumption. The bare `gpt-5.6` key exists for exactly this.
+3. **Prefix collisions?** Keys match by longest prefix, so a shorter key must never
+   shadow a longer one, and a legacy key must never capture a current slug (e.g.
+   `claude-opus-4-1` must NOT match `claude-opus-4-8`). Adding a bare `claude-opus-4`
+   would break exactly this. `testPriceTableLegacyKeysPriceWithoutShadowingCurrent`
+   and `testPriceTableBundledAndPrefixMatch` pin it — run them after any table edit.
+4. **Temporary pricing expired?** Introductory/promo rates have end dates. Known:
+   Claude Sonnet 5 intro $2/$10 ends **2026-08-31** (we deliberately bundle the stable
+   $3/$15, so nothing breaks at expiry).
+
+### Updating
+Edit `docs/prices.json`, mirror the identical change into `bundledJSON`, and **always
+advance `updated`**. Clients only accept a manifest whose `updated` is `>=` their
+bundled table's, so a forgotten bump means the correction is ignored — that date is the
+only thing preventing a stale cache from shadowing corrected prices. Pushing
+`docs/prices.json` corrects already-shipped apps within a day, with no release.
+
+Verify: `xcodebuild test -scheme AgentSessions -only-testing:AgentSessionsTests/CodexUsageParserTests`
+
+### Cadence
+Monthly is enough — provider prices move rarely, but when they move they move a lot
+(Opus went $15/$75 → $5/$25, a 3x overstatement that ran undetected). Also check on any
+**new model launch**, since an unknown slug drops that session from `$` entirely.
+
+---
+
 ## 3  OpenCode Storage Changes
 
 OpenCode's current local backend is SQLite at `~/.local/share/opencode/opencode.db`.
