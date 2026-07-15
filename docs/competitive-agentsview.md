@@ -4,6 +4,13 @@
 **Subject:** [AgentsView](https://github.com/kenn-io/agentsview) (kenn-io, MIT, ~3.4k stars) — an open-source, cross-platform session viewer that directly competes with Agent Sessions.
 **Versions compared:** AS 4.0 (build 53) · AV 0.34.5 (2026-06-23)
 
+> **Update 2026-07-14 (source-verified refresh).** The AV clone in `.reference/agentsview` is newer than 0.34.5 and changes three claims below — all read directly from AV's code, not its docs:
+> 1. AV **now resumes sessions** (including OpenCode: `opencode --session …`) and can launch a configured terminal — it is **no longer "viewer only."**
+> 2. AV **renders no images at all** — image/attachment content is skipped or flattened to text placeholders.
+> 3. AV is **read-only toward the agent stores** (server `ReadOnly` mode, `:ro` mounts) and cannot save/restore a session back into the agent.
+>
+> A new **"UI philosophy"** section is added below; corrected table rows are marked *corrected 2026-07-14*.
+
 > Companion docs:
 > - [perf-transcript-virtualization-plan.md](perf-transcript-virtualization-plan.md) — the big speed refactor.
 > - [perf-quick-wins.md](perf-quick-wins.md) — independent low-risk speed tickets.
@@ -24,6 +31,20 @@
 
 ---
 
+## UI philosophy — the core difference
+
+Reading AV's current source (not the 0.34.5 notes above) makes the split concrete, and it is bigger than "native vs webview."
+
+**AgentsView is a local web analytics console.** The frontend is a single-page Svelte 5 app (`frontend/src/App.svelte` + `main.ts` — no per-view routing; one client-rendered app) built around a `ThreeColumnLayout` and a command palette. Its component tree is organized like a data product, not a document viewer: dedicated *pages* for `analytics`, `insights`, `trends`, `usage`, `activity`, `recentedits`, `pinned`, and `trash`, plus `SignalPanel` and `SessionVitals` inside the transcript. The transcript is rich and web-native — virtualized `MessageList`, GFM markdown, Shiki-highlighted `CodeBlock`, collapsible `ToolBlock`/`ThinkingBlock`, `SubagentInline`, `ParallelGroup`, `CompactBoundaryDivider`. The whole thing is something you *browse and analyze* like a dashboard: cost treemaps, health grades, velocity trends, keyboard-driven navigation. It runs identically in a Tauri webview, at localhost, or self-hosted/Docker — the same web console everywhere.
+
+**Agent Sessions is a native macOS cockpit.** AppKit/SwiftUI, a menu-bar extra, Sparkle updates, HIG spacing, and a single operational flow: list → transcript → act. The center of gravity is *doing something with the session now* — resume/launch into a terminal, a live Agent Cockpit HUD, image/screenshot browsing, archive restore — not analyzing it after the fact. It is macOS-only and behaves like a Mac app, down to the window chrome.
+
+**The session list itself reflects the split.** AS renders a native SwiftUI `Table` with sortable columns — `★ / Agent / Session / Date / Project / Msgs / Size` (`AgentSessions/Views/UnifiedSessionsView.swift:1011-1110`), each with a sort keypath, so clicking a header sorts the grid. AV renders a compact left-sidebar item per session (title, project, relative time, machine tag, agent tag, plus star/subagent/teammate badges — `frontend/src/lib/components/sidebar/SessionItem.svelte`); sorting lives in a separate control, not column headers. AS surfaces **Size** and **message count** as first-class sortable columns AV doesn't show in-row; AV's underlying row model carries more fields (15, incl. `machine`/`is_teammate`/`termination_status`) but presents them as sidebar context, not a grid. **Both filter by agent, but the surfacing is where AS wins.** AS puts always-visible **agent pills** right in the toolbar — one-click capsule toggles per agent (`AgentTabToggle`), collapsing into an "Agents ▾" overflow menu only past four (`AgentSessions/Views/UnifiedSessionsView.swift:3460-3484`). AV's agent filter is a searchable multi-select checkbox list with per-agent counts, but it's tucked behind a generic **"Filters"** button in the sidebar header (`SessionFilterControl.svelte:139`, mounted at `SessionList.svelte:488`) — same capability, materially lower discoverability. Not a feature gap; a UX-friction gap in AS's favor.
+
+The practical read: AV optimizes for **breadth and post-hoc intelligence** (44 agents, cost/analytics, cross-platform, sync, sharing); AS optimizes for **native, private, in-the-moment operation** on a Mac. They overlap on the session list and transcript, but the surrounding philosophy differs enough that users self-select by which they want — a web-style analytics console, or a native operational cockpit.
+
+---
+
 ## Feature parity table
 
 Legend: ✅ present · ⚠️ partial / weaker · ❌ absent
@@ -38,8 +59,8 @@ Legend: ✅ present · ⚠️ partial / weaker · ❌ absent
 | Full-text search | ✅ FTS5 (warm path) | ✅ FTS5 (porter unicode61) |
 | Filters | ✅ date/model/repo/path/archived/agent/kind | ✅ agent/machine/project/activity/type/starred |
 | Transcript rendering | ⚠️ monospaced ANSI/attributed + JSON colorize; no markdown, no collapse | ✅ **markdown (GFM) + Shiki highlight + collapsible tool blocks + parallel groups + inline subagents + thinking blocks** |
-| Resume / launch session | ✅ **native (Terminal/iTerm/Warp)** | ❌ viewer only |
-| Archived-session restore | ✅ Claude + Codex restore | ❌ reads archived, no restore |
+| Resume / launch session | ✅ **native, one-click into Terminal/iTerm/Warp** | ✅ *corrected 2026-07-14:* builds resume cmd (opencode/claude/codex/copilot/gemini/amp) and launches a configured terminal (auto/custom) or copies to clipboard — **no longer "viewer only"** |
+| Save / restore sessions (write-back to the agent) | ✅ Claude + Codex archive restore | ❌ *corrected 2026-07-14:* **read-only by design** — server `ReadOnly` mode, agent stores mounted `:ro`; star/pin/exclude/trash write only to AV's own catalog, never back to the agent |
 | Live session HUD / cockpit | ✅ **Agent Cockpit + Session Runway burn-rate** | ⚠️ SSE live updates, running-turn timers (no native HUD) |
 | Multi-machine sync | ❌ | ✅ **Postgres push / SSH pull / S3** |
 | Session intelligence (health grade A–F, outcome) | ❌ | ✅ |
@@ -49,13 +70,13 @@ Legend: ✅ present · ⚠️ partial / weaker · ❌ absent
 | Usage / cost tracking | ✅ quota strips (Codex/Claude) | ✅ **cost $, pricing, cache efficiency, treemap** |
 | Analytics dashboard | ✅ charts / heatmap / breakdown | ✅ richer (velocity, grades, outcomes) |
 | Export | ⚠️ Markdown | ✅ Markdown + HTML + GitHub Gist publish |
-| Image gallery | ✅ screenshot grid | ❌ |
+| Images (inline + gallery) | ✅ inline images + screenshot grid | ❌ *corrected 2026-07-14:* **no image rendering at all** — parsers classify `image`/`canvas` as non-text and skip or flatten them to `[Attachment: …]` text; no `<img>`/`data:image` anywhere in the UI |
 | Git context | ✅ Git Inspector (beta) | ✅ Recent Edits feed → exact message |
 | Sharing / publish | ❌ | ✅ Gist |
 | Telemetry | ✅ none | ⚠️ anonymous daemon ping (opt-out) |
 
 ### Where AS wins
-Resume/launch into a terminal, archive **restore**, live native HUD + Session Runway burn-rate, menu-bar/native macOS integration, zero telemetry, screenshot gallery.
+Source-verified as of 2026-07-14: **image display + screenshot gallery** (AV renders none), **session save/restore write-back** (AV is read-only toward the agent stores), **native macOS integration** (menu-bar extra, Sparkle, live Agent Cockpit HUD + Session Runway), and **zero telemetry** (AV pings an anonymous daemon, opt-out). Resume/launch is now *parity* — AV added it — so AS's remaining resume edge is the native Terminal/iTerm/Warp preset UX baked into the app, not the capability itself.
 
 ### Where AV wins
 4× the agent coverage, true cross-platform, **transcript richness**, multi-machine sync, session intelligence (health grades/outcomes), AI insights, MCP server, secret scanning, cost tracking, and sharing/publish.
