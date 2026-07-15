@@ -1,5 +1,8 @@
 # Agents Guidelines
 
+## Marketing / Promo Coordination
+- All marketing / promo / growth work coordinates through `Marketing/STATUS.md` — read it first, update it last. It's the source of truth and indexes the detail files (goal + star log, angles, Product Hunt kit, HN draft). Draft only; the owner posts to their own accounts. (`Marketing/` is gitignored and local to this machine.)
+
 ## Build & Review Discipline
 - Do not ask the user to “confirm” or “if it looks good” until the code compiles locally with zero build errors.
 - After making changes that affect Swift sources or Xcode integration, validate by building the active scheme.
