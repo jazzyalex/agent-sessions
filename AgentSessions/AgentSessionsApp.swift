@@ -425,8 +425,7 @@ struct AgentSessionsApp: App {
             }
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
-                OpenAgentCockpitWindowButton()
-                AgentCockpitViewModePicker()
+                AgentCockpitMenu()
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
@@ -504,6 +503,11 @@ struct AgentSessionsApp: App {
                 .background(WindowOpenRegistrationView())
                 .onAppear {
                     runSharedLaunchBootstrap(windowLabel: "Agent Cockpit window")
+                    // Retires the Quota Meter card's audience test: usage
+                    // tracking being on is not the same as having ever seen the
+                    // window, and this is the only place that difference is known.
+                    onboardingCoordinator.noteCockpitOpened()
+                    CockpitWindowVisibility.shared.refresh()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     handleAppDidBecomeActive()
@@ -575,26 +579,110 @@ private struct FavoritesOnlyToggle: View {
     }
 }
 
-/// Agent Cockpit view switch — lives in the View menu instead of the cockpit's
-/// own toolbar. Writes the legacy compact key alongside the mode so older
-/// readers of `hudCompact` stay in sync.
-private struct AgentCockpitViewModePicker: View {
+/// Tracks whether the cockpit window is on screen so the View menu's "Off" item
+/// can carry an accurate checkmark. Window visibility is AppKit state, not
+/// SwiftUI state, so it has to be observed rather than read.
+///
+/// Deliberately does not observe `didUpdateNotification`, which fires
+/// continuously — this window's idle cost is watched closely. Key changes, closes
+/// and app activation are enough: the menu is only ever read while the app is
+/// active, and activation always refreshes first.
+@MainActor
+final class CockpitWindowVisibility: ObservableObject {
+    static let shared = CockpitWindowVisibility()
+
+    @Published private(set) var isVisible: Bool = false
+    private var observers: [NSObjectProtocol] = []
+
+    private init() {
+        observe(NSWindow.didBecomeKeyNotification)
+        observe(NSWindow.willCloseNotification)
+        observe(NSApplication.didBecomeActiveNotification)
+        refresh()
+    }
+
+    private func observe(_ name: Notification.Name) {
+        let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            // willClose fires *before* the window leaves the window list, so read
+            // on the next turn of the run loop rather than inside the callback.
+            Task { @MainActor [weak self] in self?.refresh() }
+        }
+        observers.append(token)
+    }
+
+    func refresh() {
+        isVisible = AppWindowRouter.isAgentCockpitWindowVisible
+    }
+}
+
+/// The single View-menu entry for the cockpit: one radio group over "which mode
+/// is showing", with Off meaning the window is closed. Mode and visibility are
+/// the same question to a user — "what am I looking at?" — so splitting them
+/// into separate open/close/mode items made three entries out of one choice.
+///
+/// Off matters beyond tidiness: compact chrome strips `.titled` and disables the
+/// standard window buttons, so Compact and Quota Meter have no titlebar close
+/// button at all. This is the discoverable way out (⌘W also works, handled in
+/// the HUD).
+private struct AgentCockpitMenu: View {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var visibility = CockpitWindowVisibility.shared
     @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 
+    private var currentMode: AgentCockpitHUDDisplayMode {
+        AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full
+    }
+
     var body: some View {
-        Picker("Cockpit View", selection: Binding(
-            get: { AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full },
-            set: { mode in
-                hudDisplayModeRaw = mode.rawValue
-                UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
-            }
-        )) {
-            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
-                Text(mode.title).tag(mode)
-            }
+        Menu("Quota Meter / Agent Cockpit") {
+            modeItem(.limits, "Quota Meter")
+                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+            Divider()
+            modeItem(.compact, "Compact Agent Cockpit")
+            modeItem(.full, "Full Agent Cockpit")
+            Divider()
+            offItem
         }
         .disabled(!liveSessionsFeatureEnabled)
+        .help(
+            liveSessionsFeatureEnabled
+                ? "Choose which cockpit is on screen, or turn it off."
+                : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
+        )
+    }
+
+    /// Radio semantics: any activation selects, including re-activating the item
+    /// that is already checked. Ignoring the "unchecking" direction instead would
+    /// make ⌘⌥⇧C a no-op exactly when the Quota Meter is already the checked
+    /// mode — losing the bring-to-front the shortcut has always meant. Turning a
+    /// mode off is what Off is for.
+    private func modeItem(_ mode: AgentCockpitHUDDisplayMode, _ title: String) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { visibility.isVisible && currentMode == mode },
+            set: { _ in select(mode) }
+        ))
+    }
+
+    private var offItem: some View {
+        Toggle("Off", isOn: Binding(
+            get: { !visibility.isVisible },
+            set: { isOn in
+                guard isOn else { return }
+                AppWindowRouter.closeAgentCockpitWindow()
+                visibility.refresh()
+            }
+        ))
+    }
+
+    /// Writes the legacy compact key alongside the mode so older readers of
+    /// `hudCompact` stay in sync. `openWindow` focuses an already-open window,
+    /// so this doubles as bring-to-front.
+    private func select(_ mode: AgentCockpitHUDDisplayMode) {
+        hudDisplayModeRaw = mode.rawValue
+        UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
+        openWindow(id: "AgentCockpit")
+        visibility.refresh()
     }
 }
 
@@ -627,22 +715,6 @@ final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private struct OpenAgentCockpitWindowButton: View {
-    @Environment(\.openWindow) private var openWindow
-    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
-    var body: some View {
-        Button("Agent Cockpit") {
-            openWindow(id: "AgentCockpit")
-        }
-        .disabled(!liveSessionsFeatureEnabled)
-        .help(
-            liveSessionsFeatureEnabled
-                ? "Open Agent Cockpit."
-                : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
-        )
-        .keyboardShortcut("c", modifiers: [.command, .option, .shift])
-    }
-}
 
 extension AgentSessionsApp {
     private static let mainUnifiedWindowTitle = "Agent Sessions"
