@@ -426,6 +426,7 @@ struct AgentSessionsApp: App {
             // View menu with Saved Only toggle (stateful)
             CommandMenu("View") {
                 OpenAgentCockpitWindowButton()
+                AgentCockpitViewModePicker()
                 Button("Image Browser") {
                     NotificationCenter.default.post(name: .showImagesFromMenu, object: nil)
                 }
@@ -571,6 +572,29 @@ private struct FavoritesOnlyToggle: View {
             Text("Saved Only")
         }
         .keyboardShortcut("s", modifiers: [.command, .option, .shift])
+    }
+}
+
+/// Agent Cockpit view switch — lives in the View menu instead of the cockpit's
+/// own toolbar. Writes the legacy compact key alongside the mode so older
+/// readers of `hudCompact` stay in sync.
+private struct AgentCockpitViewModePicker: View {
+    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
+    @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
+
+    var body: some View {
+        Picker("Cockpit View", selection: Binding(
+            get: { AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full },
+            set: { mode in
+                hudDisplayModeRaw = mode.rawValue
+                UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
+            }
+        )) {
+            ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .disabled(!liveSessionsFeatureEnabled)
     }
 }
 

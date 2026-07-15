@@ -179,6 +179,20 @@ struct HUDRow: Identifiable, Equatable {
 private enum AgentCockpitHUDTheme {
     static let cornerRadius: CGFloat = 12
     static let toolbarButtonCornerRadius: CGFloat = 7
+    /// Toolbar grouping rhythm: controls that belong to the same family sit at
+    /// `toolbarIntraGroupSpacing`, distinct families at `toolbarGroupSpacing`.
+    /// The gaps — not the ordering — are what make the groups legible.
+    static let toolbarIntraGroupSpacing: CGFloat = 2
+    static let toolbarGroupSpacing: CGFloat = 10
+}
+
+/// Where a toolbar button sits inside a fused segmented pair. `.leading` and
+/// `.trailing` square off the inner corners so two buttons separated by a 1pt
+/// gap read as one control with a seam instead of two capsules.
+private enum HUDToolbarSegment {
+    case standalone
+    case leading
+    case trailing
 }
 
 enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
@@ -812,7 +826,6 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
-    @State private var showModePopover = false
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
@@ -1247,62 +1260,36 @@ struct AgentCockpitHUDView: View {
                     .disabled(!activeEnabled)
                     .opacity(activeEnabled ? 1 : 0.6)
                 } else {
-                    // Leading action balances the Quota Meter toolbar now that the
-                    // active/idle counters are gone from the left side.
-                    cockpitOpenButton
+                    // Destinations zone: both buttons leave the Quota Meter for
+                    // another window, so they lead together and stay out of the
+                    // view-options cluster on the right.
+                    HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
+                        cockpitOpenButton
+                        cockpitSettingsButton
+                    }
                 }
 
                 Spacer(minLength: 0)
 
                 if isLimitsOnly {
+                    // Sheds the text-size toggle, then the runway group, as width
+                    // runs out. Pin survives to the last rung; the destinations
+                    // zone is outside ViewThatFits and never drops.
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 6) {
-                            cockpitModePicker
-                            if runwayControlAvailable {
-                                cockpitRunwayButton
-                                runwayPresentationButton
-                            }
-                            cockpitFontSizeButton
-                            cockpitSettingsButton
-                            cockpitPinButton
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
-                        HStack(spacing: 6) {
-                            cockpitModePicker
-                            if runwayControlAvailable {
-                                cockpitRunwayButton
-                                runwayPresentationButton
-                            }
-                            cockpitFontSizeButton
-                            cockpitPinButton
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
-                        HStack(spacing: 6) {
-                            cockpitModePicker
-                            cockpitFontSizeButton
-                            cockpitPinButton
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
-                        HStack(spacing: 6) {
-                            cockpitModePicker
-                            cockpitPinButton
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-
-                        cockpitPinButton
-                            .fixedSize(horizontal: true, vertical: false)
+                        limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: true)
+                        limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: false)
+                        limitsToolbarCluster(showRunway: false, showFontSize: false)
 
                         Color.clear
                             .frame(width: 0, height: 1)
                     }
                 } else {
-                    HStack(spacing: 6) {
-                        cockpitOpenButton
-                        cockpitModePicker
-                        cockpitSettingsButton
+                    HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
+                        HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
+                            cockpitOpenButton
+                            cockpitSettingsButton
+                        }
+                        toolbarHairline
                         cockpitPinButton
                     }
                 }
@@ -1356,35 +1343,6 @@ struct AgentCockpitHUDView: View {
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
         .help("Open Agent Sessions")
-    }
-
-    private var cockpitModePicker: some View {
-        let mode = AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full
-        return Button {
-            showModePopover.toggle()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: mode.systemImage)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(mode.shortLabel)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .opacity(0.6)
-            }
-        }
-        .buttonStyle(HUDIconButtonStyle(isOn: showModePopover, tint: nil))
-        .help("Switch Agent Cockpit view: Full, Compact, or Quota Meter (⇧⌘M cycles).")
-        .popover(isPresented: $showModePopover, arrowEdge: .bottom) {
-            HUDCockpitModePopover(
-                selectedRaw: hudDisplayModeRaw,
-                onSelect: { selected in
-                    showModePopover = false
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        setHUDDisplayMode(selected)
-                    }
-                }
-            )
-        }
     }
 
     private var cockpitSettingsButton: some View {
@@ -1446,32 +1404,68 @@ struct AgentCockpitHUDView: View {
                     .opacity(0.6)
             }
         }
-        .buttonStyle(HUDIconButtonStyle(isOn: isForced, tint: nil))
+        .buttonStyle(HUDIconButtonStyle(isOn: isForced, tint: nil, segment: .leading))
         .help("Runway drawer: choose when the session runway appears.")
         .popover(isPresented: $showRunwayPopover, arrowEdge: .bottom) {
             HUDRunwayVisibilityPopover(runwayVisibilityRaw: $runwayVisibilityRaw)
         }
     }
 
+    /// Trailing half of the fused runway pair. Carries no icon of its own — the
+    /// `⇅` on the visibility half labels the whole pair, and a second gauge here
+    /// would just restate the Quota Meter's own identity.
     private var runwayPresentationButton: some View {
         let presentation = RunwayPresentation.current(raw: runwayPresentationRaw)
         return Button {
             showRunwayPresentationPopover.toggle()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "gauge.with.dots.needle.bottom.50percent")
-                    .font(.system(size: 9.5, weight: .semibold))
                 Text(presentation.shortLabel)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .opacity(0.6)
             }
         }
-        .buttonStyle(HUDIconButtonStyle(isOn: presentation != .fiveHour, tint: nil))
+        .buttonStyle(HUDIconButtonStyle(isOn: presentation != .fiveHour, tint: nil, segment: .trailing))
         .help("Session runway rate: 5-hour, tokens, dollars, or weekly.")
         .popover(isPresented: $showRunwayPresentationPopover, arrowEdge: .bottom) {
             HUDRunwayPresentationPopover(runwayPresentationRaw: $runwayPresentationRaw)
         }
+    }
+
+    /// Fused runway group: 1pt gap lets the HUD background show through as the
+    /// seam between the two squared-off inner edges.
+    private var runwayGroup: some View {
+        HStack(spacing: 1) {
+            cockpitRunwayButton
+            runwayPresentationButton
+        }
+    }
+
+    /// Marks pin as belonging to no group — it is window behavior, not a
+    /// Quota Meter setting.
+    private var toolbarHairline: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.12))
+            .frame(width: 1, height: 16)
+    }
+
+    /// One rung of the Quota Meter's trailing cluster. The hairline only earns
+    /// its place when something precedes pin.
+    private func limitsToolbarCluster(showRunway: Bool, showFontSize: Bool) -> some View {
+        HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
+            if showRunway {
+                runwayGroup
+            }
+            if showFontSize {
+                cockpitFontSizeButton
+            }
+            if showRunway || showFontSize {
+                toolbarHairline
+            }
+            cockpitPinButton
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
@@ -4607,51 +4601,6 @@ private struct HUDRunwayPresentationPopover: View {
     }
 }
 
-private struct HUDCockpitModePopover: View {
-    let selectedRaw: String
-    let onSelect: (AgentCockpitHUDDisplayMode) -> Void
-
-    private var selection: AgentCockpitHUDDisplayMode {
-        AgentCockpitHUDDisplayMode(rawValue: selectedRaw) ?? .full
-    }
-
-    // Mirrors HUDRunwayVisibilityPopover's layout exactly: one segmented
-    // picker instead of a row list, so a single click selects the mode.
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Cockpit view")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .kerning(0.4)
-
-            Picker("", selection: Binding(
-                get: { selection },
-                set: { onSelect($0) }
-            )) {
-                ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
-                    Text(mode.shortLabel).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                Text("⇧⌘M cycles Full → Compact → Meter while the cockpit is focused.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(12)
-        .frame(width: 236)
-    }
-}
-
 private struct HUDLimitsDetailPanel: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
@@ -5807,9 +5756,14 @@ private let hudWeeklyResetFormatter: DateFormatter = {
 
 // MARK: - HUD button style
 
+/// Toolbar button chrome. Highlight invariant: `isOn` means "this control is
+/// off its default" (runway forced, non-5h rate, enlarged text) — never merely
+/// "this control exists". Pin is the one exception, tinting orange to report
+/// window state rather than a setting.
 private struct HUDIconButtonStyle: ButtonStyle {
     let isOn: Bool
     let tint: Color?
+    var segment: HUDToolbarSegment = .standalone
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -5818,11 +5772,20 @@ private struct HUDIconButtonStyle: ButtonStyle {
             .padding(.horizontal, 9)
             .frame(height: 24)
             .background(background.opacity(configuration.isPressed ? 0.85 : 1.0))
-            .clipShape(RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.toolbarButtonCornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.toolbarButtonCornerRadius, style: .continuous)
-                    .strokeBorder(border, lineWidth: 0.5)
-            )
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(border, lineWidth: 0.5))
+    }
+
+    private var shape: UnevenRoundedRectangle {
+        let r = AgentCockpitHUDTheme.toolbarButtonCornerRadius
+        switch segment {
+        case .standalone:
+            return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
+        case .leading:
+            return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: 0, topTrailingRadius: 0, style: .continuous)
+        case .trailing:
+            return UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
+        }
     }
 
     private var foreground: Color {
