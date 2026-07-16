@@ -1,3 +1,27 @@
+## 2026-07-14 21:21 · runway-dollar-burn · Session Runway $ burn: correct, stable, all pushed
+status: in-progress
+
+**State:** `$` burn (Phase 1+2) is complete and all pushed to `main` (`f09241b5`), suite green at 1601 — but **committed, not released**: 4.4 shipped without it, so no user has it yet. Four review passes fed it (Fable, Codex@low, /code-review, Codex@high — only the high-effort Codex pass earned its keep).
+
+**Decided / don't redo:**
+- **Route B**: price what we can, DROP what we can't; nil only when nothing is priceable. Do not revert to "any unpriced model → whole provider falls back" — that caused the $/tk flap on every 5s refresh.
+- **Reasoning is already inside `output_tokens`** (verified: `total == input + output`) and is billed at the output rate. Codex@high raised subtracting it as a P1 — it's wrong; subtracting understates. Don't "fix" it.
+- **`<synthetic>`** (Claude) is not a model; it carries usage but all zeros → zero-rate slice, exempt by design. Do NOT add a price key. (If Claude ever gives it real tokens, every Claude session would drop from `$`.)
+- **One `>=` acceptance rule** for prices. Strict-cache (`>`) was tried and reverted: it discarded same-date corrections on relaunch. Editing `docs/prices.json` MUST advance `updated`, or clients ignore it.
+- **Opus is $5/$25**, not $15/$75 (was 3x over). Fable/Mythos $10/$50 — pricier than Opus.
+- Model resolution: **last** `turn_context`, not the first, via a scan frontier. Cache-first was the bug; a warm cache masked a `/model` switch.
+- Sonnet 5 intro $2/$10 ends 2026-08-31 — we deliberately bundle the stable **$3/$15**. No action at expiry.
+
+**Key files:**
+- `AgentSessions/CodexStatus/CodexRunwayModel.swift` — `RunwayModelComponent` (per-model pricing), `dollarSnapshot`, model resolution + frontier cache.
+- `AgentSessions/CodexStatus/RunwayPriceTable.swift` + `docs/prices.json` — must stay **identical**; Pages serves the latter to shipped apps.
+- `skills/agent-session-format-check/SKILL.md` §2a — price-freshness maintenance (monthly + any model launch); the scan cannot catch price drift.
+
+**Next:**
+1. **Release it** — `$` burn is unreleased; the "your session is burning $X/h at API rates" meter is a strong release-notes story.
+2. Open by choice: one unknown-model subagent drops the whole session from `$` (Codex finding #3 — fails safe, benign today since subagents run priced models).
+3. Owner QA of `$` across a fan-out session (opus parent + sonnet subagents) — measured 1.13x overstatement before the per-model fix; should now read ~$28.52 not ~$32.11.
+
 ## 2026-07-14 14:19 · opencode-qm-usage · Research: OpenCode usage/limits in Quota Meter
 status: in-progress
 
