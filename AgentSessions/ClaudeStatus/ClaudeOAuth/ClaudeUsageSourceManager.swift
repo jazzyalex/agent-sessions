@@ -144,6 +144,21 @@ actor ClaudeUsageSourceManager {
         return now.timeIntervalSince(lastAt) >= interval
     }
 
+    /// How long to wait between delegated CLI token-refresh attempts while OAuth
+    /// keeps returning 401. Long enough not to hammer `claude auth status` on
+    /// every 3-minute retry, short enough that a wedged expired token recovers on
+    /// its own well before a user would relaunch.
+    static let delegatedRefreshRetryInterval: TimeInterval = 10 * 60
+
+    /// Pure predicate governing delegated CLI token refresh. Same shape as
+    /// `shouldReprobe`, deliberately: the fix for the relaunch-only wedge is to
+    /// make this a THROTTLE, not a one-shot latch — after `interval`, a token
+    /// still 401ing re-attempts the refresh instead of giving up until relaunch.
+    static func shouldAttemptDelegatedRefresh(lastAt: Date?, now: Date, interval: TimeInterval) -> Bool {
+        guard let lastAt else { return true }
+        return now.timeIntervalSince(lastAt) >= interval
+    }
+
     /// True while we're still inside the post-launch cold-start window. A
     /// transient OAuth miss during this window (e.g. the Keychain `security`
     /// read racing app launch, or a single network hiccup) must retry the —
@@ -265,7 +280,12 @@ actor ClaudeUsageSourceManager {
     private var oauthRateLimitRetryDeadline: Date?
     private var shouldRun = false
     private var startedAt: Date?
-    private var didAttemptDelegatedRefresh = false
+    /// When delegated CLI token refresh was last attempted. Throttled, NOT a
+    /// one-shot latch: a boolean here (reset only by OAuth success) meant that an
+    /// expired token whose OAuth never recovers — e.g. FDA-blocked web fallback —
+    /// latched delegated refresh off until an app relaunch, so the CLI-refreshable
+    /// token was never refreshed. `nil` = not yet attempted this cycle.
+    private var lastDelegatedRefreshAt: Date?
     /// Timestamp of the first verified 401-with-token in the current failure
     /// episode; drives the debounced `.expired` banner escalation (P2). Cleared
     /// on a successful fetch and whenever the failure path takes the non-401
@@ -424,6 +444,11 @@ actor ClaudeUsageSourceManager {
         // without needing an app relaunch.
         credentialWatchTask?.cancel()
         credentialWatchTask = nil
+        // Clear the delegated-refresh throttle too: a user-initiated refresh (or
+        // a wake, which routes here) is an explicit "try everything now", so a
+        // still-401 token should re-attempt the CLI refresh at once rather than
+        // wait out the throttle window.
+        lastDelegatedRefreshAt = nil
         await tokenResolver.invalidateCache()
         await performOAuthFetch()
     }
@@ -466,7 +491,7 @@ actor ClaudeUsageSourceManager {
             let recoveredFromFailure = oauthFailureCount > 0
             oauthFailureCount = 0
             oauthRateLimitRetryDeadline = nil
-            didAttemptDelegatedRefresh = false
+            lastDelegatedRefreshAt = nil
             first401At = nil
             episodeFirst401TokenHash = nil
             cancelExpiredEscalationTimer()
@@ -529,9 +554,13 @@ actor ClaudeUsageSourceManager {
             os_log("ClaudeOAuth: 401, invalidating token cache", log: log, type: .info)
             await tokenResolver.invalidateCache()
 
-            // Attempt delegated refresh once per failure cycle
-            if !didAttemptDelegatedRefresh {
-                didAttemptDelegatedRefresh = true
+            // Attempt delegated refresh, throttled — NOT once-until-relaunch.
+            // Re-attempting after the interval is what lets a wedged expired
+            // token recover from a valid CLI without a process restart.
+            if Self.shouldAttemptDelegatedRefresh(lastAt: lastDelegatedRefreshAt,
+                                                  now: Date(),
+                                                  interval: Self.delegatedRefreshRetryInterval) {
+                lastDelegatedRefreshAt = Date()
                 os_log("ClaudeOAuth: attempting delegated token refresh via CLI", log: log, type: .info)
                 let result = await delegatedRefresh.attemptRefresh()
                 if case .refreshed = result {

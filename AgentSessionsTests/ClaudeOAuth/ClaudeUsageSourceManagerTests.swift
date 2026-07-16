@@ -423,6 +423,34 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.shouldReprobe(lastAt: now, now: now, interval: 120))
     }
 
+    /// Regression for the wedge that only an app relaunch could clear: delegated
+    /// CLI token refresh used to be a one-shot boolean latch, set on the first
+    /// 401 and reset ONLY by a subsequent OAuth success. With an expired token +
+    /// FDA-blocked web fallback, OAuth never succeeded, so the latch stayed true
+    /// and the refresh that would have recovered the token (from a valid CLI) was
+    /// never retried — for 9 hours, until relaunch built a fresh manager.
+    ///
+    /// The throttle must re-permit a refresh once the interval elapses, which a
+    /// boolean latch structurally cannot express — that is the whole fix.
+    func testDelegatedRefreshRethrottles_doesNotLatchOffUntilRelaunch() {
+        let now = Date()
+        let interval = ClaudeUsageSourceManager.delegatedRefreshRetryInterval
+
+        // Never attempted this cycle → permitted (first 401).
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldAttemptDelegatedRefresh(lastAt: nil, now: now, interval: interval))
+        // Just attempted → suppressed (don't hammer `claude auth status`).
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldAttemptDelegatedRefresh(lastAt: now, now: now, interval: interval))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldAttemptDelegatedRefresh(lastAt: now.addingTimeInterval(-interval + 1), now: now, interval: interval))
+        // The bug's core: after the interval, a still-401 token re-attempts the
+        // refresh instead of latching off forever.
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldAttemptDelegatedRefresh(lastAt: now.addingTimeInterval(-interval), now: now, interval: interval))
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldAttemptDelegatedRefresh(lastAt: now.addingTimeInterval(-interval - 1), now: now, interval: interval))
+
+        // A sane, non-hammering cadence: minutes, not seconds, not never.
+        XCTAssertGreaterThanOrEqual(interval, 60)
+        XCTAssertLessThanOrEqual(interval, 30 * 60)
+    }
+
     // MARK: - Cold-start window (defers tmux/browser fallback)
 
     /// The cold-start window predicate gates whether a transient OAuth failure

@@ -16,9 +16,10 @@ private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "Claude
 // If the credentials file or keychain changes afterwards, the new token is
 // ready to use (detected via the fingerprint change check).
 //
-// Called at most once per failure cycle via `didAttemptDelegatedRefresh`
-// guard in ClaudeUsageSourceManager. Polling is short (5 × 2s) since the
-// CLI refresh is typically fast.
+// Throttled by `lastDelegatedRefreshAt` / `shouldAttemptDelegatedRefresh` in
+// ClaudeUsageSourceManager — re-attempted after the throttle interval while a
+// token keeps 401ing, not once-until-relaunch. Polling is short (5 × 2s) since
+// the CLI refresh is typically fast.
 
 actor ClaudeDelegatedTokenRefresh {
     enum RefreshResult: Sendable {
