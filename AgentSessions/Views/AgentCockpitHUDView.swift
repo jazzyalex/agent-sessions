@@ -706,10 +706,21 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Cockpit.hudCompact) private var legacyCompactMode: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
-    /// Defaults on: with it off, `compactBodyMinHeight` reserves the baseline row
-    /// count no matter how few sessions exist, so a mode named Compact sat on a
-    /// tall blank box whenever the list was short or empty.
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = true
+    /// Defaults OFF, and must stay off until the compact height model accounts
+    /// for the limits footer.
+    ///
+    /// `compactContentHeight` is `toolbar + rows` and nothing else, but Compact
+    /// also renders `HUDLimitsBar` whenever `showLimits` is on. Auto-fit sizes
+    /// the window from that model, so the footer takes its intrinsic height and
+    /// starves the flexible session list — the shorter the fit, the more of the
+    /// list disappears. Turning this on by default shipped that squeeze to
+    /// everyone; it was reverted.
+    ///
+    /// The blank box under "No sessions" with auto-fit off is real, but it is
+    /// not this flag's to fix: the fix is teaching the height model about the
+    /// footer (measure it, as the Quota Meter already does via
+    /// `LimitsContentHeightKey`), then revisiting this default.
+    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = true
 
@@ -1304,10 +1315,6 @@ struct AgentCockpitHUDView: View {
         legacyCompactMode = mode.usesCompactChrome
     }
 
-    private func cycleHUDDisplayMode() {
-        setHUDDisplayMode(hudDisplayMode.next())
-    }
-
     @ViewBuilder
     private func header(activeCount: Int, idleCount: Int) -> some View {
         VStack(spacing: isCompact ? 0 : 8) {
@@ -1738,14 +1745,9 @@ struct AgentCockpitHUDView: View {
             .frame(width: 0, height: 0)
             .opacity(0)
 
-            Button("") {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    cycleHUDDisplayMode()
-                }
-            }
-            .keyboardShortcut("m", modifiers: [.command, .shift])
-            .frame(width: 0, height: 0)
-            .opacity(0)
+            // ⇧⌘M lives in the View menu now — a hidden button here bound the
+            // same shortcut a second time, and left the gesture advertised
+            // nowhere a user could find it.
 
             // Compact chrome has no close button for AppKit to press, so the
             // standard ⌘W reaches performClose and merely beeps. Full keeps its

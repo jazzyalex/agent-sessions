@@ -147,7 +147,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
         private let compactAutosaveName = "AgentCockpitHUDWindow.compact"
         private let limitsAutosaveName = "AgentCockpitHUDWindow.limits"
         private let rowResizeStep: CGFloat = 31
-        private let compactDefaultRowsWhenToolbarVisible: CGFloat = 6
         private let compactDefaultRowsWhenToolbarHidden: CGFloat = 4
         private let compactMinimumRowsWhenToolbarVisible: CGFloat = 1
         private let compactMinimumRowsWhenToolbarHidden: CGFloat = 3
@@ -627,27 +626,6 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
             frame.origin.y += frame.height - targetHeight
             frame.size.height = targetHeight
             setWindowFrame(frame, display: true, animate: false)
-        }
-
-        private func applyCompactToolbarVisibilityTransition(to isVisible: Bool,
-                                                             groupByProject: Bool,
-                                                             window: NSWindow) {
-            let rowDelta = groupByProject
-                ? 0
-                : (compactDefaultRowsWhenToolbarVisible - compactDefaultRowsWhenToolbarHidden)
-            let delta = compactHeaderHeight + (rowDelta * rowResizeStep)
-            guard delta > 0 else { return }
-
-            var frame = window.frame
-            let proposedHeight = isVisible ? frame.height + delta : frame.height - delta
-            let targetHeight = max(window.minSize.height, proposedHeight)
-            guard abs(targetHeight - frame.height) > 0.5 else { return }
-
-            frame.origin.y += frame.height - targetHeight
-            frame.size.height = targetHeight
-            // This path only runs when the toolbar visibility toggles, so the
-            // window resize animates with the toolbar reveal/hide.
-            setWindowFrame(frame, display: true, animate: true)
         }
 
         private func applyCompactVisibleRowsAutoHeight(shownSessionCount: Int,

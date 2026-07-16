@@ -30,7 +30,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) var cockpitHUDDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
     @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) var cockpitCompactBaselineRows: Int = 4
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = true
+    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) var cockpitShowTabSubtitleInFullMode: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudShowLimits) var cockpitShowLimitsFooter: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) var cockpitReduceTransparency: Bool = true
