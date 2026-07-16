@@ -1,0 +1,3 @@
+{"generated_at":"2026-07-16T08:00:00Z","snapshot_ref":"s","actions":[
+ {"id":"x1","tier":"auto","type":"ack","repo":"attacker/victim-repo","target":{"kind":"issue","number":7},"body":"MODEL TRIED TO WRITE THIS"}
+]}

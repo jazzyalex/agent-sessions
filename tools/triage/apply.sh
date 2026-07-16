@@ -16,8 +16,11 @@ jq -e '.actions and (.actions|type=="array")' "$ACTIONS" >/dev/null 2>&1 \
 do_write() { if [ "$DRY" -eq 1 ]; then echo "DRY: gh $*"; else gh "$@"; fi; }
 
 # --- validation helpers (rules from the spec) ---
-label_allowed() { policy_get '.triage_labels[]' | grep -qx "$1"; }
-repo_allowed()  { policy_get '.repos[]' | grep -qx "$1"; }
+# grep -qxF: exact, whole-line, FIXED-STRING match. -F is load-bearing — the
+# needle is untrusted (repo/label from the injection-tainted actions.json), so
+# regex metacharacters must be treated literally, not interpreted.
+label_allowed() { policy_get '.triage_labels[]' | grep -qxF "$1"; }
+repo_allowed()  { policy_get '.repos[]' | grep -qxF "$1"; }
 
 apply_label() { # repo number labels-json
   local repo="$1" num="$2" labels="$3" ok=()
@@ -35,15 +38,14 @@ apply_label() { # repo number labels-json
   fi
 }
 
-ack_eligible() { # repo number  -> 0 if all live guardrails pass
+ack_eligible() { # repo number  -> 0 + prints validated author login on success; nothing on failure
   local repo="$1" num="$2"
   [ "$(policy_get '.safe_acks_enabled')" = "true" ] || return 1
   local v; v="$(gh issue view "$num" --repo "$repo" \
       --json number,author,createdAt,labels,comments,body 2>/dev/null)" || return 1
-  local login created body maints fresh_h min_c now age
+  local login created body fresh_h min_c now age ts
   login="$(jq -r '.author.login' <<<"$v")"
-  policy_get '.maintainers[]' | grep -qx "$login" && return 1               # non-maintainer only
-  jq -e '.comments | map(.author.login) as $a | $a' >/dev/null 2>&1 <<<"$v" || true
+  policy_get '.maintainers[]' | grep -qxF "$login" && return 1              # non-maintainer only (fixed-string)
   # no existing maintainer comment:
   for m in $(policy_get '.maintainers[]'); do
     jq -e --arg m "$m" '.comments // [] | any(.author.login==$m)' >/dev/null <<<"$v" && return 1
@@ -53,17 +55,27 @@ ack_eligible() { # repo number  -> 0 if all live guardrails pass
   body="$(jq -r '.body // ""' <<<"$v")"; [ "${#body}" -ge "$min_c" ] || return 1
   fresh_h="$(policy_get '.ack_fresh_hours')"
   created="$(jq -r '.createdAt' <<<"$v")"
-  now="$(date -u +%s)"; age=$(( (now - $(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$created" +%s 2>/dev/null || echo "$now")) / 3600 ))
+  now="$(date -u +%s)"
+  # Freshness must fail CLOSED: if neither the BSD (-j -f) nor the GNU (-d) date
+  # parse succeeds, we cannot prove the issue is fresh, so treat it as ineligible
+  # rather than defaulting age to 0 (which would silently bypass the guardrail).
+  ts="$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$created" +%s 2>/dev/null || date -u -d "$created" +%s 2>/dev/null)" || return 1
+  age=$(( (now - ts) / 3600 ))
   [ "$age" -le "$fresh_h" ] || return 1
+  printf '%s\n' "$login"                                                    # M2: hand the validated login back to the caller
   return 0
 }
 
 apply_ack() { # repo number kind
   local repo="$1" num="$2" kind="${3:-issue}"
+  # C1: gate the untrusted repo AND issue-kind BEFORE any gh read or write, so a
+  # crafted actions.json can never post the acked label/comment to an off-policy repo.
+  repo_allowed "$repo" || { log "drop ack: repo $repo not in policy"; return; }
   [ "$kind" = "issue" ] || { log "drop ack: target.kind=$kind not issue"; return; }
-  ack_eligible "$repo" "$num" || { log "ack skipped (guardrail) $repo#$num"; return; }
   local login tmpl body
-  login="$(gh issue view "$num" --repo "$repo" --json author -q '.author.login' 2>/dev/null || echo user)"
+  # M2: ack_eligible fetches the issue once and returns the validated author login,
+  # eliminating a second (TOCTOU-prone) gh issue view.
+  login="$(ack_eligible "$repo" "$num")" || { log "ack skipped (guardrail) $repo#$num"; return; }
   tmpl="$(policy_get '.ack_template')"; body="${tmpl/\{user\}/$login}"
   # crash-safe: label THEN comment (at-most-once). Ledger reflects confirmed
   # writes only, and a failed label write must not proceed to the comment nor

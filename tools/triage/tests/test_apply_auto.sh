@@ -28,4 +28,10 @@ case "$out" in *"not-a-real-label"*) fail "off-policy label must be dropped";; *
 cp "$HERE/fixtures/actions/malformed.json" "$OUT_DIR/actions.json"
 if bash "$TRIAGE_ROOT/apply.sh" --auto --dry-run "$OUT_DIR" >/dev/null 2>&1; then
   fail "malformed actions must be rejected"; else pass "malformed actions rejected"; fi
+
+# 4) C1 regression: an ack targeting an OUT-OF-POLICY repo must be dropped
+#    before any gh read/write — no write for attacker/victim-repo may appear.
+cp "$HERE/fixtures/actions/ack_out_of_policy_repo.json" "$OUT_DIR/actions.json"
+out="$(bash "$TRIAGE_ROOT/apply.sh" --auto --dry-run "$OUT_DIR")"
+case "$out" in *"attacker/victim-repo"*) fail "off-policy repo ack must be dropped";; *) pass "off-policy repo ack dropped";; esac
 finish
