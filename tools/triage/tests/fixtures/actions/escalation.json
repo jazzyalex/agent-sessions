@@ -1,0 +1,4 @@
+{"generated_at":"2026-07-16T08:00:00Z","snapshot_ref":"s","actions":[
+ {"id":"e1","tier":"auto","type":"comment","repo":"jazzyalex/agent-sessions","target":{"kind":"issue","number":7},"body":"auto comment must be dropped"},
+ {"id":"e2","tier":"auto","type":"label","repo":"jazzyalex/agent-sessions","target":{"kind":"issue","number":7},"labels":["not-a-real-label"]}
+]}

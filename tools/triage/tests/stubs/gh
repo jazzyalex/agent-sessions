@@ -2,16 +2,24 @@
 # Mock gh. Behavior driven by env:
 #   GH_FAIL_SOURCE — substring of the joined args that should exit 1
 #   GH_FIXTURE_DIR — dir with canned JSON keyed by a slug of the subcommand
+#   GH_WRITE_LOG   — file to append recorded write-verb invocations to
+#   GH_ISSUE_VIEW  — file to answer `issue view` (live single-issue lookups)
 set -euo pipefail
 args="$*"
 if [ -n "${GH_FAIL_SOURCE:-}" ] && case "$args" in *"$GH_FAIL_SOURCE"*) true;; *) false;; esac; then
   echo "gh: simulated failure for [$args]" >&2; exit 1
 fi
+[ -n "${GH_WRITE_LOG:-}" ] && case "$args" in
+  "issue comment"*|"issue edit"*|"pr merge"*|"issue close"*|"pr close"*) echo "$args" >> "$GH_WRITE_LOG" ;;
+esac
 case "$args" in
   "issue list"*)      cat "${GH_FIXTURE_DIR}/issues.json" ;;
   "pr list"*)         cat "${GH_FIXTURE_DIR}/prs.json" ;;
   "api graphql"*)     cat "${GH_FIXTURE_DIR}/discussions.json" ;;
   "api "*"issues/comments"*) cat "${GH_FIXTURE_DIR}/issue_comments.json" ;;
   "api "*"pulls/comments"*)  cat "${GH_FIXTURE_DIR}/pr_comments.json" ;;
+  # live single-issue view used by ack guardrails: honor GH_ISSUE_VIEW fixture
+  "issue view"*)      cat "${GH_ISSUE_VIEW:-/dev/null}" ;;
+  "issue comment"*|"issue edit"*|"pr merge"*|"issue close"*|"pr close"*) : ;;
   *) echo "[]" ;;
 esac
