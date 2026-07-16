@@ -5,9 +5,12 @@
 # ledger (OUT_DIR/apply.log), so re-running never double-posts.
 #
 # Staleness guard: before prompting, the live target is re-fetched. If it is
-# closed/merged, or has picked up new comments since the snapshot was
-# captured, the maintainer is warned and the prompt defaults to "n" instead of
-# trusting the stale snapshot.
+# closed/merged, or has picked up comments *newer than* the snapshot's
+# capture_time, the maintainer is warned and the prompt defaults to "n" instead
+# of trusting the stale snapshot. The comparison is snapshot-relative — prior
+# discussion that was already present at capture time must NOT trip the guard,
+# only genuinely new activity since then. When capture_time is unavailable we
+# fall back to the conservative "any comment trips it" behavior.
 #
 # stdin footgun (why this isn't `jq ... | while read -r a; do ... done`):
 # piping jq's output straight into the while loop rebinds fd 0 for the WHOLE
@@ -22,11 +25,20 @@ run_approval() {
   local ACTIONS="$OUT_DIR/actions.json" LEDGER="$OUT_DIR/apply.log"
   touch "$LEDGER"
 
+  # Snapshot capture time — the reference point for "new since snapshot".
+  # Empty when snapshot.json is missing/lacks the field; the guard then falls
+  # back to the conservative "any comment trips it" branch below.
+  local CAP
+  CAP="$(jq -r '.capture_time // empty' "$OUT_DIR/snapshot.json" 2>/dev/null || true)"
+
   local a
   while IFS= read -r a <&3; do
     local id typ repo num body
     id="$(jq -r '.id' <<<"$a")"
-    if grep -qx "posted $id" "$LEDGER"; then
+    # grep -qxF: exact, whole-line, FIXED-STRING match — the id is untrusted
+    # (from the injection-tainted actions.json), so regex metacharacters must
+    # be matched literally (same -qxF convention as label_allowed/repo_allowed).
+    if grep -qxF "posted $id" "$LEDGER"; then
       echo "skip $id (already posted)"
       continue
     fi
@@ -35,11 +47,17 @@ run_approval() {
     num="$(jq -r '.target.number' <<<"$a")"
     body="$(jq -r '.body // ""' <<<"$a")"
 
-    # Staleness guard.
-    local dflt="y" live
+    # Staleness guard — snapshot-relative.
+    local dflt="y" live stale=0
     live="$(gh issue view "$num" --repo "$repo" --json state,comments 2>/dev/null || echo '{}')"
-    if jq -e '(.state=="CLOSED" or .state=="MERGED") or ((.comments // []) | length > 0)' \
-         >/dev/null 2>&1 <<<"$live"; then
+    jq -e '.state=="CLOSED" or .state=="MERGED"' >/dev/null 2>&1 <<<"$live" && stale=1
+    if [ -n "$CAP" ]; then
+      jq -e --arg cap "$CAP" '(.comments // []) | any(.createdAt > $cap)' \
+        >/dev/null 2>&1 <<<"$live" && stale=1
+    else
+      jq -e '(.comments // []) | length > 0' >/dev/null 2>&1 <<<"$live" && stale=1
+    fi
+    if [ "$stale" -eq 1 ]; then
       echo "WARNING: $repo#$num changed since the snapshot was captured (closed/merged or new comments)"
       dflt="n"
     fi
@@ -63,9 +81,12 @@ run_approval() {
         y|Y)
           case "$typ" in
             comment)
+              # DRY must NOT touch the ledger: recording "posted" on a dry-run
+              # would make a later REAL run on the same OUT_DIR skip this id via
+              # the idempotency guard, so the comment would never actually post.
+              # Only a real, successful post records "posted <id>".
               if [ "$DRY" -eq 1 ]; then
                 echo "DRY: gh issue comment $num --repo $repo --body $body"
-                echo "posted $id" >> "$LEDGER"
               elif gh issue comment "$num" --repo "$repo" --body "$body"; then
                 echo "posted $id" >> "$LEDGER"
               else
