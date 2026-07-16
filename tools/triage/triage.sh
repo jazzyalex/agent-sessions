@@ -13,7 +13,13 @@ mkdir -p "$OUT_ROOT"
 # --- catch-up time gate ---
 HHMM="${NOW_HHMM:-$(date +%H%M)}"
 if [ "$HHMM" -lt "0800" ]; then log "before 08:00 ($HHMM) — waiting for schedule"; exit 0; fi
-if [ -f "$OUT_DIR/status.json" ]; then log "today already completed — skipping"; exit 0; fi
+# A `failed` marker does NOT count as "today done" — the trap writes status.json
+# even on a hard failure, so gate on the VALUE (not mere existence) to let a
+# transient morning failure be retried by a later catch-up run the same day.
+if [ -f "$OUT_DIR/status.json" ] && \
+   [ "$(jq -r '.status // empty' "$OUT_DIR/status.json" 2>/dev/null)" != "failed" ]; then
+  log "today already completed — skipping"; exit 0
+fi
 
 # --- lock (scheduled runs only) ---
 acquire_lock "$LOCK" || { log "another run holds the lock — deferring"; exit 0; }
@@ -53,8 +59,12 @@ if OUT_DIR="$OUT_DIR" bash "$HERE/run-agent.sh"; then :; else
   had_errors=1
 fi
 
-# auto-apply
-OUT_DIR="$OUT_DIR" bash "$HERE/apply.sh" --auto "$OUT_DIR" || true
+# auto-apply — a file-level rejection (e.g. schema-rejected actions.json, exit 4)
+# or a real crash must downgrade the run to `partial`, never be swallowed into a
+# false `success` that advances lastRun and silently drops GitHub activity.
+# (apply.sh's per-item guardrail rejections return/continue internally, so only a
+# whole-file failure surfaces here — exactly what should downgrade the run.)
+OUT_DIR="$OUT_DIR" bash "$HERE/apply.sh" --auto "$OUT_DIR" || had_errors=1
 
 # terminal status + lastRun advancement
 if [ "$had_errors" -eq 0 ]; then
