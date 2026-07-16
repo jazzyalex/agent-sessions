@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.5] - 2026-07-15
+
 ### Highlights
 - **See what each session is costing you.** The Session Runway can now report every active session's **API-equivalent spend per hour** — `$4.20/h` — priced per model, so an orchestrator on Opus driving subagents on Sonnet is costed at what each one actually runs at, not blended. Pick what the runway measures right from the meter: **5-hour** burn, **weekly** share, raw **tokens/hour**, or **dollars**.
 - **The Quota Meter holds still.** It used to grow whenever your pointer crossed it, which made a pinned widget a fight to reposition — the window moved while you were aiming at it. Now the pointer only moves it, and **right-click** brings up its controls. Drag it anywhere; it stays exactly where you put it.
