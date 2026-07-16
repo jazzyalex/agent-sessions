@@ -27,17 +27,26 @@ agent="$(policy_get '.agent')"
 model="$(policy_get '.agent_model')"
 
 run_claude() {
-  # NOTE: exact flag grammar is verified against the installed CLI at impl time;
-  # the Task 4 confinement test is the real gate. Isolated config dir prevents
-  # repo CLAUDE.md / allowlist / MCP / hooks from loading. cwd = stage (outside repo).
+  # Confinement mechanism, proven by the Task 4 gate, WITHOUT breaking auth:
+  #  - cwd = stage, OUTSIDE the repo -> repo CLAUDE.md / .claude/settings are never
+  #    discovered by walking up, and Read/Write are workspace-scoped to the stage
+  #    (a write outside cwd has no permission prompt in -p mode, so it is denied).
+  #  - CLAUDE_CONFIG_DIR is left UNSET (default): the real OAuth session lives in
+  #    ~/.claude.json; relocating the config dir logs the agent out ("Not logged in").
+  #  - --strict-mcp-config with no --mcp-config -> zero MCP servers load.
+  #  - --disallowedTools denies Bash/WebFetch/WebSearch; deny wins over any inherited
+  #    (user-global) allowlist, so there is no shell/network channel.
+  #  - --settings <file> adds the same denials + empty mcp/hooks declaratively
+  #    (belt-and-suspenders); it is a FILE path, not a config dir, so auth is intact.
+  #  - the prompt is piped via STDIN so the variadic --disallowedTools cannot swallow it.
+  local suffix=$'\n\nRead snapshot.json in this directory. Write digest.md and actions.json here. Do not take any other action.'
   ( cd "$STAGE" && \
-    CLAUDE_CONFIG_DIR="$AGENT_CONFIG" claude -p \
+    printf '%s%s' "$(cat PROMPT.md)" "$suffix" | claude -p \
       --model "$model" \
-      --allowedTools "Read" "Write" \
-      --disallowedTools "Bash" "WebFetch" "WebSearch" \
-      "$(cat PROMPT.md)
-
-Read snapshot.json in this directory. Write digest.md and actions.json here." )
+      --settings "$AGENT_CONFIG/settings.json" \
+      --strict-mcp-config \
+      --allowedTools Read Write \
+      --disallowedTools Bash WebFetch WebSearch )
 }
 
 run_codex() {
