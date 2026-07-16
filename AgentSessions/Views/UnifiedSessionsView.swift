@@ -345,8 +345,9 @@ struct UnifiedSessionsView: View {
     @EnvironmentObject var updaterController: UpdaterController
     @EnvironmentObject var columnVisibility: ColumnVisibilityStore
     @EnvironmentObject var onboardingCoordinator: OnboardingCoordinator
-    /// Gates the Quota Meter card — it reports Codex and Claude quota only.
-    @State private var hasCodexOrClaudeSessions: Bool = false
+    /// Gates the Quota Meter card and scopes what activation may switch on — it
+    /// reports Codex and Claude quota only.
+    @State private var quotaMeterProviders = QuotaMeterProviderAvailability()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.openWindow) private var openWindow
@@ -922,16 +923,22 @@ struct UnifiedSessionsView: View {
 	        VStack(spacing: 0) {
 	            OnboardingListTopSlot(
 	                coordinator: onboardingCoordinator,
-	                hasCodexOrClaudeSessions: hasCodexOrClaudeSessions
+	                providers: quotaMeterProviders
 	            )
 	            listPane
 	        }
-	        .onboardingSheets(coordinator: onboardingCoordinator)
+	        .onboardingSheets(
+	            coordinator: onboardingCoordinator,
+	            quotaMeterProviders: quotaMeterProviders
+	        )
 	        // Recomputed only when the index changes, never per render: the miss
 	        // case (no Codex/Claude sessions at all) is the one that scans the
 	        // whole list, and it is also the one that would repeat every frame.
 	        .onReceive(unified.$allSessions) { sessions in
-	            hasCodexOrClaudeSessions = sessions.contains { $0.source == .codex || $0.source == .claude }
+	            quotaMeterProviders = QuotaMeterProviderAvailability(
+	                hasCodex: sessions.contains { $0.source == .codex },
+	                hasClaude: sessions.contains { $0.source == .claude }
+	            )
 	        }
 	    }
 

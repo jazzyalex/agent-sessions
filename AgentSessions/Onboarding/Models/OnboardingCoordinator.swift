@@ -40,6 +40,13 @@ final class OnboardingCoordinator: ObservableObject {
     /// Hides the Quota Meter card for the rest of this launch.
     @Published var quotaMeterCardSuppressedThisLaunch: Bool = false
 
+    /// Set once the user resolves any top-slot card. The slot shows one card at
+    /// a time, but that alone only orders the queue — without this, dismissing
+    /// the winner hands the slot straight to the runner-up on the same render,
+    /// so a single ✕ produces a second ask. One ask per launch; the rest wait.
+    /// In-memory only.
+    @Published var didConsumeTopSlotAskThisLaunch: Bool = false
+
     private let defaults: UserDefaults
     private let currentMajorMinorProvider: () -> String?
     private let isFreshInstallProvider: () -> Bool
@@ -153,6 +160,7 @@ final class OnboardingCoordinator: ObservableObject {
         if let majorMinor = whatsNewMajorMinor {
             defaults.onboardingWhatsNewDismissedMajorMinor = majorMinor
         }
+        didConsumeTopSlotAskThisLaunch = true
         whatsNewMajorMinor = nil
     }
 
@@ -188,13 +196,17 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the feedback card should occupy the session-list top slot.
     /// What's New always wins the slot, and a ✕ dismissal hides it for this launch.
     func shouldShowFeedbackCard() -> Bool {
-        whatsNewMajorMinor == nil && !feedbackCardSuppressedThisLaunch && isFeedbackAskDue()
+        whatsNewMajorMinor == nil
+            && !didConsumeTopSlotAskThisLaunch
+            && !feedbackCardSuppressedThisLaunch
+            && isFeedbackAskDue()
     }
 
     /// Soft-dismiss the feedback card (its ✕). Hides it for this launch only; the
     /// permanent decline lifecycle is untouched, so it can return next launch.
     func suppressFeedbackCardThisLaunch() {
         feedbackCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
     }
 
     // MARK: - Quota Meter activation
@@ -216,6 +228,7 @@ final class OnboardingCoordinator: ObservableObject {
     ///     audience that has the data flowing but has never seen the window.
     func shouldShowQuotaMeterCard(hasCodexOrClaudeSessions: Bool, isQuotaMeterActive: Bool) -> Bool {
         guard whatsNewMajorMinor == nil else { return false }
+        guard !didConsumeTopSlotAskThisLaunch else { return false }
         guard !quotaMeterCardSuppressedThisLaunch else { return false }
         guard !didPresentFreshInstallThisLaunch else { return false }
         guard hasCodexOrClaudeSessions, !isQuotaMeterActive else { return false }
@@ -239,12 +252,16 @@ final class OnboardingCoordinator: ObservableObject {
     /// card there is no second surface where a real decline is recorded.
     func suppressQuotaMeterCardThisLaunch() {
         quotaMeterCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
         recordQuotaMeterDeclined()
     }
 
-    /// The user opened the Quota Meter — never ask again.
+    /// The user opened the Quota Meter — never ask again. Also spends the
+    /// launch's ask: someone who just acted should not be handed the feedback
+    /// card the instant this one leaves the slot.
     func recordQuotaMeterActivated() {
         defaults.onboardingQuotaMeterAskState = .activated
+        didConsumeTopSlotAskThisLaunch = true
         isQuotaMeterPromoPresented = false
     }
 

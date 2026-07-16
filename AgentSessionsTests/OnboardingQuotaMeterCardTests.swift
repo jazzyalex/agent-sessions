@@ -118,6 +118,67 @@ final class OnboardingQuotaMeterCardTests: XCTestCase {
         XCTAssertFalse(shows(makeCoordinator(defaults: defaults, version: "5.0")))
     }
 
+    // MARK: - One ask per launch
+
+    /// The slot's if/else chain orders the queue but does not limit the number
+    /// of asks: dismissing the winner used to hand the slot straight to the
+    /// runner-up on the same render, so one ✕ produced a second solicitation.
+    @MainActor
+    func testDismissingTheQuotaMeterCardDoesNotExposeFeedbackSameLaunch() {
+        let defaults = makeDefaults("QM.noStackedAsk")
+        // Feedback is due: 10 sessions opened.
+        defaults.onboardingSessionsOpenedCount = 10
+        defaults.onboardingFirstLaunchDate = Date(timeIntervalSince1970: 1_000_000)
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        XCTAssertTrue(shows(coordinator))
+        XCTAssertTrue(coordinator.shouldShowFeedbackCard(), "Feedback is due and would take the slot.")
+
+        coordinator.suppressQuotaMeterCardThisLaunch()
+
+        XCTAssertFalse(shows(coordinator))
+        XCTAssertFalse(coordinator.shouldShowFeedbackCard(), "A ✕ must not immediately produce a second ask.")
+    }
+
+    /// Same hazard from the other direction: What's New wins the slot, and
+    /// dismissing it used to reveal the Quota Meter card instantly.
+    @MainActor
+    func testDismissingWhatsNewDoesNotExposeQuotaMeterSameLaunch() {
+        let coordinator = makeCoordinator(defaults: makeDefaults("QM.afterWhatsNew"))
+        coordinator.whatsNewMajorMinor = "4.3"
+
+        XCTAssertFalse(shows(coordinator))
+        coordinator.dismissWhatsNewCard()
+
+        XCTAssertNil(coordinator.whatsNewMajorMinor)
+        XCTAssertFalse(shows(coordinator), "Dismissing one card must not hand the slot to the next.")
+    }
+
+    /// Acting spends the ask too — someone who just clicked through to the Quota
+    /// Meter should not be handed the feedback card on the way back.
+    @MainActor
+    func testActivatingDoesNotExposeFeedbackSameLaunch() {
+        let defaults = makeDefaults("QM.activateThenFeedback")
+        defaults.onboardingSessionsOpenedCount = 10
+        defaults.onboardingFirstLaunchDate = Date(timeIntervalSince1970: 1_000_000)
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        XCTAssertTrue(coordinator.shouldShowFeedbackCard())
+        coordinator.recordQuotaMeterActivated()
+        XCTAssertFalse(coordinator.shouldShowFeedbackCard())
+    }
+
+    /// The gate is per launch, not persistent — next launch the queue resumes.
+    @MainActor
+    func testTheAskGateIsNotPersisted() {
+        let defaults = makeDefaults("QM.gateNotPersisted")
+        makeCoordinator(defaults: defaults).suppressQuotaMeterCardThisLaunch()
+
+        let nextLaunch = makeCoordinator(defaults: defaults, version: "4.4")
+        XCTAssertFalse(nextLaunch.didConsumeTopSlotAskThisLaunch)
+        XCTAssertTrue(shows(nextLaunch), "After a version bump the one retry is still owed.")
+    }
+
     // MARK: - Cockpit-opened tracking
 
     /// Usage tracking on is not the same as having seen the window; this flag is

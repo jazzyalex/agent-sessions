@@ -232,11 +232,17 @@ struct FirstRunSetupView: View {
     /// the highest-leverage lever the feature has, and off-by-default silently
     /// loses everyone who clicks straight through — onboarding never asks again.
     ///
-    /// Only seeds when neither key has ever been written, so it can never
-    /// overturn a deliberate choice, and the switch stays the user's to flip
-    /// before leaving this screen. Enabling tracking does not open any window;
-    /// it only starts usage probes.
+    /// Gated on the coordinator's fresh-install flag, not merely on this view
+    /// appearing: Help → Show Onboarding presents the very same screen via
+    /// `presentManually()`, and seeding there would silently start usage probes
+    /// for an existing user who only came to re-read the setup.
+    ///
+    /// Within a fresh install it still seeds only when neither key has ever been
+    /// written, so it cannot overturn a deliberate choice, and the switch stays
+    /// the user's to flip before leaving this screen. Enabling tracking opens no
+    /// window; it only starts usage probes.
     private func seedQuotaMeterOnForFreshInstall() {
+        guard coordinator.didPresentFreshInstallThisLaunch else { return }
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: PreferencesKey.codexUsageEnabled) == nil,
               defaults.object(forKey: PreferencesKey.claudeUsageEnabled) == nil else { return }

@@ -10,9 +10,11 @@ import SwiftUI
 /// 10 sessions or 14 days regardless, so the two rarely compete.
 struct OnboardingListTopSlot: View {
     @ObservedObject var coordinator: OnboardingCoordinator
-    /// The Quota Meter reports Codex and Claude quota only — it is noise to
-    /// anyone without those sessions.
-    let hasCodexOrClaudeSessions: Bool
+    /// Which quota providers the user actually has sessions for. Kept per
+    /// provider rather than collapsed to one Bool: activation needs to enable
+    /// only what applies, and a single "has either" flag makes that impossible
+    /// by the time it reaches the activator.
+    let providers: QuotaMeterProviderAvailability
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -29,7 +31,7 @@ struct OnboardingListTopSlot: View {
 
     private var showsQuotaMeterCard: Bool {
         coordinator.shouldShowQuotaMeterCard(
-            hasCodexOrClaudeSessions: hasCodexOrClaudeSessions,
+            hasCodexOrClaudeSessions: providers.hasAny,
             isQuotaMeterActive: isQuotaMeterActive
         )
     }
@@ -118,7 +120,11 @@ extension View {
     /// but that slot renders empty once the card is dismissed — and a `.sheet` on an
     /// empty view can fail to present — so the sheets must hang off the list pane,
     /// which is always on screen (Help → What's New relies on this).
-    func onboardingSheets(coordinator: OnboardingCoordinator) -> some View {
+    /// `providers` scopes what the Quota Meter promo's activation may switch on.
+    func onboardingSheets(
+        coordinator: OnboardingCoordinator,
+        quotaMeterProviders: QuotaMeterProviderAvailability = QuotaMeterProviderAvailability()
+    ) -> some View {
         self
             .sheet(isPresented: Binding(
                 get: { coordinator.isWhatsNewPanelPresented },
@@ -143,9 +149,19 @@ extension View {
                 get: { coordinator.isQuotaMeterPromoPresented },
                 set: { coordinator.isQuotaMeterPromoPresented = $0 }
             )) {
-                QuotaMeterPromoActivator(coordinator: coordinator)
+                QuotaMeterPromoActivator(coordinator: coordinator, providers: quotaMeterProviders)
             }
     }
+}
+
+/// Which quota providers a user actually has sessions for. The Quota Meter
+/// reports Codex and Claude quota only, so this both gates the card and decides
+/// what activation is allowed to switch on.
+struct QuotaMeterProviderAvailability: Equatable {
+    var hasCodex: Bool = false
+    var hasClaude: Bool = false
+
+    var hasAny: Bool { hasCodex || hasClaude }
 }
 
 /// Owns the one side-effectful step the promo has: turning usage tracking on and
@@ -154,14 +170,23 @@ extension View {
 /// list pane, which is always mounted.
 private struct QuotaMeterPromoActivator: View {
     @ObservedObject var coordinator: OnboardingCoordinator
+    let providers: QuotaMeterProviderAvailability
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
 
+    /// Only counts providers the user actually has: a Codex-only user whose
+    /// Claude tracking happens to be off does not need "Enable", and switching
+    /// Claude on for them would just start a probe against a CLI they may not
+    /// have.
+    private var needsUsageEnabled: Bool {
+        (providers.hasCodex && !codexUsageEnabled) || (providers.hasClaude && !claudeUsageEnabled)
+    }
+
     var body: some View {
         QuotaMeterPromoView(
             coordinator: coordinator,
-            needsUsageEnabled: !(codexUsageEnabled || claudeUsageEnabled),
+            needsUsageEnabled: needsUsageEnabled,
             onActivate: activate,
             onClose: { coordinator.isQuotaMeterPromoPresented = false }
         )
@@ -170,8 +195,16 @@ private struct QuotaMeterPromoActivator: View {
     private func activate() {
         // Enable before opening: the Quota Meter renders "Usage tracking is off"
         // otherwise, which would make the promo deliver an empty box.
-        codexUsageEnabled = true
-        claudeUsageEnabled = true
+        //
+        // Only the providers the user has sessions for, and only ever switching
+        // on — never off, so an existing preference for the other provider
+        // survives untouched.
+        if providers.hasCodex {
+            codexUsageEnabled = true
+        }
+        if providers.hasClaude {
+            claudeUsageEnabled = true
+        }
         hudDisplayModeRaw = AgentCockpitHUDDisplayMode.limits.rawValue
         UserDefaults.standard.set(
             AgentCockpitHUDDisplayMode.limits.usesCompactChrome,
