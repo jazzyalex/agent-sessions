@@ -723,16 +723,20 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
 
             // Reveal and collapse must pin the same edge, or the window walks.
             // Growth picks its direction from available screen room; the shrink
-            // has to mirror that choice rather than decide for itself.
+            // mirrors that choice rather than deciding for itself.
             let isGrowing = targetHeight > oldHeight
-            if isGrowing {
-                lastLimitsGrowAnchoredTop = shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight)
-            }
-            if HUDLimitsResizeAnchor.anchorsTop(
+            let growsDown = isGrowing
+                ? shouldGrowLimitsWindowDown(window: window, targetHeight: targetHeight)
+                : false
+            let anchorsTop = HUDLimitsResizeAnchor.anchorsTop(
                 isGrowing: isGrowing,
-                growsDown: lastLimitsGrowAnchoredTop,
+                growsDown: growsDown,
                 lastGrowAnchoredTop: lastLimitsGrowAnchoredTop
-            ) {
+            )
+            if isGrowing {
+                lastLimitsGrowAnchoredTop = anchorsTop
+            }
+            if anchorsTop {
                 frame.origin.y += oldHeight - targetHeight
             }
             // Animate only when the toolbar is toggling, so the window resize
