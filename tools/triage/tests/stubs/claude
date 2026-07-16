@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Mock claude -p. Writes the two expected outputs into cwd (the stage dir),
-# proving run-agent.sh copies them back. Records that it ran to $CLAUDE_LOG.
+# Mock claude -p for the tool-less contract: consumes the prompt on stdin,
+# records its argv (and the prompt) for assertions, and prints a valid
+# delimited reply on stdout. CLAUDE_STUB_GARBAGE=1 prints junk instead,
+# exercising run-agent.sh's parse-failure exit.
 set -euo pipefail
-[ -n "${CLAUDE_LOG:-}" ] && echo "claude $*" >> "$CLAUDE_LOG"
-cat > digest.md <<'EOF'
+if [ -n "${CLAUDE_LOG:-}" ]; then echo "claude $*" >> "$CLAUDE_LOG"; fi
+cat > "${CLAUDE_PROMPT_LOG:-/dev/null}"   # consume stdin (the prompt)
+if [ -n "${CLAUDE_STUB_GARBAGE:-}" ]; then echo "no markers here"; exit 0; fi
+cat <<'EOF'
+<<<DIGEST>>>
 # Triage digest (stub)
 - see actions.json
-EOF
-cat > actions.json <<'EOF'
+<<<ACTIONS>>>
 {"generated_at":"2026-07-16T08:00:00Z","snapshot_ref":"snapshot.json","actions":[]}
+<<<END>>>
 EOF
