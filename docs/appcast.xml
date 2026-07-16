@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.4</title>
-            <pubDate>Mon, 13 Jul 2026 23:37:43 -0700</pubDate>
+            <title>4.5</title>
+            <pubDate>Wed, 15 Jul 2026 18:56:02 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,23 +27,35 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.4</h2>
+<h2>What&#x27;s New in 4.5</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Codex usage keeps working when OpenAI pauses the 5-hour limit.</strong> OpenAI temporarily removed Codex&#x27;s 5-hour rate-limit window (it&#x27;s gone from the Codex app too), which left the Quota Meter mislabeling your weekly usage as &quot;5h&quot; with the wrong reset. Agent Sessions now detects this automatically: the 5h line reads a calm <strong>&quot;no limit&quot;</strong>, your <strong>weekly</strong> usage stays accurate, and everything snaps back on its own if OpenAI restores the 5h window.</li>
-<li><strong>An honest Session Runway for Codex.</strong> With no 5-hour budget to measure against, each active Codex session now shows its real <strong>token throughput</strong> (e.g. <code>412K tk/h</code>) instead of a burn rate scaled to the wrong window — a true, comparable read of what&#x27;s burning right now. It returns to the familiar 5h &quot;m/h&quot; once the window is back.</li>
+<li><strong>See what each session is costing you.</strong> The Session Runway can now report every active session&#x27;s <strong>API-equivalent spend per hour</strong> — <code>$4.20/h</code> — priced per model, so an orchestrator on Opus driving subagents on Sonnet is costed at what each one actually runs at, not blended. Pick what the runway measures right from the meter: <strong>5-hour</strong> burn, <strong>weekly</strong> share, raw <strong>tokens/hour</strong>, or <strong>dollars</strong>.</li>
+<li><strong>The Quota Meter holds still.</strong> It used to grow whenever your pointer crossed it, which made a pinned widget a fight to reposition — the window moved while you were aiming at it. Now the pointer only moves it, and <strong>right-click</strong> brings up its controls. Drag it anywhere; it stays exactly where you put it.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>Selectable Session Runway rates.</strong> 5-Hour, Weekly, Tokens, or Dollars — chosen from the runway control in the Quota Meter toolbar, and remembered. Dollars falls back to token throughput for any model we can&#x27;t price, rather than dropping the session.</li>
+<li><strong>One View-menu entry for the cockpit.</strong> <code>View → Quota Meter / Agent Cockpit</code> now holds the whole choice — Quota Meter, Compact, Full, or <strong>Off</strong> — with ⌘⌥⇧C for the Quota Meter and ⇧⌘M to cycle.</li>
+<li><strong>The Quota Meter offers itself.</strong> If you have Codex or Claude sessions but have never switched it on, a card in the session list explains what it does and turns it on in one click. Fresh installs now arrive with it enabled.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li>The Quota Meter toolbar is grouped by what its controls do — window destinations lead, the two runway controls fuse into one segmented pill, and pin stands alone behind a separator.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li>New <strong>format guardrail</strong>: if a provider changes its usage data in a way Agent Sessions can&#x27;t confidently interpret, the meter now shows a clear <strong>&quot;can&#x27;t verify&quot;</strong> instead of displaying a wrong number.</li>
+<li><strong>The Quota Meter no longer walks up the screen.</strong> Near the bottom of a display it grew *upward* when its toolbar appeared, but collapsing kept the raised top edge — so it climbed one toolbar height every time, drifting away from where you parked it.</li>
+<li><strong>Compact and the Quota Meter can be closed.</strong> Neither has a titlebar close button, and ⌘W merely beeped, so the only way out was switching to Full or quitting. ⌘W now closes them, as does <code>View → … → Off</code>.</li>
+<li><strong>The cockpit&#x27;s provider rows line up with their reset-credits line.</strong> The 5h/Wk row sat centered while the credits line beneath it was flush left.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.4</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.5</a></p>
 </div>
             ]]></description>
-            <sparkle:version>59</sparkle:version>
-            <sparkle:shortVersionString>4.4</sparkle:shortVersionString>
+            <sparkle:version>60</sparkle:version>
+            <sparkle:shortVersionString>4.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.4/AgentSessions-4.4.dmg" length="21684635" type="application/octet-stream" sparkle:edSignature="K7EcLPdrwtAEr9scBZYUXhY83ked2jKg7RyeIf4CEZtmBZAVABGv5Ykznx6+cq2iUmMAhcfzIBxtvWeY/h7nCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg" length="21957800" type="application/octet-stream" sparkle:edSignature="Euiybtl7jE8ocqWm21KiexxCUJ/MGrDlhlMzmUkBPKF73sB2j7+vrJ97zWTcfR+3Lg0QYoUdFIzegqfLrRRCAQ=="/>
         </item>
     </channel>
 </rss>
