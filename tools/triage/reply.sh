@@ -16,20 +16,30 @@ else
 fi
 [ -n "${REPLIES:-}" ] && [ -f "$REPLIES" ] || { echo "no replies.json found (run triage.sh first)"; exit 1; }
 
-r="$(jq -c --arg id "$ID" '.[] | select(.id==$id)' "$REPLIES" 2>/dev/null || true)"
-[ -n "$r" ] || { echo "no reply with id '$ID' in $REPLIES"; exit 1; }
+# Select EXACTLY one reply. Duplicate ids would otherwise yield a multi-object
+# stream whose multiline fields slip the single-repo allowlist below.
+n="$(jq --arg id "$ID" '[.[]|select(.id==$id)]|length' "$REPLIES" 2>/dev/null || echo 0)"
+[ "$n" = "1" ] || { echo "expected exactly one reply with id '$ID' in $REPLIES (found $n)"; exit 1; }
+r="$(jq -c --arg id "$ID" 'map(select(.id==$id))|.[0]' "$REPLIES")"
 
 repo="$(jq -r '.repo' <<<"$r")"
 num="$(jq -r '.number' <<<"$r")"
 kind="$(jq -r '.kind // "issue"' <<<"$r")"
 body="$(jq -r '.body' <<<"$r")"
 
-# One cheap guard worth keeping: the repo field comes from the model, so refuse
-# to post outside the watched repos even if you fat-finger the confirm.
+# repo/number/kind all originate from the (untrusted) model output. You are the
+# final gate, but validate the machine-usable fields so a crafted value can't
+# turn into a gh flag or a wrong-repo post: number must be a plain integer (else
+# e.g. "--web" lands in flag position), repo must be watched, kind is issue|pr.
+[[ "$num" =~ ^[0-9]+$ ]] || { echo "refusing: '$num' is not a valid issue/PR number"; exit 1; }
 policy_get '.repos[]' | grep -qxF "$repo" || { echo "refusing: $repo is not in policy.repos"; exit 1; }
+[ "$kind" = "issue" ] || [ "$kind" = "pr" ] || { echo "refusing: unknown kind '$kind'"; exit 1; }
 
+# Strip control chars from the PREVIEW (keep tab + newline) so terminal escapes
+# in the body can't erase text and spoof what you approve. The posted body is the
+# raw value — GitHub renders it — but what you read here is the true content.
 echo "post to ${repo}#${num} (${kind}):"
-echo "$body" | sed 's/^/  | /'
+printf '%s\n' "$body" | LC_ALL=C tr -d '\000-\010\013-\037\177' | sed 's/^/  | /'
 printf 'post this? [y/N] '
 read -r ans
 case "$ans" in
