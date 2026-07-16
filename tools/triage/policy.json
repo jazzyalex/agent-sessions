@@ -1,12 +1,6 @@
 {
   "repos": ["jazzyalex/agent-sessions", "jazzyalex/homebrew-agent-sessions"],
-  "maintainers": ["jazzyalex"],
   "agent": "claude",
   "agent_model": "claude-sonnet-5",
-  "safe_acks_enabled": true,
-  "ack_fresh_hours": 48,
-  "ack_min_body_chars": 40,
-  "ack_template": "Thanks for opening this, @{user} — taking a look, will follow up shortly. 🙏",
-  "triage_labels": ["bug", "question", "needs-info", "dependencies", "documentation", "enhancement"],
-  "out_retention_days": 21
+  "lookback_hours": 48
 }

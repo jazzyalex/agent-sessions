@@ -1,77 +1,35 @@
 #!/usr/bin/env bash
+# Daily triage: gather open issues/PRs/comments -> tool-less agent drafts a
+# digest + suggested replies -> notify. You skim the digest and post the replies
+# you want with `reply.sh <id>`. Nothing posts on its own.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/lib/common.sh"
 
 OUT_ROOT="${OUT_ROOT:-$HERE/out}"
-STATE_FILE="${STATE_FILE:-$HERE/state.json}"
-LOCK="$OUT_ROOT/.lock"
-TODAY="$(date +%Y-%m-%d)"
-OUT_DIR="$OUT_ROOT/$TODAY"
-mkdir -p "$OUT_ROOT"
-
-# --- catch-up time gate ---
-HHMM="${NOW_HHMM:-$(date +%H%M)}"
-if [ "$HHMM" -lt "0800" ]; then log "before 08:00 ($HHMM) — waiting for schedule"; exit 0; fi
-# A `failed` marker does NOT count as "today done" — the trap writes status.json
-# even on a hard failure, so gate on the VALUE (not mere existence) to let a
-# transient morning failure be retried by a later catch-up run the same day.
-if [ -f "$OUT_DIR/status.json" ] && \
-   [ "$(jq -r '.status // empty' "$OUT_DIR/status.json" 2>/dev/null)" != "failed" ]; then
-  log "today already completed — skipping"; exit 0
-fi
-
-# --- lock (scheduled runs only) ---
-acquire_lock "$LOCK" || { log "another run holds the lock — deferring"; exit 0; }
-STATUS="failed"
-finish_run() {
-  local rc=$?
-  echo "{\"status\":\"$STATUS\",\"at\":\"$(utc_now)\"}" > "$OUT_DIR/status.json" 2>/dev/null || true
-  bash "$HERE/lib/notify.sh" "Repo triage" \
-     "$([ "$STATUS" = failed ] && echo 'FAILED — see run.log' || echo "status: $STATUS")" || true
-  release_lock "$LOCK"
-  exit $rc
-}
-trap finish_run EXIT
-
+OUT_DIR="$OUT_ROOT/$(date +%Y-%m-%d)"
 mkdir -p "$OUT_DIR"
 exec > >(tee -a "$OUT_DIR/run.log") 2>&1
 
-# retention prune
-find "$OUT_ROOT" -maxdepth 1 -type d -name '20*-*-*' -mtime +"$(policy_get '.out_retention_days')" \
-  -exec rm -rf {} + 2>/dev/null || true
+# Rolling lookback window for "new comments" — stateless (no lastRun file). Open
+# issues/PRs are always listed; comments are filtered to the last N hours.
+LOOKBACK="$(policy_get '.lookback_hours' 2>/dev/null || echo 48)"
+LAST_RUN="$(date -u -v-"${LOOKBACK}"H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+          || date -u -d "-${LOOKBACK} hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+          || utc_now)"
 
-# lastRun bootstrap
-if [ -f "$STATE_FILE" ]; then LAST_RUN="$(jq -r '.lastRun' "$STATE_FILE")"
-else LAST_RUN="$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || utc_now)"; fi
-export OUT_DIR LAST_RUN
-
-# gather
 OUT_DIR="$OUT_DIR" LAST_RUN="$LAST_RUN" bash "$HERE/gather.sh"
-had_errors="$(jq '.errors | length' "$OUT_DIR/snapshot.json")"
 
-# agent (fallback to minimal digest on failure)
-if OUT_DIR="$OUT_DIR" bash "$HERE/run-agent.sh"; then :; else
+if OUT_DIR="$OUT_DIR" bash "$HERE/run-agent.sh"; then
+  msg="digest ready → $OUT_DIR/digest.md"
+else
+  # Never leave a blank digest: fall back to a raw count from the snapshot.
   log "agent failed — writing minimal fallback digest"
   jq -r '.repos | to_entries[] | "## \(.key)\n- issues: \(.value.issues|length)  prs: \(.value.prs|length)"' \
-     "$OUT_DIR/snapshot.json" > "$OUT_DIR/digest.md" || echo "# triage (fallback)" > "$OUT_DIR/digest.md"
-  echo '{"generated_at":"'"$(utc_now)"'","snapshot_ref":"snapshot.json","actions":[]}' > "$OUT_DIR/actions.json"
-  had_errors=1
+     "$OUT_DIR/snapshot.json" > "$OUT_DIR/digest.md" 2>/dev/null \
+     || echo "# triage (agent failed — see run.log)" > "$OUT_DIR/digest.md"
+  echo '[]' > "$OUT_DIR/replies.json"
+  msg="digest ready (agent fell back — see run.log) → $OUT_DIR/digest.md"
 fi
 
-# auto-apply — a file-level rejection (e.g. schema-rejected actions.json, exit 4)
-# or a real crash must downgrade the run to `partial`, never be swallowed into a
-# false `success` that advances lastRun and silently drops GitHub activity.
-# (apply.sh's per-item guardrail rejections return/continue internally, so only a
-# whole-file failure surfaces here — exactly what should downgrade the run.)
-OUT_DIR="$OUT_DIR" bash "$HERE/apply.sh" --auto "$OUT_DIR" || had_errors=1
-
-# terminal status + lastRun advancement
-if [ "$had_errors" -eq 0 ]; then
-  STATUS="success"
-  gs="$(jq -r '.gather_start' "$OUT_DIR/snapshot.json")"
-  echo "{\"lastRun\":\"$gs\"}" > "$STATE_FILE"
-else
-  STATUS="partial"   # do NOT advance lastRun
-fi
-# trap writes status.json + notifies
+bash "$HERE/lib/notify.sh" "Repo triage" "$msg" || true

@@ -10,8 +10,8 @@ if [ -n "${CLAUDE_STUB_GARBAGE:-}" ]; then echo "no markers here"; exit 0; fi
 cat <<'EOF'
 <<<DIGEST>>>
 # Triage digest (stub)
-- see actions.json
-<<<ACTIONS>>>
-{"generated_at":"2026-07-16T08:00:00Z","snapshot_ref":"snapshot.json","actions":[]}
+- see replies.json
+<<<REPLIES>>>
+[]
 <<<END>>>
 EOF
