@@ -53,6 +53,7 @@
 		196F6BD2FA9B53ED8E9E290D /* ReverseJSONLTailReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DC9ECA4EAC133CDE4FF2A37 /* ReverseJSONLTailReader.swift */; };
 		1990581CAEE116EE0A91BE2A /* ImageBrowserIndexCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE51E91DDB45FF63A7579B6B /* ImageBrowserIndexCache.swift */; };
 		19B670E23F99ADFE64B1E91F /* ClaudeCredentialFingerprintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DFCF251FDCACECB39D27901 /* ClaudeCredentialFingerprintTests.swift */; };
+		19C8E23B7A8CA8F9B623BAA6 /* ClaudeManualWebCookie.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9937314E038C466B657D7972 /* ClaudeManualWebCookie.swift */; };
 		1A05D485575CB52DA078832A /* FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34627A0B9E81ED0AF4C56B67 /* FilterEngine.swift */; };
 		1A0C43BD559DF9822AF1242D /* PiSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272F49F814CE6F5E50E505A5 /* PiSessionParserTests.swift */; };
 		1A214409C4AE84B0BF3D9C08 /* TerminalLineID.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7FE5084C9A7F61DA06A6AB4 /* TerminalLineID.swift */; };
@@ -286,6 +287,7 @@
 		A9C8BC064D4751AA08618B32 /* MarkdownSourceMapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF6CDF19503CE380FABF2E9 /* MarkdownSourceMapTests.swift */; };
 		A9D49F2A967D8DD12C2FD3FE /* OpenCodeBackendDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACFE880E8C4F8CEFBE7FD3B6 /* OpenCodeBackendDetector.swift */; };
 		AA01F0F00000000000000001 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = AA01F0F00000000000000002 /* Markdown */; };
+		AA6D13CAD9B65E000F6A9203 /* ClaudeWebCookieParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 575BC2E10FBE2EDB852CE870 /* ClaudeWebCookieParserTests.swift */; };
 		AAD67C266F144F9C0EEC24CB /* TranscriptColorSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F13DE3D3808C990779216E4 /* TranscriptColorSystem.swift */; };
 		ABE8604AC7ECD25304634C7C /* CrashReportingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2171D0501F372B5E76925ADA /* CrashReportingServiceTests.swift */; };
 		AD30BD793924C18DE7456342 /* subagent-session.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = C00F56881BDBF91B5144FD2A /* subagent-session.jsonl */; };
@@ -373,6 +375,7 @@
 		CE8BF1C6236FC69B151E2A81 /* CursorBackendDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A22B30681A2A49CB452C34 /* CursorBackendDetector.swift */; };
 		CF1F172B687917E2C4787FF1 /* CrashReportEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = C331372717FD62646BBF983D /* CrashReportEnvelope.swift */; };
 		CF6B98C11D3482C54727F35B /* AgentCockpitHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF308FD04A790E21685E9FFD /* AgentCockpitHUDView.swift */; };
+		CFACFE687838C731CA519A6E /* ClaudeManualWebCookieTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8038F1B15229405969C3C5E /* ClaudeManualWebCookieTests.swift */; };
 		CFB900010000000000000001 /* SessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000001 /* SessionDiscovery.swift */; };
 		CFB900010000000000000002 /* TranscriptRenderMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000002 /* TranscriptRenderMode.swift */; };
 		CFB900010000000000000003 /* ClaudeSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA900010000000000000003 /* ClaudeSessionParser.swift */; };
@@ -640,6 +643,7 @@
 		558A02C67774ABC59CE8CC46 /* ClaudeStatusServiceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeStatusServiceTests.swift; sourceTree = SOURCE_ROOT; };
 		55F3DA1B53A2B4BEA17820FA /* ImageBrowserIndexCacheTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ImageBrowserIndexCacheTests.swift; sourceTree = SOURCE_ROOT; };
 		5612FE92135230B461DA0E59 /* ClaudeProbeProject.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaudeProbeProject.swift; sourceTree = "<group>"; };
+		575BC2E10FBE2EDB852CE870 /* ClaudeWebCookieParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeWebCookieParserTests.swift; sourceTree = SOURCE_ROOT; };
 		5835994D198D1EDF93CC7E47 /* HUDRebuildGateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/HUDRebuildGateTests.swift; sourceTree = SOURCE_ROOT; };
 		5937E9FEA9989BE235AC740E /* OnboardingPalette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Components/OnboardingPalette.swift; sourceTree = SOURCE_ROOT; };
 		59F809F7DFDB78DC70A32C3E /* CrashEmailDraftBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashEmailDraftBuilder.swift; sourceTree = SOURCE_ROOT; };
@@ -734,6 +738,7 @@
 		977154E97166D177FECB5E2F /* FilteredDefaultsObserver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/FilteredDefaultsObserver.swift; sourceTree = SOURCE_ROOT; };
 		979E7E3D0E14477885B20675 /* CodexLaunchMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexLaunchMode.swift; path = AgentSessions/Resume/CodexLaunchMode.swift; sourceTree = SOURCE_ROOT; };
 		984DB58B4EDFDA087B0B1623 /* CodexSessionImagesGalleryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/CodexSessionImagesGalleryView.swift; sourceTree = SOURCE_ROOT; };
+		9937314E038C466B657D7972 /* ClaudeManualWebCookie.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeManualWebCookie.swift; sourceTree = SOURCE_ROOT; };
 		99CD97A89CCCDCA326CCE023 /* AntigravityResumeTypes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/AntigravityResume/AntigravityResumeTypes.swift; sourceTree = SOURCE_ROOT; };
 		9A35FF4EC89DCD3987AD16BB /* OpenCodeSessionParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeSessionParser.swift; path = AgentSessions/Services/OpenCodeSessionParser.swift; sourceTree = SOURCE_ROOT; };
 		9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateChecker.swift; path = AgentSessions/Update/UpdateChecker.swift; sourceTree = SOURCE_ROOT; };
@@ -762,6 +767,7 @@
 		A49D561C823DF3D2B9F08E1E /* ClaudeRunwaySnapshotLoader.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeRunwaySnapshotLoader.swift; sourceTree = SOURCE_ROOT; };
 		A62B8D98322763D14AF6ACF7 /* ColumnVisibilityStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ColumnVisibilityStore.swift; path = AgentSessions/Support/ColumnVisibilityStore.swift; sourceTree = SOURCE_ROOT; };
 		A64863D6D14C1126A51A141E /* IndexDBTestHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Helpers/IndexDBTestHelpers.swift; sourceTree = SOURCE_ROOT; };
+		A8038F1B15229405969C3C5E /* ClaudeManualWebCookieTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeManualWebCookieTests.swift; sourceTree = SOURCE_ROOT; };
 		A80E2D7915DCA094DE383D10 /* CopyResumeCommandTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CopyResumeCommandTests.swift; sourceTree = SOURCE_ROOT; };
 		A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexResumeTests.swift; path = AgentSessionsTests/CodexResumeTests.swift; sourceTree = SOURCE_ROOT; };
 		A87D9748A4FB1DC0944131E2 /* HermesTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/HermesTranscriptView.swift; sourceTree = SOURCE_ROOT; };
@@ -1942,6 +1948,7 @@
 				3EA0F64F6AA5E8913A6A87EF /* ClaudeWebCookieResolver.swift */,
 				08C469B5C95E0C078BBA3A00 /* ClaudeWebUsageClient.swift */,
 				F225C8CF6DF509A4B264E2D0 /* ClaudeWebUsageNormalizer.swift */,
+				9937314E038C466B657D7972 /* ClaudeManualWebCookie.swift */,
 			);
 			name = ClaudeOAuth;
 			sourceTree = "<group>";
@@ -1956,6 +1963,8 @@
 				8DFCF251FDCACECB39D27901 /* ClaudeCredentialFingerprintTests.swift */,
 				A096C478432DCB4673FA1B36 /* ClaudeWebUsageNormalizerTests.swift */,
 				6B9049FE9289CED04C4803EE /* ClaudeDelegatedTokenRefreshTests.swift */,
+				575BC2E10FBE2EDB852CE870 /* ClaudeWebCookieParserTests.swift */,
+				A8038F1B15229405969C3C5E /* ClaudeManualWebCookieTests.swift */,
 			);
 			name = ClaudeOAuth;
 			sourceTree = "<group>";
@@ -2525,6 +2534,7 @@
 				BDA985A3E15FD2AB2574324A /* CodexRateLimitWindowClassifier.swift in Sources */,
 				28E99A62167E3F8259961EBB /* RunwayPriceTable.swift in Sources */,
 				30EBC96781F4427CADFA7D5B /* QuotaMeterPromoView.swift in Sources */,
+				19C8E23B7A8CA8F9B623BAA6 /* ClaudeManualWebCookie.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2651,6 +2661,8 @@
 				D5541F1B264AF5605E439D82 /* MigrationCorpusPreservationTests.swift in Sources */,
 				D9874EC8E224CA4488E0841C /* OnboardingQuotaMeterCardTests.swift in Sources */,
 				4975E6E741246F858DF12F13 /* HUDLimitsResizeAnchorTests.swift in Sources */,
+				AA6D13CAD9B65E000F6A9203 /* ClaudeWebCookieParserTests.swift in Sources */,
+				CFACFE687838C731CA519A6E /* ClaudeManualWebCookieTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

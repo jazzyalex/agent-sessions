@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+- **Read your Claude subscription usage without the CLI — paste a session cookie.** If you don't run the Claude CLI, Agent Sessions reads usage over the web instead. On macOS 14+ Safari stopped handing the claude.ai session to other apps, so that path had quietly become a dead end. Now you paste your claude.ai session cookie once in Settings → Usage Tracking: it's kept in your Keychain, needs no Full Disk Access, and sign-in never leaves your browser. A **Test now** button confirms it works on the spot.
+
+### Features
+- **Paste-a-cookie web usage for Claude.** Settings → Usage Tracking accepts your claude.ai `sessionKey` (or the whole cookie header) and uses it directly for usage lookups — no Full Disk Access, no scraping. The app only holds the token you hand it, stored in the Keychain. Reading the cookie from Safari is kept as a legacy fallback for anyone it still works for.
+
+### Bug Fixes
+- **The Web API path stops telling signed-in users to "sign in".** When it couldn't find a claude.ai session it advised signing in "at claude.ai (default profile)" — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can't read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.
+
 ## [4.5] - 2026-07-15
 
 ### Highlights

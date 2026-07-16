@@ -1,6 +1,16 @@
 # Claude Web-Usage Path: Embedded Login (Bug 2) — Design Spec
 
-> Status: SPEC ONLY — not yet implemented. Written 2026-07-16 for a future session.
+> Status: SUPERSEDED (2026-07-16). The honesty fix shipped as designed. For the
+> durable web source the owner chose the **safe manual cookie paste** over the
+> embedded WKWebView login below: on-machine verification confirmed the claude.ai
+> `sessionKey` is not in any readable binarycookies file (nor in the WebsiteDataStore
+> tree, which is absent) on modern Safari, so scraping can't be rescued — and the
+> paste path (CodexBar's actual Claude approach) is FDA-free, WebView-free, and
+> CAPTCHA-free. Shipped: `ClaudeManualWebCookie.swift` (extractor + Keychain store),
+> wired as the PRIMARY web source in `ClaudeUsageSourceManager.performWebFetch`;
+> `ClaudeWebCookieResolver` widened to typed outcomes + value-free diagnostics and
+> demoted to a legacy fallback; paste UI in `PreferencesView+Usage.swift`. The
+> embedded-login design below is retained for reference only.
 > Companion bug: Bug 1 (wedged OAuth/delegated-refresh latch) is being fixed
 > separately; see `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageSourceManager.swift`.
 

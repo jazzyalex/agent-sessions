@@ -120,12 +120,12 @@ extension PreferencesView {
                         get: { UserDefaults.standard.bool(forKey: PreferencesKey.claudeWebApiEnabled) },
                         set: { UserDefaults.standard.set($0, forKey: PreferencesKey.claudeWebApiEnabled) }
                     ),
-                    help: "When enabled, Auto mode falls back to the claude.ai Web API before tmux. Reads Safari session cookie. May require Full Disk Access on macOS 14+."
+                    help: "When enabled, Auto mode falls back to the claude.ai Web API before tmux. Uses a session cookie you paste below — no Full Disk Access needed."
                 )
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
                           (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
                 if webApiEffectivelyEnabled {
-                    WebApiSafariStatusCallout()
+                    ClaudeWebSessionCookieCallout()
                 }
                 toggleRow(
                     "Allow CLI probe fallback",
@@ -541,7 +541,14 @@ extension PreferencesView {
 /// read → org lookup → usage fetch — and reports the first failure with its
 /// remedy, so "enabled but silently unusable" (the TCC-denied cookie read) is
 /// visible right where the toggle lives instead of dying as a log line.
-private struct WebApiSafariStatusCallout: View {
+/// Preferences affordance for the claude.ai Web API source. The primary, durable
+/// path is a session cookie the user pastes: sign-in stays in the user's browser,
+/// the app only stores the token they hand it (in the Keychain), and it needs no
+/// Full Disk Access. Reading the cookie out of Safari is kept only as a legacy
+/// fallback (usually unavailable on macOS 14+). The "Test now" button probes the
+/// SAME source order the app uses, so "enabled but silently unusable" is visible
+/// right where the toggle lives instead of dying as a log line.
+private struct ClaudeWebSessionCookieCallout: View {
     private enum TestState: Equatable {
         case idle
         case running
@@ -549,67 +556,146 @@ private struct WebApiSafariStatusCallout: View {
     }
 
     @State private var testState: TestState = .idle
+    @State private var pasteText: String = ""
+    @State private var hasCookie: Bool = false
+    @State private var showHelp: Bool = false
+
+    private let store = ClaudeManualWebCookieStore.shared
 
     var body: some View {
-        PreferenceCallout(iconName: "lock.shield", tint: .blue) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Web API reads the Safari session cookie for claude.ai. On macOS 14+, this requires Full Disk Access.")
+        PreferenceCallout(iconName: "key.fill", tint: .blue) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Paste your claude.ai session cookie so Agent Sessions can read subscription usage without the CLI. Sign-in stays in your browser — the app only stores the token you paste, in your Keychain.")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if hasCookie {
+                    HStack(spacing: 8) {
+                        Label("A session cookie is saved", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.green)
+                        Button("Remove") { removeCookie() }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    SecureField("Paste sessionKey or cookie header", text: $pasteText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .frame(maxWidth: 320)
+                    Button("Save") { saveCookie() }
+                        .font(.caption)
+                        .disabled(pasteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
                 HStack(spacing: 12) {
-                    Button("Open Full Disk Access Settings") {
+                    Button(showHelp ? "Hide steps" : "How do I get this?") { showHelp.toggle() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    Button(testState == .running ? "Testing…" : "Test now") { runTest() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .disabled(testState == .running)
+                }
+
+                if showHelp {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("1. Open claude.ai in your browser, signed in.")
+                        Text("2. Open Developer Tools → Application/Storage → Cookies → https://claude.ai.")
+                        Text("3. Copy the value of the “sessionKey” cookie and paste it above.")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if case .result(let message, let ok) = testState {
+                    Label(message, systemImage: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(ok ? Color.green : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider().padding(.vertical, 2)
+                HStack(alignment: .top, spacing: 12) {
+                    Text("Legacy: read the cookie from Safari instead. Needs Full Disk Access, and is usually unavailable on macOS 14+.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Full Disk Access…") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                             NSWorkspace.shared.open(url)
                         }
                     }
                     .buttonStyle(.link)
-                    .font(.caption)
-                    Button(testState == .running ? "Testing…" : "Test Web API") {
-                        runTest()
-                    }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    .disabled(testState == .running)
-                }
-                if case .result(let message, let ok) = testState {
-                    Label(message, systemImage: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(ok ? Color.green : Color.orange)
+                    .font(.caption2)
+                    .fixedSize()
                 }
             }
         }
+        .onAppear { hasCookie = store.hasStoredCookie }
+    }
+
+    private func saveCookie() {
+        if store.save(pasted: pasteText) {
+            pasteText = ""
+            hasCookie = true
+            runTest()
+        } else {
+            testState = .result("That didn’t contain a claude.ai “sessionKey”. Paste the sessionKey cookie value.", ok: false)
+        }
+    }
+
+    private func removeCookie() {
+        store.clear()
+        hasCookie = false
+        testState = .idle
     }
 
     private func runTest() {
         testState = .running
         Task {
-            let outcome = await WebApiSafariStatusCallout.performTest()
+            let outcome = await ClaudeWebSessionCookieCallout.performTest()
             await MainActor.run { testState = .result(outcome.message, ok: outcome.ok) }
         }
     }
 
-    /// End-to-end probe of the Web API chain with cause-aware messaging.
-    /// User-initiated only — never called on a timer.
+    /// End-to-end probe of the Web API chain, in the SAME source order the app uses
+    /// (pasted cookie first, Safari-file scraping only as a legacy fallback), with
+    /// cause-aware messaging. User-initiated only — never called on a timer.
     static func performTest() async -> (message: String, ok: Bool) {
-        let resolver = ClaudeWebCookieResolver()
-        switch await resolver.resolveDetailed() {
-        case .permissionDenied:
-            // A visible-but-ineffective grant is common with rebuilt dev builds:
-            // TCC pins the grant to the build identity, so a stale entry shows
-            // enabled while the read stays denied. Say so, or the user loops.
-            return ("Full Disk Access needed — if already granted, remove the Agent Sessions entry and re-add this exact app.", false)
-        case .noSession:
-            return ("No claude.ai session in Safari — sign in at claude.ai (default profile), then retest.", false)
-        case .found(let cookie):
-            do {
-                let result = try await ClaudeWebUsageClient().fetch(sessionKey: cookie.sessionKey)
-                return result.fromCache
-                    ? ("Web API working — served from a recent cached response.", true)
-                    : ("Web API working — usage fetched live from claude.ai.", true)
-            } catch ClaudeOAuthUsageClientError.unauthorized {
-                return ("Safari's claude.ai session is expired — sign in again at claude.ai.", false)
-            } catch {
-                return ("claude.ai request failed: \(error.localizedDescription)", false)
+        let sessionKey: String
+        if let manual = ClaudeManualWebCookieStore.shared.currentSessionKey() {
+            sessionKey = manual
+        } else {
+            let resolver = ClaudeWebCookieResolver()
+            switch await resolver.resolveDetailed() {
+            case .found(let cookie):
+                sessionKey = cookie.sessionKey
+            case .permissionDenied:
+                return ("No pasted cookie, and Safari access is blocked. Paste your sessionKey above (or grant Full Disk Access for the legacy path).", false)
+            case .cookieExpired:
+                return ("Safari's claude.ai session cookie has expired. Paste a fresh sessionKey above.", false)
+            case .storeMissing, .validStoreNoCookie, .unsupportedFormat, .malformedRecord:
+                // The old message told a signed-in user to "sign in at claude.ai
+                // (default profile)" — a lie on macOS 14/15, where Safari keeps the
+                // live cookie in a store apps can't read. Say what's actually true.
+                return ("No claude.ai session found. Paste your sessionKey above — Safari no longer exposes it to apps on macOS 14+.", false)
             }
+        }
+
+        do {
+            let result = try await ClaudeWebUsageClient().fetch(sessionKey: sessionKey)
+            return result.fromCache
+                ? ("Working — served from a recent cached response.", true)
+                : ("Working — usage fetched live from claude.ai.", true)
+        } catch ClaudeOAuthUsageClientError.unauthorized {
+            return ("The claude.ai session is expired or invalid — paste a fresh sessionKey.", false)
+        } catch {
+            return ("claude.ai request failed: \(error.localizedDescription)", false)
         }
     }
 }

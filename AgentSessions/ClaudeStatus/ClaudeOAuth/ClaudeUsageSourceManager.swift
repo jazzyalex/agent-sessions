@@ -190,11 +190,14 @@ actor ClaudeUsageSourceManager {
     /// Gentle, non-alarming caption for a signed-out CLI while the app's saved
     /// token still fetches — a heads-up, not a runway-hiding banner (P5).
     static let cliSignedOutAdvisory = "Claude CLI signed out — usage via the app's saved token"
-    /// Cause-aware Web API captions (2026-07-12). A TCC-denied Safari cookie
-    /// read and a signed-out Safari need OPPOSITE user actions, so they must
-    /// never collapse into a silent "no session cookie" log line.
+    /// Cause-aware Web API captions. Each failure world needs a DIFFERENT user
+    /// action, so they must never collapse into a silent "no session cookie".
+    /// On macOS 14/15 Safari no longer exposes the live claude.ai `sessionKey` to
+    /// apps (it moved to a store we can't read), so the durable path is a
+    /// user-pasted cookie — the "no session" caption points there, not to Safari.
     static let webNeedsFullDiskAccessReason = "Web API needs Full Disk Access to read Safari's claude.ai session"
-    static let webNoSafariSessionReason = "No claude.ai session in Safari — sign in at claude.ai"
+    static let webNoSafariSessionReason = "No claude.ai session — paste your session cookie in Settings, or use the Claude CLI"
+    static let webSessionExpiredReason = "claude.ai session expired — paste a fresh session cookie in Settings"
 
     /// Pure escalation predicate: escalate `.expired` to the banner only once a
     /// verified 401 has persisted from `first401At` to at least `threshold` later.
@@ -1074,32 +1077,60 @@ actor ClaudeUsageSourceManager {
             }
         }
 
-        let cookie: ClaudeWebCookieResolver.ResolvedCookie
-        switch await webCookieResolver.resolveDetailed() {
-        case .found(let resolved):
-            cookie = resolved
-        case .permissionDenied:
-            // TCC blocked the Safari cookie read — retrying can't fix this; the
-            // user must grant Full Disk Access. Say so on the surface (calm
-            // caption, never an auth banner) instead of dying as a log line.
-            os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
-                   log: log, type: .info)
-            availabilityHandler?(ClaudeServiceAvailability(
-                cliUnavailable: false, tmuxUnavailable: false,
-                transientReason: Self.webNeedsFullDiskAccessReason, captionOnly: true))
-            await handleWebFailure(reason: "cookie read permission denied")
-            return
-        case .noSession:
-            os_log("ClaudeOAuth: web API — no claude.ai session in Safari", log: log, type: .info)
-            availabilityHandler?(ClaudeServiceAvailability(
-                cliUnavailable: false, tmuxUnavailable: false,
-                transientReason: Self.webNoSafariSessionReason, captionOnly: true))
-            await handleWebFailure(reason: "no claude.ai session in Safari")
-            return
+        // PRIMARY web source: the user's manually-pasted claude.ai session cookie.
+        // It's the only durable option on macOS 14/15 (Safari no longer exposes the
+        // live cookie to apps), needs no Full Disk Access, and never scrapes. The
+        // Safari-file reader below is kept ONLY as a legacy fallback for anyone it
+        // still works for.
+        let sessionKey: String
+        let usingManualCookie: Bool
+        if let manual = ClaudeManualWebCookieStore.shared.currentSessionKey() {
+            sessionKey = manual
+            usingManualCookie = true
+        } else {
+            usingManualCookie = false
+            let cookieOutcome = await webCookieResolver.resolveDetailed()
+            switch cookieOutcome {
+            case .found(let resolved):
+                sessionKey = resolved.sessionKey
+            case .permissionDenied:
+                // TCC blocked the Safari cookie read — retrying can't fix this; the
+                // user must grant Full Disk Access. Say so on the surface (calm
+                // caption, never an auth banner) instead of dying as a log line.
+                os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
+                       log: log, type: .info)
+                availabilityHandler?(ClaudeServiceAvailability(
+                    cliUnavailable: false, tmuxUnavailable: false,
+                    transientReason: Self.webNeedsFullDiskAccessReason, captionOnly: true))
+                await handleWebFailure(reason: "cookie read permission denied")
+                return
+            case .cookieExpired:
+                // A claude.ai sessionKey WAS present but has expired — the user must
+                // sign in again (or paste a fresh cookie). Distinct remedy from a
+                // missing session, so it gets its own caption.
+                os_log("ClaudeOAuth: web API — Safari claude.ai session cookie expired", log: log, type: .info)
+                availabilityHandler?(ClaudeServiceAvailability(
+                    cliUnavailable: false, tmuxUnavailable: false,
+                    transientReason: Self.webSessionExpiredReason, captionOnly: true))
+                await handleWebFailure(reason: "claude.ai session cookie expired")
+                return
+            case .storeMissing, .validStoreNoCookie, .unsupportedFormat, .malformedRecord:
+                // No usable claude.ai session in Safari. On macOS 14/15 this is the
+                // normal state even for a signed-in user (the live cookie moved to a
+                // store apps can't read), so point the user at the durable path — a
+                // pasted session cookie — rather than telling them to sign in again.
+                os_log("ClaudeOAuth: web API — no readable claude.ai session (%{public}@)",
+                       log: log, type: .info, String(describing: cookieOutcome))
+                availabilityHandler?(ClaudeServiceAvailability(
+                    cliUnavailable: false, tmuxUnavailable: false,
+                    transientReason: Self.webNoSafariSessionReason, captionOnly: true))
+                await handleWebFailure(reason: "no claude.ai session available")
+                return
+            }
         }
 
         do {
-            let (raw, bodyHash, fromCache, fetchedAt) = try await webUsageClient.fetch(sessionKey: cookie.sessionKey)
+            let (raw, bodyHash, fromCache, fetchedAt) = try await webUsageClient.fetch(sessionKey: sessionKey)
             guard var snapshot = ClaudeWebUsageNormalizer.normalize(raw, bodyHash: bodyHash, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: web normalizer returned nil", log: log, type: .error)
                 await handleWebFailure(reason: "empty web payload")
@@ -1130,8 +1161,17 @@ actor ClaudeUsageSourceManager {
             scheduleWebRefresh(delay: delay)
         } catch ClaudeOAuthUsageClientError.unauthorized {
             os_log("ClaudeOAuth: web API 401, invalidating cookie and org caches", log: log, type: .info)
-            await webCookieResolver.invalidateCache()
             await webUsageClient.invalidateOrgId()
+            if usingManualCookie {
+                // The pasted cookie no longer authenticates — it can't be
+                // refreshed, so tell the user to paste a fresh one rather than
+                // silently retrying the dead token.
+                availabilityHandler?(ClaudeServiceAvailability(
+                    cliUnavailable: false, tmuxUnavailable: false,
+                    transientReason: Self.webSessionExpiredReason, captionOnly: true))
+            } else {
+                await webCookieResolver.invalidateCache()
+            }
             await handleWebFailure(reason: "401 unauthorized")
         } catch {
             os_log("ClaudeOAuth: web API error: %{public}@", log: log, type: .error, error.localizedDescription)
