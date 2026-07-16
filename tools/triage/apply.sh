@@ -105,5 +105,6 @@ if [ "$MODE" = "auto" ]; then
   exit 0
 fi
 
-# approval mode implemented in Task 6
-exit 0
+# approval mode
+source "$HERE/lib/apply-approval.sh"
+run_approval "$OUT_DIR" "$DRY"
