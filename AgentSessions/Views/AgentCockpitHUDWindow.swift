@@ -230,9 +230,13 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                 cachedFrameByMode[currentMode] = window.frame
             }
             let clampedCompactPreferredRows = clampedPreferredCompactRows(compactPreferredRows)
-            let includesToolbarForStableSizing = isLimitsOnly
-                ? compactToolbarVisible
-                : (compactAutoFitEnabled ? compactToolbarVisible : true)
+            // Compact always reserves toolbar height, auto-fit or not. Auto-fit
+            // means "height follows session count" — it must not also mean
+            // "height follows toolbar visibility", or revealing the toolbar on
+            // hover resizes the window under the pointer. The Quota Meter keeps
+            // its own rule: its chrome mode decides whether the toolbar is part
+            // of the window at all.
+            let includesToolbarForStableSizing = isLimitsOnly ? compactToolbarVisible : true
 
             if window.identifier?.rawValue != "AgentCockpit" {
                 window.identifier = NSUserInterfaceItemIdentifier("AgentCockpit")
@@ -297,18 +301,12 @@ struct AgentCockpitHUDWindowConfigurator: NSViewRepresentable {
                         appliesDefaultWidth: false,
                         animated: previousCompactToolbarVisibility != compactToolbarVisible
                     )
-                } else if let previousCompactToolbarVisibility,
-                          previousCompactToolbarVisibility != compactToolbarVisible,
-                          compactAutoFitEnabled {
-                    applyCompactToolbarVisibilityTransition(
-                        to: compactToolbarVisible,
-                        groupByProject: groupByProject,
-                        window: window
-                    )
                 }
+                // No toolbar-visibility resize for ordinary Compact: its height
+                // is reserved for the toolbar whether or not it is on screen, so
+                // revealing it has nothing to resize.
                 if !isLimitsOnly,
                    compactAutoFitEnabled,
-                   compactToolbarVisible,
                    !groupByProject {
                     applyCompactVisibleRowsAutoHeight(
                         shownSessionCount: shownSessionCount,

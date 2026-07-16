@@ -1674,9 +1674,16 @@ struct AgentCockpitHUDView: View {
         )
     }
 
+    /// Compact only — the Quota Meter's body is `HUDLimitsRowsPanel`, which never
+    /// reaches here.
+    ///
+    /// Under auto-fit the count is the whole answer, independent of the toolbar:
+    /// keying off `showsCompactToolbar` made the body shrink to the
+    /// hidden-toolbar minimum the moment the pointer left, which is the same
+    /// hover-driven resize the window-level sizing was just decoupled from.
     private func compactBodyMinHeight(visibleRowCount: Int,
                                       showsCompactToolbar: Bool) -> CGFloat {
-        if compactAutoFitEnabled && showsCompactToolbar {
+        if compactAutoFitEnabled {
             let rows = min(max(visibleRowCount, 1), Int(compactBodyMaxRowsWhenToolbarVisible))
             return CGFloat(rows) * compactBodyRowHeight
         }
