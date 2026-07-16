@@ -94,3 +94,7 @@ docs/assets/geo-test-2.pdf
 
 # Local competitor/reference source (never shipped; excluded from remote)
 .reference/
+
+# repo triage automation runtime artifacts
+tools/triage/out/
+tools/triage/state.json
