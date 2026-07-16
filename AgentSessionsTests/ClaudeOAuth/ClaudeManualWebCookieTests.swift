@@ -24,6 +24,18 @@ final class ClaudeManualWebCookieTests: XCTestCase {
         XCTAssertEqual(ClaudeManualWebCookie.extractSessionKey(fromPasted: header), "sk-ant-sid01-FAKE")
     }
 
+    func testCookieNameEndingInSessionKey_isNotMistakenForIt() {
+        // A different cookie whose name ends in "sessionKey" must not be matched
+        // as the sessionKey pair — the match has to be name-anchored.
+        let header = "anon_sessionKey=WRONG; sessionKey=sk-ant-sid01-RIGHT; lastActiveOrg=xyz"
+        XCTAssertEqual(ClaudeManualWebCookie.extractSessionKey(fromPasted: header), "sk-ant-sid01-RIGHT")
+    }
+
+    func testSessionKeyNotFirst_afterAnotherPairWithEqualsInValue() {
+        let header = "redirect=/foo?sessionKey=DECOY; sessionKey=sk-ant-sid01-RIGHT"
+        XCTAssertEqual(ClaudeManualWebCookie.extractSessionKey(fromPasted: header), "sk-ant-sid01-RIGHT")
+    }
+
     func testCookieHeaderLabelPrefix_isStripped() {
         XCTAssertEqual(ClaudeManualWebCookie.extractSessionKey(fromPasted: "Cookie: sessionKey=sk-ant-sid01-FAKE"),
                        "sk-ant-sid01-FAKE")

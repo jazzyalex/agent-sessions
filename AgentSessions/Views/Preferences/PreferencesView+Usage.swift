@@ -688,7 +688,9 @@ private struct ClaudeWebSessionCookieCallout: View {
         }
 
         do {
-            let result = try await ClaudeWebUsageClient().fetch(sessionKey: sessionKey)
+            // bypassCache: the self-test must validate THIS cookie live, not return
+            // a recent cached response that may have been fetched with a different one.
+            let result = try await ClaudeWebUsageClient().fetch(sessionKey: sessionKey, bypassCache: true)
             return result.fromCache
                 ? ("Working — served from a recent cached response.", true)
                 : ("Working — usage fetched live from claude.ai.", true)

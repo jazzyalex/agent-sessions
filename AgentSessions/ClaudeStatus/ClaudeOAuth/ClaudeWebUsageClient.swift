@@ -61,8 +61,12 @@ actor ClaudeWebUsageClient {
         cachedOrgId = nil
     }
 
-    func fetch(sessionKey: String) async throws -> (response: ClaudeWebRawUsageResponse, bodyHash: String, fromCache: Bool, fetchedAt: Date) {
-        if let cached = readSharedCache() {
+    /// - Parameter bypassCache: when true, skip the 3-minute shared file cache and
+    ///   force a live request with THIS `sessionKey`. Used by the user-initiated
+    ///   self-test so it actually validates the pasted cookie instead of returning
+    ///   a recent response fetched with a different cookie.
+    func fetch(sessionKey: String, bypassCache: Bool = false) async throws -> (response: ClaudeWebRawUsageResponse, bodyHash: String, fromCache: Bool, fetchedAt: Date) {
+        if !bypassCache, let cached = readSharedCache() {
             os_log("ClaudeOAuth: web API — serving from cache", log: log, type: .debug)
             return (cached.response, cached.bodyHash, true, cached.fetchedAt)
         }

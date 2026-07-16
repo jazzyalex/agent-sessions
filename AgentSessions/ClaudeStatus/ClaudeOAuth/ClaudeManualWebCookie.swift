@@ -32,14 +32,16 @@ enum ClaudeManualWebCookie {
             s = String(s[r.upperBound...]).trimmingCharacters(in: .whitespaces)
         }
 
-        // Preferred: pull the sessionKey pair's value out of a cookie string. The
-        // value runs to the next ';' or whitespace (so trailing cookies/notes are
-        // dropped, and a value containing '=' survives intact).
-        if let r = s.range(of: "sessionKey=") {
-            let after = s[r.upperBound...]
-            let value = after.prefix { $0 != ";" && !$0.isWhitespace }
-            let trimmed = String(value).trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            return trimmed.isEmpty ? nil : trimmed
+        // Preferred: find the cookie pair NAMED exactly `sessionKey`. Split on ';'
+        // and match on the trimmed name so the match is name-anchored — a
+        // different cookie whose name merely ends in "sessionKey" (e.g.
+        // `anon_sessionKey=`), or an earlier value that happens to contain the
+        // literal `sessionKey=`, must NOT be mistaken for the real pair.
+        for pair in s.split(separator: ";") {
+            let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard kv.count == 2, String(kv[0]).trimmingCharacters(in: .whitespaces) == "sessionKey" else { continue }
+            let value = String(kv[1]).trimmingCharacters(in: CharacterSet(charactersIn: "\"'").union(.whitespaces))
+            return value.isEmpty ? nil : value
         }
 
         // No sessionKey pair. Accept a lone pasted token, but reject a cookie
