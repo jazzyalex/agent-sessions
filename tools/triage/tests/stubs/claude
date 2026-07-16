@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Mock claude -p. Writes the two expected outputs into cwd (the stage dir),
+# proving run-agent.sh copies them back. Records that it ran to $CLAUDE_LOG.
+set -euo pipefail
+[ -n "${CLAUDE_LOG:-}" ] && echo "claude $*" >> "$CLAUDE_LOG"
+cat > digest.md <<'EOF'
+# Triage digest (stub)
+- see actions.json
+EOF
+cat > actions.json <<'EOF'
+{"generated_at":"2026-07-16T08:00:00Z","snapshot_ref":"snapshot.json","actions":[]}
+EOF

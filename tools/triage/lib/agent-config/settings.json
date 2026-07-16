@@ -1,0 +1,9 @@
+{
+  "enableAllProjectMcpServers": false,
+  "mcpServers": {},
+  "hooks": {},
+  "permissions": {
+    "allow": ["Read", "Write"],
+    "deny": ["Bash", "WebFetch", "WebSearch"]
+  }
+}
