@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.4/AgentSessions-4.4.dmg"><b>Download Agent Sessions 4.4 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg"><b>Download Agent Sessions 4.5 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.4** — Codex usage keeps working when OpenAI pauses the 5-hour limit: Agent Sessions detects the change, shows a calm "no limit" for 5h while keeping your weekly usage accurate, and the Session Runway shows honest per-session token throughput instead of a misleading rate. [See what's new ↓](#whats-new-in-44)
+> **New in 4.5** — See what each session is costing you: the Session Runway can now report every active session's API-equivalent spend per hour, priced per model, alongside 5-hour, weekly, and token rates. And the Quota Meter holds still — it no longer resizes when your pointer crosses it, so you can drag it where you want it. [See what's new ↓](#whats-new-in-45)
 
 ## Overview
 
@@ -72,6 +72,20 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
+## What's New in 4.5
+
+**TL;DR** - See what each session is costing you: the Session Runway can report every active session's API-equivalent spend per hour, priced per model. And the Quota Meter holds still — it no longer grows when your pointer crosses it, so you can drag it where you want it.
+
+**Highlights:** The Session Runway now measures whatever you ask it to — **5-hour** burn, **weekly** share, raw **tokens/hour**, or **dollars**. The `$` rate prices each model in a session at its own rate, so an orchestrator on Opus driving subagents on Sonnet is costed at what each actually runs at rather than blended into one number. Meanwhile the Quota Meter stops fighting you: it used to expand whenever the pointer crossed it, moving the window while you were aiming at it. Now the pointer only moves it and **right-click** summons its controls. The cockpit also gets one View-menu entry for the whole choice — Quota Meter, Compact, Full, or **Off** — so the pinned window can finally be closed.
+
+New in 4.5:
+- **Dollar burn** — each active session's API-equivalent cost per hour, priced per model, not blended.
+- **Selectable runway rates** — 5-Hour, Weekly, Tokens, or Dollars, chosen from the meter and remembered.
+- **A Quota Meter that stays put** — no pointer-driven resizing; right-click for the toolbar; drag it anywhere.
+- **One View-menu entry** — Quota Meter / Compact / Full / Off, with ⌘⌥⇧C and ⇧⌘M. ⌘W closes the cockpit.
+
+Previous release — 4.4: Codex usage keeps working when OpenAI pauses the 5-hour limit. Full history in the [changelog](docs/CHANGELOG.md).
+
 ## What's New in 4.4
 
 **TL;DR** - Codex usage keeps working when OpenAI pauses the 5-hour limit. Agent Sessions detects the change, shows a calm "no limit" for 5h while keeping your weekly usage accurate, and the Session Runway shows honest per-session token throughput instead of a misleading rate.
@@ -82,8 +96,6 @@ New in 4.4:
 - **Codex 5-hour drop handled** — auto-detects when OpenAI pauses the 5h window; shows "no limit" for 5h, keeps weekly accurate, and self-recovers when it returns.
 - **Honest Session Runway for Codex** — active sessions show real token throughput (`412K tk/h`) while the 5h window is gone; reverts to the familiar 5h "m/h" once it's back.
 - **Format guardrail** — shows "can't verify" instead of a wrong number when a provider's usage format changes unexpectedly.
-
-Previous release — 4.3.2: A much quieter Quota Meter. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## What's New in 4.3.2
 
@@ -151,7 +163,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.4/AgentSessions-4.4.dmg)
+1. [Download AgentSessions-4.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

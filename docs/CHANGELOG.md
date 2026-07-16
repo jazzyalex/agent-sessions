@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+- **See what each session is costing you.** The Session Runway can now report every active session's **API-equivalent spend per hour** — `$4.20/h` — priced per model, so an orchestrator on Opus driving subagents on Sonnet is costed at what each one actually runs at, not blended. Pick what the runway measures right from the meter: **5-hour** burn, **weekly** share, raw **tokens/hour**, or **dollars**.
+- **The Quota Meter holds still.** It used to grow whenever your pointer crossed it, which made a pinned widget a fight to reposition — the window moved while you were aiming at it. Now the pointer only moves it, and **right-click** brings up its controls. Drag it anywhere; it stays exactly where you put it.
+
+### Features
+- **Selectable Session Runway rates.** 5-Hour, Weekly, Tokens, or Dollars — chosen from the runway control in the Quota Meter toolbar, and remembered. Dollars falls back to token throughput for any model we can't price, rather than dropping the session.
+- **One View-menu entry for the cockpit.** `View → Quota Meter / Agent Cockpit` now holds the whole choice — Quota Meter, Compact, Full, or **Off** — with ⌘⌥⇧C for the Quota Meter and ⇧⌘M to cycle.
+- **The Quota Meter offers itself.** If you have Codex or Claude sessions but have never switched it on, a card in the session list explains what it does and turns it on in one click. Fresh installs now arrive with it enabled.
+
+### Bug Fixes
+- **The Quota Meter no longer walks up the screen.** Near the bottom of a display it grew *upward* when its toolbar appeared, but collapsing kept the raised top edge — so it climbed one toolbar height every time, drifting away from where you parked it.
+- **Compact and the Quota Meter can be closed.** Neither has a titlebar close button, and ⌘W merely beeped, so the only way out was switching to Full or quitting. ⌘W now closes them, as does `View → … → Off`.
+- **The cockpit's provider rows line up with their reset-credits line.** The 5h/Wk row sat centered while the credits line beneath it was flush left.
+
+### Improvements
+- The Quota Meter toolbar is grouped by what its controls do — window destinations lead, the two runway controls fuse into one segmented pill, and pin stands alone behind a separator.
+
 ## [4.4] - 2026-07-13
 
 ### Highlights
