@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Mock gh. Behavior driven by env:
+#   GH_FAIL_SOURCE — substring of the joined args that should exit 1
+#   GH_FIXTURE_DIR — dir with canned JSON keyed by a slug of the subcommand
+set -euo pipefail
+args="$*"
+if [ -n "${GH_FAIL_SOURCE:-}" ] && case "$args" in *"$GH_FAIL_SOURCE"*) true;; *) false;; esac; then
+  echo "gh: simulated failure for [$args]" >&2; exit 1
+fi
+case "$args" in
+  "issue list"*)      cat "${GH_FIXTURE_DIR}/issues.json" ;;
+  "pr list"*)         cat "${GH_FIXTURE_DIR}/prs.json" ;;
+  "api graphql"*)     cat "${GH_FIXTURE_DIR}/discussions.json" ;;
+  "api "*"issues/comments"*) cat "${GH_FIXTURE_DIR}/issue_comments.json" ;;
+  "api "*"pulls/comments"*)  cat "${GH_FIXTURE_DIR}/pr_comments.json" ;;
+  *) echo "[]" ;;
+esac
