@@ -642,6 +642,15 @@ private struct AgentCockpitMenu: View {
             modeItem(.compact, "Compact Agent Cockpit")
             modeItem(.full, "Full Agent Cockpit")
             Divider()
+            // The cycle predates this menu but was only ever documented in the
+            // toolbar popover that the menu replaced, leaving a shortcut nobody
+            // could discover. A radio group cannot advertise "go to the next
+            // one" on a checkmark, so it gets its own entry.
+            Button("Cycle Cockpit View") {
+                select(currentMode.next())
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
+            Divider()
             offItem
         }
         .disabled(!liveSessionsFeatureEnabled)
