@@ -61,14 +61,27 @@ All notable changes to this project will be documented in this file.
 ### Highlights
 - **Usage tracking that never cries wolf.** When your Claude or Codex CLI is signed out — or its saved token has quietly expired — the Quota Meter and Session Runway no longer flash false alarms or silently pop open a browser sign-in behind your back. Agent Sessions now reads the real CLI auth state, degrades calmly (a quiet "signed out" state instead of a scary error), and shows clear in-app **sign-in remediation** right in the usage strips and menu bar so you know exactly how to get your quota readings back.
 
+### Runway auth — graceful degradation & guided CLI fallback (P1–P4)
+- **Cold-start fallback fix (P1):** on a fresh launch with no cached snapshot, a transient first-poll OAuth miss (e.g. the Keychain read racing app launch) no longer immediately spawns the interactive tmux `/usage` probe — which could open a Safari OAuth sign-in for an already-signed-in user. The fallback is deferred through the 90s cold-start window while the healthy OAuth path retries; the Keychain read also retries once on a transient `.unreadable`.
+- **Cause-aware degradation (P2):** transient failures (5xx / network / 429) show a calm "temporarily unavailable — retrying" caption in the strip, menu bar, and Cockpit instead of the alarming banner, and clear on the next good fetch. A verified 401 flips the internal `.expired` verdict immediately (preserving tmux-suppression) but the published banner is debounced behind a 5-minute clock, so a brief blip stays calm and only a persistent 401 escalates.
+- **No-CLI remediation ladder (P3):** a Claude user without the CLI now gets a two-rung fix-it ladder — rung 1 enables the existing claude.ai Web API mode (no install), rung 2 guides a CLI install — instead of a `claude auth login` command they can't run. AS never mints a token or runs an installer; the cancelled "sign in to Agent Sessions directly" copy is removed.
+- **Probe hardening (P4):** the tmux `/usage` script checks for an auth/login screen before pressing any keys and suppresses the browser hook (`BROWSER=/usr/bin/true`), so a probe can never advance a login into the browser; suppressed/aborted probes now raise the auth banner instead of failing silently; CLI-probe data is labeled "via CLI probe"; and the interactive Auto-mode fallback is now **opt-in** (Preferences → Usage, default off — behavior change).
+- Agent Sessions will not mint or refresh its own Claude subscription token (no in-app OAuth login) — it remains a read-only usage reader.
+
+### Auth verdict plumbing & hardening (tracks A–C)
+- Shared `UsageAuthStatus` model and remediation copy; both the Claude and Codex usage managers publish an authoritative auth verdict from an explicit `claude auth status` / `codex login status` probe (throttled to ~15 min on the success path) rather than inferring it from a fetch failure.
+- Result-typed credential resolution surfaces 401 / absent / malformed distinctly, distinguishes Keychain not-found from unreadable, and short-circuits the usage feed while signed out. Debounced classifiers on both providers never false-alarm; recovery emits cleanly.
+- Closed several probe hazards found during hardening: cold-start tmux hangs, probe reentrancy, orphaned live tmux probes (SIGKILL-escalate past the retry cap), and spawning a `/status` or `/usage` tmux probe while signed out. A permission-gated one-shot "signed out" notification fires at most once.
+- Non-interactive, browser-safe delegated token refresh; cold-start tmux fallback deferred so a valid-token relaunch never opens browser auth.
+
 ### Improvements
-- Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views.
-- Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look.
+- Quota Meter: a segmented cockpit-view popover that matches the Runway drawer styling, and the ⇧⌘M shortcut now cycles cockpit views. Auth remediation renders in the usage strips and menu bar (`AuthRemediationBanner`).
+- Transcript: unified color palette and a native macOS list/transcript separator, with shared layout tokens for a calmer, more consistent look. Removed dead `ClaudeUsageStripView`.
 - Usage probing is gentler on your machine — auth-status re-checks are throttled on the healthy path, and stale background probes are cleaned up instead of piling up.
 
 ### Bug Fixes
-- Session view: restored click-and-drag text selection in the transcript.
-- Filter: archived Codex sessions now show in the Archived filter regardless of surface metadata.
+- Session view: restored visible click-and-drag text selection in the Rich Session transcript.
+- Filter: archived Codex sessions now appear in the Archived filter regardless of (often NULL) surface metadata — the filter keys off file path instead.
 
 ## [4.2] - 2026-07-06
 ### Highlights

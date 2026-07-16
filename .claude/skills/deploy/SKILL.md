@@ -67,8 +67,7 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 
 ## Pre-Deploy Checklist (Run Before Bump)
 
-- [ ] `docs/CHANGELOG.md` `[Unreleased]` section has full, accurate content for this release
-- [ ] `CHANGELOG.md` (root, if present) mirrors `docs/CHANGELOG.md` content
+- [ ] `docs/CHANGELOG.md` `[Unreleased]` section has full, accurate content for this release (this is the only changelog — root `CHANGELOG.md` is a pointer to it, not a copy to sync)
 - [ ] README.md download links updated to new version (both occurrences)
 - [ ] README.md "What's New" section updated to new version heading + rewritten highlights
 - [ ] `docs/index.html` download button URL and label updated
