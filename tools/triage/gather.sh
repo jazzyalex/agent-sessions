@@ -40,11 +40,15 @@ for repo in $(policy_get '.repos[]'); do
     discs="$(jq -c --arg since "$LAST_RUN" \
       '(.data.repository.discussions.nodes // []) | map(select(.updatedAt >= $since))' <<<"$raw")"
   fi
+  # recent releases — so the agent can VERIFY whether a fix shipped (and cite the
+  # version/date) instead of guessing "it's fixed".
+  rels="$(fetch "releases:$repo" '[]' release list --repo "$repo" --limit 5 \
+             --json tagName,publishedAt,name)"
   new_comments="$(jq -c -s 'add' <(printf '%s' "$icmts") <(printf '%s' "$pcmts"))"
   REPOS_JSON="$(jq -c --arg r "$repo" \
       --argjson issues "$issues" --argjson prs "$prs" \
-      --argjson discs "$discs" --argjson nc "$new_comments" \
-      '. + {($r):{issues:$issues,prs:$prs,discussions:$discs,new_comments:$nc}}' <<<"$REPOS_JSON")"
+      --argjson discs "$discs" --argjson nc "$new_comments" --argjson rels "$rels" \
+      '. + {($r):{issues:$issues,prs:$prs,discussions:$discs,new_comments:$nc,releases:$rels}}' <<<"$REPOS_JSON")"
 done
 
 ERRORS="$(jq -cs '.' "$ERR_FILE")"   # slurp sidecar ndjson into an array ([] if empty)

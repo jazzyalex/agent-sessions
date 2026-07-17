@@ -18,6 +18,7 @@ case "$args" in
   "api graphql"*)     cat "${GH_FIXTURE_DIR}/discussions.json" ;;
   "api "*"issues/comments"*) cat "${GH_FIXTURE_DIR}/issue_comments.json" ;;
   "api "*"pulls/comments"*)  cat "${GH_FIXTURE_DIR}/pr_comments.json" ;;
+  "release list"*)    cat "${GH_FIXTURE_DIR}/releases.json" ;;
   # live single-issue view used by ack guardrails: honor GH_ISSUE_VIEW fixture
   "issue view"*)      cat "${GH_ISSUE_VIEW:-/dev/null}" ;;
   "issue comment"*|"issue edit"*|"pr merge"*|"issue close"*|"pr close"*) : ;;

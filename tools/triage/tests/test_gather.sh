@@ -13,6 +13,7 @@ assert_file_exists "$OUT_DIR/snapshot.json" "snapshot written"
 assert_eq "0" "$(jq '.errors | length' "$OUT_DIR/snapshot.json")" "no errors on happy path"
 assert_eq "UNKNOWN" "$(jq -r '.repos["jazzyalex/agent-sessions"].prs[0].mergeable' "$OUT_DIR/snapshot.json")" "mergeable recorded verbatim"
 assert_eq "7" "$(jq -r '.repos["jazzyalex/agent-sessions"].issues[0].number' "$OUT_DIR/snapshot.json")" "issue captured"
+assert_eq "v4.5" "$(jq -r '.repos["jazzyalex/agent-sessions"].releases[0].tagName' "$OUT_DIR/snapshot.json")" "releases captured (fix-verification grounding)"
 case "$(jq -r '.gather_start' "$OUT_DIR/snapshot.json")" in ????-??-??T??:??:??Z) pass "gather_start UTC";; *) fail "gather_start UTC";; esac
 
 # partial failure path: issue list fails for one source -> recorded, not fatal
