@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg"><b>Download Agent Sessions 4.5 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6/AgentSessions-4.6.dmg"><b>Download Agent Sessions 4.6 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.5** — See what each session is costing you: the Session Runway can now report every active session's API-equivalent spend per hour, priced per model, alongside 5-hour, weekly, and token rates. And the Quota Meter holds still — it no longer resizes when your pointer crosses it, so you can drag it where you want it. [See what's new ↓](#whats-new-in-45)
+> **New in 4.6** — Read your Claude subscription usage without the CLI. If you don't run the Claude CLI, Agent Sessions reads usage over the web instead — but on macOS 14+ Safari stopped handing the claude.ai session to other apps. Now you paste your session cookie once in Settings; it lives in your Keychain, needs no Full Disk Access, and a **Test now** button confirms it works. [See what's new ↓](#whats-new-in-46)
 
 ## Overview
 
@@ -72,6 +72,20 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
+## What's New in 4.6
+
+**TL;DR** - Read your Claude subscription usage without the CLI. If you don't run the Claude CLI, Agent Sessions reads your usage over the web — but macOS 14+ Safari stopped sharing the claude.ai session with other apps, so that path had gone quiet. Paste your session cookie once in Settings and it works again: kept in your Keychain, no Full Disk Access, sign-in never leaves your browser.
+
+**Highlights:** On macOS 14 and 15, Safari keeps the live claude.ai cookie in a store other apps can't read, so the Web API usage path had become a dead end for anyone without the Claude CLI. Now Settings → Usage Tracking accepts your claude.ai `sessionKey` (or the whole cookie header) and uses it directly for usage lookups — no scraping, no Full Disk Access. The app only holds the token you hand it, stored in the Keychain, and a **Test now** button confirms it on the spot. The old advice to "sign in at claude.ai" — impossible to satisfy on these macOS versions — is gone, replaced with honest, cause-aware messages that point to the fix that works. The Quota Meter also got two small touches: its right-click hint stays findable on every hover, and the agent row now marks which runway lens is live.
+
+New in 4.6:
+- **Paste-a-cookie Claude web usage** — hand Settings your claude.ai session cookie once; it reads your subscription usage over the web with no CLI, no Full Disk Access, and no scraping.
+- **Kept in the Keychain** — the app stores only the token you paste, and a **Test now** button runs an end-to-end check.
+- **Honest Web API messages** — no more "sign in at claude.ai" advice you can't act on; the guidance now points to the cookie paste that actually works.
+- **Quota Meter polish** — the right-click hint recurs on hover, and the agent row marks the active runway lens (5h/Wk).
+
+Previous release — 4.5: See what each session is costing you, and a Quota Meter that holds still. Full history in the [changelog](docs/CHANGELOG.md).
+
 ## What's New in 4.5
 
 **TL;DR** - See what each session is costing you: the Session Runway can report every active session's API-equivalent spend per hour, priced per model. And the Quota Meter holds still — it no longer grows when your pointer crosses it, so you can drag it where you want it.
@@ -96,20 +110,6 @@ New in 4.4:
 - **Codex 5-hour drop handled** — auto-detects when OpenAI pauses the 5h window; shows "no limit" for 5h, keeps weekly accurate, and self-recovers when it returns.
 - **Honest Session Runway for Codex** — active sessions show real token throughput (`412K tk/h`) while the 5h window is gone; reverts to the familiar 5h "m/h" once it's back.
 - **Format guardrail** — shows "can't verify" instead of a wrong number when a provider's usage format changes unexpectedly.
-
-## What's New in 4.3.2
-
-**TL;DR** - A much quieter Quota Meter. The usage meters no longer re-read and re-parse your entire session history every few seconds while idle, so your Mac stays cool and quiet — plus a more resilient Claude Web API path and a calm state for expired logins.
-
-**Highlights:** The usage surfaces used to re-parse the whole session corpus on every 5-second refresh; they now cache each file's parse, cutting idle CPU from roughly 25–41% down to about 11% (measured on Release). The "active burn" shimmer pauses when nothing is burning and honors **Reduce Motion**. On the Claude side, the Web API path is far more resilient — it surfaces a Full Disk Access problem clearly instead of failing silently, recovers from retries instead of stalling, and adds a **Test Web API** self-check in Preferences. An idle, expired Claude token now shows a calm "no active session" state instead of a misleading error.
-
-New in 4.3.2:
-- **A much quieter Quota Meter** — usage meters cache each file's parse instead of re-reading your whole history every 5 seconds, cutting idle CPU from ~25–41% to ~11%.
-- **Reduce Motion aware** — the "active burn" shimmer runs only while a session is burning and honors the system Reduce Motion setting.
-- **Resilient Claude Web API** — a Full Disk Access problem now shows a clear cause instead of failing silently, retries recover instead of stalling, and a new **Test Web API** button runs an end-to-end self-check.
-- **Calm expired state** — an idle, expired Claude token shows "no active session" instead of a misleading error.
-
-Previous release — 4.3.1: A rebuilt first run and one-click "Fix" for usage tracking. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -163,7 +163,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.5.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg)
+1. [Download AgentSessions-4.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6/AgentSessions-4.6.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

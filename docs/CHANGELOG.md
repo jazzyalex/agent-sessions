@@ -13,6 +13,10 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 - **The Web API path stops telling signed-in users to "sign in".** When it couldn't find a claude.ai session it advised signing in "at claude.ai (default profile)" — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can't read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.
 
+### Improvements
+- **The Quota Meter's right-click hint stays findable.** In On-Demand mode the "Right-click for controls" hint used to show once and never again — but right-click is the only way back to the toolbar, so it now reappears on every hover.
+- **The agent row shows which runway lens is live.** A subtle marker under the 5h or Wk symbol tracks the runway toggle, so you can tell at a glance what the burn rate is measuring.
+
 ## [4.5] - 2026-07-15
 
 ### Highlights
