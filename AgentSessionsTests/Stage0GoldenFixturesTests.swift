@@ -109,6 +109,16 @@ final class Stage0GoldenFixturesTests: XCTestCase {
                        "permission-mode event should survive parsing as .meta")
     }
 
+    // Claude 2.1.211 emits a session-level `mode` marker alongside `permission-mode`.
+    // It carries no content, so it reaches .meta via the SessionEventKind.from fallback
+    // rather than a named case; this pins that it is never surfaced as a blank event.
+    func testClaudeSchemaDriftModeEventSurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertFalse(metaEvents(withType: "mode", in: full.events).isEmpty,
+                       "mode event should survive parsing as .meta")
+    }
+
     func testClaudeSchemaDriftStopHookSummaryEventSurvivesParsing() throws {
         let url = FixturePaths.stage0FixtureURL("agents/claude/schema_drift.jsonl")
         guard let full = ClaudeSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }

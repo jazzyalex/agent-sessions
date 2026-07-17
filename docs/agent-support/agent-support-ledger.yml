@@ -9,6 +9,54 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "4.6"
+    as_of_date_utc: "2026-07-17"
+    as_of_commit: "caa930ea"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.144.5"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "Resources/Fixtures/stage0/agents/codex/large.jsonl", "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260717-061144Z-prebump/report.json"]
+      claude:
+        sessions:
+          max_verified_version: "2.1.211"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "Resources/Fixtures/stage0/agents/claude/large.jsonl", "Resources/Fixtures/stage0/agents/claude/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl", "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl", "scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json", "scripts/probe_scan_output/agent_watch/20260717-061321Z-prebump/report.json"]
+      antigravity:
+        sessions:
+          max_verified_version: "1.0.16"
+          evidence: ["Resources/Fixtures/stage0/agents/antigravity/small.md", "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl", "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json"]
+      copilot:
+        sessions:
+          max_verified_version: "1.0.65"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "Resources/Fixtures/stage0/agents/copilot/large.jsonl", "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl", "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl", "scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json"]
+      opencode:
+        sessions:
+          max_verified_version: "1.18.3"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_large.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/message/s_stage0_large/msg_0002.json", "Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/002.json", "scripts/probe_scan_output/agent_watch/20260717-061911Z-prebump/report.json"]
+      hermes:
+        sessions:
+          max_verified_version: "0.17.0"
+          evidence: ["Resources/Fixtures/stage0/agents/hermes/small.json", "Resources/Fixtures/stage0/agents/hermes/large.json", "Resources/Fixtures/stage0/agents/hermes/schema_drift.json", "scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json"]
+      openclaw:
+        sessions:
+          max_verified_version: "2026.6.11"
+          evidence: ["Resources/Fixtures/stage0/agents/openclaw/small.jsonl", "Resources/Fixtures/stage0/agents/openclaw/large.jsonl", "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json"]
+      cursor:
+        sessions:
+          max_verified_version: "2026.6.24"
+          evidence: ["Resources/Fixtures/stage0/agents/cursor/small.jsonl", "Resources/Fixtures/stage0/agents/cursor/large.jsonl", "Resources/Fixtures/stage0/agents/cursor/schema_drift.jsonl", "scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json"]
+      pi:
+        sessions:
+          max_verified_version: "0.80.10"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
+          evidence: ["Resources/Fixtures/stage0/agents/pi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260717-061911Z-prebump/report.json"]
+    notes:
+      - "2026-07-17 weekly format check (report scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json). One additive schema drift, non-breaking: Claude 2.1.211 emits a session-level `mode` event ({type, mode, sessionId}; only mode=normal observed, 3,638 occurrences across 99 local sessions), a sibling of the existing permission-mode marker. The event carries no content, so role resolves to meta and SessionEventKind.from falls through both its type and role switches to the final `return .meta` — it is absorbed by the fallback rather than a named case, which is why no UI regression was visible despite the high-severity verdict. Added to claude small.jsonl + schema_drift.jsonl with testClaudeSchemaDriftModeEventSurvivesParsing (Stage0GoldenFixturesTests 24/24 pass). Bumped Claude 2.1.207->2.1.211 and Codex 0.144.3->0.144.5 (codex prebump scripts/probe_scan_output/agent_watch/20260717-061144Z-prebump/report.json, fresh_matches_baseline=True, no drift). Usage/limits probes all healthy: codex_status_probe, claude_usage_probe, claude_status ok=true, exit 0. No parser or UI change required."
+      - "MONITORING GAP FOUND: prebump cannot observe the `mode` drift. `mode` is interactive-only and the claude_print one-shot driver never emits it, so the claude prebump reported fresh_matches_baseline=True (types: queue-operation, attachment, user, assistant, last-prompt) while the weekly scan of real interactive sessions correctly reported format_drift_detected. This is the inverse of the codex 0.120.0 stale-sample trap: a green prebump is necessary but NOT sufficient for interactive-only event families. Consider widening the claude prebump prompt or documenting the limitation in the skill."
+      - "Claude prebump required --allow-real-home: Claude Code stores OAuth in the macOS Keychain, so the sandboxed home_override run reported apiKeySource=none and 'Not logged in · Please run /login' (rc=1). The config already declares real_home_session: true for claude; the sandboxed attempt is scripts/probe_scan_output/agent_watch/20260717-061144Z-prebump/report.json, the successful real-home run is 20260717-061321Z-prebump."
+      - "Corrected stale metadata: agent_sessions_version was still 4.3.2 in both the matrix and this ledger although the app shipped 4.6 (MARKETING_VERSION = 4.6, commits 99bc1031/caa930ea); the 4.6 release did not update the support matrix. Set to 4.6 as of commit caa930ea."
+      - "Cleared stale-sample blocks: bumped OpenCode 1.17.18->1.18.3 and Pi 0.80.6->0.80.10 from prebump scripts/probe_scan_output/agent_watch/20260717-061911Z-prebump/report.json (both fresh_matches_baseline=True, no drift). OpenClaw remains blocked_stale_sample at verified 2026.6.11 (installed 2026.7.1) after two failed prebump attempts, both auth failures rather than format drift. (1) Sandboxed openclaw_local_agent (scripts/probe_scan_output/agent_watch/20260717-061911Z-prebump/report.json) failed rc=1 with ProviderAuthError 'No API key found for provider openai' against the sandbox auth store — same as 2026-07-07 and 2026-06-26. (2) --allow-real-home rerun (scripts/probe_scan_output/agent_watch/20260717-223220Z-prebump/report.json) got past the sandbox auth store but failed rc=1 with 'OpenAI Codex token refresh failed (401): refresh_token_reused'. OpenClaw authenticates via shared OpenAI Codex OAuth (not its own API key), so its refresh token was already consumed/rotated by another consumer of the same Codex token store (most likely the Codex CLI). Resolving needs a fresh OpenClaw/Codex OAuth sign-in, then a --allow-real-home rerun; not retried further to avoid thrashing the auth endpoint. No format-drift evidence either way."
+      - "Held at unchanged verified versions: Copilot 1.0.65 (upstream 1.0.71 not installed; weekly schema_diff shows no unknown types/keys), Hermes 0.17.0 (upstream 0.18.2 not installed), Cursor 2026.6.24 (upstream 2026.7.16 not installed)."
   - agent_sessions_version: "4.3.2"
     as_of_date_utc: "2026-07-13"
     as_of_commit: "dad7c4e7"
