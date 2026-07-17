@@ -1,3 +1,37 @@
+## 2026-07-16 22:54 · claude-auth-idle-webapi · Calm idle-token QM state + Web API FDA fix
+status: done
+
+**State:** All committed on `main`: idle-token state `3e170854`, Web API cause-aware path `8076b058`, Debug signing `6160a591`, Opus review fixes `0c9457a8`. App relaunched from `.deriveddata-manual` (now Apple Development-signed). Full test suite green. Only user step left: one-time FDA re-grant to the debug app, then "Test Web API" in Preferences → Usage Tracking.
+
+**Decided / don't redo:**
+- QM "Claude auth expired" after ~24h inactivity is a routine token lapse → new non-alarming `UsageAuthState.idle` ("no active session" moon cells); alarm only if CLI reports signed-out or a *fresh* token still 401s (per-episode token fingerprint).
+- `claude auth status` (CLI 2.1.207) does NOT refresh tokens — the delegated-refresh assumption is false; only a real Claude session refreshes the keychain token. AS-owned token refresh stays cancelled (2026-07-08 spec §1).
+- Web API path was dead from TCC: app can't read Safari Cookies.binarycookies without Full Disk Access, and ad-hoc Debug signing invalidated FDA grants on every rebuild (cdhash-pinned). Debug now signs with Apple Development (team 24NDRU35WD) → grants survive rebuilds.
+
+**Key files:**
+- `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageSourceManager.swift` — idle publication + web fetch loop
+- `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebCookieResolver.swift` — typed ReadOutcome (.permissionDenied/.noSession)
+- `AgentSessions/Views/Preferences/PreferencesView+Usage.swift` — "Test Web API" self-test callout
+
+**Next:**
+1. User: remove stale FDA rows, add `.deriveddata-manual/.../AgentSessions.app`, restart, run "Test Web API".
+2. Visual QA of the idle state happens at the next natural token lapse (~1 day without Claude sessions).
+3. Consider Safari Profiles limitation (non-default profile login reads as .noSession) if users report false "no session".
+
+## 2026-07-16 22:37 · release-4.6 · Ship 4.6 (Claude paste-a-cookie usage) + app-staple notarization fix
+status: done
+
+**State:** 4.6 fully deployed, verified, and announced. `main` level with `origin/main`; GitHub Release, appcast (4.6), and Homebrew cask all live. Issue #50 closed.
+
+**What shipped:** Headline = paste-a-cookie Claude web usage (already coded pre-session). This session's real work = committing the uncommitted **app-staple notarization fix** (Info.plist `CFBundleExecutable`/`CFBundlePackageType`; build script now notarizes+staples the .app *then* the DMG — 2x notary submissions, normal not a hang) and running the deploy. First release carrying that fix.
+
+**Decided / don't redo:**
+- Manual smoke was **skipped** per owner ("deploy anyway"); automated gates (build, 1649 tests, 116 py release tests, no warnings) were GO. Notary auth comes from ignored `tools/release/.env` (App Store Connect API key) — not env vars in the shell.
+- Verified the fix end-to-end on the shipped DMG: `stapler validate` passes on the app *inside* the DMG + on the DMG; `spctl --assess --type execute` → "accepted / Notarized Developer ID". This is the #50 diagnostic.
+
+**Next:**
+1. Nothing required — release done. Watch for any @efenex reply on #50 (closed; they can reopen). Optional post-release: Sparkle auto-update + `brew upgrade` smoke on a clean machine.
+
 ## 2026-07-16 17:58 · qm-lens-highlight-recurring-hint · QM recurring right-click hint + active-lens underline
 status: done
 
