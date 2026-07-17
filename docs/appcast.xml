@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.5</title>
-            <pubDate>Wed, 15 Jul 2026 18:56:02 -0700</pubDate>
+            <title>4.6</title>
+            <pubDate>Thu, 16 Jul 2026 22:33:25 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,35 +27,31 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.5</h2>
+<h2>What&#x27;s New in 4.6</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>See what each session is costing you.</strong> The Session Runway can now report every active session&#x27;s <strong>API-equivalent spend per hour</strong> — <code>$4.20/h</code> — priced per model, so an orchestrator on Opus driving subagents on Sonnet is costed at what each one actually runs at, not blended. Pick what the runway measures right from the meter: <strong>5-hour</strong> burn, <strong>weekly</strong> share, raw <strong>tokens/hour</strong>, or <strong>dollars</strong>.</li>
-<li><strong>The Quota Meter holds still.</strong> It used to grow whenever your pointer crossed it, which made a pinned widget a fight to reposition — the window moved while you were aiming at it. Now the pointer only moves it, and <strong>right-click</strong> brings up its controls. Drag it anywhere; it stays exactly where you put it.</li>
+<li><strong>Read your Claude subscription usage without the CLI — paste a session cookie.</strong> If you don&#x27;t run the Claude CLI, Agent Sessions reads usage over the web instead. On macOS 14+ Safari stopped handing the claude.ai session to other apps, so that path had quietly become a dead end. Now you paste your claude.ai session cookie once in Settings → Usage Tracking: it&#x27;s kept in your Keychain, needs no Full Disk Access, and sign-in never leaves your browser. A <strong>Test now</strong> button confirms it works on the spot.</li>
 </ul>
 <h3>Features</h3>
 <ul>
-<li><strong>Selectable Session Runway rates.</strong> 5-Hour, Weekly, Tokens, or Dollars — chosen from the runway control in the Quota Meter toolbar, and remembered. Dollars falls back to token throughput for any model we can&#x27;t price, rather than dropping the session.</li>
-<li><strong>One View-menu entry for the cockpit.</strong> <code>View → Quota Meter / Agent Cockpit</code> now holds the whole choice — Quota Meter, Compact, Full, or <strong>Off</strong> — with ⌘⌥⇧C for the Quota Meter and ⇧⌘M to cycle.</li>
-<li><strong>The Quota Meter offers itself.</strong> If you have Codex or Claude sessions but have never switched it on, a card in the session list explains what it does and turns it on in one click. Fresh installs now arrive with it enabled.</li>
+<li><strong>Paste-a-cookie web usage for Claude.</strong> Settings → Usage Tracking accepts your claude.ai <code>sessionKey</code> (or the whole cookie header) and uses it directly for usage lookups — no Full Disk Access, no scraping. The app only holds the token you hand it, stored in the Keychain. Reading the cookie from Safari is kept as a legacy fallback for anyone it still works for.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li>The Quota Meter toolbar is grouped by what its controls do — window destinations lead, the two runway controls fuse into one segmented pill, and pin stands alone behind a separator.</li>
+<li><strong>The Quota Meter&#x27;s right-click hint stays findable.</strong> In On-Demand mode the &quot;Right-click for controls&quot; hint used to show once and never again — but right-click is the only way back to the toolbar, so it now reappears on every hover.</li>
+<li><strong>The agent row shows which runway lens is live.</strong> A subtle marker under the 5h or Wk symbol tracks the runway toggle, so you can tell at a glance what the burn rate is measuring.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>The Quota Meter no longer walks up the screen.</strong> Near the bottom of a display it grew *upward* when its toolbar appeared, but collapsing kept the raised top edge — so it climbed one toolbar height every time, drifting away from where you parked it.</li>
-<li><strong>Compact and the Quota Meter can be closed.</strong> Neither has a titlebar close button, and ⌘W merely beeped, so the only way out was switching to Full or quitting. ⌘W now closes them, as does <code>View → … → Off</code>.</li>
-<li><strong>The cockpit&#x27;s provider rows line up with their reset-credits line.</strong> The 5h/Wk row sat centered while the credits line beneath it was flush left.</li>
+<li><strong>The Web API path stops telling signed-in users to &quot;sign in&quot;.</strong> When it couldn&#x27;t find a claude.ai session it advised signing in &quot;at claude.ai (default profile)&quot; — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can&#x27;t read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.5">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.5</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6</a></p>
 </div>
             ]]></description>
-            <sparkle:version>60</sparkle:version>
-            <sparkle:shortVersionString>4.5</sparkle:shortVersionString>
+            <sparkle:version>61</sparkle:version>
+            <sparkle:shortVersionString>4.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.5/AgentSessions-4.5.dmg" length="21957800" type="application/octet-stream" sparkle:edSignature="Euiybtl7jE8ocqWm21KiexxCUJ/MGrDlhlMzmUkBPKF73sB2j7+vrJ97zWTcfR+3Lg0QYoUdFIzegqfLrRRCAQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6/AgentSessions-4.6.dmg" length="22027209" type="application/octet-stream" sparkle:edSignature="TFkElwn/m4eswslwPzrvFdmetrSMYG7GXmKKqawR2s9eSMN1ESBBJdwbQekJMpRYZzrfyrUNkkGBFTpLTSw2Cw=="/>
         </item>
     </channel>
 </rss>
