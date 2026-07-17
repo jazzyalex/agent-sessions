@@ -7,7 +7,7 @@
   </array>
   <key>StartCalendarInterval</key><dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>__PATH__</string>
     <key>HOME</key><string>__HOME__</string>
   </dict>
   <key>StandardOutPath</key><string>__OUT_ROOT__/launchd.log</string>

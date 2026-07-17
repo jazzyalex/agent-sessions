@@ -8,9 +8,16 @@ source "$HERE/lib/common.sh"
 
 render() { # dest
   local dest="$1" tmpl="$HERE/com.agentsessions.triage.plist.template"
+  # launchd runs with a bare PATH; claude often lives in ~/.local/bin (off it).
+  # Build a PATH that actually contains jq/gh/claude wherever they resolve now.
+  local bindirs
+  bindirs="$(for c in jq gh claude; do command -v "$c" 2>/dev/null; done \
+             | xargs -n1 dirname 2>/dev/null | awk '!seen[$0]++' | paste -sd: -)"
+  local pathval="${bindirs:+$bindirs:}/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   sed -e "s#__TRIAGE_SH__#$HERE/triage.sh#g" \
       -e "s#__HOME__#$HOME#g" \
-      -e "s#__OUT_ROOT__#$HERE/out#g" "$tmpl" > "$dest"
+      -e "s#__OUT_ROOT__#$HERE/out#g" \
+      -e "s#__PATH__#$pathval#g" "$tmpl" > "$dest"
 }
 
 if [ "${1:-}" = "--render-only" ]; then render "${2:?dest required}"; exit 0; fi
