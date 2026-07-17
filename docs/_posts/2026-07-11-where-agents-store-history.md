@@ -227,7 +227,10 @@ sitting locally, and it is all readable if you know the path and the format.
 
 Agent Sessions reads every one of the locations above into a single searchable
 macOS app. It is free, local-only, and has no telemetry; it opens these files
-read-only and never writes back into them. If you would rather not memorize six
+read-only and never writes back into them. For a measured look at what each of
+these formats actually *records* — verbosity, telemetry, how searchable it is —
+see the companion field study, [How coding agents remember]({% post_url 2026-07-14-how-coding-agents-remember %}).
+If you would rather not memorize six
 paths and two schema quirks, [the source is on
 GitHub](https://github.com/jazzyalex/agent-sessions), and more posts like this
 one live at [/blog/]({{ '/blog/' | relative_url }}).

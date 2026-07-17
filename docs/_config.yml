@@ -67,6 +67,7 @@ exclude:
   - "CHANGELOG.md"
   - "CONTRIBUTING.md"
   - "Energy-and-Performance.md"
+  - "perf-2026-07-12-runway-idle-fix.md"
   - "Ghostty-support-v1.md"
   - "PRIVACY.md"
   - "QA_SUMMARY_v2.1.md"
