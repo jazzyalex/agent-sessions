@@ -161,27 +161,28 @@ enum QuotaMeterChrome: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The "Right-click for controls" hint: `.onDemand` only, while the pointer
-    /// is dwelling, the chrome isn't already out, and the lesson hasn't landed.
-    func showsRightClickHint(pointerDwelled: Bool, demandRevealed: Bool, retired: Bool) -> Bool {
+    /// The "Right-click for controls" hint: `.onDemand` only, whenever the pointer
+    /// is dwelling and the chrome isn't already out. It recurs on every hover
+    /// rather than retiring — right-click is the only route back to the toolbar,
+    /// so the reminder has to stay findable, not vanish after the first success.
+    func showsRightClickHint(pointerDwelled: Bool, demandRevealed: Bool) -> Bool {
         guard self == .onDemand else { return false }
-        return pointerDwelled && !demandRevealed && !retired
+        return pointerDwelled && !demandRevealed
     }
 
     /// Only `.onDemand` reveals on an explicit right-click.
     var respondsToRightClick: Bool { self == .onDemand }
 
     /// Whether the dwell timer has a consumer. `.always` shows chrome
-    /// unconditionally and `.onDemand` stops caring once its hint retires, so
-    /// neither should arm a timer on an idle pinned window.
-    func armsDwellTimer(hintRetired: Bool) -> Bool {
+    /// unconditionally, so it needs no timer. `.onHover` and `.onDemand` both watch
+    /// the pointer — `.onHover` to reveal the toolbar, `.onDemand` to re-show the
+    /// recurring right-click hint on each dwell (it never retires).
+    func armsDwellTimer() -> Bool {
         switch self {
         case .always:
             return false
-        case .onHover:
+        case .onHover, .onDemand:
             return true
-        case .onDemand:
-            return !hintRetired
         }
     }
 

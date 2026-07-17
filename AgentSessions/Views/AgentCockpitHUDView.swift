@@ -819,8 +819,7 @@ struct AgentCockpitHUDView: View {
         guard isLimitsOnly else { return false }
         return quotaMeterChrome.showsRightClickHint(
             pointerDwelled: pointerDwelled,
-            demandRevealed: demandRevealed,
-            retired: quotaMeterChromeRevealedOnce
+            demandRevealed: demandRevealed
         )
     }
 
@@ -852,7 +851,6 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
-    @AppStorage(PreferencesKey.quotaMeterChromeRevealedOnce) private var quotaMeterChromeRevealedOnce = false
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
     @State private var showChromePopover = false
@@ -1196,7 +1194,7 @@ struct AgentCockpitHUDView: View {
     private var dwellTimerArmed: Bool {
         guard isCompact else { return false }
         guard isLimitsOnly else { return true }
-        return quotaMeterChrome.armsDwellTimer(hintRetired: quotaMeterChromeRevealedOnce)
+        return quotaMeterChrome.armsDwellTimer()
     }
 
     /// A toolbar popover is its own window, so reaching for it reads as leaving
@@ -1260,14 +1258,11 @@ struct AgentCockpitHUDView: View {
         }
     }
 
-    /// Explicit reveal. Retires the hint on first use — once you have found the
-    /// gesture, the pill has nothing left to teach.
+    /// Explicit reveal on right-click. The hint keeps recurring on later hovers —
+    /// right-click is the only route to the toolbar, so the reminder never retires.
     private func revealChromeOnDemand() {
         guard quotaMeterChrome.respondsToRightClick, isLimitsOnly else { return }
         cancelCompactToolbarHideTask()
-        if !quotaMeterChromeRevealedOnce {
-            quotaMeterChromeRevealedOnce = true
-        }
         guard !demandRevealed else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
             demandRevealed = true
@@ -3613,8 +3608,8 @@ private struct LimitsContentHeightKey: PreferenceKey {
 }
 
 /// Teaches the one gesture that `.onDemand` chrome depends on. Drawn as an
-/// overlay so it can never affect layout, and retired for good once the user
-/// right-clicks.
+/// overlay so it can never affect layout, and shown on every hover (it never
+/// retires) so the only route back to the toolbar stays findable.
 private struct HUDRightClickHintPill: View {
     var body: some View {
         Text("Right-click for controls")
@@ -4873,6 +4868,7 @@ private struct HUDLimitsDetailPanel: View {
     @EnvironmentObject private var codexUsageModel: CodexUsageModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
+    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
 
     private var shouldReserveFiveHourProjectionSlot: Bool {
         guard projectedRunoutEnabled else { return false }
@@ -4973,6 +4969,7 @@ private struct HUDLimitsDetailPanel: View {
         let weekAbsent = !entry.hasWeekRateLimit
         let fiveStale = !fiveAbsent && isResetInfoUnavailable(raw: entry.fiveHourResetText)
         let weekStale = !weekAbsent && isResetInfoUnavailable(raw: entry.weekResetText)
+        let activeLens = activeRunwayLensWindow(rawPresentation: runwayPresentationRaw, fiveAbsent: fiveAbsent, weekAbsent: weekAbsent)
         let projection = projectedRunoutEnabled
             ? formatUsageProjectionLabel(
                 runoutAt: entry.fiveHourProjectedRunoutAt,
@@ -5029,7 +5026,7 @@ private struct HUDLimitsDetailPanel: View {
                 .gridCellColumns(spansThree ? 3 : 2)
             } else {
                 HStack(spacing: 0) {
-                    Text("5h: ")
+                    runwayLensLabel("5h: ", active: activeLens == .fiveHour)
                     Text(fiveStale ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
                         .foregroundStyle(fiveStale ? Color.secondary : hudPctColor(entry.fiveHourLeft))
                 }
@@ -5046,7 +5043,7 @@ private struct HUDLimitsDetailPanel: View {
                 .foregroundStyle(Color.primary.opacity(0.25))
                 .frame(width: HUDLimitsColumnLayout.detailSeparatorWidth, alignment: .center)
             HStack(spacing: 0) {
-                Text("Wk: ")
+                runwayLensLabel("Wk: ", active: activeLens == .week)
                 if weekAbsent {
                     Text("—").foregroundStyle(.secondary)
                 } else {
@@ -5746,6 +5743,47 @@ private struct HUDLimitsProviderIcon: View {
     }
 }
 
+/// Which quota window (if any) the Session Runway drawer is currently reporting,
+/// so the matching `5h`/`Wk` label in the agent row can be underlined. A picked-
+/// but-unmeasurable window (e.g. `5h: no limit`, where the runway silently falls
+/// back to tokens) and the token/$ lenses resolve to `nil` — the underline only
+/// ever marks the lens the drawer is actually using.
+private enum RunwayLensWindow { case fiveHour, week }
+
+private func activeRunwayLensWindow(rawPresentation raw: String,
+                                    fiveAbsent: Bool,
+                                    weekAbsent: Bool) -> RunwayLensWindow? {
+    switch RunwayPresentation.current(raw: raw) {
+    case .fiveHour: return fiveAbsent ? nil : .fiveHour
+    case .weekly:   return weekAbsent ? nil : .week
+    case .token, .dollar: return nil
+    }
+}
+
+/// A `5h`/`Wk` label token. When it is the active runway lens, a short, subtle
+/// grey rounded bar sits centered under the window symbol ("5h"/"Wk") — the
+/// "selected tab" idiom, so it reads as a deliberate marker rather than stray
+/// dust. Short and centered so it clears the neighbouring "|" separator (a full-
+/// width underline butted against it). Drawn as a bottom overlay so it never
+/// alters row layout.
+@ViewBuilder
+private func runwayLensLabel(_ text: String, active: Bool) -> some View {
+    let symbol = text.prefix { $0 != ":" }        // "5h" / "Wk" from "5h: "
+    let separator = text.dropFirst(symbol.count)  // ": "
+    HStack(spacing: 0) {
+        Text(String(symbol))
+            .overlay(alignment: .bottom) {
+                if active {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.6))
+                        .frame(width: 9, height: 2)
+                        .offset(y: 2.5)
+                }
+            }
+        Text(String(separator))
+    }
+}
+
 private struct HUDLimitsProviderText: View {
     let entry: HUDLimitsProviderEntry
     let mode: UsageDisplayMode
@@ -5758,6 +5796,7 @@ private struct HUDLimitsProviderText: View {
     var now: Date = Date()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
+    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
 
     // 5h wins ties (<=): it's the shorter window, so equally constrained favours showing the tighter limit.
     private var bottleneckIs5h: Bool {
@@ -5784,6 +5823,11 @@ private struct HUDLimitsProviderText: View {
     private func percentColor(left: Int, absent: Bool, stale: Bool) -> Color {
         (absent || stale) ? .secondary : hudPctColor(left)
     }
+
+    private var activeLensWindow: RunwayLensWindow? {
+        activeRunwayLensWindow(rawPresentation: runwayPresentationRaw, fiveAbsent: fiveAbsent, weekAbsent: weekAbsent)
+    }
+
     private var fiveHourProjectionLabel: String? {
         guard showProjection else { return nil }
         guard projectedRunoutEnabled else { return nil }
@@ -5880,7 +5924,7 @@ private struct HUDLimitsProviderText: View {
                 .frame(width: fiveHourRegionWidth * scale, alignment: .leading)
             } else {
                 HStack(spacing: 0) {
-                    Text("5h: ")
+                    runwayLensLabel("5h: ", active: activeLensWindow == .fiveHour)
                     Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
                         .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
                 }
@@ -5900,7 +5944,7 @@ private struct HUDLimitsProviderText: View {
                 .frame(width: HUDLimitsColumnLayout.compactSeparatorWidth * scale, alignment: .center)
 
             HStack(spacing: 0) {
-                Text("Wk: ")
+                runwayLensLabel("Wk: ", active: activeLensWindow == .week)
                 Text(percentText(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
                     .foregroundStyle(percentColor(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
             }
@@ -5956,7 +6000,7 @@ private struct HUDLimitsProviderText: View {
                                     }
                                 } else {
                                     HStack(spacing: 0) {
-                                        Text("5h: ")
+                                        runwayLensLabel("5h: ", active: activeLensWindow == .fiveHour)
                                         Text(percentText(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
                                             .foregroundStyle(percentColor(left: entry.fiveHourLeft, absent: fiveAbsent, stale: fiveStale))
                                         if let projection = fiveHourProjectionLabel {
@@ -5977,7 +6021,7 @@ private struct HUDLimitsProviderText: View {
                         if !onlyBottleneck || !bottleneckIs5h {
                             HStack(spacing: 4) {
                                 HStack(spacing: 0) {
-                                    Text("Wk: ")
+                                    runwayLensLabel("Wk: ", active: activeLensWindow == .week)
                                     Text(percentText(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
                                         .foregroundStyle(percentColor(left: entry.weekLeft, absent: weekAbsent, stale: weekStale))
                                 }

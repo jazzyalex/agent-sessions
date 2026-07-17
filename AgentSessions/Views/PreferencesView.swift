@@ -761,7 +761,6 @@ struct PreferencesView: View {
         usageLimitCockpitProjectionEnabled = true
         quotaMeterEnlarged = false
         quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
-        UserDefaults.standard.set(false, forKey: PreferencesKey.quotaMeterChromeRevealedOnce)
         quotaMeterRunwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
         quotaMeterOnTrackGlyphRaw = QuotaMeterOnTrackGlyph.smile.rawValue
 
