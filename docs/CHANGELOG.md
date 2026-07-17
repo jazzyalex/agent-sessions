@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6] - 2026-07-16
+
 ### Highlights
 - **Read your Claude subscription usage without the CLI — paste a session cookie.** If you don't run the Claude CLI, Agent Sessions reads usage over the web instead. On macOS 14+ Safari stopped handing the claude.ai session to other apps, so that path had quietly become a dead end. Now you paste your claude.ai session cookie once in Settings → Usage Tracking: it's kept in your Keychain, needs no Full Disk Access, and sign-in never leaves your browser. A **Test now** button confirms it works on the spot.
 
