@@ -4,10 +4,14 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>Agent Sessions</string>
+	<key>CFBundleExecutable</key>
+	<string>AgentSessions</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.triada.AgentSessions</string>
 	<key>CFBundleName</key>
 	<string>Agent Sessions</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

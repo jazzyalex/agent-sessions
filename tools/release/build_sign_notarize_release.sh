@@ -156,26 +156,17 @@ echo "✅ Developer ID signature verified: $SIGNING_AUTHORITY"
 
 spctl --assess --verbose=4 "$APP" || echo "Note: spctl assessment fails before notarization (expected)"
 
-echo "==> Creating DMG: $DMG"
-rm -f "$DMG"
-hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$DMG"
-
-echo "==> Verifying DMG integrity"
-if ! hdiutil verify "$DMG"; then
-  echo "ERROR: DMG verification failed! The DMG is corrupted." >&2
-  echo "This usually means the app bundle was incomplete or damaged." >&2
-  exit 4
-fi
-echo "✅ DMG verification passed"
-
-echo "==> Verifying DMG is a valid disk image"
-FILE_TYPE=$(file "$DMG")
-if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "Apple partition map" ]] && [[ ! "$FILE_TYPE" =~ "zlib compressed data" ]]; then
-  echo "ERROR: DMG does not appear to be a valid disk image!" >&2
-  echo "File type: $FILE_TYPE" >&2
-  exit 5
-fi
-echo "✅ DMG file type validated"
+# --- Prepare the app for its OWN notarization (Apple-standard order) ---
+# The shipped .app must carry its own stapled notarization ticket so Gatekeeper
+# never has to perform an online check at first launch. We notarize a zip of the
+# app, staple the ticket onto the .app, and only THEN package the stapled app
+# into the DMG (which is separately notarized + stapled below). This fixes the
+# "Apple could not verify AgentSessions.app is free of malware" failure that
+# occurs when only the DMG is stapled but the app inside is not.
+APP_ZIP="$DIST/$APP_NAME-$VERSION-app.zip"
+echo "==> Zipping app for notarization: $APP_ZIP"
+rm -f "$APP_ZIP"
+/usr/bin/ditto -c -k --keepParent "$APP" "$APP_ZIP"
 
 notarize_background() {
   local dmg="$1"
@@ -183,7 +174,7 @@ notarize_background() {
   local max_wait=1200 # 20 minutes
   local log_file="/tmp/notarization-${VERSION:-unknown}-$(date +%s).log"
 
-  echo "==> Notarizing DMG asynchronously (log: $log_file)"
+  echo "==> Notarizing $(basename "$dmg") asynchronously (log: $log_file)"
   echo "Monitor in another shell: tail -f $log_file"
 
   # Submit for notarization without blocking
@@ -317,6 +308,45 @@ print(data.get("status", ""), end="")
   esac
 }
 
+# --- 1) Notarize the app zip, then staple the ticket onto the .app ---
+if [[ "${NOTARIZE_SYNC:-0}" == "1" ]]; then
+  echo "==> Notarizing app (synchronous mode)"
+  xcrun notarytool submit "$APP_ZIP" "${NOTARY_AUTH_ARGS[@]}" --wait
+else
+  notarize_background "$APP_ZIP"
+fi
+
+echo "==> Stapling notarization ticket to app"
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+rm -f "$APP_ZIP"
+
+echo "==> Verifying Gatekeeper acceptance of stapled app"
+spctl --assess --type execute -vv "$APP" || echo "Note: spctl execute assessment may warn in some environments"
+
+# --- 2) Package the STAPLED app into the DMG ---
+echo "==> Creating DMG: $DMG"
+rm -f "$DMG"
+hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$DMG"
+
+echo "==> Verifying DMG integrity"
+if ! hdiutil verify "$DMG"; then
+  echo "ERROR: DMG verification failed! The DMG is corrupted." >&2
+  echo "This usually means the app bundle was incomplete or damaged." >&2
+  exit 4
+fi
+echo "✅ DMG verification passed"
+
+echo "==> Verifying DMG is a valid disk image"
+FILE_TYPE=$(file "$DMG")
+if [[ ! "$FILE_TYPE" =~ "Macintosh HFS Extended" ]] && [[ ! "$FILE_TYPE" =~ "Apple partition map" ]] && [[ ! "$FILE_TYPE" =~ "zlib compressed data" ]]; then
+  echo "ERROR: DMG does not appear to be a valid disk image!" >&2
+  echo "File type: $FILE_TYPE" >&2
+  exit 5
+fi
+echo "✅ DMG file type validated"
+
+# --- 3) Notarize the DMG itself, then staple it ---
 if [[ "${NOTARIZE_SYNC:-0}" == "1" ]]; then
   echo "==> Notarizing DMG (synchronous mode)"
   xcrun notarytool submit "$DMG" "${NOTARY_AUTH_ARGS[@]}" --wait
@@ -326,6 +356,7 @@ fi
 
 echo "==> Stapling and verifying Gatekeeper"
 xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
 spctl --assess --type open -vv "$DMG" || echo "Note: spctl assessment may fail in some environments"
 
 echo "==> Checksumming"

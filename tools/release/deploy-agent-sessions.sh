@@ -264,8 +264,8 @@ Validations (already passed):
   ✓ CHANGELOG.md contains [${VERSION}]
 
 Deployment pipeline:
-  1) Build → 2) Sign → 3) DMG → 4) Notarize (background)
-  5) Review notes → 6) GitHub Release assets → 7) Appcast → 8) Docs/Homebrew
+  1) Build → 2) Sign → 3) Notarize + staple app → 4) DMG → 5) Notarize + staple DMG
+  6) Review notes → 7) GitHub Release assets → 8) Appcast → 9) Docs/Homebrew
 
 If a step fails, rollback prompt will appear after automated verification.
 EOF
@@ -477,6 +477,16 @@ if ! hdiutil verify "$DMG" >/dev/null 2>&1; then
 fi
 green "✓ DMG structure valid"
 
+# Verify the DMG itself carries a stapled notarization ticket. Resume paths
+# reuse a prebuilt DMG and skip the build script's own validation, so assert it
+# here too — an un-stapled DMG reintroduces an online Gatekeeper check on open.
+if xcrun stapler validate "$DMG" >/dev/null 2>&1; then
+  green "✓ DMG has stapled notarization ticket"
+else
+  red "ERROR: DMG is not stapled (notarization ticket missing)."
+  exit 2
+fi
+
 # Mount DMG and test app
 MOUNT_POINT="/tmp/agent-sessions-test-$$"
 if hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -quiet 2>/dev/null; then
@@ -494,6 +504,18 @@ if hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -quiet 2>/dev/null; then
     green "✓ Code signature valid"
   else
     red "ERROR: Code signature verification failed"
+    hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
+    exit 2
+  fi
+
+  # Verify the app carries its OWN stapled notarization ticket. Without this,
+  # Gatekeeper must check notarization online at first launch and users offline
+  # or behind a proxy get "Apple could not verify ... is free of malware".
+  if xcrun stapler validate "$APP_PATH" >/dev/null 2>&1; then
+    green "✓ App has stapled notarization ticket"
+  else
+    red "ERROR: App inside DMG is NOT stapled (only the DMG may be)."
+    red "       Users will hit the 'could not verify ... free of malware' error."
     hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
     exit 2
   fi
