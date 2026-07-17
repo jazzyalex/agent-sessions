@@ -1,3 +1,92 @@
+## 2026-07-16 17:58 · qm-lens-highlight-recurring-hint · QM recurring right-click hint + active-lens underline
+status: done
+
+**State:** Both QM UX fixes implemented, build green, 2 enum tests pass, app relaunched for QA. Uncommitted on `main`.
+1. On-Demand chrome: `Right-click for controls` hint no longer retires — recurs on every hover (right-click is the only route back to the toolbar). 2. Agent row underlines the `5h`/`Wk` symbol matching the active runway lens (subtle grey, 1pt, symbol-only — not the `: `); token/$ underline neither; picked-but-absent window underlines nothing.
+
+**Decided / don't redo:**
+- Rejected a hover reveal *button* (drag-target fight) — kept right-click + recurring text hint. Underline chosen over a separate lens badge (owner: reuse existing `5h:/Wk:` labels, no new chrome). Final underline style: grey `.secondary.opacity(0.6)`, symbol-only, NOT bright accent (walked back from accent 1.5pt).
+- Removed dead `quotaMeterChromeRevealedOnce` plumbing entirely (AppStorage + PreferencesKey + reset + `retired`/`hintRetired` params).
+
+**Key files:**
+- `AgentSessions/CodexStatus/UsageDisplayMode.swift` — `QuotaMeterChrome.showsRightClickHint`/`armsDwellTimer` (params dropped)
+- `AgentSessions/Views/AgentCockpitHUDView.swift` — file-scope `RunwayLensWindow`/`activeRunwayLensWindow`/`runwayLensLabel`; applied at 6 label sites (`HUDLimitsProviderText` aligned+nonaligned+bottleneck, `HUDLimitsDetailPanel.detailRow`)
+- `docs/superpowers/specs/2026-07-16-qm-lens-highlight-recurring-hint-design.md` — spec
+
+**Next:**
+1. Owner visual QA (both compact + Full cockpit); then commit when asked.
+
+## 2026-07-16 17:49 · repo-triage-automation · Daily GitHub triage tool (built, right-sized, live)
+status: done
+
+**State:** `tools/triage/` shipped + installed as a daily 08:00 LaunchAgent: gathers open issues/PRs/comments + recent releases via `gh` → drafts a digest + suggested replies with a TOOL-LESS `claude -p` (data inlined in the prompt, replies parsed from stdout) → macOS notification. You skim `out/<date>/digest.md` and post with `reply.sh <id>` (shows text, y/N). Full suite green (7 files); real-claude confinement gate 9/9; verified end-to-end THROUGH launchd. Pushed to origin/main through `626dfbe6`. Posted R2 live on homebrew-agent-sessions#3.
+
+**Decided / don't redo:**
+- Flag-based agent confinement (`--allowed/--disallowedTools`) is a pre-approval list, NOT a sandbox — proven inadequate (reads/writes outside not blocked; Task/Agent/Skill still available → injection could spawn an unrestricted subagent). Fix = the TOOL-LESS architecture; do NOT reintroduce file-tool scoping.
+- Right-sized from an over-engineered build: cut auto-ack tier + guardrails, apply.sh tiers, lock, status.json/catch-up, retention, idempotency ledger, state.json. Keep it minimal for a tool the user approves everything on. (memory: feedback_right_size_personal_tools)
+- launchd runs a bare PATH and `claude` is in `~/.local/bin` — install.sh bakes resolved tool dirs into the plist PATH. Always verify installed jobs by triggering THROUGH launchd, not just manually.
+
+**Key files:**
+- `tools/triage/README.md` — how it works + install/use; `run-agent.sh` — tool-less agent + stdout delimiter parse; `reply.sh` — hardened manual post path
+- `docs/superpowers/specs/2026-07-16-repo-triage-automation-design.md` — design + security findings (right-sized banner)
+
+**Next:**
+1. Nothing required — runs tomorrow 08:00; skim the digest, `reply.sh <id>` as needed. Uninstall: `bash tools/triage/uninstall.sh`.
+2. Product (not tool): issue #50 (notarization) still open — confirm whether v4.5 contains the stapling fix, then close the loop with the reporter.
+
+## 2026-07-16 14:34 · claude-web-manual-cookie · Claude web usage via pasted session cookie
+status: done
+
+**State:** Paste-a-cookie Claude web usage shipped and owner-QA-confirmed working (Settings → Usage Tracking → Data source "Web API only" → paste sessionKey → Test now = "Working"). Committed to local `main` (`33fcda27` feature + `95e73b43` review fixes), NOT pushed. Full suite 1649 pass.
+
+**Decided / don't redo:**
+- Root cause proven on-machine: claude.ai `sessionKey` is NOT in any readable binarycookies file on modern Safari; path-fix / SweetCookieKit can't rescue Safari. Chose SAFE MANUAL COOKIE PASTE (CodexBar's actual Claude approach), NOT embedded WKWebView login (spec Plan A — rejected as heavier/riskier).
+- sessionKey stored in Keychain (never plaintext UserDefaults). `extractSessionKey` is name-anchored (split on ';', match pair named exactly `sessionKey`); self-test uses `ClaudeWebUsageClient.fetch(bypassCache:)` so it validates live, not from the 3-min /tmp cache.
+
+**Key files:**
+- `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeManualWebCookie.swift` — extractor + Keychain store (PRIMARY web source).
+- `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeWebCookieResolver.swift` — 7 typed outcomes + value-free diagnostics (Safari reader now legacy fallback).
+- `AgentSessions/Views/Preferences/PreferencesView+Usage.swift` — paste UI + Test-now self-check.
+
+**Next:**
+1. Push when the parallel work lands (both commits are local-only on `main`).
+2. Optional, deferred code-review findings: source-manager tests read real Keychain via `.shared` (non-hermetic); `save()` conflates keychain-write-fail with invalid-paste message; bare token containing `=` rejected; synchronous Keychain read on the actor.
+
+## 2026-07-16 14:34 · claude-usage-wedge-fix · Claude usage stuck-until-relaunch + FDA flap diagnosis
+status: done
+
+**State:** 4.5 shipped/pushed earlier this session. Claude-usage fixes pushed to `origin/main` (`4d81b789`). Bug 1 (usage wedges on "no active session" for hours until relaunch) fixed + self-heals; Bug 2 (web cookie path) handled by a parallel session; FDA flap diagnosed as a dev artifact (no code).
+
+**Decided / don't redo:**
+- **Bug 1 root cause = one-shot `didAttemptDelegatedRefresh` latch** (reset only by OAuth success). Fixed by replacing with a 10-min throttle (`shouldAttemptDelegatedRefresh`/`lastDelegatedRefreshAt`), cleared on `refreshNow` (double-click QM / wake force it). Commit `6a9242a3`, mutation-verified test.
+- **Bug 2** (Safari cookie path broken on macOS 14/15 — sessionKey not in the legacy binarycookies file): parallel session shipped **manual cookie paste** (`33fcda27`, `95e73b43`), NOT the embedded-WKWebView login in the spec. Spec is marked superseded.
+- **FDA flap** = dev builds share bundle id `com.triada.AgentSessions` with the official app; TCC keys FDA to signature so the grant flaps. NOT a shipping bug. Do NOT do the Debug-bundle-id split — coupled to `AppRuntime.isHostedByTooling` (would disable filesystem probing in all debug builds) + hardcoded self-probe ids. Fix = build-only, don't `open` dev builds.
+
+**Next:**
+1. User: one-time FDA cleanup — remove "AgentSessions" from Full Disk Access, re-add only `/Applications/AgentSessions.app`.
+2. Optional follow-ups from Codex on Bug 1: hidden-surface OAuth recovery (credential-watch never wakes OAuth) and `.expired` tmux suppression — left intact, not needed for the fix.
+
+## 2026-07-16 11:27 · notarization-staple-50 · Fix Gatekeeper "could not verify free of malware" (issue #50)
+status: in-progress
+
+**State:** Root-caused issue #50 by inspecting the shipped 4.4/4.5 DMGs: the app is signed **and notarized** (cdhash registered), but the release only stapled the **DMG**, never the **.app** inside it → Gatekeeper does an online check at first launch that fails offline/behind proxies. Fix applied to the release pipeline + Info.plist; **uncommitted on `main`, not yet released**. Replied to reporter on GitHub with a safe workaround, promised a fixed build today.
+
+**Decided / don't redo:**
+- The app WAS notarized — proven: `stapler staple AgentSessions.app` fetches a live ticket. Do NOT resubmit from scratch; it was purely a missing staple step.
+- Pipeline now notarizes+staples **both** the app zip AND the DMG → **two `notarytool` submissions per release (~2x notary wait). That's expected, not a hang.**
+- Sync path (`NOTARIZE_SYNC=1`) left un-hardened on purpose: the `stapler staple` step after each notarize is the real Accepted-gate (no ticket → hard fail under `set -e`).
+- Missing `CFBundleExecutable`/`CFBundlePackageType` also made code identity fall back to the bundle filename (renaming breaks cdhash) → added both to Info.plist.
+
+**Key files (all uncommitted):**
+- `tools/release/build_sign_notarize_release.sh` — new order: sign → zip → notarize → staple+validate app → DMG → notarize → staple+validate DMG.
+- `tools/release/deploy-agent-sessions.sh` — smoke test now asserts `stapler validate` on BOTH the app and the DMG (covers resume paths); pipeline comment updated.
+- `AgentSessions/Info.plist` — added `CFBundleExecutable`=AgentSessions, `CFBundlePackageType`=APPL.
+- Reference doc for the user's *other* macOS app: scratchpad `macos-notarization-staple-check.md` (portable check).
+
+**Next:**
+1. User is doing other bug fixes, then cutting a new release today — these staple changes ride along automatically (deploy → build script). Expect the doubled notary wait.
+2. After release, update issue #50 and confirm the shipped app passes `stapler validate`.
+
 ## 2026-07-14 21:21 · runway-dollar-burn · Session Runway $ burn: correct, stable, all pushed
 status: in-progress
 
