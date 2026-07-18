@@ -1,4 +1,6 @@
-/* The Rollout — blog-only styles, layered over guides/guide.css. */
+/* The Rollout — blog-only styles, layered over guides/guide.css.
+   Dark mode and all color tokens come from guide.css; this file is
+   blog-listing/post structure only. */
 
 .post-list {
   list-style: none;
@@ -8,7 +10,7 @@
 
 .post-list li {
   padding: 18px 0;
-  border-bottom: 1px solid #d0d7de;
+  border-bottom: 1px solid var(--hair-strong);
 }
 
 .post-list h2 {
@@ -21,14 +23,14 @@
 }
 
 .post-meta {
-  color: #57606a;
+  color: var(--ink-2);
   font-size: 14px;
   margin: 0 0 8px;
 }
 
 .post-excerpt {
   margin: 6px 0 0;
-  color: #3d444d;
+  color: var(--ink-2);
 }
 
 article.post {
@@ -38,7 +40,7 @@ article.post {
 article.post img {
   max-width: 100%;
   height: auto;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--hair-strong);
   border-radius: 8px;
 }
 
@@ -60,33 +62,9 @@ article.post img {
 }
 
 .post-figure figcaption {
-  color: #57606a;
+  color: var(--ink-2);
   font-size: 14px;
   line-height: 1.5;
   margin-top: 10px;
   max-width: 720px;
-}
-
-/* Dark mode — scoped to blog pages (guide.css is light-only; this overrides it
-   here because blog.css loads after it). Matches the landing page's dark feel. */
-@media (prefers-color-scheme: dark) {
-  body { background: #000000; color: #f5f5f7; }
-  header { background: #000000; color: #f5f5f7; }
-  a { color: #409cff; }
-  .eyebrow { color: #aeaeb2; }
-  .lede { color: #aeaeb2; }
-  .site-footer { color: #8e8e93; }
-  pre,
-  .note,
-  .boundary,
-  .meta-card,
-  .sources li { background: #1c1c1e; border-color: #2c2c2e; }
-  code { color: #f5f5f7; }
-
-  .post-list li { border-bottom-color: #2c2c2e; }
-  .post-meta { color: #8e8e93; }
-  .post-excerpt { color: #aeaeb2; }
-  article.post img,
-  .post-figure img { border-color: #2c2c2e; }
-  .post-figure figcaption { color: #aeaeb2; }
 }

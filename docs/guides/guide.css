@@ -1,52 +1,111 @@
+/* Shared site chrome + guide/blog body styles.
+   Design tokens, sticky .nav header, and footer treatment are reproduced from
+   docs/index.html so guides and The Rollout blog match the landing page in both
+   light and dark mode. If the landing page's tokens/nav change, mirror them here. */
+
+:root {
+  --bg: #fbfbfd;
+  --bg-elev: #ffffff;
+  --bg-sunken: #f5f5f7;
+  --ink: #1d1d1f;
+  --ink-2: #6e6e73;
+  --ink-3: #86868b;
+  --hair: rgba(0, 0, 0, 0.08);
+  --hair-strong: rgba(0, 0, 0, 0.12);
+  --blue: #0071e3;
+  --blue-press: #0077ed;
+  --radius: 18px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --bg-elev: #1c1c1e;
+    --bg-sunken: #0e0e10;
+    --ink: #f5f5f7;
+    --ink-2: #aeaeb2;
+    --ink-3: #8e8e93;
+    --hair: rgba(255, 255, 255, 0.10);
+    --hair-strong: rgba(255, 255, 255, 0.16);
+    --blue: #2997ff;
+    --blue-press: #47a6ff;
+  }
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
+html { scroll-behavior: smooth; }
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font);
   margin: 0;
-  background: #f6f8fa;
-  color: #1b1f23;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
-  color: #0969da;
+  color: var(--blue);
+  text-decoration: none;
 }
 
-header {
-  background: #f6f8fa;
-  padding: 20px;
-  color: #24292e;
+a:hover { text-decoration: underline; }
+
+/* ---------- Nav (sticky, blurred — mirrors index.html) ---------- */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  border-bottom: 1px solid var(--hair);
+}
+
+.nav-inner {
+  max-width: var(--maxw, 1024px);
+  margin: 0 auto;
+  height: 52px;
+  padding: 0 22px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
-.brand {
+.nav-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 17px;
+  color: var(--ink);
 }
 
-.brand img {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
-}
+.nav-brand:hover { text-decoration: none; }
+.nav-brand img { width: 26px; height: 26px; border-radius: 7px; }
 
-header h1 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.header-right {
+.nav-links {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 26px;
+  font-size: 13px;
+  color: var(--ink-2);
 }
 
+.nav-links a { color: var(--ink-2); }
+.nav-links a:hover { color: var(--ink); text-decoration: none; }
+.nav-star { font-variant-numeric: tabular-nums; }
+.gh-star-icon { color: #f5b301; }
+
+/* ---------- Buttons ---------- */
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -65,17 +124,24 @@ header h1 {
   font-weight: 600;
 }
 
+.btn:hover { text-decoration: none; }
+
 .btn.primary {
-  background: #007aff;
+  background: var(--blue);
   color: #fff;
 }
 
+.btn.primary:hover { background: var(--blue-press); }
+
 .btn.secondary {
-  background: #f2f2f2;
-  color: #111;
-  border: 1px solid #d0d7de;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+  border: 1px solid var(--hair-strong);
 }
 
+.btn.secondary:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+
+/* ---------- Content shell ---------- */
 .guide-shell {
   max-width: 1120px;
   margin: 0 auto;
@@ -83,7 +149,7 @@ header h1 {
 }
 
 .eyebrow {
-  color: #57606a;
+  color: var(--ink-2);
   font-weight: 700;
   font-size: 13px;
   text-transform: uppercase;
@@ -112,7 +178,7 @@ li {
 .lede {
   max-width: 860px;
   font-size: 19px;
-  color: #3d444d;
+  color: var(--ink-2);
 }
 
 .guide-shell > p,
@@ -125,15 +191,16 @@ li {
   display: block;
   width: 100%;
   margin: 30px 0 34px;
+  border-radius: var(--radius);
 }
 
 .note,
 .boundary {
   margin: 18px 0;
   padding: 14px 16px;
-  background: #fff;
-  border: 1px solid #d0d7de;
-  border-left: 4px solid #0969da;
+  background: var(--bg-elev);
+  border: 1px solid var(--hair-strong);
+  border-left: 4px solid var(--blue);
   border-radius: 8px;
 }
 
@@ -150,8 +217,8 @@ li {
 
 .meta-card {
   padding: 14px 16px;
-  background: #fff;
-  border: 1px solid #d0d7de;
+  background: var(--bg-elev);
+  border: 1px solid var(--hair-strong);
   border-radius: 8px;
 }
 
@@ -162,12 +229,12 @@ li {
 
 code,
 pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--mono);
 }
 
 pre {
-  background: #fff;
-  border: 1px solid #d0d7de;
+  background: var(--bg-elev);
+  border: 1px solid var(--hair-strong);
   border-radius: 8px;
   padding: 14px;
   overflow: auto;
@@ -182,30 +249,23 @@ pre {
 }
 
 .sources li {
-  background: #fff;
-  border: 1px solid #d0d7de;
+  background: var(--bg-elev);
+  border: 1px solid var(--hair-strong);
   border-radius: 8px;
   padding: 12px 14px;
 }
 
+/* ---------- Footer (full-width band — mirrors index.html footer) ---------- */
 .site-footer {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 0 30px 36px;
-  color: #57606a;
-  font-size: 14px;
+  margin-top: 8px;
+  padding: 28px 30px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--hair);
+  color: var(--ink-3);
+  font-size: 13px;
 }
 
 @media (max-width: 720px) {
-  header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .header-right {
-    justify-content: flex-start;
-  }
-
   .guide-shell {
     padding: 24px 18px 48px;
   }
