@@ -1,3 +1,26 @@
+## 2026-07-18 10:59 · agent-support-format-check · Weekly format check (Claude mode event) + OpenClaw auth wall
+status: done
+
+**State:** Weekly `agent_watch.py` check done and committed+pushed (`b65aa748` format-check, `21a8738b` handover) — Claude went high/format_drift_detected → medium. OpenClaw is the one open item: session **format verified drift-free**, but version pin stays at 2026.6.11 (can't mint a fresh sample — auth wall). Full suite green (1650/0). Blog drafts from the earlier session are already committed+pushed (`38225903`); the flagship still needs the rewrite (see Next).
+
+**Decided / don't redo:**
+- Claude 2.1.211 `mode` event ({type,mode,sessionId}, mode=normal, 3638×) is **non-breaking** — resolves to `.meta` via the `SessionEventKind.from` fallback. Pinned by `testClaudeSchemaDriftModeEventSurvivesParsing`. Not a hotfix; already-shipped 4.6 handles it.
+- Prebump is **blind to interactive-only event families** (`mode`) — one-shot `-p` never emits them; trust the weekly scan for those. Recorded in ledger/tracking.
+- OpenClaw `refresh_token_reused` is NOT a sandbox artifact — a real `openclaw agent --local` fails too. Its OpenAI token store (`openclaw-agent.sqlite`) is separate from Codex's and its token is dead. Fix is **user-side re-auth** of OpenClaw's openai provider (or static `OPENAI_API_KEY`) — don't retry-thrash, don't chase the gateway.
+- **`openclaw update` bricked the gateway** (Memory Core legacy→canonical index migration conflict); `doctor --fix` did NOT clear it. User doesn't use the gateway — left **stopped/quiesced** on purpose. Don't run `openclaw update` casually.
+- Corrected stale metadata: matrix+ledger said 4.3.2 though app shipped 4.6 → set to 4.6.
+- Also used the existing `skills/agent-session-format-check` + `agent_watch.py` — don't hand-roll a session parser (I did once this session; wasteful).
+
+**Key files:**
+- `docs/agent-support/{agent-support-matrix.yml,agent-support-ledger.yml}`, `docs/agent-json-tracking.md` — verified-version records (append-only ledger).
+- `Resources/Fixtures/stage0/agents/claude/{small,schema_drift}.jsonl` + `AgentSessionsTests/Stage0GoldenFixturesTests.swift` — `mode` fixture + test.
+- `docs/_posts/2026-07-14-how-coding-agents-remember.md` + 3 sibling Rollout drafts — committed but flagship needs rewrite.
+
+**Next:**
+1. (Optional) OpenClaw version-pin bump to 2026.7.1: user re-auths OpenClaw openai provider → `openclaw agent --local --agent main -m hi` → weekly scan → bump matrix/ledger/tracking. Format itself already verified.
+2. Rewrite the flagship blog post (9 agents incl. Antigravity protobuf + Qwen/Factory; three storage philosophies; refresh stale Codex 126→136 KB number; "withdrawal of legibility" thesis).
+3. Correct the model-field claim in the published `2026-07-11-where-agents-store-history.md` (Claude DOES write per-event `message.model`) — task chip still open.
+
 ## 2026-07-16 22:54 · claude-auth-idle-webapi · Calm idle-token QM state + Web API FDA fix
 status: done
 
