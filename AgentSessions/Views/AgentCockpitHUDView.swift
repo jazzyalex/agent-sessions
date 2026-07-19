@@ -854,6 +854,10 @@ struct AgentCockpitHUDView: View {
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
     @State private var showChromePopover = false
+    @State private var showProbePopover = false
+    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
+    @EnvironmentObject private var codexUsageModel: CodexUsageModel
+    @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
 
     init(codexIndexer: SessionIndexer, claudeIndexer: ClaudeSessionIndexer, opencodeIndexer: OpenCodeSessionIndexer) {
         self.codexIndexer = codexIndexer
@@ -1201,7 +1205,7 @@ struct AgentCockpitHUDView: View {
     /// the HUD. Collapsing then would yank the chrome out from under the popover
     /// still anchored to it.
     private var isToolbarPopoverOpen: Bool {
-        showRunwayPopover || showRunwayPresentationPopover || showChromePopover
+        showRunwayPopover || showRunwayPresentationPopover || showChromePopover || showProbePopover
     }
 
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
@@ -1559,6 +1563,47 @@ struct AgentCockpitHUDView: View {
         }
     }
 
+    /// Manual hard-probe trigger (spec 2026-07-18). Eligibility mirrors the
+    /// probe guards: provider enabled + usage tracking on + coordinator idle
+    /// + model idle (isUpdating also covers ordinary refreshes, which make
+    /// the model reject) + auth not alarming (suppressed would be a no-op).
+    private var cockpitProbeButton: some View {
+        Button {
+            showProbePopover.toggle()
+        } label: {
+            Image(systemName: "bolt.badge.clock")
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
+        .help("Probe usage now via the provider CLI (may consume tokens).")
+        .popover(isPresented: $showProbePopover, arrowEdge: .bottom) {
+            HUDProbePopover(
+                claudeEligible: claudeProbeEligible,
+                codexEligible: codexProbeEligible,
+                claudeShown: claudeAgentEnabledForLimits && claudeUsageEnabledForLimits,
+                codexShown: codexAgentEnabledForLimits && codexUsageEnabledForLimits,
+                onProbe: { claude, codex in
+                    if claude && codex { ProbeCoordinator.shared.requestBoth() }
+                    else if claude { ProbeCoordinator.shared.request(.claude) }
+                    else if codex { ProbeCoordinator.shared.request(.codex) }
+                }
+            )
+        }
+    }
+
+    private var claudeProbeEligible: Bool {
+        claudeAgentEnabledForLimits && claudeUsageEnabledForLimits
+            && !probeCoordinator.isBusy(.claude)
+            && !claudeUsageModel.isUpdating
+            && !(claudeUsageModel.authStatus?.state.isAlarming ?? false)
+    }
+
+    private var codexProbeEligible: Bool {
+        codexAgentEnabledForLimits && codexUsageEnabledForLimits
+            && !probeCoordinator.isBusy(.codex)
+            && !codexUsageModel.isUpdating
+            && !(codexUsageModel.authStatus?.state.isAlarming ?? false)
+    }
+
     /// Marks pin as belonging to no group — it is window behavior, not a
     /// Quota Meter setting.
     private var toolbarHairline: some View {
@@ -1575,6 +1620,7 @@ struct AgentCockpitHUDView: View {
             if showRunway {
                 runwayGroup
             }
+            cockpitProbeButton
             // Presentation pair: how the window renders itself, as opposed to
             // what it reports.
             HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
@@ -4800,6 +4846,41 @@ private struct HUDRunwayVisibilityPopover: View {
     }
 }
 
+/// Per-click provider chooser for the manual hard probe. Each item is
+/// disabled while that provider is busy (coordinator OR model — an ordinary
+/// refresh also makes the model reject) or its probe would be suppressed
+/// (alarming auth); "Probe Both" is an atomic eligibility decision — disabled
+/// unless BOTH are individually eligible, never silently probing just one.
+private struct HUDProbePopover: View {
+    let claudeEligible: Bool
+    let codexEligible: Bool
+    let claudeShown: Bool
+    let codexShown: Bool
+    let onProbe: (_ claude: Bool, _ codex: Bool) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if claudeShown {
+                Button("Probe Claude") { onProbe(true, false); dismiss() }
+                    .disabled(!claudeEligible)
+            }
+            if codexShown {
+                Button("Probe Codex") { onProbe(false, true); dismiss() }
+                    .disabled(!codexEligible)
+            }
+            if claudeShown && codexShown {
+                Divider()
+                Button("Probe Both") { onProbe(true, true); dismiss() }
+                    .disabled(!(claudeEligible && codexEligible))
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(10)
+        .help("Force-refresh usage via the provider CLI. May consume tokens.")
+    }
+}
+
 private struct HUDRunwayPresentationPopover: View {
     @Binding var runwayPresentationRaw: String
 
@@ -6281,5 +6362,7 @@ private struct HUDSearchTextField: NSViewRepresentable {
         opencodeIndexer: OpenCodeSessionIndexer()
     )
     .environment(CodexActiveSessionsModel())
+    .environmentObject(CodexUsageModel.shared)
+    .environmentObject(ClaudeUsageModel.shared)
     .frame(width: 760, height: 420)
 }
