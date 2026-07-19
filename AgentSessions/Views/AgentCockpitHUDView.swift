@@ -4501,6 +4501,7 @@ private struct HUDLimitsRowsPanel: View {
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
     @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
+    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
     private var runwayVisibility: QuotaMeterRunwayVisibility {
@@ -4621,12 +4622,17 @@ private struct HUDLimitsRowsPanel: View {
             // Same shared-state degradation as the footer / menu bar / limits bar:
             // never render a misleading "0% / no reset" meter for a provider whose
             // data isn't trustworthy.
+            let probeState = probeCoordinator.displayState(for: entry.source, now: clockNow)
             switch entry.presentationState {
             case .needsAction(let auth):
                 // Chip variant: "Claude auth expired · claude auth login [Copy]" —
                 // matches the footer's FooterAuthCell language and fits the QM's
                 // content-hugging width (the full headline banner would clip).
                 HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+            case _ where isProbeVisible(probeState):
+                HUDLimitsProbeCell(source: entry.source,
+                                   failed: isProbeFailed(probeState),
+                                   enlarged: quotaMeterEnlarged)
             case .idle(let auth):
                 HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
@@ -4934,6 +4940,7 @@ private struct HUDLimitsDetailPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
     @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
+    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
 
     private var shouldReserveFiveHourProjectionSlot: Bool {
         guard projectedRunoutEnabled else { return false }
@@ -4962,10 +4969,18 @@ private struct HUDLimitsDetailPanel: View {
                 // Same shared-state degradation as the footer / menu bar / limits
                 // bar: an untrustworthy provider shows the remediation chip or the
                 // reconnecting cell instead of a misleading "0% / --" detail row.
+                let probeState = probeCoordinator.displayState(for: entry.source, now: now)
                 switch entry.presentationState {
                 case .needsAction(let auth):
                     HStack(spacing: 0) {
                         HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 22)
+                case _ where isProbeVisible(probeState):
+                    HStack(spacing: 0) {
+                        HUDLimitsProbeCell(source: entry.source, failed: isProbeFailed(probeState))
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
@@ -5657,6 +5672,7 @@ private struct HUDLimitsBarContent: View {
     let entries: [HUDLimitsProviderEntry]
     let mode: UsageDisplayMode
     let now: Date
+    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -5688,6 +5704,7 @@ private struct HUDLimitsBarContent: View {
                         .foregroundStyle(Color.primary.opacity(0.25))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
+                let probeState = probeCoordinator.displayState(for: entry.source, now: now)
                 switch entry.presentationState {
                 case .needsAction(let auth):
                     // The HUD bar is a single 22pt, clipped row and the window
@@ -5695,6 +5712,8 @@ private struct HUDLimitsBarContent: View {
                     // the full (two-line) banner would overflow. Keep the provider
                     // icon so the alarming provider stays attributable.
                     HUDLimitsAuthCell(source: entry.source, status: auth)
+                case _ where isProbeVisible(probeState):
+                    HUDLimitsProbeCell(source: entry.source, failed: isProbeFailed(probeState))
                 case .idle(let auth):
                     // Signed in, token lapsed from inactivity: calm cell — no
                     // spinner, no Fix chip; the next session refreshes it.
@@ -5761,6 +5780,37 @@ private struct HUDLimitsIdleCell: View {
         }
         .help(detail.isEmpty ? "Usage will update after the next session." : detail)
     }
+}
+
+/// In-row probe feedback (spec 2026-07-18): swaps the provider's numbers for
+/// explicit status text inside the same fixed-height row — the QM's height
+/// never changes. "probing…" while running; "probe failed" until the
+/// coordinator's deadline passes; success is simply the fresh numbers.
+private struct HUDLimitsProbeCell: View {
+    let source: UsageTrackingSource
+    let failed: Bool
+    var enlarged: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HUDLimitsProviderIcon(source: source)
+            Text(failed ? "probe failed" : "probing…")
+                .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                .foregroundStyle(failed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+        }
+        .help(failed ? "The CLI probe did not return usage. Use the menu bar's Hard Refresh for diagnostics." : "Probing usage via the provider CLI…")
+    }
+}
+
+private func isProbeVisible(_ s: ProbeCoordinator.ProbeRowState) -> Bool {
+    if case .none = s { return false }
+    return true
+}
+
+private func isProbeFailed(_ s: ProbeCoordinator.ProbeRowState) -> Bool {
+    if case .failed = s { return true }
+    return false
 }
 
 /// Compact "reconnecting" cell for the HUD limits surfaces: provider icon +
