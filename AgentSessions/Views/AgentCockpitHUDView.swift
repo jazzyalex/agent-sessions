@@ -4295,14 +4295,6 @@ private struct HUDLimitsBar: View {
                 .allowsHitTesting(false)
             )
             .onReceive(Self.clockTimer) { clockNow = $0 }
-            .onTapGesture(count: 2) {
-                if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
-                    codexUsageModel.hardProbeNow { _ in }
-                }
-                if claudeAgentEnabled && claudeUsageEnabled && !claudeUsageModel.isUpdating {
-                    claudeUsageModel.hardProbeNowDiagnostics { _ in }
-                }
-            }
             .overlay(alignment: .bottom) {
                 if shouldShowExpandedPanel && expansionDirection == .up {
                     expandedPanel
@@ -4572,14 +4564,6 @@ private struct HUDLimitsRowsPanel: View {
             }
         )
         .onReceive(Self.clockTimer) { clockNow = $0 }
-        .onTapGesture(count: 2) {
-            if codexAgentEnabled && codexUsageEnabled && !codexUsageModel.isUpdating {
-                codexUsageModel.hardProbeNow { _ in }
-            }
-            if claudeAgentEnabled && claudeUsageEnabled && !claudeUsageModel.isUpdating {
-                claudeUsageModel.hardProbeNowDiagnostics { _ in }
-            }
-        }
         .task(id: runwayRequestID) {
             await refreshRunwaySnapshot()
         }
