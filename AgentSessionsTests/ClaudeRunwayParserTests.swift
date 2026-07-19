@@ -553,6 +553,41 @@ final class ClaudeRunwayParserTests: XCTestCase {
                        "a provisional rate must be capped at the measured peer burst, not dominate the split")
     }
 
+    // MARK: - Provisional subagent path must not dominate the session rate (F3)
+
+    func testScoredActivityCapsProvisionalPathToMeasuredPeerPath() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-pathcap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = Date()
+        // Path 1 (e.g. the parent transcript): a measured two-sample burst —
+        // 2000 tokens over 20s = 100 tok/s.
+        let measuredLog = dir.appendingPathComponent("parent.jsonl")
+        try """
+        \(assistantLine(id: "m1", at: now.addingTimeInterval(-25), inputTokens: 1000, sessionID: "S"))
+        \(assistantLine(id: "m2", at: now.addingTimeInterval(-5), inputTokens: 2000, sessionID: "S"))
+        """.write(to: measuredLog, atomically: true, encoding: .utf8)
+        // Path 2 (a freshly-spawned subagent): one steep single turn — 100k
+        // tokens over 3s ≈ 33,333 tok/s provisional. Uncapped it would swamp
+        // the measured path and inflate the whole session's rate ~300x.
+        let spikeLog = dir.appendingPathComponent("agent-spike.jsonl")
+        try """
+        \(userLine(sessionID: "S", cwd: "/tmp", text: "go", at: now.addingTimeInterval(-4)))
+        \(assistantLine(id: "p1", at: now.addingTimeInterval(-1), inputTokens: 100000, sessionID: "S"))
+        """.write(to: spikeLog, atomically: true, encoding: .utf8)
+
+        let identity = RunwaySessionIdentity(
+            id: "S", displayName: "S", isGoal: false,
+            logPaths: [measuredLog.path, spikeLog.path]
+        )
+        let activity = try XCTUnwrap(ClaudeRunwayTokenActivityParser.activity(identity: identity, now: now))
+        // Provisional path capped at the measured peer's 100 tok/s → 100 + 100.
+        XCTAssertEqual(activity.tokensPerSecond, 200, accuracy: 200 * 0.02,
+                       "a provisional subagent path must be capped at the session's best measured path, not summed raw")
+    }
+
     // MARK: - Desktop-titled idle session keeps idle confidence (F2)
 
     func testLoaderPreservesIdleForDesktopTitledSession() async throws {

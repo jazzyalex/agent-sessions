@@ -125,11 +125,44 @@ enum ClaudeRunwayTokenActivityParser {
     /// from dominating the cross-session split.
     static func scoredActivity(identity: RunwaySessionIdentity,
                                now: Date = Date()) -> (activity: RunwaySessionActivity, provisional: Bool)? {
-        let pathActivities = identity.logPaths.compactMap { path -> (activity: RunwaySessionActivity, provisional: Bool)? in
+        let rawPathActivities = identity.logPaths.compactMap { path -> (activity: RunwaySessionActivity, provisional: Bool)? in
             let samples = recentSamples(fromLogPath: path, now: now)
             return pathActivity(identity: identity, samples: samples, now: now)
         }
-        guard !pathActivities.isEmpty else { return nil }
+        guard !rawPathActivities.isEmpty else { return nil }
+        // A subagent-heavy session keeps spawning fresh paths whose first turn
+        // yields a steep provisional spike (a few seconds of cache-heavy setup
+        // reads as thousands of tok/s). The session-level cap in `burns` never
+        // fires for such a session — some path is always measured — so clamp at
+        // path granularity too: no provisional path may claim more than the
+        // session's best *measured* path. Components scale with the clamp so
+        // the $ pricing describes the same token volume as the clamped rate.
+        let maxMeasured = rawPathActivities.filter { !$0.provisional }
+            .map { $0.activity.tokensPerSecond }
+            .max()
+        let pathActivities = rawPathActivities.map { entry -> (activity: RunwaySessionActivity, provisional: Bool) in
+            guard entry.provisional,
+                  let maxMeasured,
+                  entry.activity.tokensPerSecond > maxMeasured,
+                  entry.activity.tokensPerSecond > 0 else {
+                return entry
+            }
+            let scale = maxMeasured / entry.activity.tokensPerSecond
+            let activity = entry.activity
+            return (RunwaySessionActivity(
+                identity: activity.identity,
+                tokensPerSecond: maxMeasured,
+                sampleStart: activity.sampleStart,
+                sampleEnd: activity.sampleEnd,
+                components: activity.components.map { c in
+                    RunwayModelComponent(modelSlug: c.modelSlug,
+                                         inputPerSecond: c.inputPerSecond * scale,
+                                         cachedInputPerSecond: c.cachedInputPerSecond * scale,
+                                         outputPerSecond: c.outputPerSecond * scale,
+                                         cacheCreationPerSecond: c.cacheCreationPerSecond * scale)
+                }
+            ), entry.provisional)
+        }
         let tokensPerSecond = pathActivities.reduce(0) { $0 + $1.activity.tokensPerSecond }
         guard tokensPerSecond > 0, tokensPerSecond.isFinite else { return nil }
         // Provisional only if NO contributing path produced a measured burst — a
