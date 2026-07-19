@@ -304,6 +304,8 @@ enum SessionRowsBuilder {
     /// branch fires before `claudeDesktopSurfacePill` is ever consulted), which
     /// is label/isArchived-identical to an unarchived Claude Desktop pill but
     /// must never be promoted to an archived Desktop pill here.
+    ///
+    /// Cowork sessions get the same promotion with their own pill: "cowork" -> [.cowork(isArchived: true)].
     static func applyingLiveClaudeArchiveState(
         to staticPills: [UnifiedSessionsView.CodexSurfacePill],
         session: Session,
@@ -313,11 +315,17 @@ enum SessionRowsBuilder {
               !session.isSideChat,
               isClaudeArchived,
               staticPills.count == 1,
-              staticPills[0].label == "desk",
               staticPills[0].isArchived == false else {
             return staticPills
         }
-        return [.desktop(isArchived: true)]
+        switch staticPills[0].label {
+        case "cowork":
+            return [.cowork(isArchived: true)]
+        case "desk":
+            return [.desktop(isArchived: true)]
+        default:
+            return staticPills
+        }
     }
 
     static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [UnifiedSessionsView.CodexSurfacePill] {
@@ -355,20 +363,17 @@ enum SessionRowsBuilder {
 
     private static func claudeDesktopSurfacePill(for session: Session, isArchived: Bool) -> UnifiedSessionsView.CodexSurfacePill? {
         guard session.source == .claude else { return nil }
+        // Cowork first: sidecar enrichment also stamps originator "Claude
+        // Desktop" on Cowork sessions, so the narrower (path-first) check must
+        // win before the generic Desktop match.
+        if session.isClaudeCoworkSession {
+            return .cowork(isArchived: isArchived)
+        }
         let originator = session.originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let originSource = session.originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if originator == "claude desktop" || originSource == "local-agent-mode" || isClaudeDesktopLocalAgentPath(session.filePath) {
+        if originator == "claude desktop" {
             return .desktop(isArchived: isArchived)
         }
         return nil
-    }
-
-    private static func isClaudeDesktopLocalAgentPath(_ path: String) -> Bool {
-        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
-        return components.contains("local-agent-mode-sessions") &&
-            components.contains(".claude") &&
-            components.contains("projects") &&
-            components.contains { $0.hasPrefix("local_") }
     }
 
     private static func codexOriginatorSurfacePill(for session: Session) -> UnifiedSessionsView.CodexSurfacePill? {

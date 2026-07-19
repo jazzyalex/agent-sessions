@@ -2932,6 +2932,15 @@ struct UnifiedSessionsView: View {
             )
         }
 
+        static func cowork(isArchived: Bool = false) -> CodexSurfacePill {
+            CodexSurfacePill(
+                label: "cowork",
+                accessibilityLabel: isArchived ? "Claude Cowork archived session" : "Cowork session",
+                usesFullAccessibilityLabel: isArchived,
+                isArchived: isArchived
+            )
+        }
+
         static func standard(label: String, accessibilityLabel: String) -> CodexSurfacePill {
             CodexSurfacePill(label: label, accessibilityLabel: accessibilityLabel)
         }

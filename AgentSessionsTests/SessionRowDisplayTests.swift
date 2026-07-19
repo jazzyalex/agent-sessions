@@ -319,4 +319,52 @@ final class SessionRowDisplayTests: XCTestCase {
         let s = makeClaudeSession(filePath: Self.coworkTranscriptPath, source: .codex)
         XCTAssertFalse(s.isClaudeCoworkSession)
     }
+
+    // MARK: - Cowork surface pill
+
+    func testCoworkSessionGetsCoworkPillNotDeskPill() {
+        // Freshly-parsed Cowork session: sidecar enrichment sets originator
+        // "Claude Desktop" — the cowork path check must win over that.
+        let s = makeClaudeSession(
+            filePath: Self.coworkTranscriptPath,
+            originator: "Claude Desktop",
+            originSource: "local-agent-mode"
+        )
+        let pills = UnifiedSessionsView.surfacePills(for: s)
+        XCTAssertEqual(pills.map(\.label), ["cowork"])
+        XCTAssertEqual(pills.map(\.isArchived), [false])
+    }
+
+    func testHydratedCoworkSessionWithNilMetadataGetsCoworkPill() {
+        // Hydrated-from-DB shape: all surface metadata nil, path is the only signal.
+        let s = makeClaudeSession(filePath: Self.coworkTranscriptPath)
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["cowork"])
+    }
+
+    func testClaudeCodeTabSessionKeepsDeskPill() {
+        let s = makeClaudeSession(
+            filePath: "/Users/test/.claude/projects/-Users-test-Repo/aaaa1111-2222-3333-4444-555566667777.jsonl",
+            originator: "Claude Desktop"
+        )
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["desk"])
+    }
+
+    func testApplyingLiveClaudeArchiveStatePromotesCoworkPill() {
+        let s = makeClaudeSession(filePath: Self.coworkTranscriptPath)
+        let staticPills = UnifiedSessionsView.staticSurfacePills(for: s)
+        XCTAssertEqual(staticPills.map(\.label), ["cowork"])
+        XCTAssertEqual(staticPills.map(\.isArchived), [false])
+
+        let patched = UnifiedSessionsView.applyingLiveClaudeArchiveState(
+            to: staticPills,
+            session: s,
+            isClaudeArchived: true
+        )
+        XCTAssertEqual(patched.map(\.label), ["cowork"])
+        XCTAssertEqual(patched.map(\.isArchived), [true])
+
+        // Parity with the legacy single-call path.
+        let legacyDirect = UnifiedSessionsView.surfacePills(for: s, isClaudeArchived: true)
+        XCTAssertEqual(patched.map(\.identity), legacyDirect.map(\.identity))
+    }
 }
