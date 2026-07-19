@@ -129,8 +129,23 @@ final class RunwayAuthDegradationTests: XCTestCase {
         let s = UsageAuthStatus.make(provider: .claude, state: .idle)
         XCTAssertEqual(s.remediation, .none)
         XCTAssertTrue(s.headline.contains("No active"))
-        XCTAssertTrue(s.detail.contains("next Claude session"))
         XCTAssertEqual(s.chipLabel, "")
+    }
+
+    /// Claude's idle detail is the recovery ladder (2026-07-18): with the latch
+    /// fix, the idle cell renders only when NO source is serving data — so its
+    /// tooltip must say how to recover, not just "wait for the next session".
+    /// Rungs: any CLI run refreshes the token; a pasted claude.ai cookie feeds
+    /// the web path; the CLI probe is the last resort (works CLI-less-hostile
+    /// cases but can consume tokens). Codex keeps the generic calm copy.
+    func testClaudeIdleDetailCarriesRecoveryLadder() {
+        let s = UsageAuthStatus.make(provider: .claude, state: .idle)
+        XCTAssertTrue(s.detail.contains("claude"), "rung 1: run any claude CLI command")
+        XCTAssertTrue(s.detail.lowercased().contains("cookie"), "rung 2: paste a claude.ai session cookie")
+        XCTAssertTrue(s.detail.lowercased().contains("probe"), "rung 3: manual CLI probe as last resort")
+        XCTAssertTrue(s.detail.lowercased().contains("token"), "probe rung must carry its token-cost caveat")
+        let codex = UsageAuthStatus.make(provider: .codex, state: .idle)
+        XCTAssertTrue(codex.detail.contains("next Codex session"), "Codex idle copy stays generic")
     }
 
     /// A suppressed-fallback dead end re-emits the calm idle verdict instead of
@@ -165,6 +180,28 @@ final class RunwayAuthDegradationTests: XCTestCase {
         q.authStatus = .make(provider: .claude, state: .expired)
         guard case .needsAction = q.presentationState else {
             return XCTFail("alarming must win over idle, got \(q.presentationState)")
+        }
+    }
+
+    /// Fresh live data must beat the idle latch (2026-07-18 incident): once the
+    /// OAuth token lapses, the `.idle` verdict latches and — because web-fallback
+    /// successes are caption-only emits — nothing on the web path ever clears it.
+    /// The header must not keep saying "no active session" while fresh usage data
+    /// is flowing from the web fallback; only alarming states may mask live data.
+    func testQuotaDataFreshDataBeatsIdleLatch() {
+        var q = QuotaData(provider: .claude, fiveHourRemainingPercent: 40, fiveHourResetText: "resets 5pm",
+                          weekRemainingPercent: 80, weekResetText: "resets Fri")
+        q.authStatus = .make(provider: .claude, state: .idle)
+        q.lastUpdate = Date()          // fresh web-fallback fetch
+        q.dataIsStale = false
+        q.transientReason = nil
+        guard case .live = q.presentationState else {
+            return XCTFail("fresh usage data must render live, not idle — got \(q.presentationState)")
+        }
+        // Once the data stales out again, idle resumes.
+        q.dataIsStale = true
+        guard case .idle = q.presentationState else {
+            return XCTFail("stale data with idle auth must fall back to idle, got \(q.presentationState)")
         }
     }
 

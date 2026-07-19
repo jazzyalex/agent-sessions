@@ -111,14 +111,17 @@ struct QuotaData: Equatable {
 
     var presentationState: PresentationState {
         if let auth = authStatus, auth.state.isAlarming { return .needsAction(auth) }
-        if let auth = authStatus, auth.state == .idle { return .idle(auth) }
         // A suspect verdict with nothing placeable means "can't read it right now",
         // not trustworthy live data — show the calm reconnecting cell rather than an
         // alarming "can't verify" (which misfired during the normal connect window).
-        if !hasUsageData || dataIsStale || transientReason != nil
-            || (usageFormatSuspect && !hasFiveHourRateLimit && !hasWeekRateLimit) {
-            return .reconnecting
-        }
+        let dataIsLive = hasUsageData && !dataIsStale && transientReason == nil
+            && !(usageFormatSuspect && !hasFiveHourRateLimit && !hasWeekRateLimit)
+        // The idle latch (lapsed OAuth token) yields to fresh data: web-fallback
+        // successes are caption-only emits that never clear `authStatus`, so once
+        // idle latched, only data liveness can unseat the "no active session"
+        // cell — checking idle first hid live web data behind it indefinitely.
+        if let auth = authStatus, auth.state == .idle, !dataIsLive { return .idle(auth) }
+        if !dataIsLive { return .reconnecting }
         return .live
     }
 
@@ -240,6 +243,11 @@ struct CockpitFooterView: View {
 		                            )
 		                            if q.currentSource == .tmuxUsage {
 		                                Text("via CLI probe").font(.caption2).foregroundStyle(.secondary)
+		                            } else if q.currentSource == .webEndpoint || q.currentSource == .cachedWeb {
+		                                // Quiet fallback-source tag: tells the user usage is being
+		                                // served by the claude.ai web path (pasted cookie) while the
+		                                // CLI OAuth token is lapsed — without any prompt or alarm.
+		                                Text("via claude.ai").font(.caption2).foregroundStyle(.secondary)
 		                            }
 		                        }
 		                    }
