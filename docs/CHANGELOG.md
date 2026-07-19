@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+- **The Quota Meter stops claiming "no active session" while it's holding fresh data.** Once your Claude CLI token lapsed, the calm "idle" verdict latched — and successful web-fallback reads could never clear it. The meter insisted nothing was running while the pasted-cookie web path served fresh usage every minute. Fresh live data now outranks the idle latch (a genuine auth problem still wins), Claude's idle tooltip becomes a recovery ladder — run the CLI, paste a cookie, probe — and web-served numbers are tagged **via claude.ai** so you can see where the reading came from.
+
+### Features
+- **Ask for a fresh usage reading from the toolbar.** Forcing a hard probe used to be an undiscoverable double-click on the Quota Meter. It's now a visible toolbar button with a per-provider menu that tells you in the row itself when a probe is **probing…** or has **failed**, greys out providers it can't probe with a reason, and won't let two probes race from the toolbar, Preferences, and the usage strip at once. The old double-click gesture is gone.
+
+### Bug Fixes
+- **Burn rate no longer overstates subagent-heavy sessions.** A session that keeps spawning subagents also keeps spawning fresh transcript paths, and each new path's first turn — a couple of seconds of cache-heavy setup — read as thousands of tokens per second. The existing session-level cap never fired for these sessions, because some path was always already measured, so orchestrated fleets showed burn rates up to 3.6x too high (1.6x median, validated against live ground truth). Provisional paths are now clamped to the session's best measured path rate, with pricing components scaled by the same factor — median error drops to roughly 1.25x.
+
 ## [4.6] - 2026-07-16
 
 ### Highlights

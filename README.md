@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6/AgentSessions-4.6.dmg"><b>Download Agent Sessions 4.6 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.1/AgentSessions-4.6.1.dmg"><b>Download Agent Sessions 4.6.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6** — Read your Claude subscription usage without the CLI. If you don't run the Claude CLI, Agent Sessions reads usage over the web instead — but on macOS 14+ Safari stopped handing the claude.ai session to other apps. Now you paste your session cookie once in Settings; it lives in your Keychain, needs no Full Disk Access, and a **Test now** button confirms it works. [See what's new ↓](#whats-new-in-46)
+> **New in 4.6.1** — The Quota Meter no longer insists there's "no active session" while it's holding fresh usage data. Once your Claude CLI token lapsed the idle state latched, and successful web reads couldn't clear it. Fresh data now wins, the tooltip spells out how to recover, and web-served numbers are tagged **via claude.ai**. Burn rate also stops overstating subagent-heavy sessions. [See what's new ↓](#whats-new-in-461)
 
 ## Overview
 
@@ -71,6 +71,20 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 - The only network activity is optional Sparkle update checks and an optional read-only fetch of a public model-price list (for the runway's $ estimate) — neither sends any personal or session data.
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
+
+## What's New in 4.6.1
+
+**TL;DR** - The Quota Meter stops claiming "no active session" when it has fresh data in hand. Once your Claude CLI token lapsed, the calm idle state latched and successful web reads could never clear it — so the meter read as dead while the pasted-cookie path served fresh usage every minute. Fresh data now wins. Burn rate also stops overstating subagent-heavy sessions, and forcing a fresh reading is a real toolbar button instead of a hidden double-click.
+
+**Highlights:** If you run the Claude desktop app and your CLI token lapses, the Quota Meter used to latch on "no active session" and never come back, even while the web fallback had current numbers the whole time. Live data now outranks that idle latch — a genuine auth problem still takes precedence — and Claude's idle tooltip becomes a recovery ladder telling you what to actually do: run the CLI, paste a cookie, or probe. Anything served over the web is labeled **via claude.ai** so you know where the number came from. Separately, sessions running orchestrated subagent fleets were reading up to 3.6x hotter than reality, because every freshly spawned transcript path spiked during its cache-heavy first turn and the existing cap never fired; those provisional paths are now clamped to what the session has actually been measured doing. And the hard probe finally has a home in the toolbar.
+
+New in 4.6.1:
+- **Fresh data beats the idle latch** — a lapsed CLI token no longer freezes the Quota Meter on "no active session" while web usage is flowing.
+- **A recovery ladder you can read** — Claude's idle tooltip names the three ways back (CLI, cookie paste, probe), and web-served numbers are tagged **via claude.ai**.
+- **Honest burn rate for subagent fleets** — provisional transcript paths are capped at the session's measured rate, cutting median overstatement from 1.6x to about 1.25x.
+- **A probe button in the toolbar** — per-provider menu, in-row **probing…** / **failed** status, and reasons for anything it can't probe. The old double-click gesture is gone.
+
+Previous release — 4.6: Read your Claude subscription usage without the CLI by pasting a session cookie. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## What's New in 4.6
 
@@ -163,7 +177,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.6.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6/AgentSessions-4.6.dmg)
+1. [Download AgentSessions-4.6.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.1/AgentSessions-4.6.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
