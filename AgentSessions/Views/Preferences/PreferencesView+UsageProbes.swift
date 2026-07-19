@@ -76,7 +76,12 @@ extension PreferencesView {
                         if !accepted { isClaudeHardProbeRunning = false }
 	                    }
 	                    .buttonStyle(.bordered)
-	                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
+	                    // Disabled while running: a repeat click would re-set the flag,
+	                    // take the coordinator's .alreadyRunning rejection, and the
+	                    // rejection cleanup would wrongly clear "Wait for probe result…"
+	                    // mid-probe. The clear-on-rejection below stays correct for the
+	                    // cross-surface case (probe started elsewhere → honest no-op).
+	                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled || isClaudeHardProbeRunning)
 	                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
 
                     if isClaudeHardProbeRunning {
@@ -193,7 +198,8 @@ extension PreferencesView {
                         if !accepted { isCodexHardProbeRunning = false }
 	                    }
 	                    .buttonStyle(.bordered)
-	                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
+	                    // Same repeat-click guard as the Claude probe button above.
+	                    .disabled(!codexUsageEnabled || !codexAgentEnabled || isCodexHardProbeRunning)
 	                    .help("Runs a one-off /status probe regardless of staleness or auto-probe setting, and shows the result.")
 
                     if isCodexHardProbeRunning {
