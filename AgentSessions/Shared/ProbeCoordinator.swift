@@ -46,35 +46,35 @@ final class ProbeCoordinator: ObservableObject {
     @Published private(set) var claudeState: ProbeRowState = .none
     @Published private(set) var codexState: ProbeRowState = .none
 
-    private let claudeRunner: (@escaping (ClaudeProbeDiagnostics) -> Void) -> Bool
-    private let codexRunner: (@escaping (CodexProbeDiagnostics) -> Void) -> Bool
+    private let claudeRunner: @MainActor (@escaping (ClaudeProbeDiagnostics) -> Void) -> Bool
+    private let codexRunner: @MainActor (@escaping (CodexProbeDiagnostics) -> Void) -> Bool
     /// `isUpdating` covers ordinary refreshes too, so coordinator-idle does
     /// not imply the model will accept; `requestBoth` needs both checks
     /// up front to guarantee it never partially starts.
-    private let claudeModelBusy: () -> Bool
-    private let codexModelBusy: () -> Bool
+    private let claudeModelBusy: @MainActor () -> Bool
+    private let codexModelBusy: @MainActor () -> Bool
     private var generation: UInt64 = 0
 
-    init(claudeRunner: @escaping (@escaping (ClaudeProbeDiagnostics) -> Void) -> Bool = { completion in
+    init(claudeRunner: @escaping @MainActor (@escaping (ClaudeProbeDiagnostics) -> Void) -> Bool = { completion in
              ClaudeUsageModel.shared.hardProbeNowDiagnostics(completion: completion)
          },
-         codexRunner: @escaping (@escaping (CodexProbeDiagnostics) -> Void) -> Bool = { completion in
+         codexRunner: @escaping @MainActor (@escaping (CodexProbeDiagnostics) -> Void) -> Bool = { completion in
              CodexUsageModel.shared.hardProbeNowDiagnostics(completion: completion)
          },
-         claudeModelBusy: @escaping () -> Bool = { ClaudeUsageModel.shared.isUpdating },
-         codexModelBusy: @escaping () -> Bool = { CodexUsageModel.shared.isUpdating }) {
+         claudeModelBusy: @escaping @MainActor () -> Bool = { ClaudeUsageModel.shared.isUpdating },
+         codexModelBusy: @escaping @MainActor () -> Bool = { CodexUsageModel.shared.isUpdating }) {
         self.claudeRunner = claudeRunner
         self.codexRunner = codexRunner
         self.claudeModelBusy = claudeModelBusy
         self.codexModelBusy = codexModelBusy
     }
 
-    static func outcome(claude diag: ClaudeProbeDiagnostics) -> Outcome {
+    nonisolated static func outcome(claude diag: ClaudeProbeDiagnostics) -> Outcome {
         if diag.success { return diag.unavailableMessage != nil ? .suppressed : .ok }
         return (diag.exitCode == 126 || diag.exitCode == 125) ? .suppressed : .failed
     }
 
-    static func outcome(codex diag: CodexProbeDiagnostics) -> Outcome {
+    nonisolated static func outcome(codex diag: CodexProbeDiagnostics) -> Outcome {
         if diag.success { return .ok }
         return (diag.exitCode == 126 || diag.exitCode == 125) ? .suppressed : .failed
     }
