@@ -73,7 +73,6 @@ final class ProbeEntryPointTests: XCTestCase {
         XCTAssertTrue(accepted, "an auth-suppressed run is accepted, not rejected")
         XCTAssertEqual(completions, 1, "guard short-circuit completes exactly once, synchronously")
         XCTAssertEqual(received?.exitCode, 126)
-        // TODO(Task 3): re-enable once ProbeCoordinator.outcome(claude:) lands.
-        // XCTAssertEqual(received.map { ProbeCoordinator.outcome(claude: $0) }, .suppressed)
+        XCTAssertEqual(received.map { ProbeCoordinator.outcome(claude: $0) }, .suppressed)
     }
 }
