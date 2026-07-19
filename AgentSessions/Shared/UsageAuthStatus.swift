@@ -82,12 +82,12 @@ struct UsageAuthStatus: Equatable {
             // recovery ladder instead of a passive "wait": (1) any terminal
             // `claude` run refreshes the CLI token — desktop-app sessions never
             // do; (2) a pasted claude.ai cookie feeds the web path; (3) the
-            // double-click CLI probe is the last resort (needs the CLI installed
-            // and can consume tokens, so it is never auto-run).
+            // Quick Meter toolbar probe button is the last resort (needs the CLI
+            // installed and can consume tokens, so it is never auto-run).
             if provider == .claude {
                 return .init(state: state, remediation: .none,
                     headline: "No active \(name) session",
-                    detail: "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: double-click the meter for a CLI probe (may consume tokens).",
+                    detail: "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: the probe button in the Quick Meter toolbar (may consume tokens).",
                     providerName: name)
             }
             return .init(state: state, remediation: .none,

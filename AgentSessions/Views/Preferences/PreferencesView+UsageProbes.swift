@@ -20,8 +20,9 @@ extension PreferencesView {
                 HStack(spacing: 12) {
                     Button("Refresh Claude usage now") {
                         isClaudeHardProbeRunning = true
-                        ClaudeUsageModel.shared.hardProbeNowDiagnostics { diag in
+                        let accepted = ProbeCoordinator.shared.request(.claude) { report in
                             isClaudeHardProbeRunning = false
+                            guard case .claude(let diag) = report else { return }
                             if let unavailable = diag.unavailableMessage {
                                 var lines: [String] = []
                                 lines.append("Result: UNAVAILABLE")
@@ -72,6 +73,7 @@ extension PreferencesView {
                             }
                             showClaudeProbeResult = true
                         }
+                        if !accepted { isClaudeHardProbeRunning = false }
 	                    }
 	                    .buttonStyle(.bordered)
 	                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
@@ -156,8 +158,9 @@ extension PreferencesView {
                 HStack(spacing: 12) {
                     Button("Run hard Codex /status probe now") {
                         isCodexHardProbeRunning = true
-                        CodexUsageModel.shared.hardProbeNowDiagnostics { diag in
+                        let accepted = ProbeCoordinator.shared.request(.codex) { report in
                             isCodexHardProbeRunning = false
+                            guard case .codex(let diag) = report else { return }
                             if diag.success {
                                 let m = CodexUsageModel.shared
                                 // Nicely formatted, monospaced-friendly block
@@ -187,6 +190,7 @@ extension PreferencesView {
                             }
                             showCodexProbeResult = true
                         }
+                        if !accepted { isCodexHardProbeRunning = false }
 	                    }
 	                    .buttonStyle(.bordered)
 	                    .disabled(!codexUsageEnabled || !codexAgentEnabled)

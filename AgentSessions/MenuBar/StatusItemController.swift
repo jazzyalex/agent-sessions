@@ -472,8 +472,8 @@ final class StatusItemController: NSObject {
         let codexTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.codexEnabled) as? Bool ?? true)
             && (d.object(forKey: PreferencesKey.codexUsageEnabled) as? Bool ?? false)
         guard codexTrackingEnabled else { return }
-        guard !codexStatus.isUpdating else { return }
-        codexStatus.hardProbeNowDiagnostics { diag in
+        ProbeCoordinator.shared.request(.codex) { report in
+            guard case .codex(let diag) = report else { return }
             if !diag.success { self.presentFailureAlert(title: "Codex Probe Failed", diagnostics: diag) }
         }
     }
@@ -482,8 +482,8 @@ final class StatusItemController: NSObject {
         let claudeTrackingEnabled = (d.object(forKey: PreferencesKey.Agents.claudeEnabled) as? Bool ?? true)
             && (d.object(forKey: PreferencesKey.claudeUsageEnabled) as? Bool ?? false)
         guard claudeTrackingEnabled else { return }
-        guard !claudeStatus.isUpdating else { return }
-        claudeStatus.hardProbeNowDiagnostics { diag in
+        ProbeCoordinator.shared.request(.claude) { report in
+            guard case .claude(let diag) = report else { return }
             if !diag.success { self.presentFailureAlert(title: "Claude Probe Failed", diagnostics: diag) }
             else if diag.unavailableMessage != nil { self.presentFailureAlert(title: "Claude Probe Unavailable", diagnostics: diag) }
         }

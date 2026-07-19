@@ -142,7 +142,7 @@ final class RunwayAuthDegradationTests: XCTestCase {
         let s = UsageAuthStatus.make(provider: .claude, state: .idle)
         XCTAssertTrue(s.detail.contains("claude"), "rung 1: run any claude CLI command")
         XCTAssertTrue(s.detail.lowercased().contains("cookie"), "rung 2: paste a claude.ai session cookie")
-        XCTAssertTrue(s.detail.lowercased().contains("probe"), "rung 3: manual CLI probe as last resort")
+        XCTAssertTrue(s.detail.lowercased().contains("probe button"), "rung 3: QM toolbar probe button as last resort")
         XCTAssertTrue(s.detail.lowercased().contains("token"), "probe rung must carry its token-cost caveat")
         let codex = UsageAuthStatus.make(provider: .codex, state: .idle)
         XCTAssertTrue(codex.detail.contains("next Codex session"), "Codex idle copy stays generic")

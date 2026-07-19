@@ -45,7 +45,7 @@ struct UsageStripView: View {
             if !codexStatus.isUpdating {
                 // Double-click performs a hard /status probe (same as the
                 // Usage Probes button) but without showing a diagnostics dialog.
-                CodexUsageModel.shared.hardProbeNow { _ in }
+                ProbeCoordinator.shared.request(.codex)
             }
         }
         .help(makeTooltip())
