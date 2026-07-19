@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6.1] - 2026-07-19
+
 ### Highlights
 - **The Quota Meter stops claiming "no active session" while it's holding fresh data.** Once your Claude CLI token lapsed, the calm "idle" verdict latched — and successful web-fallback reads could never clear it. The meter insisted nothing was running while the pasted-cookie web path served fresh usage every minute. Fresh live data now outranks the idle latch (a genuine auth problem still wins), Claude's idle tooltip becomes a recovery ladder — run the CLI, paste a cookie, probe — and web-served numbers are tagged **via claude.ai** so you can see where the reading came from.
 
