@@ -264,4 +264,59 @@ final class SessionRowDisplayTests: XCTestCase {
         )
         XCTAssertEqual(patched.map(\.isArchived), [false], "isClaudeArchived must not affect a non-Claude session")
     }
+
+    // MARK: - Cowork classification (2026-07-19 cowork labeling)
+
+    private func makeClaudeSession(
+        filePath: String,
+        source: SessionSource = .claude,
+        originator: String? = nil,
+        originSource: String? = nil
+    ) -> Session {
+        Session(
+            id: "cowork-test",
+            source: source,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: filePath,
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil,
+            originator: originator,
+            originSource: originSource
+        )
+    }
+
+    private static let coworkTranscriptPath =
+        "/Users/test/Library/Application Support/Claude/local-agent-mode-sessions/acct-1/ws-1/local_0b5ef277-1234/.claude/projects/-sessions-outputs/44ebb75a-48e4-4460-9d76-a19c62c10701.jsonl"
+
+    func testIsClaudeCoworkSessionMatchesLocalAgentModePath() {
+        // Path-only signal: hydrated sessions have nil originator/originSource.
+        let s = makeClaudeSession(filePath: Self.coworkTranscriptPath)
+        XCTAssertTrue(s.isClaudeCoworkSession)
+    }
+
+    func testIsClaudeCoworkSessionFalseForCodeTabTranscript() {
+        // Claude Desktop Code-tab transcript: ~/.claude/projects path, desktop metadata.
+        let s = makeClaudeSession(
+            filePath: "/Users/test/.claude/projects/-Users-test-Repo/aaaa1111-2222-3333-4444-555566667777.jsonl",
+            originator: "Claude Desktop",
+            originSource: "claude-desktop"
+        )
+        XCTAssertFalse(s.isClaudeCoworkSession)
+    }
+
+    func testIsClaudeCoworkSessionMatchesOriginSourceFallback() {
+        // Freshly-parsed session under a custom root: metadata still identifies it.
+        let s = makeClaudeSession(filePath: "/tmp/some-transcript.jsonl", originSource: "local-agent-mode")
+        XCTAssertTrue(s.isClaudeCoworkSession)
+    }
+
+    func testIsClaudeCoworkSessionFalseForNonClaudeSource() {
+        let s = makeClaudeSession(filePath: Self.coworkTranscriptPath, source: .codex)
+        XCTAssertFalse(s.isClaudeCoworkSession)
+    }
 }

@@ -347,6 +347,29 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             components.contains("projects")
     }
 
+    /// True for Cowork transcripts — Claude Desktop's local-agent mode, whose
+    /// sessions live under
+    /// `~/Library/Application Support/Claude/local-agent-mode-sessions/**/local_*/.claude/projects/**`.
+    /// A Cowork session is also a `isClaudeDesktopSession` (Cowork runs inside
+    /// the Desktop app); this is the narrower check.
+    ///
+    /// Path-first, mirroring `isArchivedCodexDesktopSession`: hydrated sessions
+    /// routinely have nil `originator`/`originSource`/`surface` (launch hydrates
+    /// from SQLite and never re-parses unchanged files), so the on-disk location
+    /// is the reliable signal. `originSource == "local-agent-mode"` is kept as a
+    /// fallback for freshly-parsed sessions under nonstandard roots.
+    public var isClaudeCoworkSession: Bool {
+        guard source == .claude else { return false }
+        let components = URL(fileURLWithPath: filePath).standardizedFileURL.pathComponents
+        if components.contains("local-agent-mode-sessions"),
+           components.contains(".claude"),
+           components.contains("projects"),
+           components.contains(where: { $0.hasPrefix("local_") }) {
+            return true
+        }
+        return originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "local-agent-mode"
+    }
+
     /// True for any Codex session that lives under `~/.codex/archived_sessions`
     /// (the folder Codex Desktop's "Archive" action writes to), regardless of the
     /// session's originating surface.
