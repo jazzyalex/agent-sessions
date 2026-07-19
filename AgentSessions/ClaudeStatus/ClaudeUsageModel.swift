@@ -196,6 +196,13 @@ final class ClaudeUsageModel: ObservableObject {
     static var cliPresenceOverrideForTesting: Bool?
 #endif
 
+    #if DEBUG
+    /// Test seam: the public setEnabled() deliberately no-ops under tests so
+    /// suites never spawn services; entry-point contract tests still need to
+    /// exercise the enabled guard ordering. Sets the flag only — no start().
+    func setEnabledForTesting(_ enabled: Bool) { isEnabled = enabled }
+    #endif
+
     /// Deterministic Claude-CLI presence used to choose the remediation rung. Same
     /// disk check `classifyAndPublishAuthState` uses; overridable in DEBUG for tests.
     private func resolveClaudeCLIPresent() -> Bool {
@@ -398,7 +405,9 @@ final class ClaudeUsageModel: ObservableObject {
 
     // Hard-probe entry: run a one-off /usage probe and return diagnostics.
     // Bypasses the source manager to always use the tmux path for direct diagnostics.
-    func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) {
+    @discardableResult
+    func hardProbeNowDiagnostics(completion: @escaping (ClaudeProbeDiagnostics) -> Void) -> Bool {
+        if isUpdating { return false }
         guard isEnabled else {
             let diag = ClaudeProbeDiagnostics(
                 success: false,
@@ -412,7 +421,7 @@ final class ClaudeUsageModel: ObservableObject {
                 stderr: "Claude usage tracking is disabled"
             )
             completion(diag)
-            return
+            return true
         }
         // I4: the hard probe uses the tmux `/usage` path, which hangs on a login /
         // re-auth / setup screen. If the current auth verdict is alarming (signed out /
@@ -421,9 +430,8 @@ final class ClaudeUsageModel: ObservableObject {
         // (unlike Codex's), so the gate must live here, before the service is built.
         if let state = authStatus?.state, state.isAlarming {
             completion(Self.suppressedHardProbeDiagnostics())
-            return
+            return true
         }
-        if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
             guard let self else { return }
@@ -479,6 +487,7 @@ final class ClaudeUsageModel: ObservableObject {
                 completion(diag)
             }
         }
+        return true
     }
 
     /// Convert a tmux snapshot and persist it for cold-start restore.

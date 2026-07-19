@@ -269,6 +269,13 @@ final class CodexUsageModel: ObservableObject {
         }
     }
 
+    #if DEBUG
+    /// Test seam: the public setEnabled() deliberately no-ops under tests so
+    /// suites never spawn services; entry-point contract tests still need to
+    /// exercise the enabled guard ordering. Sets the flag only — no start().
+    func setEnabledForTesting(_ enabled: Bool) { isEnabled = enabled }
+    #endif
+
     func setVisible(_ visible: Bool) {
         // Back-compat shim: treat as strip visibility
         setStripVisible(visible)
@@ -368,13 +375,14 @@ final class CodexUsageModel: ObservableObject {
     }
 
     // Hard-probe from Preferences pane: forces a /status tmux probe, shows result via callback
-    func hardProbeNow(completion: @escaping (Bool) -> Void) {
+    @discardableResult
+    func hardProbeNow(completion: @escaping (Bool) -> Void) -> Bool {
+        if isUpdating { return false }
         guard isEnabled else {
-            completion(false)
-            return
+            completion(false)   // disabled = accepted, completes synchronously (existing UX)
+            return true
         }
         refreshResetCredits()
-        if isUpdating { return }
         isUpdating = true
         Task { [weak self] in
             guard let self = self else { return }
@@ -408,27 +416,31 @@ final class CodexUsageModel: ObservableObject {
                 completion(diag.success)
             }
         }
+        return true
     }
 
     // Hard-probe variant that returns full diagnostics for UI display
-    func hardProbeNowDiagnostics(completion: @escaping (CodexProbeDiagnostics) -> Void) {
+    @discardableResult
+    func hardProbeNowDiagnostics(completion: @escaping (CodexProbeDiagnostics) -> Void) -> Bool {
+        if isUpdating { return false }
+        guard isEnabled else {
+            let diag = CodexProbeDiagnostics(
+                success: false,
+                exitCode: 125,
+                scriptPath: "(not run)",
+                workdir: CodexProbeConfig.probeWorkingDirectory(),
+                codexBin: nil,
+                tmuxBin: nil,
+                timeoutSecs: nil,
+                stdout: "",
+                stderr: "Codex usage tracking is disabled"
+            )
+            completion(diag)
+            return true
+        }
+        isUpdating = true
         Task { [weak self] in
             guard let self = self else { return }
-            guard self.isEnabled else {
-                let diag = CodexProbeDiagnostics(
-                    success: false,
-                    exitCode: 125,
-                    scriptPath: "(not run)",
-                    workdir: CodexProbeConfig.probeWorkingDirectory(),
-                    codexBin: nil,
-                    tmuxBin: nil,
-                    timeoutSecs: nil,
-                    stdout: "",
-                    stderr: "Codex usage tracking is disabled"
-                )
-                await MainActor.run { completion(diag) }
-                return
-            }
             if let svc = self.service {
                 let diag = await svc.forceProbeNow()
                 await MainActor.run {
@@ -436,6 +448,7 @@ final class CodexUsageModel: ObservableObject {
                         self.lastSuccessAt = Date()
                         setFreshUntil(for: .codex, until: Date().addingTimeInterval(UsageFreshnessTTL.probeFreshness))
                     }
+                    self.isUpdating = false
                     completion(diag)
                 }
                 return
@@ -457,6 +470,7 @@ final class CodexUsageModel: ObservableObject {
                 completion(diag)
             }
         }
+        return true
     }
 
     private func start() {
