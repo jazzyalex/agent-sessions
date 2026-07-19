@@ -1,3 +1,21 @@
+## 2026-07-19 13:49 · qm-hard-probe · Probe feature + usage-accuracy fixes shipped; 4.6.1 release pending
+status: in-progress
+
+**State:** All pushed to `main` (ef7bd125..644f3446): QM toolbar probe button + provider menu backed by new `ProbeCoordinator` (single acceptance gate for ALL probe surfaces; QM double-click removed), in-row probing/failed feedback at 3 render sites, entry points rewritten busy-first/always-completing; plus burn-rate provisional-path cap (subagent sessions overstated ~1.6-3.6x) and the idle-latch fix (web-fallback data was hidden behind "no active session" forever). Suite 1690/0; owner QA passed; 3 Codex reviews + Opus whole-branch review clean (last P2 fixed in 644f3446). Owner decided 4.6.1 (patch), 2026-07-19 — despite the removed QM double-click gesture arguing for a minor bump.
+
+**Decided / don't redo:**
+- AS-owned OAuth (P2) re-confirmed CANCELLED (ban risk). Desktop-app sessions do NOT refresh the CLI keychain token — only a terminal `claude` run does (proven live 2026-07-18).
+- Probe = manual only; auth-suppressed probes render as no-op, never "probe failed"; `.alreadyRunning` = silent no-op everywhere.
+- Kept "dead" `CodexUsageModel.hardProbeNow(Bool)` — its tests pin the entry-point contract. Strip double-click no longer refreshes reset credits (accepted).
+
+**Key files:**
+- `AgentSessions/Shared/ProbeCoordinator.swift` — acceptance gate; buffering/generation/one-shot semantics documented in header.
+- `docs/superpowers/specs/2026-07-18-qm-hard-probe-design.md` + plan — the contract source of truth.
+- `.superpowers/sdd/progress-qm-probe.md` — SDD ledger for the 6-task run.
+
+**Next:**
+1. Release 4.6.1: `deploy bump patch` → changelog → `deploy qa` (stamp) → notarize → appcast; notes drafted via release-notes skill (headline: idle-latch fix + probe button + burn-rate accuracy; note QM double-click removed).
+
 ## 2026-07-18 12:31 · site-chrome-unification · Landing header + style unified across guides & blog
 status: done
 
