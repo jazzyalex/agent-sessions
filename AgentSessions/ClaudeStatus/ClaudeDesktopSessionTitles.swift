@@ -23,6 +23,27 @@ enum ClaudeDesktopSessionTitles {
             .appendingPathComponent("Library/Application Support/Claude/claude-code-sessions", isDirectory: true)
     }
 
+    /// Root of Cowork (local-agent mode) session metadata. Same `local_*.json`
+    /// sidecar shape as `claude-code-sessions`, different tree.
+    static func coworkRoot() -> URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/Claude/local-agent-mode-sessions", isDirectory: true)
+    }
+
+    /// The two sidecar roots every overlay consumer should read: Claude
+    /// Desktop Code-tab sessions plus Cowork (local-agent mode).
+    static func defaultRoots() -> [URL] {
+        [defaultRoot(), coworkRoot()]
+    }
+
+    /// Directory names inside the Cowork tree that hold session artifacts
+    /// (uploaded files, generated outputs, plugin bundles) — potentially
+    /// thousands of entries, never sidecar metadata. Mirrors the skip list in
+    /// `ClaudeSessionDiscovery.desktopLocalAgentRoots`. The nested `.claude`
+    /// transcript dirs are already excluded by `.skipsHiddenFiles`.
+    private static let skippedDirectoryNames: Set<String> =
+        ["uploads", "outputs", "cowork_plugins", "skills-plugin"]
+
     /// Per-file-path cache entry: the parsed record plus the file mtime it was
     /// parsed from. Keyed by `root` so distinct roots (tests use per-test temp
     /// dirs) never share entries.
@@ -58,7 +79,7 @@ enum ClaudeDesktopSessionTitles {
         guard fileManager.fileExists(atPath: rootURL.path),
               let enumerator = fileManager.enumerator(
                 at: rootURL,
-                includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .contentModificationDateKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
               ) else {
             cacheLock.lock()
@@ -76,6 +97,11 @@ enum ClaudeDesktopSessionTitles {
         var out: [String: ClaudeDesktopSidecarRecord] = [:]
 
         for case let url as URL in enumerator {
+            if skippedDirectoryNames.contains(url.lastPathComponent),
+               (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                enumerator.skipDescendants()
+                continue
+            }
             guard url.lastPathComponent.hasPrefix("local_"), url.pathExtension == "json" else { continue }
             let path = url.path
             let modifiedAt = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
@@ -105,6 +131,20 @@ enum ClaudeDesktopSessionTitles {
         cacheLock.unlock()
 
         return out
+    }
+
+    /// Merge of `records(root:)` across several roots. Duplicate `cliSessionId`s
+    /// resolve last-writer-wins by sidecar mtime, matching the single-root rule.
+    /// Each root keeps its own mtime cache entry (cache is keyed by root).
+    static func records(roots: [URL], fileManager: FileManager = .default) -> [String: ClaudeDesktopSidecarRecord] {
+        var merged: [String: ClaudeDesktopSidecarRecord] = [:]
+        for rootURL in roots {
+            for (cli, record) in records(root: rootURL, fileManager: fileManager) {
+                if let existing = merged[cli], existing.modifiedAt >= record.modifiedAt { continue }
+                merged[cli] = record
+            }
+        }
+        return merged
     }
 
     private static func parseRecord(at url: URL, modifiedAt: Date) -> ClaudeDesktopSidecarRecord? {

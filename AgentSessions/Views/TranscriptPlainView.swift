@@ -4551,12 +4551,13 @@ private struct ClaudeArchiveRestoreStripControl: View {
         }
     }
 
-    /// `ClaudeDesktopSessionTitles.records()` enumerates
-    /// `~/Library/Application Support/Claude/claude-code-sessions` every call
-    /// (per-file parse results are cached by mtime since W7 Task 2b, but the
-    /// directory walk itself still runs every time) — run it off the main
-    /// actor so that walk never blocks the main thread, matching
-    /// `ClaudeRunwaySnapshotLoader`'s existing off-main usage of the same call.
+    /// `ClaudeDesktopSessionTitles.records(roots:)` enumerates both the Claude
+    /// Desktop Code-tab tree (`~/Library/Application Support/Claude/claude-code-sessions`)
+    /// and the Cowork tree (`local-agent-mode-sessions`) every call (per-file
+    /// parse results are cached by mtime since W7 Task 2b, but the directory
+    /// walk itself still runs every time) — run it off the main actor so that
+    /// walk never blocks the main thread, matching `ClaudeRunwaySnapshotLoader`'s
+    /// existing off-main usage of the same call.
     private func refreshArchiveState() async {
         didRestore = false
         guard session.source == .claude, let key = session.claudeArchiveJoinKey else {
@@ -4564,7 +4565,7 @@ private struct ClaudeArchiveRestoreStripControl: View {
             return
         }
         let rec = await Task.detached(priority: .utility) {
-            ClaudeDesktopSessionTitles.records()[key]
+            ClaudeDesktopSessionTitles.records(roots: ClaudeDesktopSessionTitles.defaultRoots())[key]
         }.value
         guard !Task.isCancelled else { return }
         archivedSidecarPath = (rec?.isArchived == true) ? rec?.sidecarPath : nil

@@ -503,7 +503,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
-    /// Read-only overlay of Claude Desktop sidecar records, keyed by cliSessionId
+    /// Read-only overlay of Claude Desktop + Cowork sidecar records, keyed by cliSessionId
     /// (== a session's codexInternalSessionIDHint for Code-tab transcripts).
     @Published private(set) var claudeArchive: [String: ClaudeDesktopSidecarRecord] = [:]
 
@@ -530,7 +530,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     func rebuildClaudeArchiveOverlay() {
-        let records = ClaudeDesktopSessionTitles.records()
+        let records = ClaudeDesktopSessionTitles.records(roots: ClaudeDesktopSessionTitles.defaultRoots())
         if records != claudeArchive { claudeArchive = records }
     }
 

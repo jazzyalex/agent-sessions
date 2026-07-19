@@ -91,4 +91,65 @@ final class ClaudeDesktopSessionTitlesTests: XCTestCase {
         XCTAssertNil(afterDelete["doomed-2222"],
                      "a deleted sidecar must not be served from the cache")
     }
+
+    // MARK: - Multi-root (Cowork overlay, 2026-07-19)
+
+    func testRecordsMultiRootMergesNewerMtimeWins() throws {
+        let rootA = root.appendingPathComponent("code-sessions", isDirectory: true)
+        let rootB = root.appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: rootB, withIntermediateDirectories: true)
+
+        let older = rootA.appendingPathComponent("local_a.json")
+        let newer = rootB.appendingPathComponent("local_b.json")
+        try """
+        {"sessionId":"local_a","cliSessionId":"shared-1111","title":"Older title"}
+        """.write(to: older, atomically: true, encoding: .utf8)
+        try """
+        {"sessionId":"local_b","cliSessionId":"shared-1111","title":"Newer title"}
+        """.write(to: newer, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(10)],
+            ofItemAtPath: newer.path
+        )
+
+        let merged = ClaudeDesktopSessionTitles.records(roots: [rootA, rootB])
+        XCTAssertEqual(merged["shared-1111"]?.title, "Newer title")
+    }
+
+    func testRecordsMultiRootToleratesMissingRoot() throws {
+        let rootA = root.appendingPathComponent("code-sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootA, withIntermediateDirectories: true)
+        try """
+        {"sessionId":"local_k","cliSessionId":"keep-3333","title":"Kept"}
+        """.write(to: rootA.appendingPathComponent("local_k.json"), atomically: true, encoding: .utf8)
+
+        let missing = root.appendingPathComponent("does-not-exist", isDirectory: true)
+        let merged = ClaudeDesktopSessionTitles.records(roots: [rootA, missing])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged["keep-3333"]?.title, "Kept")
+    }
+
+    func testRecordsSkipsHeavyCoworkDirectories() throws {
+        // uploads/outputs/cowork_plugins/skills-plugin can hold thousands of
+        // files; the walk must skipDescendants, never parse json inside them.
+        let coworkRoot = root.appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
+        let sessionDir = coworkRoot.appendingPathComponent("acct/ws", isDirectory: true)
+        let uploads = sessionDir.appendingPathComponent("uploads", isDirectory: true)
+        try FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+
+        try """
+        {"sessionId":"local_real","cliSessionId":"real-4444","title":"Real Cowork task"}
+        """.write(to: sessionDir.appendingPathComponent("local_real.json"), atomically: true, encoding: .utf8)
+        try """
+        {"sessionId":"local_decoy","cliSessionId":"decoy-5555","title":"Decoy inside uploads"}
+        """.write(to: uploads.appendingPathComponent("local_decoy.json"), atomically: true, encoding: .utf8)
+
+        let records = ClaudeDesktopSessionTitles.records(roots: [coworkRoot])
+        XCTAssertEqual(records["real-4444"]?.title, "Real Cowork task")
+        XCTAssertNil(records["decoy-5555"], "files inside skipped directories must not be parsed")
+
+        let counts = ClaudeDesktopSessionTitles.debugParseAndHitCounts()
+        XCTAssertEqual(counts.parsed, 1, "the decoy must be skipped by skipDescendants, not parsed-and-discarded")
+    }
 }
