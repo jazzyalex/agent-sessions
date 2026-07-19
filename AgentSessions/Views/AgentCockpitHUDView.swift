@@ -1581,6 +1581,8 @@ struct AgentCockpitHUDView: View {
                 codexEligible: codexProbeEligible,
                 claudeShown: claudeAgentEnabledForLimits && claudeUsageEnabledForLimits,
                 codexShown: codexAgentEnabledForLimits && codexUsageEnabledForLimits,
+                claudeDisabledReason: claudeProbeDisabledReason,
+                codexDisabledReason: codexProbeDisabledReason,
                 onProbe: { claude, codex in
                     if claude && codex { ProbeCoordinator.shared.requestBoth() }
                     else if claude { ProbeCoordinator.shared.request(.claude) }
@@ -1602,6 +1604,30 @@ struct AgentCockpitHUDView: View {
             && !probeCoordinator.isBusy(.codex)
             && !codexUsageModel.isUpdating
             && !(codexUsageModel.authStatus?.state.isAlarming ?? false)
+    }
+
+    /// Explains why the Claude probe item is disabled, mirroring the guards
+    /// in `claudeProbeEligible` (first match wins); nil when eligible.
+    private var claudeProbeDisabledReason: String? {
+        if probeCoordinator.isBusy(.claude) || claudeUsageModel.isUpdating {
+            return "A probe or refresh is already running."
+        }
+        if claudeUsageModel.authStatus?.state.isAlarming == true {
+            return "Signed out / auth needs attention — probing would hit a login screen."
+        }
+        return nil
+    }
+
+    /// Explains why the Codex probe item is disabled, mirroring the guards
+    /// in `codexProbeEligible` (first match wins); nil when eligible.
+    private var codexProbeDisabledReason: String? {
+        if probeCoordinator.isBusy(.codex) || codexUsageModel.isUpdating {
+            return "A probe or refresh is already running."
+        }
+        if codexUsageModel.authStatus?.state.isAlarming == true {
+            return "Signed out / auth needs attention — probing would hit a login screen."
+        }
+        return nil
     }
 
     /// Marks pin as belonging to no group — it is window behavior, not a
@@ -4862,6 +4888,10 @@ private struct HUDProbePopover: View {
     let codexEligible: Bool
     let claudeShown: Bool
     let codexShown: Bool
+    /// Why Claude is disabled right now; nil when eligible.
+    let claudeDisabledReason: String?
+    /// Why Codex is disabled right now; nil when eligible.
+    let codexDisabledReason: String?
     let onProbe: (_ claude: Bool, _ codex: Bool) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -4870,20 +4900,22 @@ private struct HUDProbePopover: View {
             if claudeShown {
                 Button("Probe Claude") { onProbe(true, false); dismiss() }
                     .disabled(!claudeEligible)
+                    .help(claudeEligible ? "Force-refresh Claude usage via the CLI (may consume tokens)." : (claudeDisabledReason ?? ""))
             }
             if codexShown {
                 Button("Probe Codex") { onProbe(false, true); dismiss() }
                     .disabled(!codexEligible)
+                    .help(codexEligible ? "Force-refresh Codex usage via the CLI (may consume tokens)." : (codexDisabledReason ?? ""))
             }
             if claudeShown && codexShown {
                 Divider()
                 Button("Probe Both") { onProbe(true, true); dismiss() }
                     .disabled(!(claudeEligible && codexEligible))
+                    .help((claudeEligible && codexEligible) ? "Force-refresh both providers (may consume tokens)." : "Available when both providers are idle and signed in.")
             }
         }
         .buttonStyle(.plain)
         .padding(10)
-        .help("Force-refresh usage via the provider CLI. May consume tokens.")
     }
 }
 
