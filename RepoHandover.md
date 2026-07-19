@@ -1,3 +1,23 @@
+## 2026-07-18 12:31 · site-chrome-unification · Landing header + style unified across guides & blog
+status: done
+
+**State:** Guides and The Rollout blog now use the landing page's sticky nav header, design tokens, and full light+dark mode. Committed `6f0c96ec`, pushed to `main`, GitHub Pages built (no errors), verified live on blog + guides.
+
+**Decided / don't redo:**
+- Chose Approach A (rework the shared stylesheet + swap header markup); rejected Approach B (Jekyll-ify the 6 static guides + extract landing CSS) as out of scope.
+- Accepted trade-off: design tokens are duplicated between `docs/index.html` (inline `<style>`) and `guides/guide.css` — a future landing redesign needs a matching `guide.css` edit. Kept to hold zero risk on the landing page. Landing page + `guide.js` intentionally untouched.
+- Sub-page nav is the **simplified** variant (brand + The Rollout + GitHub★), reusing `guide.js`'s `#github-stars` IDs — not the landing's full nav.
+- Local `jekyll build` needs `LANG=en_US.UTF-8` (theme-injected `style.scss` trips US-ASCII); pre-existing, non-issue on Pages.
+
+**Key files:**
+- `docs/guides/guide.css` — now the shared design system (tokens + `.nav` + tokenized body + footer band).
+- `docs/blog/blog.css` — trimmed to blog-only rules; bespoke dark-mode block removed (global via tokens).
+- `docs/_layouts/blog.html` + `docs/guides/*.html` ×6 — header swapped to unified `.nav`.
+- `docs/superpowers/specs/2026-07-18-site-chrome-unification-design.md` — design record.
+
+**Next:**
+1. Nothing required — shipped. Optional future: fully DRY the landing/guide tokens (Approach B) if the site gets a bigger redesign.
+
 ## 2026-07-18 10:59 · agent-support-format-check · Weekly format check (Claude mode event) + OpenClaw auth wall
 status: done
 
