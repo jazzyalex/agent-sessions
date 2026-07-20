@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.2/AgentSessions-4.6.2.dmg"><b>Download Agent Sessions 4.6.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg"><b>Download Agent Sessions 4.6.3 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6.2** — Codex guardian sessions stop showing up as a duplicate of the session they were reviewing, subagents spawned by subagents stop vanishing from the list, and Cowork tasks get their own badge. Heads up: the guardian fix rebuilds your Codex index once on first launch, so Codex sessions drop out of the list and search for a couple of minutes while it runs. [See what's new ↓](#whats-new-in-462)
+> **New in 4.6.3** — The footer usage meters can finally be switched off: the three toggles that used to claim to do this never did anything, and one switch replaces them. The usage-source note ("via claude.ai") also stops breaking the footer layout. [See what's new ↓](#whats-new-in-463)
 
 ## Overview
 
@@ -72,20 +72,16 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.6.2
+## What's New in 4.6.3
 
-**TL;DR** - Codex's approval-reviewer ("guardian") sessions used to sit in the list as a second copy of the session they were reviewing. They now nest under their parent like any other subagent. Subagents that spawned their own subagents were disappearing from the list entirely; the list now walks the whole tree. Claude Cowork tasks and Codex's sandboxed work sessions each get their own badge.
+**TL;DR** - The footer usage meters can be switched off. Settings → Usage Tracking carried three toggles that claimed to control this and none of them did anything — they saved a value nothing read, and flipping usage tracking overwrote your choice anyway. One working switch replaces all three. The "via claude.ai" source note also stops pushing the footer out of line.
 
-**Upgrade note:** the guardian fix only reaches sessions you already indexed by re-reading them, so the first launch after updating rebuilds your Codex session metadata. While that runs, Codex sessions are missing from the list **and from search**, then come back all at once — timed at about two and a half minutes for a 3,300-session, 5 GB library, and less for smaller ones. Claude sessions are unaffected, and it happens once.
+New in 4.6.3:
+- **Show usage in the footer** — one switch, applied immediately, no relaunch. Tracking keeps running while it's off, so the menu bar and Quota Meter are unaffected; this only decides whether the main window repeats the same numbers.
+- **Reset times are always shown** — they're part of reading a meter, so the footer no longer pretends that's optional. The menu bar keeps its own reset-indicator switches in its own menu.
+- **The source note stays on one line** — a reading served by the claude.ai web path or the CLI probe used to be tagged on a second line underneath, which grew the fixed-height footer and shoved everything out of alignment.
 
-New in 4.6.2:
-- **Guardian sessions stop duplicating their parent** — they nest as subagents, and the **work** pill no longer duplicates onto them.
-- **Resuming a guardian resumes the guardian** — newer Codex builds pointed a guardian's internal session id at its parent, so Resume reopened the wrong session.
-- **Grandchildren stay in the list** — a subagent that spawned its own subagents used to drop those children entirely: not nested, not top-level, just gone.
-- **Cowork and Codex work sessions get their own badges** — sandboxed Cowork tasks no longer wear the same **desk** badge as Claude Desktop's Code tab.
-- **Claude usage recovers in seconds** — a fresher Keychain token is retried immediately, and rate-limit windows fall back to the web path instead of blacking out the meter.
-
-Previous release — 4.6.1: The Quota Meter stops claiming "no active session" while holding fresh data. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it, and subagents spawned by subagents stay in the list. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## What's New in 4.6
 
@@ -178,7 +174,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.6.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.2/AgentSessions-4.6.2.dmg)
+1. [Download AgentSessions-4.6.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
