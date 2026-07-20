@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.6.1</title>
-            <pubDate>Sun, 19 Jul 2026 14:13:04 -0700</pubDate>
+            <title>4.6.2</title>
+            <pubDate>Mon, 20 Jul 2026 09:33:34 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,18 +27,24 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.6.1</h2>
+<h2>What&#x27;s New in 4.6.2</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>The Quota Meter stops claiming &quot;no active session&quot; while it&#x27;s holding fresh data.</strong> Once your Claude CLI token lapsed, the calm &quot;idle&quot; verdict latched — and successful web-fallback reads could never clear it. The meter insisted nothing was running while the pasted-cookie web path served fresh usage every minute. Fresh live data now outranks the idle latch (a genuine auth problem still wins), Claude&#x27;s idle tooltip becomes a recovery ladder — run the CLI, paste a cookie, probe — and web-served numbers are tagged <strong>via claude.ai</strong> so you can see where the reading came from.</li>
+<li><strong>Your Codex history rebuilds once, on the first launch after updating.</strong> The guardian fix below can only reach sessions that are already indexed by re-reading them, so this release re-derives the metadata for your Codex sessions on first launch. While that runs, Codex sessions are missing from the session list <strong>and from search results</strong>, then reappear all at once when it finishes — there&#x27;s no partial fill. A large library takes a while: timed here at about <strong>two and a half minutes</strong> for 3,300 Codex sessions across 5 GB of transcripts, and proportionally less for smaller histories. Claude sessions are untouched throughout, and the rebuild happens exactly once. If your Codex sessions look like they&#x27;ve vanished right after updating, let it finish.</li>
 </ul>
 <h3>Features</h3>
 <ul>
-<li><strong>Ask for a fresh usage reading from the toolbar.</strong> Forcing a hard probe used to be an undiscoverable double-click on the Quota Meter. It&#x27;s now a visible toolbar button with a per-provider menu that tells you in the row itself when a probe is <strong>probing…</strong> or has <strong>failed</strong>, greys out providers it can&#x27;t probe with a reason, and won&#x27;t let two probes race from the toolbar, Preferences, and the usage strip at once. The old double-click gesture is gone.</li>
+<li><strong>Cowork sessions are labelled as Cowork.</strong> Claude&#x27;s Cowork tasks were already in your history, but they wore the same <strong>desk</strong> badge as Claude Desktop&#x27;s Code tab, so there was no way to tell a sandboxed Cowork run from a normal desktop coding session. They now carry their own <strong>cowork</strong> badge. Renaming a task inside Cowork retitles it here without a reindex, and archiving one puts it behind the same archive filter that already covers Claude Desktop — the transcript&#x27;s archive strip included.</li>
+<li><strong>Codex&#x27;s sandboxed tasks get their own badge too.</strong> Codex Desktop runs some tasks in a throwaway workspace under <code>~/Documents/Codex/&lt;date&gt;/&lt;slug&gt;/</code> instead of a repo you chose. Those sessions used to look identical to ordinary Codex Desktop work; they now carry a <strong>work</strong> badge, named after Codex&#x27;s own <code>codex_work_desktop</code> marker rather than borrowing Claude&#x27;s Cowork name for a different vendor&#x27;s feature.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Burn rate no longer overstates subagent-heavy sessions.</strong> A session that keeps spawning subagents also keeps spawning fresh transcript paths, and each new path&#x27;s first turn — a couple of seconds of cache-heavy setup — read as thousands of tokens per second. The existing session-level cap never fired for these sessions, because some path was always already measured, so orchestrated fleets showed burn rates up to 3.6x too high (1.6x median, validated against live ground truth). Provisional paths are now clamped to the session&#x27;s best measured path rate, with pricing components scaled by the same factor — median error drops to roughly 1.25x.</li>
+<li><strong>Codex guardian sessions stop duplicating their parent&#x27;s row.</strong> Codex&#x27;s approval-reviewer subagent (&quot;guardian&quot;) sessions used to show up as a second top-level row right next to the session they were reviewing — same title, the same <strong>work</strong> pill, no sign the two were related. They&#x27;re now classified as subagents like any other Codex subagent: they nest underneath their parent, and the <strong>work</strong> pill no longer duplicates onto them. Applying this to sessions you already indexed needs the one-time Codex rebuild described under Highlights.</li>
+<li><strong>Resuming a Codex guardian session no longer resumes its parent.</strong> Newer Codex builds recorded a guardian subagent&#x27;s session id as its parent&#x27;s rather than its own, so clicking Resume on a guardian row reopened the parent&#x27;s session. Guardian rows now resume themselves.</li>
+<li><strong>Claude usage recovers in seconds, not minutes.</strong> When the Claude CLI refreshes its sign-in while Agent Sessions holds an older cached token, the meter now retries immediately with the fresh token instead of waiting out a multi-minute credential check.</li>
+<li><strong>Rate-limit windows no longer black out the meter.</strong> When Anthropic&#x27;s usage endpoint rate-limits (windows can run tens of minutes), Agent Sessions now switches to the claude.ai web path to keep live numbers flowing instead of sitting on stale data.</li>
+<li><strong>The spinner tells you why.</strong> The &quot;reconnecting…&quot; cells in the Quota Meter, menu bar, and footer now say what&#x27;s actually happening — &quot;rate limited — retrying…&quot; — instead of spinning anonymously.</li>
+<li><strong>Leaked probe sessions are reaped reliably.</strong> A hidden Claude probe could survive for days if its tmux socket vanished; the launch sweep now retries and logs instead of silently skipping.</li>
 </ul>
 <h3>Reminder: What You Got in 4.6</h3>
 <ul>
@@ -47,13 +53,13 @@
 <li><strong>The Web API path stops telling signed-in users to &quot;sign in&quot;.</strong> When it couldn&#x27;t find a claude.ai session it advised signing in &quot;at claude.ai (default profile)&quot; — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can&#x27;t read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.</li>
 <li><strong>The Quota Meter&#x27;s right-click hint stays findable.</strong> In On-Demand mode the &quot;Right-click for controls&quot; hint used to show once and never again — but right-click is the only way back to the toolbar, so it now reappears on every hover.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.1</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.2</a></p>
 </div>
             ]]></description>
-            <sparkle:version>62</sparkle:version>
-            <sparkle:shortVersionString>4.6.1</sparkle:shortVersionString>
+            <sparkle:version>63</sparkle:version>
+            <sparkle:shortVersionString>4.6.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.1/AgentSessions-4.6.1.dmg" length="22074819" type="application/octet-stream" sparkle:edSignature="k+SCIGFGJdSKWzx4Nw9cB2gG50FSDXoRbtwZ1Os0sgi1qpIkk5k/PbVl474hQzrQw+z3Gw48OxGqbhHXJngtAg=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.2/AgentSessions-4.6.2.dmg" length="22097556" type="application/octet-stream" sparkle:edSignature="IIZR1n9rZ1Iz4FAkPfmu7Ld49dlu9PROpi7OJMyZkY3JAiPNsGVmhh906sKapX3m9MasoiR0+0bgljlQeTZWAg=="/>
         </item>
     </channel>
 </rss>
