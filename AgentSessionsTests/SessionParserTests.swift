@@ -3856,4 +3856,24 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNil(session.repoName)
         XCTAssertEqual(session.repoDisplay, "—")
     }
+
+    func testCodexInternalSessionIDPrefersOwnIDOverParentPointingSessionID() throws {
+        // Newer Codex builds set payload.session_id to the PARENT's UUID on
+        // subagent rollouts; payload.id is the thread's own UUID. Resume and
+        // hierarchy joins must use the OWN id.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexOwnID-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-07-20T00:22:56.633Z","type":"session_meta","payload":{"session_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","id":"019f7ce7-8979-7203-8867-34084576cf0c","parent_thread_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/tmp","source":{"subagent":{"other":"guardian"}}}}"#,
+            #"{"timestamp":"2026-07-20T00:22:57.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Assess"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.codexInternalSessionIDHint, "019f7ce7-8979-7203-8867-34084576cf0c")
+    }
 }

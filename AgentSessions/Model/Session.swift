@@ -725,10 +725,13 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 if let v = obj["session_id"] as? String, !v.isEmpty { return v }
                 if let payload = obj["payload"] as? [String: Any] {
-                    if let v = payload["session_id"] as? String, !v.isEmpty { return v }
-                    // Newer Codex session_meta uses `payload.id` as the session identifier.
+                    // session_meta's `payload.id` is the thread's OWN UUID. It must win
+                    // over `payload.session_id`, which newer Codex builds (0.145+) set
+                    // to the PARENT thread's UUID on subagent rollouts — preferring
+                    // session_id made guardian rows resume/join as their parent.
                     if let t = obj["type"] as? String, t == "session_meta",
                        let v = payload["id"] as? String, !v.isEmpty { return v }
+                    if let v = payload["session_id"] as? String, !v.isEmpty { return v }
                 }
             }
             // Lightweight regex fallback when JSON parsing fails
