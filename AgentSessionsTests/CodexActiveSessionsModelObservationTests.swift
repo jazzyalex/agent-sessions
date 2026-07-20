@@ -151,7 +151,7 @@ final class CodexActiveSessionsModelObservationTests: XCTestCase {
     // register a tracked-property access — a table row that only calls these
     // lookups must not re-render on every poll tick — while reading the
     // `presences` array directly (the views' actual data source, e.g.
-    // `CockpitView.makeLiveRowsSnapshot()`) MUST register one, and that
+    // `AgentCockpitHUDView.makeRowsSnapshot(...)`) MUST register one, and that
     // registration must actually fire when `apply(_:)` changes membership.
     // `withObservationTracking(_:onChange:)` is the framework-provided way to
     // assert this deterministically and synchronously — it does not need the
@@ -176,7 +176,7 @@ final class CodexActiveSessionsModelObservationTests: XCTestCase {
         withObservationTracking {
             // Both are `CodexActivePresence`-keyed facade sync-lookup methods
             // views call from body-reachable sites (`liveState(for:)` —
-            // CockpitView:167, AgentCockpitHUDView:1996/2008/2222,
+            // AgentCockpitHUDView:1996/2008/2222,
             // UnifiedSessionsView:2654; `idleReason(for:)` —
             // AgentCockpitHUDView:2223, per the W6 recon census). Both
             // resolve entirely through `latestSnapshot`, which the Task 2
@@ -208,7 +208,7 @@ final class CodexActiveSessionsModelObservationTests: XCTestCase {
 
         var invalidated = false
         withObservationTracking {
-            // `CockpitView.makeLiveRowsSnapshot()`'s legitimate data source —
+            // The live-row builders' legitimate data source —
             // the property this migration deliberately keeps tracked so
             // views that render the list itself still update.
             _ = model.presences

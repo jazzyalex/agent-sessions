@@ -412,8 +412,7 @@ enum SessionRowsBuilder {
     // dependency. `directJoinFallbackKeys(for:presenceLookup:)` below is the
     // shared helper that replaces the byte-identical
     // `supportedFallbackSources`/`directJoinFallbackKeys` blocks that used to
-    // live separately in `CockpitView.makeLiveRowsSnapshot()` and
-    // `AgentCockpitHUDView.makeRowsSnapshot(...)` (S2).
+    // live separately in each live-row builder (S2).
 
     /// Builds the reverse (session -> presence) fallback join used when a session
     /// has no presence directly keyed to it (no session-specific join signals in
@@ -585,8 +584,8 @@ enum SessionRowsBuilder {
     }
 
     /// Shared helper (S2): the direct-join key set computation was
-    /// byte-identical across `CockpitView.makeLiveRowsSnapshot()` and
-    /// `AgentCockpitHUDView.makeRowsSnapshot(...)` (each had its own copy of
+    /// byte-identical across the live-row builders (`AgentCockpitHUDView.makeRowsSnapshot(...)`
+    /// and, before its deletion, the Cockpit view — each had its own copy of
     /// `supportedFallbackSources`/`directJoinFallbackKeys`). `presenceLookup`
     /// stays a closure rather than a concrete `CodexActiveSessionsModel`
     /// parameter so this file doesn't need to import/depend on that type --
@@ -600,5 +599,47 @@ enum SessionRowsBuilder {
             keys.insert(fallbackPresenceKey(source: session.source, sessionID: session.id))
         }
         return keys
+    }
+
+    /// Whether an unresolved presence placeholder (no indexed `Session` joined to
+    /// it) should be dropped rather than surfaced as its own live row. Pure over
+    /// `Sendable` inputs; `hasWorkspaceMatch` is passed in because the workspace
+    /// index lookup belongs to the caller's `SessionLookupIndexes`.
+    ///
+    /// Rehomed here when the Agent Cockpit was deprecated and `CockpitView` was
+    /// deleted — the rule is presence-shaping logic, not view logic.
+    static func shouldHideUnresolvedPresencePlaceholder(_ presence: CodexActivePresence,
+                                                        resolvedSession: Session?,
+                                                        hasWorkspaceMatch: Bool) -> Bool {
+        // Keep unresolved rows only when they still offer user actionability:
+        // direct join keys, focusable terminals, or known workspace joins.
+        // Registry file path (`sourceFilePath`) by itself is not actionable and can
+        // surface ghost sub-agent rows with no own terminal/session.
+        guard resolvedSession == nil else { return false }
+        let kind = presence.kind?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if kind == "subagent" { return true }
+
+        // Codex placeholders without a resolved indexed session are often stale
+        // discovery artifacts. Keep Codex rows only when joined.
+        if presence.source == .codex { return true }
+        let hasSessionID = presence.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let hasLogPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        if hasSessionID || hasLogPath { return false }
+
+        let hasRevealURL = presence.revealURL != nil
+        let hasITermGuid = CodexActiveSessionsModel.itermSessionGuid(from: presence.terminal?.itermSessionId)?.isEmpty == false
+        let termProgram = presence.terminal?.termProgram?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        let reportsITermProgram = termProgram.contains("iterm")
+        let canFocusFallbackStrict = hasRevealURL || hasITermGuid || reportsITermProgram
+
+        // For non-Codex providers, unresolved placeholders are noisy unless they
+        // are iTerm-backed/focusable or can be workspace-joined.
+        if canFocusFallbackStrict { return false }
+        if hasWorkspaceMatch { return false }
+        return true
     }
 }

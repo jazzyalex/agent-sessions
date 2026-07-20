@@ -3406,8 +3406,8 @@ struct UnifiedSessionsView: View {
     /// but it's the same O(sessions) set of calls this function always made, just
     /// isolated from the heavy grouping/sorting that used to run alongside it.
     /// Delegates to `SessionRowsBuilder.directJoinFallbackKeys` (S2 shared
-    /// helper) so this file, `CockpitView`, and `AgentCockpitHUDView` don't
-    /// each keep their own copy of the same source-filter loop.
+    /// helper) so this file and `AgentCockpitHUDView` don't each keep their
+    /// own copy of the same source-filter loop.
     private func directJoinFallbackKeys(for sessions: [Session]) -> Set<String> {
         SessionRowsBuilder.directJoinFallbackKeys(for: sessions) { session in
             activeCodexSessions.presence(for: session)

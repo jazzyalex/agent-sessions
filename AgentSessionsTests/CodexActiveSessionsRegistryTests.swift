@@ -1880,7 +1880,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.sourceFilePath = "/Users/alexm/.codex/active/subagent.json"
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1896,7 +1896,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.sessionId = "sid-subagent"
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1912,7 +1912,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.sessionId = "sid-codex"
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1928,7 +1928,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.sessionLogPath = "/tmp/subagent-rollout.jsonl"
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1944,7 +1944,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.sessionLogPath = "/tmp/codex-rollout.jsonl"
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1964,7 +1964,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.terminal = terminal
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -1986,7 +1986,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         )
 
         XCTAssertFalse(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: resolved,
                 hasWorkspaceMatch: false
@@ -2004,7 +2004,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.terminal = terminal
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -2022,7 +2022,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.terminal = terminal
 
         XCTAssertTrue(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -2041,7 +2041,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.terminal = terminal
 
         XCTAssertFalse(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false
@@ -2060,7 +2060,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         presence.terminal = terminal
 
         XCTAssertFalse(
-            CockpitView.shouldHideUnresolvedPresencePlaceholder(
+            SessionRowsBuilder.shouldHideUnresolvedPresencePlaceholder(
                 presence,
                 resolvedSession: nil,
                 hasWorkspaceMatch: false

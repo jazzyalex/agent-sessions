@@ -2478,8 +2478,8 @@ struct AgentCockpitHUDView: View {
                                              now: Date = Date()) -> HUDRowsSnapshot {
         let supportedSources: Set<SessionSource> = [.codex, .claude, .opencode]
         let allSessions = codexSessions + claudeSessions + opencodeSessions
-        // S2: shared with `CockpitView.makeLiveRowsSnapshot()`, which used to
-        // carry a byte-identical copy of this direct-join key computation.
+        // S2: extracted to `SessionRowsBuilder` when this direct-join key
+        // computation was duplicated byte-identically across live-row builders.
         let directJoinFallbackKeys = SessionRowsBuilder.directJoinFallbackKeys(for: allSessions) { session in
             activeCodex.presence(for: session)
         }
