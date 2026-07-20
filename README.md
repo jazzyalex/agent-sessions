@@ -9,8 +9,8 @@
 </td>
 <td>
 
-**Session management for [Codex](docs/guides/codex-local-history.html), [Claude](docs/guides/claude-code-jsonl-history.html), [OpenCode](docs/guides/opencode-sqlite-history.html), [Cursor](docs/guides/cursor-agent-local-history.html), GitHub Copilot CLI, Pi, Antigravity CLI, [Hermes](docs/guides/hermes-agent-state-db-history.html), and [OpenClaw](docs/guides/openclaw-local-agent-history.html) on macOS.**
-Search, inspect, save, and resume local AI-coding sessions from CLI tools, desktop apps, and IDE agent surfaces.
+**Live per-session quota burn for Codex and Claude — see *which* session is eating your 5-hour and weekly limits, priced per model.**
+Plus a searchable history across [Codex](docs/guides/codex-local-history.html), [Claude](docs/guides/claude-code-jsonl-history.html), [OpenCode](docs/guides/opencode-sqlite-history.html), [Cursor](docs/guides/cursor-agent-local-history.html), GitHub Copilot CLI, Pi, Antigravity CLI, [Hermes](docs/guides/hermes-agent-state-db-history.html), and [OpenClaw](docs/guides/openclaw-local-agent-history.html) — transcripts, images, and one-click resume. macOS, local-only.
 
 </td>
 </tr>
@@ -36,10 +36,12 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 
 ## Overview
 
-Agent Sessions is a local-first Mac app for finding useful work that coding agents already wrote to disk. It brings Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, and Pi histories into one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
+Run three agents at once and a normal quota meter tells you "60% used" — not which one spent it. Agent Sessions attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows. Pick the lens you want (5-hour, weekly, tokens/hour, or dollars); the `$` lens prices each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended into one number.
+
+It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, and Pi histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>New in 4.0 — Session Runway: live per-session quota burn-rate</em></p>
+  <p style="margin:0 0 0px 0;"><em>Session Runway — live per-session quota burn-rate</em></p>
   <img src="docs/assets/quota-meter-runway.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
 
   <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
@@ -81,46 +83,7 @@ New in 4.6.3:
 - **Reset times are always shown** — they're part of reading a meter, so the footer no longer pretends that's optional. The menu bar keeps its own reset-indicator switches in its own menu.
 - **The source note stays on one line** — a reading served by the claude.ai web path or the CLI probe used to be tagged on a second line underneath, which grew the fixed-height footer and shoved everything out of alignment.
 
-Previous release — 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it, and subagents spawned by subagents stay in the list. Full history in the [changelog](docs/CHANGELOG.md).
-
-## What's New in 4.6
-
-**TL;DR** - Read your Claude subscription usage without the CLI. If you don't run the Claude CLI, Agent Sessions reads your usage over the web — but macOS 14+ Safari stopped sharing the claude.ai session with other apps, so that path had gone quiet. Paste your session cookie once in Settings and it works again: kept in your Keychain, no Full Disk Access, sign-in never leaves your browser.
-
-**Highlights:** On macOS 14 and 15, Safari keeps the live claude.ai cookie in a store other apps can't read, so the Web API usage path had become a dead end for anyone without the Claude CLI. Now Settings → Usage Tracking accepts your claude.ai `sessionKey` (or the whole cookie header) and uses it directly for usage lookups — no scraping, no Full Disk Access. The app only holds the token you hand it, stored in the Keychain, and a **Test now** button confirms it on the spot. The old advice to "sign in at claude.ai" — impossible to satisfy on these macOS versions — is gone, replaced with honest, cause-aware messages that point to the fix that works. The Quota Meter also got two small touches: its right-click hint stays findable on every hover, and the agent row now marks which runway lens is live.
-
-New in 4.6:
-- **Paste-a-cookie Claude web usage** — hand Settings your claude.ai session cookie once; it reads your subscription usage over the web with no CLI, no Full Disk Access, and no scraping.
-- **Kept in the Keychain** — the app stores only the token you paste, and a **Test now** button runs an end-to-end check.
-- **Honest Web API messages** — no more "sign in at claude.ai" advice you can't act on; the guidance now points to the cookie paste that actually works.
-- **Quota Meter polish** — the right-click hint recurs on hover, and the agent row marks the active runway lens (5h/Wk).
-
-Previous release — 4.5: See what each session is costing you, and a Quota Meter that holds still. Full history in the [changelog](docs/CHANGELOG.md).
-
-## What's New in 4.5
-
-**TL;DR** - See what each session is costing you: the Session Runway can report every active session's API-equivalent spend per hour, priced per model. And the Quota Meter holds still — it no longer grows when your pointer crosses it, so you can drag it where you want it.
-
-**Highlights:** The Session Runway now measures whatever you ask it to — **5-hour** burn, **weekly** share, raw **tokens/hour**, or **dollars**. The `$` rate prices each model in a session at its own rate, so an orchestrator on Opus driving subagents on Sonnet is costed at what each actually runs at rather than blended into one number. Meanwhile the Quota Meter stops fighting you: it used to expand whenever the pointer crossed it, moving the window while you were aiming at it. Now the pointer only moves it and **right-click** summons its controls. The cockpit also gets one View-menu entry for the whole choice — Quota Meter, Compact, Full, or **Off** — so the pinned window can finally be closed.
-
-New in 4.5:
-- **Dollar burn** — each active session's API-equivalent cost per hour, priced per model, not blended.
-- **Selectable runway rates** — 5-Hour, Weekly, Tokens, or Dollars, chosen from the meter and remembered.
-- **A Quota Meter that stays put** — no pointer-driven resizing; right-click for the toolbar; drag it anywhere.
-- **One View-menu entry** — Quota Meter / Compact / Full / Off, with ⌘⌥⇧C and ⇧⌘M. ⌘W closes the cockpit.
-
-Previous release — 4.4: Codex usage keeps working when OpenAI pauses the 5-hour limit. Full history in the [changelog](docs/CHANGELOG.md).
-
-## What's New in 4.4
-
-**TL;DR** - Codex usage keeps working when OpenAI pauses the 5-hour limit. Agent Sessions detects the change, shows a calm "no limit" for 5h while keeping your weekly usage accurate, and the Session Runway shows honest per-session token throughput instead of a misleading rate.
-
-**Highlights:** OpenAI temporarily removed Codex's 5-hour rate-limit window, which left the Quota Meter mislabeling weekly usage as "5h" with the wrong reset. Agent Sessions now recognizes this automatically — the 5h line reads a calm **"no limit"**, your **weekly** usage stays accurate, and it snaps back on its own when OpenAI restores the window. With no 5-hour budget to measure against, each active Codex session's runway now shows its real **token throughput** (e.g. `412K tk/h`) instead of a burn rate scaled to the wrong window, and a new **format guardrail** shows "can't verify" rather than a wrong number if a provider changes its usage data unexpectedly.
-
-New in 4.4:
-- **Codex 5-hour drop handled** — auto-detects when OpenAI pauses the 5h window; shows "no limit" for 5h, keeps weekly accurate, and self-recovers when it returns.
-- **Honest Session Runway for Codex** — active sessions show real token throughput (`412K tk/h`) while the 5h window is gone; reverts to the familiar 5h "m/h" once it's back.
-- **Format guardrail** — shows "can't verify" instead of a wrong number when a provider's usage format changes unexpectedly.
+**Recent releases** — 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. 4.5: dollar burn per session, priced per model, and a Quota Meter that stays put. 4.4: Codex 5-hour drop handled with honest "no limit" and "can't verify" states. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -134,18 +97,29 @@ New in 4.4:
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
-- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with a compact Quota Meter for always-on Codex and Claude usage visibility, freshness diagnostics, and projected run-out alerts.
+- Quota Meter with Session Runway shows **live burn rate per session** against your Codex and Claude 5-hour and weekly limits — in percent, tokens/hour, or dollars priced per model.
+- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with active/waiting summaries, freshness diagnostics, and projected run-out alerts.
 - Local-only indexing designed for large histories.
+
+## Quota Meter — Session Runway
+
+An ordinary quota meter says "60% used." It won't say which of your three running agents spent it. The Quota Meter attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows.
+
+- **Per-session burn bars** — each active session gets its own rate against the live window, so you know which one to stop.
+- **Four lenses** — 5-hour, weekly, tokens/hour, or dollars; chosen from the meter and remembered.
+- **Priced per model** — the `$` lens rates each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed at what each actually runs at rather than blended into one number.
+- **Honest states** — a calm "no limit" when a provider drops a window, and "can't verify" rather than a wrong number if usage data changes shape.
+- **Stays where you put it** — drag it anywhere, right-click for controls. Quota Meter / Compact / Full / Off from the View menu (⌘⌥⇧C, ⇧⌘M).
+
+<div align="center">
+  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude 5h/weekly limits with Session Runway per-session burn-rate bars" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
+</div>
 
 ## Agent Cockpit (Beta)
 
-Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking.
+Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking. Click any session to jump straight into its transcript.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Quota Meter with Session Runway per-session burn</em></p>
-  <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude 5h/weekly limits with Session Runway per-session burn-rate bars" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
-
-  <p style="margin:0 0 0px 0;"><em>Agent Cockpit</em></p>
   <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
 </div>
 

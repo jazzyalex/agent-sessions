@@ -4,23 +4,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Agent Sessions - Session Management for Codex, Claude, OpenCode, Cursor, Copilot, Pi and Antigravity</title>
+  <title>Agent Sessions - Live Per-Session Quota Burn for Codex and Claude on macOS</title>
   <meta name="description"
-    content="Agent Sessions 4.6.3 — the footer usage meters can finally be switched off: three toggles that claimed to do this never worked, and one switch replaces them. The via claude.ai source note also stops breaking the footer layout. Browse, search, inspect, and resume local AI coding-agent history on macOS: Codex CLI/Desktop/VS Code, Cursor Agent, Hermes, OpenClaw, Claude Desktop, OpenCode, Antigravity, Copilot, and Pi." />
+    content="See which agent session is eating your Codex and Claude 5-hour and weekly limits. Agent Sessions shows live per-session burn rate, priced per model, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended. Plus searchable local history across Codex, Claude, Cursor Agent, OpenCode, Hermes, OpenClaw, Antigravity, Copilot, and Pi. macOS, local-only, no telemetry." />
   <meta name="keywords"
     content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Cursor Agent history, Cursor agent transcripts, Hermes state.db, Hermes Agent sessions, OpenClaw sessions, OpenClaw JSONL, AI coding agent history, local session browser, Claude Desktop, OpenCode SQLite, Antigravity CLI, GitHub Copilot CLI, macOS agent history" />
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/">
-  <meta property="og:title" content="Agent Sessions - Local History for AI Coding Agents">
+  <meta property="og:title" content="Three agents running. One is eating your week.">
   <meta property="og:description"
-    content="Agent Sessions 4.6.3 — the footer usage meters can finally be switched off: three toggles that claimed to do this never worked, and one switch replaces them. The via claude.ai source note also stops breaking the footer layout. Browse and resume local Codex, Cursor, Hermes, OpenClaw, Claude, OpenCode, Antigravity, Copilot, and Pi sessions on macOS.">
-  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-history-light.png">
+    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@jazzyalex">
-  <meta name="twitter:title" content="Agent Sessions - Codex, Claude, Antigravity, Copilot Local History">
+  <meta name="twitter:title" content="Three agents running. One is eating your week.">
   <meta name="twitter:description"
-    content="Agent Sessions 4.6.3 — the footer usage meters can finally be switched off: three toggles that claimed to do this never worked, and one switch replaces them. The via claude.ai source note also stops breaking the footer layout. Browse and resume local Codex, Cursor, Hermes, OpenClaw, Claude, OpenCode, Antigravity, Copilot, and Pi sessions on macOS.">
-  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/session-history-light.png">
+    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/">
   <link rel="icon" href="assets/app-icon-32.png" />
   <style>
@@ -410,7 +410,7 @@
       </a>
       <div class="nav-links">
         <a class="hide-sm" href="#features">Features</a>
-        <a class="hide-sm" href="#cockpit">Quota Meter</a>
+        <a class="hide-sm" href="#quota-meter">Quota Meter</a>
         <a class="hide-sm" href="#guides">Guides</a>
         <a class="hide-sm" href="blog/">The Rollout</a>
         <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="gh-stars"></span></a>
@@ -421,8 +421,8 @@
   <a id="top"></a>
   <header class="hero">
     <p class="eyebrow">macOS · Open Source · Local-first</p>
-    <h1>Every coding agent. One history.</h1>
-    <p class="sub">Browse, search, inspect, and resume local AI agent sessions — across Codex, Claude, Cursor, Antigravity, Copilot, OpenCode, Pi and more.<br>Desktop apps and CLI, together.</p>
+    <h1>Three agents running. One is eating your week.</h1>
+    <p class="sub">Live burn rate <b>per session</b> against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs.<br>Plus searchable history across every agent you run.</p>
     <div class="cta-row">
       <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg">Download Agent Sessions 4.6.3</a>
       <a class="btn ghost" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
@@ -435,10 +435,7 @@
   </header>
 
   <div class="hero-shot">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="assets/session-all-agents-dark.png">
-      <img src="assets/session-history-light.png" alt="Main Sessions window with unified agent history and transcript preview">
-    </picture>
+    <img src="assets/quota-meter-runway.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars for Codex and Claude">
   </div>
 
   <section class="band" id="features">
@@ -497,7 +494,8 @@
     </div>
   </section>
 
-  <section class="band" id="cockpit" style="padding-top:0;">
+  <a id="cockpit"></a>
+  <section class="band" id="quota-meter" style="padding-top:0;">
     <div class="grid">
       <div class="feat span6 showcase">
         <div class="copy">
@@ -507,6 +505,7 @@
           <ul class="blist">
             <li><b>Always-on widget</b> — a tiny window that keeps your Codex &amp; Claude 5h / weekly runway on screen.</li>
             <li><b>Session Runway</b> — per-session burn bars that show which active Codex sessions are eating your plan, and how long until reset.</li>
+            <li><b>Priced per model</b> — the <code>$</code> lens rates each model in a session separately, so an Opus orchestrator driving Sonnet subagents is costed at what each actually runs at rather than blended into one number.</li>
             <li><b>Run-out predictions</b> — freshness-aware ETAs showing the runway left before you hit the wall.</li>
             <li><b>Quota Meter alerts</b> — separate controls for predicted exhaustion vs. low-threshold warnings.</li>
           </ul>
