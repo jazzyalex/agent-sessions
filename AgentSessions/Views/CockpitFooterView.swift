@@ -243,7 +243,7 @@ struct CockpitFooterView: View {
 		                        // Actively retrying: one compact line with spinning arrows,
 		                        // not a broken "-- ↻ Waiting" meter. Escalates to the chip
 		                        // above if the retries keep failing.
-		                        FooterRetryChip(provider: q.provider)
+		                        FooterRetryChip(provider: q.provider, caption: q.reconnectingCaption)
 		                    case .live:
 		                        VStack(alignment: .leading, spacing: 1) {
 		                            CockpitQuotaWidget(
@@ -368,6 +368,7 @@ private struct FooterIdleChip: View {
 /// fix, so the user is never left staring at an endless "retrying".
 private struct FooterRetryChip: View {
     let provider: QuotaData.Provider
+    var caption: String = "reconnecting…"
     @State private var spinning = false
 
     var body: some View {
@@ -377,7 +378,7 @@ private struct FooterRetryChip: View {
                 .foregroundStyle(.secondary)
                 .rotationEffect(.degrees(spinning ? 360 : 0))
                 .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: spinning)
-            Text("\(provider == .claude ? "Claude" : "Codex") — reconnecting…")
+            Text("\(provider == .claude ? "Claude" : "Codex") — \(caption)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

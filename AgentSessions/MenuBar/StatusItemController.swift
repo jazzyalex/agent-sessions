@@ -536,13 +536,14 @@ final class StatusItemController: NSObject {
         // read alike. Never a misleading "0% / no resets" (reads as exhausted):
         // `.reconnecting` says so, `.needsAction` shows unavailable (the auth-alert
         // row above carries the fix command).
-        switch QuotaData.claude(from: claudeStatus).presentationState {
+        let quota = QuotaData.claude(from: claudeStatus)
+        switch quota.presentationState {
         case .needsAction:
             return "\(label) --  Usage unavailable"
         case .idle:
             return "\(label) --  No active session"
         case .reconnecting:
-            return "\(label) --  reconnecting…"
+            return "\(label) --  \(quota.reconnectingCaption)"
         case .live:
             return resetLine(label: label, percent: percent, reset: reset)
         }

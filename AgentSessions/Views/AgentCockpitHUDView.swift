@@ -3639,6 +3639,10 @@ private struct HUDLimitsProviderEntry {
     /// (`.needsAction`) or a spinning "reconnecting" cell (`.reconnecting`)
     /// instead of a misleading "0% / no reset" meter.
     var presentationState: QuotaData.PresentationState = .live
+    /// The same `QuotaData` value's compact reconnecting caption (e.g. "rate
+    /// limited — retrying…"), carried alongside `presentationState` so every
+    /// HUD surface renders the actual cause instead of a generic spinner.
+    var reconnectingCaption: String = "reconnecting…"
 }
 
 private extension CodexRunwaySnapshot {
@@ -4300,7 +4304,8 @@ private struct HUDLimitsBar: View {
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
-                presentationState: QuotaData.codex(from: codexUsageModel).presentationState
+                presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
+                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -4317,7 +4322,8 @@ private struct HUDLimitsBar: View {
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
-                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
+                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
+                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption
             ))
         }
         return out
@@ -4558,7 +4564,8 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
-                presentationState: QuotaData.codex(from: codexUsageModel).presentationState
+                presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
+                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption
             ))
         }
         if claudeAgentEnabled && claudeUsageEnabled {
@@ -4575,7 +4582,8 @@ private struct HUDLimitsRowsPanel: View {
                 fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
-                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState
+                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
+                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption
             ))
         }
         return out
@@ -4662,7 +4670,7 @@ private struct HUDLimitsRowsPanel: View {
             case .idle(let auth):
                 HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
-                HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged)
+                HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged, caption: entry.reconnectingCaption)
             case .live:
                 HUDLimitsProviderText(
                     entry: entry,
@@ -5026,7 +5034,7 @@ private struct HUDLimitsDetailPanel: View {
                     .frame(minHeight: 22)
                 case .reconnecting:
                     HStack(spacing: 0) {
-                        HUDLimitsRetryCell(source: entry.source)
+                        HUDLimitsRetryCell(source: entry.source, caption: entry.reconnectingCaption)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
@@ -5753,7 +5761,7 @@ private struct HUDLimitsBarContent: View {
                 case .reconnecting:
                     // Actively retrying: spinner + quiet caption, never a broken
                     // "0% / --" meter (mirrors the footer's FooterRetryChip).
-                    HUDLimitsRetryCell(source: entry.source)
+                    HUDLimitsRetryCell(source: entry.source, caption: entry.reconnectingCaption)
                 case .live:
                     HUDLimitsProviderText(
                         entry: entry,
@@ -5853,12 +5861,13 @@ private func isProbeFailed(_ s: ProbeCoordinator.ProbeRowState) -> Bool {
 private struct HUDLimitsRetryCell: View {
     let source: UsageTrackingSource
     var enlarged: Bool = false
+    var caption: String = "reconnecting…"
 
     var body: some View {
         HStack(spacing: 8) {
             HUDLimitsProviderIcon(source: source)
             HUDLimitsLoadingSpinner()
-            Text("reconnecting…")
+            Text(caption)
                 .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

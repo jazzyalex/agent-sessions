@@ -294,10 +294,14 @@ private struct UsageMeterMenuBarLabel: View {
                     }
                 case .reconnecting:
                     // Spinning arrows + provider name — the footer's "reconnecting"
-                    // affordance in a menu-bar-sized form.
+                    // affordance in a menu-bar-sized form. A specific cause (rate
+                    // limited) replaces the provider name so the face is honest
+                    // at a glance.
                     HStack(spacing: 3) {
                         MenuBarReconnectingGlyph()
-                        Text(q.provider == .claude ? "Claude" : "Codex")
+                        Text(q.reconnectingCaption == "reconnecting…"
+                             ? (q.provider == .claude ? "Claude" : "Codex")
+                             : q.reconnectingCaption)
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
