@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 - **Codex's sandboxed tasks get their own badge too.** Codex Desktop runs some tasks in a throwaway workspace under `~/Documents/Codex/<date>/<slug>/` instead of a repo you chose. Those sessions used to look identical to ordinary Codex Desktop work; they now carry a **work** badge, named after Codex's own `codex_work_desktop` marker rather than borrowing Claude's Cowork name for a different vendor's feature.
 
 ### Bug Fixes
+- **Claude usage recovers in seconds, not minutes.** When the Claude CLI refreshes its sign-in while Agent Sessions holds an older cached token, the meter now retries immediately with the fresh token instead of waiting out a multi-minute credential check.
+- **Rate-limit windows no longer black out the meter.** When Anthropic's usage endpoint rate-limits (windows can run tens of minutes), Agent Sessions now switches to the claude.ai web path to keep live numbers flowing instead of sitting on stale data.
+- **The spinner tells you why.** The "reconnecting…" cells in the Quota Meter, menu bar, and footer now say what's actually happening — "rate limited — retrying…" — instead of spinning anonymously.
+- **Leaked probe sessions are reaped reliably.** A hidden Claude probe could survive for days if its tmux socket vanished; the launch sweep now retries and logs instead of silently skipping.
 - **Surface badges stop getting clipped on subagent rows.** Subagent rows spend part of the Agent column on their indent, which was enough to cut a six-character badge down to `cowo…`. Badges now always render whole.
 
 ## [4.6.1] - 2026-07-19
