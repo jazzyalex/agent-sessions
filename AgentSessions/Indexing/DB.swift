@@ -378,12 +378,22 @@ actor IndexDB {
         // These one-time markers re-derive parse-derived `session_meta` columns for
         // existing installs. To force that re-derive, delete ONLY `session_meta`
         // (scoped by `source`): the core indexer rebuilds it from files, and the
-        // search corpus (`session_search` / `session_tool_io`) stays queryable the
-        // whole time — its text never depends on these metadata columns. A NEW marker
-        // must use the corpus-preserving pattern — `try reindexSessionMeta(db, sources:)`
-        // (the `static` form, callable here where `handle` is not yet set) — NOT
-        // `DELETE FROM session_search` / `session_tool_io`, which blanks search for the
-        // entire multi-minute reparse. Contract: `MigrationCorpusPreservationTests`.
+        // search corpus (`session_search` / `session_tool_io`) keeps its rows, so the
+        // rebuild does not re-parse gigabytes of transcript text to restore them. A NEW
+        // marker must use this pattern — `try reindexSessionMeta(db, sources:)` (the
+        // `static` form, callable here where `handle` is not yet set) — NOT
+        // `DELETE FROM session_search` / `session_tool_io`, which throws that text away
+        // and makes the reparse far longer. Contract: `MigrationCorpusPreservationTests`.
+        //
+        // What this pattern does NOT buy: search RESULTS for the source being reindexed.
+        // `searchSessionIDs` inner-joins `session_meta` (it filters on sm.source/model/
+        // repo/cwd/dates and returns sm.session_id), so while that table is empty the
+        // source's sessions are missing from the list AND every search returns zero hits
+        // for them — silently, not as an error. Measured on a 5 GB / 3363-session Codex
+        // corpus (4.6.2's guardian marker): ~149s from wipe to restore, with the rows
+        // reappearing in one bulk write, and codex search hits 500 -> 0 -> 500 while
+        // claude held steady. Preserving the corpus saves reparse COST, not availability.
+        // Budget user-visible downtime accordingly, and say so in the release notes.
         //
         // The markers below predate this guidance and still wipe the corpus. They are
         // one-time and already applied on current installs, so they are left as-is
@@ -1329,19 +1339,26 @@ actor IndexDB {
     /// Emptying `session_meta` forces a repopulate on the next refresh — for the sources
     /// with a core `session_meta` writer (Claude / Codex / OpenClaw) via their "missing
     /// hydrated" supplement, and for every other source via the search-ingest pass, which
-    /// re-parses and re-upserts the row. Either way:
-    ///   • the search corpus is never emptied — its rows are never deleted, only upserted
-    ///     in place — so search stays queryable the whole time, and
-    ///   • for the core-writer sources the search skip-gate (`files ⨝ session_meta ⨝
-    ///     session_search`) re-matches once the core rebuilds meta, so their corpus is not
-    ///     re-parsed at all; the other sources refresh their corpus in place as meta is
-    ///     rebuilt (a reparse, but search never goes dark).
+    /// re-parses and re-upserts the row. Either way the search corpus is never emptied:
+    /// its rows are never deleted, only upserted in place, so the text survives and does
+    /// not have to be re-extracted from the transcripts to restore it.
+    ///
+    /// IMPORTANT — this preserves the corpus, NOT search availability. While
+    /// `session_meta` is empty for a source, that source is gone from the session list
+    /// and `searchSessionIDs` returns zero hits for it, because that query inner-joins
+    /// `session_meta` for its filters and its result id. The rows come back in one bulk
+    /// write at the end, so there is no partial fill along the way. On a 5 GB /
+    /// 3363-session Codex corpus this window measured ~149s (4.6.2's guardian marker).
+    /// The interruption is safe — the core writers' gap detection keys on ABSENT meta
+    /// rows (`diskPaths - hydratedPaths`), so a quit mid-rebuild simply resumes — but it
+    /// is user-visible, and a marker that triggers it belongs in the release notes.
     ///
     /// This is the corpus-preserving alternative to the historical "wipe everything"
     /// reindex markers in `bootstrap`. A schema change that adds a parse-derived
     /// `session_meta` column should re-derive via this path; a migration must NOT
-    /// `DELETE FROM session_search` / `session_tool_io`, which blanks search for the
-    /// entire (minutes-long) reparse. Contract locked by `MigrationCorpusPreservationTests`.
+    /// `DELETE FROM session_search` / `session_tool_io`, which discards the extracted
+    /// text and makes the rebuild far slower. Contract: `MigrationCorpusPreservationTests`
+    /// (row-count preservation only — it does not assert query results).
     ///
     /// A new bootstrap marker cannot use this instance method (`handle` is not assigned
     /// until after `bootstrap` returns) — it must call the `static` form below, which
