@@ -17,10 +17,19 @@ func normalizeProbePath(_ path: String) -> String {
 ///   - labelPrefix: Only processes whose `-L <label>` starts with this prefix are targeted.
 ///   - psOutput:    Raw output from `ps -Ao pid,command` (or equivalent). Reuse an
 ///                  already-captured snapshot to avoid an extra `ps` invocation.
-func terminateSocketlessProbeServers(labelPrefix: String, psOutput: String) {
+///   - socketExists: Injectable socket-presence check (defaults to the real filesystem check).
+///   - killAction:   Injectable kill action (defaults to `SIGKILL` via `Darwin.kill`).
+func terminateSocketlessProbeServers(labelPrefix: String,
+                                     psOutput: String,
+                                     socketExists: ((String) -> Bool)? = nil,
+                                     killAction: ((pid_t) -> Void)? = nil) {
     guard !psOutput.isEmpty else { return }
     let uid = getuid()
     let socketDirs = ["/private/tmp/tmux-\(uid)", "/tmp/tmux-\(uid)"]
+    let socketCheck = socketExists ?? { label in
+        socketDirs.contains { FileManager.default.fileExists(atPath: "\($0)/\(label)") }
+    }
+    let kill = killAction ?? { pid in _ = Darwin.kill(pid, SIGKILL) }
     for line in psOutput.split(separator: "\n") {
         let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { continue }
@@ -35,9 +44,8 @@ func terminateSocketlessProbeServers(labelPrefix: String, psOutput: String) {
         let label = String(afterL[..<labelEnd])
         guard label.hasPrefix(labelPrefix) else { continue }
         // Only kill if the socket file is gone.
-        let hasSocket = socketDirs.contains { FileManager.default.fileExists(atPath: "\($0)/\(label)") }
-        if !hasSocket {
-            _ = kill(pid_t(tmuxPID), SIGKILL)
+        if !socketCheck(label) {
+            kill(pid_t(tmuxPID))
         }
     }
 }

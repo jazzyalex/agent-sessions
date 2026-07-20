@@ -1,8 +1,11 @@
 import Foundation
 import Darwin
+import os.log
 #if os(macOS)
 import IOKit.ps
 #endif
+
+private let log = OSLog(subsystem: "com.triada.AgentSessions", category: "ClaudeStatus")
 
 // MARK: - Claude Usage Tracking Architecture Documentation
 //
@@ -599,10 +602,17 @@ actor ClaudeStatusService {
     private func cleanupOrphanedProbeProcesses() async {
         let workDir = ClaudeProbeConfig.probeWorkingDirectory()
         let markers = workDirMarkers(workDir)
-        let snapshot = await runProcess(executable: "/bin/ps",
+        var snapshot = await runProcess(executable: "/bin/ps",
                                         arguments: ["-A", "-o", "pid=", "-o", "command="],
-                                        timeoutSeconds: 2)
+                                        timeoutSeconds: 5)
+        if snapshot.stdout.isEmpty {
+            os_log("ClaudeStatus: orphan sweep ps snapshot empty — retrying once", log: log, type: .info)
+            snapshot = await runProcess(executable: "/bin/ps",
+                                        arguments: ["-A", "-o", "pid=", "-o", "command="],
+                                        timeoutSeconds: 5)
+        }
         guard !snapshot.stdout.isEmpty else {
+            os_log("ClaudeStatus: orphan sweep skipped — ps snapshot empty twice", log: log, type: .error)
             await cleanupOrphanedTmuxLabels()
             return
         }
@@ -676,6 +686,7 @@ actor ClaudeStatusService {
         // Reuse the snapshot already captured above to avoid a redundant ps -A call.
         terminateSocketlessProbeServers(labelPrefix: Self.probeLabelPrefix,
                                        psOutput: snapshot.stdout)
+        os_log("ClaudeStatus: orphan sweep completed (socketless pass included)", log: log, type: .info)
 
         // Labels discovered on live orphan processes are protected during PID shutdown.
         // After termination, unprotect and requeue so kill-server runs in this cycle.
