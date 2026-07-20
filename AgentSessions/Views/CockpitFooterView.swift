@@ -125,6 +125,21 @@ struct QuotaData: Equatable {
         return .live
     }
 
+    /// Compact, honest caption for the reconnecting cell. The manager already
+    /// knows WHY the meter is dark (`transientReason`); the spinner previously
+    /// discarded it, which read as a never-ending mystery reconnect during
+    /// multi-minute 429 windows. Contains-matching keeps this resilient to
+    /// minor copy edits in the manager constants; anything unrecognized falls
+    /// back to the generic caption rather than leaking prose into the cell.
+    var reconnectingCaption: String {
+        guard let reason = transientReason?.lowercased(), !reason.isEmpty else {
+            return "reconnecting…"
+        }
+        if reason.contains("rate limit") { return "rate limited — retrying…" }
+        if reason.contains("unavailable") { return "retrying…" }
+        return "reconnecting…"
+    }
+
     /// Live within the last 5 minutes. Mirrors the usage strip's freshness gate
     /// for choosing the compact banner (over dimmed meters) vs the full banner
     /// (replacing meters) when auth is alarming.

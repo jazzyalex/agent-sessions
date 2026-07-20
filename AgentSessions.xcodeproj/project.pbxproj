@@ -321,6 +321,7 @@
 		B0000SSS2A0A000100000001 /* SessionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000SSS4A0A000100000002 /* SessionSource.swift */; };
 		B17905835FD9A93AD12C0472 /* PresenceEngineRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E69060A0479F7A483F8C1C0 /* PresenceEngineRegressionTests.swift */; };
 		B1FE28867D59ADE2038B7B04 /* InlineSessionImageMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6523776A36C69A0BA161B86 /* InlineSessionImageMappingTests.swift */; };
+		B24E6CA1D3C284AE5E53BF2A /* QuotaDataPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C63E51DF24A350A63AA7A7 /* QuotaDataPresentationTests.swift */; };
 		B363A6564B562CED45A7B839 /* OpenCodeResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401D8C6CC89AED7DF379FC2C /* OpenCodeResumeTypes.swift */; };
 		B3D6DDA22E3F3030E89005A1 /* ActivationPolicyDecider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC86925EFC5579C811934FF /* ActivationPolicyDecider.swift */; };
 		B403BDF16E177ABD244DA739 /* CLIAuthStatusProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E4841C9B819ABB31F73BDC /* CLIAuthStatusProbeTests.swift */; };
@@ -730,6 +731,7 @@
 		8F0D04E9AF014FBB97C71477 /* UpdateCheckerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UpdateCheckerTests.swift; path = AgentSessionsTests/UpdateCheckerTests.swift; sourceTree = SOURCE_ROOT; };
 		8FE850504C7022449FBE19AC /* HermesResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/HermesResume/HermesResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		9059F3E358CEE3DD092E327B /* test-session.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; path = "AgentSessionsTests/Fixtures/Cursor/test-session.jsonl"; sourceTree = SOURCE_ROOT; };
+		90C63E51DF24A350A63AA7A7 /* QuotaDataPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/QuotaDataPresentationTests.swift; sourceTree = SOURCE_ROOT; };
 		9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WindowFocusCoordinator.swift; path = AgentSessions/Services/WindowFocusCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		9250A5B0654ADC3B8ACA39B4 /* AgentUpdateService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentUpdateService.swift; sourceTree = SOURCE_ROOT; };
 		93CCE9E3D3EB93F780CF57CA /* CLIBinaryPresence.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Shared/CLIBinaryPresence.swift; sourceTree = SOURCE_ROOT; };
@@ -1586,6 +1588,7 @@
 				D0F5E0F747BD65EAE9D778D1 /* HUDLimitsResizeAnchorTests.swift */,
 				345E87948993F434CC795AA3 /* ProbeEntryPointTests.swift */,
 				46D6BA57F6BDBFA89B28432C /* ProbeCoordinatorTests.swift */,
+				90C63E51DF24A350A63AA7A7 /* QuotaDataPresentationTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2683,6 +2686,7 @@
 				CFACFE687838C731CA519A6E /* ClaudeManualWebCookieTests.swift in Sources */,
 				73297434523F391743965F60 /* ProbeEntryPointTests.swift in Sources */,
 				5BA5B6ACA8C141C1BF8C26EA /* ProbeCoordinatorTests.swift in Sources */,
+				B24E6CA1D3C284AE5E53BF2A /* QuotaDataPresentationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
