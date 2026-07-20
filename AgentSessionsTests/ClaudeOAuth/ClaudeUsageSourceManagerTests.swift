@@ -502,4 +502,30 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertTrue(ClaudeUsageSourceManager.hasAnyToken(keychainFound: false, credsFilePresentToken: false, envTokenPresent: true))
         XCTAssertFalse(ClaudeUsageSourceManager.hasAnyToken(keychainFound: false, credsFilePresentToken: false, envTokenPresent: false))
     }
+
+    // MARK: - 401 fresh-token immediate retry (2026-07-19 stale-cached-token race)
+
+    func testShouldRetry401_freshTokenDiffers_retries() {
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
+            failedHash: "aaaa1111", freshHash: "bbbb2222", alreadyRetriedHash: nil))
+    }
+
+    func testShouldRetry401_sameToken_doesNotRetry() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
+            failedHash: "aaaa1111", freshHash: "aaaa1111", alreadyRetriedHash: nil))
+    }
+
+    func testShouldRetry401_freshTokenAlreadyRetried_doesNotLoop() {
+        // The same "fresh" token must only earn ONE immediate retry per episode,
+        // otherwise a token that is new-but-still-invalid retries forever.
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
+            failedHash: "aaaa1111", freshHash: "bbbb2222", alreadyRetriedHash: "bbbb2222"))
+    }
+
+    func testShouldRetry401_missingHashes_doesNotRetry() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
+            failedHash: nil, freshHash: "bbbb2222", alreadyRetriedHash: nil))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
+            failedHash: "aaaa1111", freshHash: nil, alreadyRetriedHash: nil))
+    }
 }

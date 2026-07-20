@@ -245,6 +245,20 @@ actor ClaudeUsageSourceManager {
         SHA256.hash(data: Data(token.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// One-shot fast path for the stale-cached-token 401 race: the resolver's
+    /// ~10-min token cache can hand `performOAuthFetch` a copy the CLI has since
+    /// refreshed in the Keychain. If a *different* token is available after
+    /// invalidating the cache, retry immediately instead of credential-gating on
+    /// a token that is already obsolete. `alreadyRetriedHash` caps this at one
+    /// immediate retry per fresh token so a new-but-still-invalid token cannot
+    /// spin a retry loop.
+    static func shouldRetry401WithFreshToken(failedHash: String?,
+                                             freshHash: String?,
+                                             alreadyRetriedHash: String?) -> Bool {
+        guard let failedHash, let freshHash else { return false }
+        return freshHash != failedHash && freshHash != alreadyRetriedHash
+    }
+
     /// Pure publication routing for the classifier branch: an alarming verdict
     /// publishes as-is (no caption — the banner owns it); a non-alarming verdict
     /// publishes the calm caption so the strip explains the degradation without alarm.
@@ -289,6 +303,10 @@ actor ClaudeUsageSourceManager {
     /// latched delegated refresh off until an app relaunch, so the CLI-refreshable
     /// token was never refreshed. `nil` = not yet attempted this cycle.
     private var lastDelegatedRefreshAt: Date?
+    /// Fingerprint of the fresh token the 401 fast path already retried with,
+    /// so the same token never earns a second immediate retry. Cleared on any
+    /// successful fetch.
+    private var last401ImmediateRetryTokenHash: String?
     /// Timestamp of the first verified 401-with-token in the current failure
     /// episode; drives the debounced `.expired` banner escalation (P2). Cleared
     /// on a successful fetch and whenever the failure path takes the non-401
@@ -495,6 +513,7 @@ actor ClaudeUsageSourceManager {
             oauthFailureCount = 0
             oauthRateLimitRetryDeadline = nil
             lastDelegatedRefreshAt = nil
+            last401ImmediateRetryTokenHash = nil
             first401At = nil
             episodeFirst401TokenHash = nil
             cancelExpiredEscalationTimer()
@@ -556,6 +575,24 @@ actor ClaudeUsageSourceManager {
             oauthRateLimitRetryDeadline = nil
             os_log("ClaudeOAuth: 401, invalidating token cache", log: log, type: .info)
             await tokenResolver.invalidateCache()
+
+            // Fast path: the CLI may have refreshed the Keychain while we held a
+            // cached copy. A different token now in the Keychain means the 401 was
+            // about a token that no longer exists — retry with the fresh one now
+            // (sub-second) instead of delegating/credential-gating (minutes).
+            let failedHash = Self.tokenFingerprint(resolved.token)
+            if let fresh = await tokenResolver.resolve() {
+                let freshHash = Self.tokenFingerprint(fresh.token)
+                if Self.shouldRetry401WithFreshToken(failedHash: failedHash,
+                                                     freshHash: freshHash,
+                                                     alreadyRetriedHash: last401ImmediateRetryTokenHash) {
+                    last401ImmediateRetryTokenHash = freshHash
+                    os_log("ClaudeOAuth: Keychain token changed since resolve — retrying 401 immediately with fresh token",
+                           log: log, type: .info)
+                    await performOAuthFetch()
+                    return
+                }
+            }
 
             // Attempt delegated refresh, throttled — NOT once-until-relaunch.
             // Re-attempting after the interval is what lets a wedged expired
