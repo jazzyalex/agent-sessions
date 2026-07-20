@@ -1294,9 +1294,20 @@ final class CodexActiveSessionsModel {
 
             var parentSessionID: String?
             if let sourceMeta = payload["source"] as? [String: Any],
-               let subagentInfo = sourceMeta["subagent"] as? [String: Any],
-               let threadSpawn = subagentInfo["thread_spawn"] as? [String: Any] {
-                parentSessionID = threadSpawn["parent_thread_id"] as? String
+               let subagentInfo = sourceMeta["subagent"] {
+                if let subDict = subagentInfo as? [String: Any],
+                   let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
+                    parentSessionID = threadSpawn["parent_thread_id"] as? String
+                }
+                if parentSessionID == nil {
+                    // Newer Codex builds (0.145+) also stamp the parent link at
+                    // payload top level; guardian rollouts
+                    // ({"subagent":{"other":"guardian"}}) have ONLY this form.
+                    // Kept identical to SessionIndexer's two parse blocks so a
+                    // running subagent is attributed here exactly as the indexed
+                    // session list nests it.
+                    parentSessionID = payload["parent_thread_id"] as? String
+                }
             }
 
             parsed = ParsedActiveSubagentSessionMeta(

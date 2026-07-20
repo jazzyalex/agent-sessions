@@ -3514,6 +3514,134 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(counts["019d371a-45f2-7443-a076-d68981630bf3"], 1)
     }
 
+    func testActiveSubagentCounts_attributesGuardianSubagentToParentViaTopLevelParentThread() throws {
+        // Guardian approval reviewers use source {"subagent":{"other":"guardian"}}
+        // and stamp the parent link at payload top level — there is no
+        // thread_spawn dict and no thread_spawn_edges row. Reading only
+        // thread_spawn left a RUNNING guardian looking like an independent
+        // active session in the Quota Meter instead of a child of its parent.
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentRuntimeID = "019f7ce5-7a52-7e32-8fc5-99c3193aba48"
+        let guardianRuntimeID = "019f7ce7-8979-7203-8867-34084576cf0c"
+        let parentLog = tmp.appendingPathComponent("rollout-2026-07-19T17-20-41-\(parentRuntimeID).jsonl")
+        let guardianLog = tmp.appendingPathComponent("rollout-2026-07-19T17-22-56-\(guardianRuntimeID).jsonl")
+
+        try Data("""
+        {"timestamp":"2026-07-20T00:20:41.003Z","type":"session_meta","payload":{"id":"\(parentRuntimeID)","cwd":"/Users/alexm/Documents/Codex/2026-07-19/kaize-slug","source":"vscode"}}
+        """.utf8).write(to: parentLog)
+        // payload.session_id points at the PARENT here; payload.id is the
+        // guardian's own thread id and must win (matches SessionIndexer).
+        try Data("""
+        {"timestamp":"2026-07-20T00:22:56.633Z","type":"session_meta","payload":{"session_id":"\(parentRuntimeID)","id":"\(guardianRuntimeID)","parent_thread_id":"\(parentRuntimeID)","cwd":"/Users/alexm/Documents/Codex/2026-07-19/kaize-slug","source":{"subagent":{"other":"guardian"}}}}
+        """.utf8).write(to: guardianLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: guardianLog.path)
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = parentRuntimeID
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, guardianLog.path]
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [:],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: tmp.appendingPathComponent("missing.sqlite")
+        )
+
+        XCTAssertEqual(counts[parentRuntimeID], 1)
+        XCTAssertNil(counts[guardianRuntimeID])
+    }
+
+    func testActiveSubagentCounts_attributesStringFormSubagentToParentViaTopLevelParentThread() throws {
+        // The string form {"subagent":"review"} also carries the parent link at
+        // payload top level on newer builds; the live path must read it for
+        // every subagent source shape, as SessionIndexer does.
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentRuntimeID = "019d371a-45f2-7443-a076-d68981630bf3"
+        let reviewRuntimeID = "019d371b-06c0-79d1-ad85-17ba4e23290a"
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-\(parentRuntimeID).jsonl")
+        let reviewLog = tmp.appendingPathComponent("rollout-2026-03-28T18-00-11-\(reviewRuntimeID).jsonl")
+
+        try Data("""
+        {"timestamp":"2026-03-29T00:59:41.003Z","type":"session_meta","payload":{"id":"\(parentRuntimeID)","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        """.utf8).write(to: parentLog)
+        try Data("""
+        {"timestamp":"2026-03-29T01:00:12.991Z","type":"session_meta","payload":{"id":"\(reviewRuntimeID)","parent_thread_id":"\(parentRuntimeID)","cwd":"/Users/alexm/Repository/Codex-History","source":{"subagent":"review"}}}
+        """.utf8).write(to: reviewLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: reviewLog.path)
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = parentRuntimeID
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, reviewLog.path]
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [:],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: tmp.appendingPathComponent("missing.sqlite")
+        )
+
+        XCTAssertEqual(counts[parentRuntimeID], 1)
+    }
+
+    func testActiveSubagentCounts_ignoresTopLevelParentThreadOnNonSubagentSession() throws {
+        // Guardrail: the top-level parent_thread_id read is gated on a subagent
+        // source, matching SessionIndexer. A non-subagent session carrying the
+        // field must not be counted as somebody's subagent.
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let parentRuntimeID = "019d371a-45f2-7443-a076-d68981630bf3"
+        let forkedRuntimeID = "019d371b-06c0-79d1-ad85-17ba4e23290a"
+        let parentLog = tmp.appendingPathComponent("rollout-2026-03-28T17-59-21-\(parentRuntimeID).jsonl")
+        let forkedLog = tmp.appendingPathComponent("rollout-2026-03-28T18-00-11-\(forkedRuntimeID).jsonl")
+
+        try Data("""
+        {"timestamp":"2026-03-29T00:59:41.003Z","type":"session_meta","payload":{"id":"\(parentRuntimeID)","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        """.utf8).write(to: parentLog)
+        try Data("""
+        {"timestamp":"2026-03-29T01:00:12.991Z","type":"session_meta","payload":{"id":"\(forkedRuntimeID)","parent_thread_id":"\(parentRuntimeID)","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        """.utf8).write(to: forkedLog)
+
+        let now = Date()
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: parentLog.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-5)], ofItemAtPath: forkedLog.path)
+
+        var presence = CodexActivePresence()
+        presence.source = .codex
+        presence.sessionId = parentRuntimeID
+        presence.sessionLogPath = parentLog.path
+        presence.openSessionLogPaths = [parentLog.path, forkedLog.path]
+
+        let counts = CodexActiveSessionsModel.activeSubagentCounts(
+            presences: [presence],
+            sessionsByLogPath: [:],
+            now: now,
+            recentWriteWindow: 45,
+            codexRuntimeStateDBURL: tmp.appendingPathComponent("missing.sqlite")
+        )
+
+        XCTAssertNil(counts[parentRuntimeID])
+    }
+
     func testActiveSubagentCounts_usesCodexRuntimeOpenEdgesForStaleChildren() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)

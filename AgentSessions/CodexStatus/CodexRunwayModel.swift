@@ -1754,11 +1754,19 @@ enum CodexRunwayRecentSessionScanner {
 
     private static func parentSessionID(from payload: [String: Any]) -> String? {
         guard let source = payload["source"] as? [String: Any],
-              let subagent = source["subagent"] as? [String: Any],
-              let threadSpawn = subagent["thread_spawn"] as? [String: Any] else {
+              let subagent = source["subagent"] else {
             return nil
         }
-        return string(threadSpawn["parent_thread_id"])
+        if let subagentDict = subagent as? [String: Any],
+           let threadSpawn = subagentDict["thread_spawn"] as? [String: Any],
+           let parent = string(threadSpawn["parent_thread_id"]) {
+            return parent
+        }
+        // Newer Codex builds (0.145+) also stamp the parent link at payload top
+        // level; guardian rollouts ({"subagent":{"other":"guardian"}}) have ONLY
+        // this form. Kept identical to SessionIndexer's two parse blocks so a
+        // running subagent groups here exactly as the indexed session list nests it.
+        return string(payload["parent_thread_id"])
     }
 
     private static func string(_ value: Any?) -> String? {

@@ -3370,6 +3370,113 @@ final class CodexUsageParserTests: XCTestCase {
         )
     }
 
+    func testCodexRunwayRecentSessionScannerGroupsGuardianSubagentByTopLevelParentThread() throws {
+        // Guardian approval reviewers use source {"subagent":{"other":"guardian"}}
+        // and carry the parent link at payload top level (no thread_spawn dict).
+        // Reading only thread_spawn made a RUNNING guardian show up in Runway as
+        // an independent active session alongside its parent.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-guardian-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/07/19", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let parent = dir.appendingPathComponent("rollout-parent.jsonl")
+        let guardian = dir.appendingPathComponent("rollout-guardian.jsonl")
+        let parentText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/Users/alexm/Documents/Codex/2026-07-19/kaize-slug","originator":"codex_work_desktop","source":"vscode"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Check Codex SSD write issue"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        // payload.session_id points at the PARENT on new-format subagent rollouts;
+        // payload.id is the guardian's own thread id.
+        let guardianText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"session_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","id":"019f7ce7-8979-7203-8867-34084576cf0c","parent_thread_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/Users/alexm/Documents/Codex/2026-07-19/kaize-slug","originator":"codex_work_desktop","source":{"subagent":{"other":"guardian"}}}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Assess the planned action"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}
+        """
+        try parentText.write(to: parent, atomically: true, encoding: .utf8)
+        try guardianText.write(to: guardian, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parent.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-1)], ofItemAtPath: guardian.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "019f7ce5-7a52-7e32-8fc5-99c3193aba48")
+        XCTAssertEqual(identities.first?.displayName, "Check Codex SSD write issue")
+        XCTAssertEqual(
+            identities.first?.logPaths.map { URL(fileURLWithPath: $0).lastPathComponent }.sorted(),
+            ["rollout-guardian.jsonl", "rollout-parent.jsonl"]
+        )
+    }
+
+    func testCodexRunwayRecentSessionScannerGroupsStringFormSubagentByTopLevelParentThread() throws {
+        // The string form {"subagent":"review"} also carries the parent link at
+        // payload top level on newer builds. SessionIndexer reads it for every
+        // subagent source shape; the live scanner must agree.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-review-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/07/19", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let parent = dir.appendingPathComponent("rollout-parent.jsonl")
+        let review = dir.appendingPathComponent("rollout-review.jsonl")
+        let parentText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"parent-thread","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review the pending diff"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        let reviewText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"review-thread","parent_thread_id":"parent-thread","cwd":"/Users/alexm/Repository/Codex-History","source":{"subagent":"review"}}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Reviewing"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}
+        """
+        try parentText.write(to: parent, atomically: true, encoding: .utf8)
+        try reviewText.write(to: review, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parent.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-1)], ofItemAtPath: review.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 1)
+        XCTAssertEqual(identities.first?.id, "parent-thread")
+    }
+
+    func testCodexRunwayRecentSessionScannerKeepsRootSessionWithTopLevelParentThreadIndependent() throws {
+        // Guardrail: the top-level parent_thread_id read is gated on a subagent
+        // source, matching SessionIndexer. A non-subagent session that carries
+        // the field (e.g. a fork/resume lineage pointer) stays its own row.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-rootparent-\(UUID().uuidString)")
+        let now = Date()
+        let dir = root.appendingPathComponent("2026/07/19", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let parent = dir.appendingPathComponent("rollout-parent.jsonl")
+        let forked = dir.appendingPathComponent("rollout-forked.jsonl")
+        let parentText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"origin-thread","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Origin session"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":250000}}}}
+        """
+        let forkedText = """
+        {"timestamp":"\(iso(now))","type":"session_meta","payload":{"id":"forked-thread","parent_thread_id":"origin-thread","cwd":"/Users/alexm/Repository/Codex-History","source":"cli"}}
+        {"timestamp":"\(iso(now))","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Forked session"}]}}
+        {"timestamp":"\(iso(now))","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}
+        """
+        try parentText.write(to: parent, atomically: true, encoding: .utf8)
+        try forkedText.write(to: forked, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: parent.path)
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-1)], ofItemAtPath: forked.path)
+
+        let identities = CodexRunwayRecentSessionScanner.identities(root: root, now: now)
+
+        XCTAssertEqual(identities.count, 2)
+        XCTAssertEqual(Set(identities.map(\.id)), ["origin-thread", "forked-thread"])
+    }
+
     func testCodexRunwayRecentSessionScannerKeepsWorktreeParentWhenLogEmbedsSourceMeta() throws {
         let codexHome = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-worktree-\(UUID().uuidString)")
         let root = codexHome.appendingPathComponent("sessions", isDirectory: true)
