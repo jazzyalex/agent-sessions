@@ -1493,6 +1493,127 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(session?.codexSource?.contains(#""subagent":"review""#) == true)
     }
 
+    // MARK: - Codex guardian subagent classification (2026-07-19)
+
+    func testCodexGuardianOtherSubagentClassifiesAndLinksParent() throws {
+        // Newer Codex builds (0.145+) spawn guardian approval reviewers with
+        // source {"subagent":{"other":"guardian"}} and stamp the parent link
+        // at payload top level (NOT inside thread_spawn, and there is no
+        // thread_spawn_edges row for them).
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardian-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-07-20T00:22:56.633Z","type":"session_meta","payload":{"session_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","id":"019f7ce7-8979-7203-8867-34084576cf0c","parent_thread_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/Users/test/Documents/Codex/2026-07-19/kaize-slug","originator":"codex_work_desktop","source":{"subagent":{"other":"guardian"}},"thread_source":"subagent"}}"#,
+            #"{"timestamp":"2026-07-20T00:22:57.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Assess the planned action"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.subagentType, "guardian")
+        XCTAssertEqual(session?.parentSessionID, "019f7ce5-7a52-7e32-8fc5-99c3193aba48")
+        XCTAssertTrue(session?.isSubagent == true)
+        XCTAssertEqual(session?.codexSurface, .subagent)
+    }
+
+    func testCodexGuardianOtherSubagentClassifiesViaParseFileFull() throws {
+        // parseFile(at:) resolves to lightweightSession for any readable,
+        // well-formed fixture, so the pinning above never exercises
+        // parseFileFull's copy of this branch (SessionIndexer.swift:507, :630
+        // both call into it directly). Call it explicitly so a future edit
+        // that only touches the parseFileFull block gets caught here too.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardianFull-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-07-19T17-22-56-019f7ce7-8979-7203-8867-34084576cf0c.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-07-20T00:22:56.633Z","type":"session_meta","payload":{"session_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","id":"019f7ce7-8979-7203-8867-34084576cf0c","parent_thread_id":"019f7ce5-7a52-7e32-8fc5-99c3193aba48","cwd":"/Users/test/Documents/Codex/2026-07-19/kaize-slug","originator":"codex_work_desktop","source":{"subagent":{"other":"guardian"}},"thread_source":"subagent"}}"#,
+            #"{"timestamp":"2026-07-20T00:22:57.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Assess the planned action"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFileFull(at: url)
+        XCTAssertEqual(session?.subagentType, "guardian")
+        XCTAssertEqual(session?.parentSessionID, "019f7ce5-7a52-7e32-8fc5-99c3193aba48")
+        XCTAssertTrue(session?.isSubagent == true)
+        XCTAssertEqual(session?.codexSurface, .subagent)
+    }
+
+    func testCodexGuardianWithoutTopLevelParentStillClassifies() throws {
+        // 68 of 70 on-disk guardian rollouts predate the parent_thread_id
+        // stamp: subagentType alone must classify them (parent then resolves
+        // via SubagentHierarchyBuilder's role-only same-cwd inference).
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexGuardianOld-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-06-01T10-00-00-019f0000-0000-7000-8000-000000000001.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-06-01T17:00:00.000Z","type":"session_meta","payload":{"id":"019f0000-0000-7000-8000-000000000001","cwd":"/tmp/repo","originator":"codex_work_desktop","source":{"subagent":{"other":"guardian"}}}}"#,
+            #"{"timestamp":"2026-06-01T17:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Assess"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.subagentType, "guardian")
+        XCTAssertNil(session?.parentSessionID)
+        XCTAssertTrue(session?.isSubagent == true)
+    }
+
+    func testCodexUnknownSubagentStructVariantFallsBackToVariantName() throws {
+        // Future-proofing: an unrecognized struct variant must still classify
+        // as a subagent (variant name as type) instead of silently reading as
+        // a root session — that silence is exactly how guardian slipped through.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexFutureSub-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let url = root.appendingPathComponent("rollout-2026-07-19T18-00-00-019f0000-0000-7000-8000-000000000002.jsonl")
+        let lines = [
+            #"{"timestamp":"2026-07-20T01:00:00.000Z","type":"session_meta","payload":{"id":"019f0000-0000-7000-8000-000000000002","cwd":"/tmp/repo","source":{"subagent":{"future_kind":{"detail":1}}}}}"#,
+            #"{"timestamp":"2026-07-20T01:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}"#
+        ]
+        try lines.joined(separator: "\n").data(using: .utf8)!.write(to: url)
+
+        let session = SessionIndexer().parseFile(at: url)
+        XCTAssertEqual(session?.subagentType, "future_kind")
+        XCTAssertTrue(session?.isSubagent == true)
+    }
+
+    func testSubagentHierarchyNestsGuardianUnderExplicitParent() {
+        // End-to-end row shape: guardian with an explicit parentSessionID nests
+        // under the parent resolved via the parent's internal-ID hint.
+        let parent = makeCodexHierarchySession(
+            id: "work-parent",
+            runtimeID: "019f7ce5-7a52-7e32-8fc5-99c3193aba48",
+            timestamp: "2026-07-19T17-20-41",
+            cwd: "/Users/test/Documents/Codex/2026-07-19/kaize-slug"
+        )
+        let guardian = makeCodexHierarchySession(
+            id: "guardian-child",
+            runtimeID: "019f7ce7-8979-7203-8867-34084576cf0c",
+            timestamp: "2026-07-19T17-22-56",
+            cwd: "/Users/test/Documents/Codex/2026-07-19/kaize-slug",
+            parentSessionID: "019f7ce5-7a52-7e32-8fc5-99c3193aba48",
+            subagentType: "guardian"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [parent, guardian],
+            hierarchyEnabled: true
+        )
+        XCTAssertEqual(result.sessions.map(\.id), ["work-parent", "guardian-child"])
+        XCTAssertEqual(result.rowMeta["work-parent"]?.childCount, 1)
+        XCTAssertEqual(result.rowMeta["guardian-child"]?.depth, 1)
+    }
+
     func testCodexSubagentParsesReasoningEffortFromTurnContext() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-CodexSubagentEffort-\(UUID().uuidString)", isDirectory: true)

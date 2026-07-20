@@ -2016,10 +2016,26 @@ final class SessionIndexer: ObservableObject {
                            let subagentInfo = sourceDict["subagent"] {
                             if let subStr = subagentInfo as? String {
                                 subagentType = subStr
-                            } else if let subDict = subagentInfo as? [String: Any],
-                                      let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
-                                parentSessionID = threadSpawn["parent_thread_id"] as? String
-                                subagentType = threadSpawn["agent_role"] as? String
+                            } else if let subDict = subagentInfo as? [String: Any] {
+                                if let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
+                                    parentSessionID = threadSpawn["parent_thread_id"] as? String
+                                    subagentType = threadSpawn["agent_role"] as? String
+                                } else if let other = subDict["other"] as? String {
+                                    // Codex's catch-all variant, e.g. {"other":"guardian"}
+                                    // (approval-reviewer subagents; 70 on disk as of 2026-07-19).
+                                    subagentType = other
+                                } else if let variant = subDict.keys.sorted().first {
+                                    // Unknown future struct variant: keep the variant name so
+                                    // the session still classifies as a subagent instead of
+                                    // silently reading as a root session.
+                                    subagentType = variant
+                                }
+                            }
+                            if parentSessionID == nil {
+                                // Newer Codex builds (0.145+) also stamp the parent link at
+                                // payload top level; guardian rollouts have ONLY this form
+                                // (thread_spawn_edges has no row for them).
+                                parentSessionID = payload["parent_thread_id"] as? String
                             }
                         }
                     }
@@ -2280,10 +2296,26 @@ final class SessionIndexer: ObservableObject {
                             if let subStr = subagentInfo as? String {
                                 // e.g. "review" — no parent thread ID available
                                 subagentType = subStr
-                            } else if let subDict = subagentInfo as? [String: Any],
-                                      let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
-                                parentSessionID = threadSpawn["parent_thread_id"] as? String
-                                subagentType = threadSpawn["agent_role"] as? String
+                            } else if let subDict = subagentInfo as? [String: Any] {
+                                if let threadSpawn = subDict["thread_spawn"] as? [String: Any] {
+                                    parentSessionID = threadSpawn["parent_thread_id"] as? String
+                                    subagentType = threadSpawn["agent_role"] as? String
+                                } else if let other = subDict["other"] as? String {
+                                    // Codex's catch-all variant, e.g. {"other":"guardian"}
+                                    // (approval-reviewer subagents; 70 on disk as of 2026-07-19).
+                                    subagentType = other
+                                } else if let variant = subDict.keys.sorted().first {
+                                    // Unknown future struct variant: keep the variant name so
+                                    // the session still classifies as a subagent instead of
+                                    // silently reading as a root session.
+                                    subagentType = variant
+                                }
+                            }
+                            if parentSessionID == nil {
+                                // Newer Codex builds (0.145+) also stamp the parent link at
+                                // payload top level; guardian rollouts have ONLY this form
+                                // (thread_spawn_edges has no row for them).
+                                parentSessionID = payload["parent_thread_id"] as? String
                             }
                         }
                     }
