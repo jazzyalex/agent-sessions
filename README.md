@@ -21,7 +21,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.1/AgentSessions-4.6.1.dmg"><b>Download Agent Sessions 4.6.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.2/AgentSessions-4.6.2.dmg"><b>Download Agent Sessions 4.6.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6.1** — The Quota Meter no longer insists there's "no active session" while it's holding fresh usage data. Once your Claude CLI token lapsed the idle state latched, and successful web reads couldn't clear it. Fresh data now wins, the tooltip spells out how to recover, and web-served numbers are tagged **via claude.ai**. Burn rate also stops overstating subagent-heavy sessions. [See what's new ↓](#whats-new-in-461)
+> **New in 4.6.2** — Codex guardian sessions stop showing up as a duplicate of the session they were reviewing, subagents spawned by subagents stop vanishing from the list, and Cowork tasks get their own badge. Heads up: the guardian fix rebuilds your Codex index once on first launch, so Codex sessions briefly drop out of the list and search while it runs. [See what's new ↓](#whats-new-in-462)
 
 ## Overview
 
@@ -72,19 +72,20 @@ Agent Sessions is a local-first Mac app for finding useful work that coding agen
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.6.1
+## What's New in 4.6.2
 
-**TL;DR** - The Quota Meter stops claiming "no active session" when it has fresh data in hand. Once your Claude CLI token lapsed, the calm idle state latched and successful web reads could never clear it — so the meter read as dead while the pasted-cookie path served fresh usage every minute. Fresh data now wins. Burn rate also stops overstating subagent-heavy sessions, and forcing a fresh reading is a real toolbar button instead of a hidden double-click.
+**TL;DR** - Codex's approval-reviewer ("guardian") sessions used to sit in the list as a second copy of the session they were reviewing. They now nest under their parent like any other subagent. Subagents that spawned their own subagents were disappearing from the list entirely; the list now walks the whole tree. Claude Cowork tasks and Codex's sandboxed work sessions each get their own badge.
 
-**Highlights:** If you run the Claude desktop app and your CLI token lapses, the Quota Meter used to latch on "no active session" and never come back, even while the web fallback had current numbers the whole time. Live data now outranks that idle latch — a genuine auth problem still takes precedence — and Claude's idle tooltip becomes a recovery ladder telling you what to actually do: run the CLI, paste a cookie, or probe. Anything served over the web is labeled **via claude.ai** so you know where the number came from. Separately, sessions running orchestrated subagent fleets were reading up to 3.6x hotter than reality, because every freshly spawned transcript path spiked during its cache-heavy first turn and the existing cap never fired; those provisional paths are now clamped to what the session has actually been measured doing. And the hard probe finally has a home in the toolbar.
+**Upgrade note:** the guardian fix only reaches sessions you already indexed by re-reading them, so the first launch after updating rebuilds your Codex session metadata. While that runs, Codex sessions are missing from the list **and from search** — seconds for most histories, a minute or two for very large ones. Claude sessions are unaffected, and it happens once.
 
-New in 4.6.1:
-- **Fresh data beats the idle latch** — a lapsed CLI token no longer freezes the Quota Meter on "no active session" while web usage is flowing.
-- **A recovery ladder you can read** — Claude's idle tooltip names the three ways back (CLI, cookie paste, probe), and web-served numbers are tagged **via claude.ai**.
-- **Honest burn rate for subagent fleets** — provisional transcript paths are capped at the session's measured rate, cutting median overstatement from 1.6x to about 1.25x.
-- **A probe button in the toolbar** — per-provider menu, in-row **probing…** / **failed** status, and reasons for anything it can't probe. The old double-click gesture is gone.
+New in 4.6.2:
+- **Guardian sessions stop duplicating their parent** — they nest as subagents, and the **work** pill no longer duplicates onto them.
+- **Resuming a guardian resumes the guardian** — newer Codex builds pointed a guardian's internal session id at its parent, so Resume reopened the wrong session.
+- **Grandchildren stay in the list** — a subagent that spawned its own subagents used to drop those children entirely: not nested, not top-level, just gone.
+- **Cowork and Codex work sessions get their own badges** — sandboxed Cowork tasks no longer wear the same **desk** badge as Claude Desktop's Code tab.
+- **Claude usage recovers in seconds** — a fresher Keychain token is retried immediately, and rate-limit windows fall back to the web path instead of blacking out the meter.
 
-Previous release — 4.6: Read your Claude subscription usage without the CLI by pasting a session cookie. Full history in the [changelog](docs/CHANGELOG.md).
+Previous release — 4.6.1: The Quota Meter stops claiming "no active session" while holding fresh data. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## What's New in 4.6
 
@@ -177,7 +178,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.6.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.1/AgentSessions-4.6.1.dmg)
+1. [Download AgentSessions-4.6.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.2/AgentSessions-4.6.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
