@@ -209,7 +209,10 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     @AppStorage("CodexUsageEnabled") private var codexUsageEnabledPref: Bool = false
     @AppStorage("ClaudeUsageEnabled") private var claudeUsageEnabledPref: Bool = false
-    @AppStorage("ShowClaudeUsageStrip") private var showClaudeUsageStrip: Bool = false
+    // No @AppStorage for "ShowClaudeUsageStrip": the property here was never read. The
+    // key itself is still live as a LEGACY MIGRATION FALLBACK — read by literal below and
+    // in ClaudeStatusService.claudeUsageEnabledPreference, but only when "ClaudeUsageEnabled"
+    // has never been set. Don't delete the key on the assumption it's unused.
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true

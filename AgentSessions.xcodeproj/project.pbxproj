@@ -350,7 +350,6 @@
 		BF7200C9605B4304E115A18B /* CopilotSessionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE6E4EC02F20236FB460314 /* CopilotSessionParser.swift */; };
 		C04E3F5262A3A373AE8AFF10 /* CrashReportingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7474A9AC95B3E3F43FEDC572 /* CrashReportingService.swift */; };
 		C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000001 /* CodexStatusService.swift */; };
-		C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0D3E5A1700F000000000002 /* UsageStripView.swift */; };
 		C0DA70FF08934B0990583766 /* TimeOfDayHeatmapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E56D60F0F594AF48A652427 /* TimeOfDayHeatmapView.swift */; };
 		C0DEXRESC0FFEE0000000001 /* codex_status_capture.sh in Resources */ = {isa = PBXBuildFile; fileRef = 14A6E170A6244505C28DCE0C /* codex_status_capture.sh */; };
 		C124E15F9EF049399D9F4FCA /* AntigravityCLISettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3100554C4A8E408F8E20AE34 /* AntigravityCLISettings.swift */; };
@@ -854,7 +853,6 @@
 		C00F56881BDBF91B5144FD2A /* subagent-session.jsonl */ = {isa = PBXFileReference; includeInIndex = 1; path = "AgentSessionsTests/Fixtures/Cursor/subagent-session.jsonl"; sourceTree = SOURCE_ROOT; };
 		C09E04E00723C1B1342D3234 /* OnboardingContent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Onboarding/Models/OnboardingContent.swift; sourceTree = SOURCE_ROOT; };
 		C0D3E5A1700F000000000001 /* CodexStatusService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CodexStatusService.swift; path = AgentSessions/CodexStatus/CodexStatusService.swift; sourceTree = SOURCE_ROOT; };
-		C0D3E5A1700F000000000002 /* UsageStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UsageStripView.swift; path = AgentSessions/CodexStatus/UsageStripView.swift; sourceTree = SOURCE_ROOT; };
 		C10DE434722D491647B5D368 /* TerminalSemanticSegmentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TerminalSemanticSegmentationTests.swift; sourceTree = SOURCE_ROOT; };
 		C29E004E088B0110C36DAAAC /* UnifiedSearchState.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Search/UnifiedSearchState.swift; sourceTree = SOURCE_ROOT; };
 		C311CBC276711A2955D27C8E /* Stage0GoldenFixturesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Stage0GoldenFixturesTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1837,7 +1835,6 @@
 			isa = PBXGroup;
 			children = (
 				C0D3E5A1700F000000000001 /* CodexStatusService.swift */,
-				C0D3E5A1700F000000000002 /* UsageStripView.swift */,
 				A1B2C3D4E5F60708AA55BB65 /* MenuBarPrefs.swift */,
 				E1F2A3B4C5D60708FFEEDDCC /* UsageMenuBar.swift */,
 				MB000010000000000000001 /* StatusItemController.swift */,
@@ -2271,7 +2268,6 @@
 				D1E2F3A4B5C647E8F9A0B1C2 /* ResumeHealthCheck.swift in Sources */,
 				DAC510E5A5804B0C865935FC /* CodexResumeCoordinator.swift in Sources */,
 				C0D3E5A1700A000000000001 /* CodexStatusService.swift in Sources */,
-				C0D3E5A1700A000000000002 /* UsageStripView.swift in Sources */,
 				7E6B9F3E2F8E4C05A0E9B6D1 /* UsageMenuBar.swift in Sources */,
 				A1B2C3D4E5F60708AA55BB66 /* MenuBarPrefs.swift in Sources */,
 				CFB900010000000000000001 /* SessionDiscovery.swift in Sources */,
