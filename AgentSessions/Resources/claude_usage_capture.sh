@@ -414,7 +414,12 @@ booted=false
     # A login screen can otherwise be mistaken for a trust/theme prompt and get
     # Enter pressed into "Select login method", which triggers the browser OAuth
     # flow. Bailing here (exit 13) keeps the probe from ever advancing a login.
-    if echo "$output" | grep -qE '(sign in|login|authentication|unauthorized|Please run.*claude login|Select login method)'; then
+    #
+    # Every alternative must be a login-specific phrase, never a bare term like
+    # "authentication" or "login": the pane also renders unrelated banners such
+    # as "N MCP servers need authentication", and matching those bails out of a
+    # perfectly authenticated session before /usage ever runs.
+    if echo "$output" | grep -qiE '(select login method|sign in to claude|log in to claude|please run.*login|claude (auth )?login|invalid api key|authentication failed|unauthorized)'; then
         echo "$(error_json auth_required_or_cli_prompted_login 'Run: claude auth login')"
         echo "ERROR: Authentication/login required" >&2
         echo "$output" >&2
