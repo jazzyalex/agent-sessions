@@ -1,3 +1,21 @@
+## 2026-07-19 18:32 · usage-connection-resilience · QM "reconnecting forever" root-caused + fixed; QA/push pending
+status: in-progress
+
+**State:** Diagnosed today's recurrence: NOT the 4.3.1 expired-token bug — (1) Cloudflare edge 429 on `api.anthropic.com/api/oauth/usage` (Retry-After up to ~47 min; dev relaunch churn burns the tiny quota) and (2) stale-cached-token 401 race (CLI refreshes Keychain, manager 401s with 10-min-cached copy, delegated refresh sees "no change", credential-gates). Fixes on local main, commits ad3ebc04..57655242 via SDD: immediate 401 retry with re-read Keychain token; web fallback activates during 429-with-cache; all reconnecting cells (QM/menu bar/footer) now render the real cause via `QuotaData.reconnectingCaption`; socketless orphan sweep testable + ps-timeout no longer silently skips (3-day orphan probe PID 46300 killed manually). Suite 1706/0 GREEN; Opus whole-branch review READY TO MERGE. NOT pushed; owner visual QA pending (build in `.deriveddata-manual`).
+
+**Decided / don't redo:**
+- Non-goals locked: no dimmed stale meters, no `.idle` copy change, no retry-cadence change vs Retry-After.
+- Accepted minors: UsageMenuBar caption magic-string compare; single-hash 401-retry guard (oscillation not field-reachable).
+- Diagnostics that work: `/usr/bin/log show --info --predicate 'subsystem == "com.triada.AgentSessions" AND category == "ClaudeOAuth"'` (`log` is shell-shadowed — full path); Keychain mdat via `security find-generic-password -s "Claude Code-credentials"`; `/tmp/claude/statusline-usage-cache.json` mtime = last endpoint 200.
+
+**Key files:**
+- `AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageSourceManager.swift` — 401 fast path + 429 web-fallback kick
+- `docs/superpowers/plans/2026-07-19-claude-usage-connection-resilience.md` — executed plan
+
+**Next:**
+1. Owner QA: relaunch from `.deriveddata-manual`, confirm captions + fast recovery.
+2. Push on owner GO; fold into next release notes.
+
 ## 2026-07-19 13:49 · qm-hard-probe · Probe feature + usage-accuracy fixes shipped; 4.6.1 release pending
 status: in-progress
 
