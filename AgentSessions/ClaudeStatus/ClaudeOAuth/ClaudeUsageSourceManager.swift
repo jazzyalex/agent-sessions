@@ -274,6 +274,17 @@ actor ClaudeUsageSourceManager {
         mode == .tmuxOnly || optIn
     }
 
+    /// During a 429 window the OAuth path is dark for Retry-After (5 min floor,
+    /// observed up to ~47 min at the edge). Cached data goes stale within
+    /// minutes; the claude.ai web path is a different endpoint that is NOT
+    /// covered by the oauth/usage quota, so it should carry the meter through
+    /// the window whenever it is available — not only when there is no cache.
+    static func shouldActivateWebFallbackDuringRateLimit(isAutoMode: Bool,
+                                                         webApiEnabled: Bool,
+                                                         usingWebFallback: Bool) -> Bool {
+        isAutoMode && webApiEnabled && !usingWebFallback
+    }
+
     init(store: ClaudeUsageSnapshotStore = ClaudeUsageSnapshotStore()) {
         self.store = store
     }
@@ -634,6 +645,14 @@ actor ClaudeUsageSourceManager {
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
+                if Self.shouldActivateWebFallbackDuringRateLimit(isAutoMode: mode == .auto,
+                                                                 webApiEnabled: webApiEnabled,
+                                                                 usingWebFallback: usingWebFallback) {
+                    os_log("ClaudeOAuth: rate limited with cache — activating web API fallback for the window",
+                           log: log, type: .info)
+                    usingWebFallback = true
+                    scheduleWebRefresh(delay: 0)
+                }
                 // Have cached data — just wait, don't fall back
                 scheduleOAuthRefresh(delay: delay)
             } else if var persisted = await store.load(),
@@ -647,6 +666,14 @@ actor ClaudeUsageSourceManager {
                 publish(persisted)
                 os_log("ClaudeOAuth: rate limited — serving persisted snapshot (age %.0fs)",
                        log: log, type: .info, Date().timeIntervalSince(persisted.fetchedAt))
+                if Self.shouldActivateWebFallbackDuringRateLimit(isAutoMode: mode == .auto,
+                                                                 webApiEnabled: webApiEnabled,
+                                                                 usingWebFallback: usingWebFallback) {
+                    os_log("ClaudeOAuth: rate limited with cache — activating web API fallback for the window",
+                           log: log, type: .info)
+                    usingWebFallback = true
+                    scheduleWebRefresh(delay: 0)
+                }
                 scheduleOAuthRefresh(delay: delay)
             } else if mode == .auto && !usingTmuxFallback {
                 if webApiEnabled && !usingWebFallback {

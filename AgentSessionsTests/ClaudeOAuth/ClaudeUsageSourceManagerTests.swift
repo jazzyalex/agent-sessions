@@ -528,4 +528,26 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.shouldRetry401WithFreshToken(
             failedHash: "aaaa1111", freshHash: nil, alreadyRetriedHash: nil))
     }
+
+    // MARK: - Web fallback during 429 windows (edge rate limit can last ~47 min)
+
+    func testRateLimitWebFallback_autoModeEnabledNotRunning_activates() {
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldActivateWebFallbackDuringRateLimit(
+            isAutoMode: true, webApiEnabled: true, usingWebFallback: false))
+    }
+
+    func testRateLimitWebFallback_alreadyRunning_doesNotReactivate() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldActivateWebFallbackDuringRateLimit(
+            isAutoMode: true, webApiEnabled: true, usingWebFallback: true))
+    }
+
+    func testRateLimitWebFallback_webDisabled_staysOff() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldActivateWebFallbackDuringRateLimit(
+            isAutoMode: true, webApiEnabled: false, usingWebFallback: false))
+    }
+
+    func testRateLimitWebFallback_nonAutoMode_staysOff() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldActivateWebFallbackDuringRateLimit(
+            isAutoMode: false, webApiEnabled: true, usingWebFallback: false))
+    }
 }
