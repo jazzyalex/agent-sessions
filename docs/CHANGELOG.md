@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6.2] - 2026-07-20
+
 ### Highlights
 - **Your Codex history rebuilds once, on the first launch after updating.** The guardian fix below can only reach sessions that are already indexed by re-reading them, so this release re-derives the metadata for your Codex sessions on first launch. While that runs, Codex sessions are missing from the session list **and from search results**, then reappear all at once when it finishes — there's no partial fill. A large library takes a while: timed here at about **two and a half minutes** for 3,300 Codex sessions across 5 GB of transcripts, and proportionally less for smaller histories. Claude sessions are untouched throughout, and the rebuild happens exactly once. If your Codex sessions look like they've vanished right after updating, let it finish.
 
