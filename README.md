@@ -32,7 +32,7 @@ Search, inspect, save, and resume local AI-coding sessions from CLI tools, deskt
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6.2** — Codex guardian sessions stop showing up as a duplicate of the session they were reviewing, subagents spawned by subagents stop vanishing from the list, and Cowork tasks get their own badge. Heads up: the guardian fix rebuilds your Codex index once on first launch, so Codex sessions briefly drop out of the list and search while it runs. [See what's new ↓](#whats-new-in-462)
+> **New in 4.6.2** — Codex guardian sessions stop showing up as a duplicate of the session they were reviewing, subagents spawned by subagents stop vanishing from the list, and Cowork tasks get their own badge. Heads up: the guardian fix rebuilds your Codex index once on first launch, so Codex sessions drop out of the list and search for a couple of minutes while it runs. [See what's new ↓](#whats-new-in-462)
 
 ## Overview
 
@@ -76,7 +76,7 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 **TL;DR** - Codex's approval-reviewer ("guardian") sessions used to sit in the list as a second copy of the session they were reviewing. They now nest under their parent like any other subagent. Subagents that spawned their own subagents were disappearing from the list entirely; the list now walks the whole tree. Claude Cowork tasks and Codex's sandboxed work sessions each get their own badge.
 
-**Upgrade note:** the guardian fix only reaches sessions you already indexed by re-reading them, so the first launch after updating rebuilds your Codex session metadata. While that runs, Codex sessions are missing from the list **and from search** — seconds for most histories, a minute or two for very large ones. Claude sessions are unaffected, and it happens once.
+**Upgrade note:** the guardian fix only reaches sessions you already indexed by re-reading them, so the first launch after updating rebuilds your Codex session metadata. While that runs, Codex sessions are missing from the list **and from search**, then come back all at once — timed at about two and a half minutes for a 3,300-session, 5 GB library, and less for smaller ones. Claude sessions are unaffected, and it happens once.
 
 New in 4.6.2:
 - **Guardian sessions stop duplicating their parent** — they nest as subagents, and the **work** pill no longer duplicates onto them.
