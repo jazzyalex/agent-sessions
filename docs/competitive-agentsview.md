@@ -12,6 +12,7 @@
 > A new **"UI philosophy"** section is added below; corrected table rows are marked *corrected 2026-07-14*.
 
 > Companion docs:
+> - [competitive-codexbar.md](competitive-codexbar.md) — **CodexBar (18.7k★) is the competitor on the live-cockpit/quota axis, not AV.** AV has no live HUD; CodexBar's live-session detection is *broader* than AS's. Read that doc before making any claim about live sessions, quota, or the Quota Meter.
 > - [perf-transcript-virtualization-plan.md](perf-transcript-virtualization-plan.md) — the big speed refactor.
 > - [perf-quick-wins.md](perf-quick-wins.md) — independent low-risk speed tickets.
 
