@@ -3916,6 +3916,12 @@ private struct SessionTitleCell: View {
         let isNestedSubagent = (rowMeta?.depth ?? 0) > 0
         let showFlatSubagentMarker = session.isSubagent && !isNestedSubagent
         HStack(spacing: 4) {
+            // Indent nested rows by depth. A nested row can itself be a parent
+            // (subagent that spawned subagents), so this can't live in the
+            // chevron's `else` branch or those rows would read as top-level.
+            if isNestedSubagent {
+                Spacer().frame(width: CGFloat(20 * (rowMeta?.depth ?? 1)))
+            }
             // Disclosure chevron for parents with children
             if let meta = rowMeta, meta.hasChildren {
                 Button(action: { onToggleExpand?(session.id) }) {
@@ -3937,9 +3943,6 @@ private struct SessionTitleCell: View {
                 Text("(\(meta.childCount))")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
-            } else if isNestedSubagent {
-                // Indent for subagent children
-                Spacer().frame(width: 20)
             }
 
             if showFlatSubagentMarker {

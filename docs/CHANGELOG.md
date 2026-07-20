@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - **Rate-limit windows no longer black out the meter.** When Anthropic's usage endpoint rate-limits (windows can run tens of minutes), Agent Sessions now switches to the claude.ai web path to keep live numbers flowing instead of sitting on stale data.
 - **The spinner tells you why.** The "reconnecting…" cells in the Quota Meter, menu bar, and footer now say what's actually happening — "rate limited — retrying…" — instead of spinning anonymously.
 - **Leaked probe sessions are reaped reliably.** A hidden Claude probe could survive for days if its tmux socket vanished; the launch sweep now retries and logs instead of silently skipping.
+- **Subagents spawned by subagents no longer vanish from the list.** When a subagent had children of its own — a Codex `review` subagent that spawned thread children, for instance — those grandchildren were dropped from the session list entirely: not nested, not shown at top level, just absent. The list now walks the whole tree, so every session appears under its own parent at its own indent level, and collapsing a row hides everything beneath it.
 - **Surface badges stop getting clipped on subagent rows.** Subagent rows spend part of the Agent column on their indent, which was enough to cut a six-character badge down to `cowo…`. Badges now always render whole.
 
 ## [4.6.1] - 2026-07-19

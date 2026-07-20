@@ -1732,6 +1732,122 @@ final class SessionParserTests: XCTestCase {
         XCTAssertNil(collapsed.rowMeta["review-child"])
     }
 
+    func testSubagentHierarchyKeepsGrandchildrenWhenParentIsItselfASubagent() {
+        // A `review` subagent that gets an *inferred* role-only parent is both a
+        // child and a parent. The flatten loop used to skip every session in
+        // `childIDs` and only emit `childrenByParentID[s.id]` for the survivors,
+        // so this grandchild was dropped from the list entirely.
+        let cwd = "/tmp/repo"
+        let reviewRuntimeID = "019d9d15-b642-7fd3-b91b-390331f2aefa"
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: cwd
+        )
+        // Role-only: no parentSessionID, so it resolves to `root` by inference.
+        let review = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: reviewRuntimeID,
+            timestamp: "2026-04-17T13-15-39",
+            cwd: cwd,
+            subagentType: "review"
+        )
+        let grandchild = makeCodexHierarchySession(
+            id: "thread-spawn-grandchild",
+            runtimeID: "019d9d18-1a2b-7c3d-8e4f-5a6b7c8d9e0f",
+            timestamp: "2026-04-17T13-17-39",
+            cwd: cwd,
+            parentSessionID: reviewRuntimeID,
+            subagentType: "thread_spawn"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [root, review, grandchild],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["root", "review-child", "thread-spawn-grandchild"])
+        XCTAssertEqual(result.rowMeta["review-child"]?.depth, 1)
+        XCTAssertEqual(result.rowMeta["review-child"]?.hasChildren, true)
+        XCTAssertEqual(result.rowMeta["review-child"]?.childCount, 1)
+        XCTAssertEqual(result.rowMeta["thread-spawn-grandchild"]?.depth, 2)
+        XCTAssertEqual(result.rowMeta["thread-spawn-grandchild"]?.hasChildren, false)
+    }
+
+    func testSubagentHierarchyCollapsingRootHidesEntireSubtree() {
+        let cwd = "/tmp/repo"
+        let reviewRuntimeID = "019d9d15-b642-7fd3-b91b-390331f2aefa"
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: cwd
+        )
+        let review = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: reviewRuntimeID,
+            timestamp: "2026-04-17T13-15-39",
+            cwd: cwd,
+            subagentType: "review"
+        )
+        let grandchild = makeCodexHierarchySession(
+            id: "thread-spawn-grandchild",
+            runtimeID: "019d9d18-1a2b-7c3d-8e4f-5a6b7c8d9e0f",
+            timestamp: "2026-04-17T13-17-39",
+            cwd: cwd,
+            parentSessionID: reviewRuntimeID,
+            subagentType: "thread_spawn"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [root, review, grandchild],
+            collapsedParents: ["root"],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["root"])
+        XCTAssertEqual(result.rowMeta["root"]?.childCount, 1)
+        XCTAssertNil(result.rowMeta["review-child"])
+        XCTAssertNil(result.rowMeta["thread-spawn-grandchild"])
+    }
+
+    func testSubagentHierarchyCollapsingMidLevelParentHidesOnlyItsChildren() {
+        let cwd = "/tmp/repo"
+        let reviewRuntimeID = "019d9d15-b642-7fd3-b91b-390331f2aefa"
+        let root = makeCodexHierarchySession(
+            id: "root",
+            runtimeID: "019d9d10-3975-78d0-aa1d-76869a532044",
+            timestamp: "2026-04-17T13-09-39",
+            cwd: cwd
+        )
+        let review = makeCodexHierarchySession(
+            id: "review-child",
+            runtimeID: reviewRuntimeID,
+            timestamp: "2026-04-17T13-15-39",
+            cwd: cwd,
+            subagentType: "review"
+        )
+        let grandchild = makeCodexHierarchySession(
+            id: "thread-spawn-grandchild",
+            runtimeID: "019d9d18-1a2b-7c3d-8e4f-5a6b7c8d9e0f",
+            timestamp: "2026-04-17T13-17-39",
+            cwd: cwd,
+            parentSessionID: reviewRuntimeID,
+            subagentType: "thread_spawn"
+        )
+
+        let result = SubagentHierarchyBuilder.build(
+            sessions: [root, review, grandchild],
+            collapsedParents: ["review-child"],
+            hierarchyEnabled: true
+        )
+
+        XCTAssertEqual(result.sessions.map(\.id), ["root", "review-child"])
+        XCTAssertEqual(result.rowMeta["review-child"]?.hasChildren, true)
+        XCTAssertNil(result.rowMeta["thread-spawn-grandchild"])
+    }
+
     func testSubagentHierarchyShowsChildrenWhenCollapsedParentsIsEmpty() {
         let parent = makeCodexHierarchySession(
             id: "parent",

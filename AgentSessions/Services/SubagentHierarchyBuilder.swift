@@ -2,7 +2,7 @@ import Foundation
 
 /// Row metadata for hierarchical session display.
 struct SubagentRowMeta {
-    let depth: Int            // 0 = top-level, 1 = subagent child
+    let depth: Int            // 0 = top-level, 1 = subagent child, 2+ = nested subagent
     let hasChildren: Bool     // true if this session has resolved subagent children
     let childCount: Int       // number of resolved subagent children (0 for non-parents)
     let hasWorkflowChildren: Bool  // true when ≥1 resolved child is a Claude workflow agent
@@ -121,31 +121,45 @@ enum SubagentHierarchyBuilder {
             childrenByParentID[key] = children.sorted { $0.modifiedAt > $1.modifiedAt }
         }
 
-        // 3. Flatten: parents in original order, children inserted after expanded parents
+        // 3. Flatten: roots in original order, each followed by its expanded
+        //    subtree in depth-first order. The walk must recurse rather than emit
+        //    a single child level: a session can be *both* a child and a parent
+        //    (e.g. a `review` subagent with an inferred role-only parent that
+        //    itself spawned thread children). Emitting only one level dropped
+        //    those grandchildren from the list entirely.
         var flatSessions: [Session] = []
         var rowMeta: [String: SubagentRowMeta] = [:]
         flatSessions.reserveCapacity(sessions.count)
         rowMeta.reserveCapacity(sessions.count)
 
+        // Iterative DFS: bounds stack growth by the session count regardless of
+        // how deep (or cyclic) a resolved parent chain turns out to be.
+        var emitted: Set<String> = []
+        var stack: [(session: Session, depth: Int)] = []
+
         for s in sessions {
-            // Skip children — they'll be inserted after their parent
+            // Skip children — they're emitted as part of their ancestor's subtree
             if childIDs.contains(s.id) { continue }
 
-            let children = childrenByParentID[s.id] ?? []
-            let hasChildren = !children.isEmpty
+            stack.append((s, 0))
+            while let (node, depth) = stack.popLast() {
+                // Guards against a cycle in the resolved parent chain revisiting
+                // a row (which would otherwise loop forever).
+                guard emitted.insert(node.id).inserted else { continue }
 
-            flatSessions.append(s)
-            rowMeta[s.id] = SubagentRowMeta(
-                depth: 0,
-                hasChildren: hasChildren,
-                childCount: children.count,
-                hasWorkflowChildren: children.contains { $0.isClaudeWorkflowSubagent }
-            )
+                let children = childrenByParentID[node.id] ?? []
+                flatSessions.append(node)
+                rowMeta[node.id] = SubagentRowMeta(
+                    depth: depth,
+                    hasChildren: !children.isEmpty,
+                    childCount: children.count,
+                    hasWorkflowChildren: children.contains { $0.isClaudeWorkflowSubagent }
+                )
 
-            if hasChildren, !collapsedParents.contains(s.id) {
-                for child in children {
-                    flatSessions.append(child)
-                    rowMeta[child.id] = SubagentRowMeta(depth: 1, hasChildren: false, childCount: 0)
+                guard !children.isEmpty, !collapsedParents.contains(node.id) else { continue }
+                // Reversed: popLast() then yields children in sorted order.
+                for child in children.reversed() {
+                    stack.append((child, depth + 1))
                 }
             }
         }
