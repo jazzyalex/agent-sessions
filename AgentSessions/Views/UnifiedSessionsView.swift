@@ -412,6 +412,9 @@ struct UnifiedSessionsView: View {
 	@AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
 	@AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
 	@AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+	/// Footer usage meters on/off. @AppStorage rather than a raw UserDefaults read so
+	/// flipping the toggle in Preferences applies to an open window immediately.
+	@AppStorage(PreferencesKey.Unified.showFooterUsage) private var showFooterUsage: Bool = true
 	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
@@ -697,6 +700,7 @@ struct UnifiedSessionsView: View {
 			let afterUsage = afterLiveFeature
 				.onChange(of: codexUsageEnabled) { _, _ in updateFooterUsageVisibility() }
 				.onChange(of: claudeUsageEnabled) { _, _ in updateFooterUsageVisibility() }
+				.onChange(of: showFooterUsage) { _, _ in updateFooterUsageVisibility() }
 					.onChange(of: searchState.query) { _, newValue in
 						if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 							cancelAutoJump()
@@ -1434,6 +1438,9 @@ struct UnifiedSessionsView: View {
 	    }
 
 	    private var footerQuotas: [QuotaData] {
+	        // Footer switched off: no meters, whatever tracking is doing. Tracking itself
+	        // keeps running for the menu bar and the Quota Meter.
+	        guard showFooterUsage else { return [] }
 	        var out: [QuotaData] = []
 	        if codexAgentEnabled && codexUsageEnabled {
 	            out.append(.codex(from: codexUsageModel))
@@ -1446,8 +1453,11 @@ struct UnifiedSessionsView: View {
 
 	    @MainActor
 	    private func updateFooterUsageVisibility() {
-	        codexUsageModel.setStripVisible(codexAgentEnabled && codexUsageEnabled)
-	        claudeUsageModel.setStripVisible(claudeAgentEnabled && claudeUsageEnabled)
+	        // `stripVisible` is only the FOOTER's claim on polling — the menu bar and a
+	        // visible/pinned Quota Meter register their own (see propagateVisibility), so
+	        // hiding the footer stops it asking for refreshes without starving them.
+	        codexUsageModel.setStripVisible(showFooterUsage && codexAgentEnabled && codexUsageEnabled)
+	        claudeUsageModel.setStripVisible(showFooterUsage && claudeAgentEnabled && claudeUsageEnabled)
 	    }
 
     private func restoreFromArchive(_ session: Session) {

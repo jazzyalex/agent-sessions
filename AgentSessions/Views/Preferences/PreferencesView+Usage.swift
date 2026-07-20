@@ -148,20 +148,12 @@ extension PreferencesView {
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
             }
 
-            // Strip options (shared)
-            sectionHeader("Strip Options")
+            // Where usage is shown (shared)
+            sectionHeader("Main Window")
             VStack(alignment: .leading, spacing: 12) {
-                toggleRow("Show Codex strip", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showCodexStrip) },
-                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showCodexStrip) }
-                ), help: "Show the Codex usage strip at the bottom of the Unified window")
-                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
-                toggleRow("Show Claude strip", isOn: Binding(
-                    get: { UserDefaults.standard.bool(forKey: PreferencesKey.Unified.showClaudeStrip) },
-                    set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Unified.showClaudeStrip) }
-                ), help: "Show the Claude usage strip at the bottom of the Unified window")
-                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
-                toggleRow("Show reset times", isOn: $stripShowResetTime, help: "Display the usage reset timestamp next to each meter")
+                toggleRow("Show usage in the footer", isOn: $showFooterUsage,
+                          help: "Show the usage meters along the bottom of the main window. Turn this off if you read usage in the menu bar or the Quota Meter — tracking keeps running either way.")
+                    .disabled(!(codexUsageEnabled && codexAgentEnabled) && !(claudeUsageEnabled && claudeAgentEnabled))
             }
 
             // Display style (shared across Codex & Claude)

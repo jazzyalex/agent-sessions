@@ -63,7 +63,10 @@ enum PreferencesKey {
     static let menuBarEnabled = "MenuBarEnabled"
     static let menuBarScope = "MenuBarScope"
     static let menuBarStyle = "MenuBarStyle"
-    static let stripShowResetTime = "StripShowResetTime"
+    // NOTE: no `stripShowResetTime` here any more. Reset times are essential context for
+    // a usage meter, so the footer always shows them; the old toggle only ever reached
+    // the retired UsageStripView. The menu bar keeps its own MenuBar.show*ResetTimes
+    // pair, which is live and controlled from the menu bar's own menu.
     static let stripMonochromeMeters = "StripMonochromeMeters"
 
     // Unified window filters
@@ -101,8 +104,11 @@ enum PreferencesKey {
     static let claudePollingInterval = "ClaudePollingInterval"
 
     enum Unified {
-        static let showCodexStrip = "UnifiedShowCodexStrip"
-        static let showClaudeStrip = "UnifiedShowClaudeStrip"
+        /// Whether the main window's footer carries the usage meters. Off is for people
+        /// who read usage in the menu bar or Quota Meter and don't want it twice —
+        /// tracking keeps running, only the footer row goes away.
+        /// (Replaces the never-read UnifiedShowCodexStrip/UnifiedShowClaudeStrip pair.)
+        static let showFooterUsage = "UnifiedShowFooterUsage"
         static let showSourceColumn = "UnifiedShowSourceColumn"
         static let showSizeColumn = "UnifiedShowSizeColumn"
         static let showStarColumn = "UnifiedShowStarColumn"

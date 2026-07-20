@@ -84,7 +84,8 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
     @AppStorage(PreferencesKey.menuBarStyle) var menuBarStyleRaw: String = MenuBarStyleKind.bars.rawValue
-    @AppStorage(PreferencesKey.stripShowResetTime) var stripShowResetTime: Bool = false
+    /// Defaults ON so existing users see no change until they choose otherwise.
+    @AppStorage(PreferencesKey.Unified.showFooterUsage) var showFooterUsage: Bool = true
     @AppStorage(PreferencesKey.stripMonochromeMeters) var stripMonochromeGlobal: Bool = false
     @AppStorage(PreferencesKey.usageDisplayMode) var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) var quotaMeterRunwayVisibilityRaw: String = QuotaMeterRunwayVisibility.automatic.rawValue
@@ -320,28 +321,11 @@ struct PreferencesView: View {
         }
         // Keep UI feeling responsive when switching between panes
         .animation(.easeInOut(duration: 0.12), value: selectedTab)
-        // Keep Codex strip visibility consistent with tracking master toggle.
-        .onChange(of: codexUsageEnabled) { _, newValue in
-            let d = UserDefaults.standard
-            if newValue {
-                d.set(true, forKey: PreferencesKey.Unified.showCodexStrip)
-            } else {
-                d.set(false, forKey: PreferencesKey.Unified.showCodexStrip)
-            }
-        }
-        // Keep Claude strip visibility consistent with tracking master toggle.
-        // When tracking is turned OFF, immediately hide the strip(s).
-        // When tracking is turned ON again, turn the strip(s) back ON for visibility.
-        .onChange(of: claudeUsageEnabled) { _, newValue in
-            let d = UserDefaults.standard
-            if newValue {
-                d.set(true, forKey: PreferencesKey.Unified.showClaudeStrip)
-                d.set(true, forKey: PreferencesKey.showClaudeUsageStrip)
-            } else {
-                d.set(false, forKey: PreferencesKey.Unified.showClaudeStrip)
-                d.set(false, forKey: PreferencesKey.showClaudeUsageStrip)
-            }
-        }
+        // NOTE: the old per-provider strip keys used to be force-synced here whenever the
+        // usage master toggle flipped. Nothing ever read them, so the sync only served to
+        // overwrite a choice the user had made. Footer visibility now lives in
+        // Unified.showFooterUsage and is owned solely by its own toggle; a provider whose
+        // tracking is off simply contributes no meter (see footerQuotas).
         .onChange(of: selectedTab) { _, newValue in
             guard let t = newValue else { return }
             lastSelectedTabRaw = t.rawValue
