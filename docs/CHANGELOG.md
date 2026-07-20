@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.6.3] - 2026-07-20
+
 ### Highlights
 - **You can switch the footer usage meters off, and it works now.** Settings → Usage Tracking had three toggles for this — Show Codex strip, Show Claude strip, Show reset times — and every one of them was inert: they saved a value nothing read, and flipping usage tracking quietly overwrote whatever you'd chosen. They're replaced by a single **Show usage in the footer** switch that genuinely hides the meters from the main window, straight away, without a relaunch. Usage tracking keeps running while it's off, so the menu bar and the Quota Meter carry on as before — this only decides whether the main window shows the same numbers a second time. Reset times no longer have a toggle at all; they're part of reading a meter, so the footer always shows them (the menu bar keeps its own reset-indicator switches in its own menu).
 
