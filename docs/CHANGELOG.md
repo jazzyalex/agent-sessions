@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **The usage-source note stops breaking the footer layout.** When a reading came from the claude.ai web path or the CLI probe rather than the provider's usual source, the footer tagged it on a second line stacked under the meter — which grew the fixed-height strip and shoved the rest of the footer out of line. The tag now sits beside the meter and the strip stays one row. This affected the **via CLI probe** tag exactly as much as **via claude.ai**; both now share one label mapping.
+
 ## [4.6.2] - 2026-07-20
 
 ### Highlights

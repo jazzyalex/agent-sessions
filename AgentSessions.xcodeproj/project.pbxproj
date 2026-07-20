@@ -237,6 +237,7 @@
 		8C5E9719E00034AAF37A8148 /* OpenClawSessionDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC54FCC94EC9F1A7A25BE98 /* OpenClawSessionDiscovery.swift */; };
 		8DC56A2B614B4E77A1030420 /* CodexCLIEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D641BFBD310B4157871F120F /* CodexCLIEnvironment.swift */; };
 		8DF3C86532429CB45AA853EF /* ClaudeOAuthTokenResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24A9CCB363D46E74686EE3F2 /* ClaudeOAuthTokenResolverTests.swift */; };
+		8E470DB22059F23266D61CE0 /* FooterSourceTagTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 380690C21F585A16EFC2B7AF /* FooterSourceTagTests.swift */; };
 		8F5A32127F320686B74E1C3B /* CodexStatusProbeSuppressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C7A7A304CC1B724E2708B68 /* CodexStatusProbeSuppressionTests.swift */; };
 		8F5F9638088D526B977CFB13 /* AgentUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9250A5B0654ADC3B8ACA39B4 /* AgentUpdateService.swift */; };
 		8FE8D241D632CC693B3BDF74 /* SessionViewModeMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DBF75F0C17E31CB61362815 /* SessionViewModeMigrationTests.swift */; };
@@ -600,6 +601,7 @@
 		364AF61D9D3F6BB2B413B5D3 /* PerfQuickWinsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PerfQuickWinsTests.swift; sourceTree = SOURCE_ROOT; };
 		37006C856FBE4448A658887B /* CommandExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CommandExecutor.swift; path = AgentSessions/Resume/CommandExecutor.swift; sourceTree = SOURCE_ROOT; };
 		372394B7F3B77108C9FEAFC8 /* AgentEnablement.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/AgentEnablement.swift; sourceTree = SOURCE_ROOT; };
+		380690C21F585A16EFC2B7AF /* FooterSourceTagTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/FooterSourceTagTests.swift; sourceTree = SOURCE_ROOT; };
 		389079ECB645543E0ECC7212 /* ClaudeRunwayTokenActivityParser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift; sourceTree = SOURCE_ROOT; };
 		39375A35205563EFBB541E55 /* SubagentHierarchyBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/SubagentHierarchyBuilder.swift; sourceTree = SOURCE_ROOT; };
 		3A39A36FCB3A36B34E58751E /* DroidSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/DroidSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
@@ -1592,6 +1594,7 @@
 				46D6BA57F6BDBFA89B28432C /* ProbeCoordinatorTests.swift */,
 				90C63E51DF24A350A63AA7A7 /* QuotaDataPresentationTests.swift */,
 				FF3000B6770D40C5A39AD0C3 /* ProbeCleanupHelpersTests.swift */,
+				380690C21F585A16EFC2B7AF /* FooterSourceTagTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -2691,6 +2694,7 @@
 				5BA5B6ACA8C141C1BF8C26EA /* ProbeCoordinatorTests.swift in Sources */,
 				B24E6CA1D3C284AE5E53BF2A /* QuotaDataPresentationTests.swift in Sources */,
 				07EEB1C3113FDD27D296DAE2 /* ProbeCleanupHelpersTests.swift in Sources */,
+				8E470DB22059F23266D61CE0 /* FooterSourceTagTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

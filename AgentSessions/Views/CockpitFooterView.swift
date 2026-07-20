@@ -245,7 +245,11 @@ struct CockpitFooterView: View {
 		                        // above if the retries keep failing.
 		                        FooterRetryChip(provider: q.provider, caption: q.reconnectingCaption)
 		                    case .live:
-		                        VStack(alignment: .leading, spacing: 1) {
+		                        // Laid out as a ROW, not a stack: this strip is a fixed
+		                        // single-line design (see .frame(minHeight:) below), so a
+		                        // second stacked line here grows the whole footer. Any
+		                        // fallback-source tag rides beside the meter instead.
+		                        HStack(spacing: 4) {
 		                            CockpitQuotaWidget(
 		                                data: q,
 		                                isDarkMode: colorScheme == .dark,
@@ -256,13 +260,15 @@ struct CockpitFooterView: View {
 		                                showResetIndicators: true,
 		                                showPill: true
 		                            )
-		                            if q.currentSource == .tmuxUsage {
-		                                Text("via CLI probe").font(.caption2).foregroundStyle(.secondary)
-		                            } else if q.currentSource == .webEndpoint || q.currentSource == .cachedWeb {
-		                                // Quiet fallback-source tag: tells the user usage is being
-		                                // served by the claude.ai web path (pasted cookie) while the
-		                                // CLI OAuth token is lapsed — without any prompt or alarm.
-		                                Text("via claude.ai").font(.caption2).foregroundStyle(.secondary)
+		                            // Quiet fallback-source tag: says which path served the
+		                            // reading — the claude.ai web cookie or the CLI probe —
+		                            // while the usual source is unavailable, without alarm.
+		                            if let sourceTag = Self.fallbackSourceTag(for: q.currentSource) {
+		                                Text(sourceTag)
+		                                    .font(.caption2)
+		                                    .foregroundStyle(.secondary)
+		                                    .lineLimit(1)
+		                                    .fixedSize()
 		                            }
 		                        }
 		                    }
@@ -284,6 +290,21 @@ struct CockpitFooterView: View {
             Rectangle()
                 .fill(CockpitFooterTheme.topBorder(isDark: colorScheme == .dark))
                 .frame(height: 1)
+        }
+    }
+
+    /// Short provenance label for a reading served by something other than the
+    /// provider's usual source, or nil when the usual source served it (the common
+    /// case, which stays unlabelled). Kept as one mapping so the footer can't drift
+    /// from the menu bar's equivalent note.
+    static func fallbackSourceTag(for source: ClaudeUsageSource?) -> String? {
+        switch source {
+        case .tmuxUsage:
+            return "via CLI probe"
+        case .webEndpoint, .cachedWeb:
+            return "via claude.ai"
+        default:
+            return nil
         }
     }
 }
