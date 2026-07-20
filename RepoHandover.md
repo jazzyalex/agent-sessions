@@ -1,3 +1,65 @@
+## 2026-07-19 21:15 · subagent-grandchildren-drop · Grandchild sessions no longer dropped from the list
+status: done
+
+**State:** Fixed the pre-existing `SubagentHierarchyBuilder` bug where a session that is BOTH a child and a parent had its own children silently dropped from the session list (not nested, not flattened — absent). Flatten loop replaced with an iterative DFS over the whole subtree. TDD: 3 tests written and watched fail first (failure was exactly `["root","review-child"]` missing the grandchild), then full suite green 1725/0/3-skipped. Committed `d1d8de2e` on main, unpushed.
+
+**Decided / don't redo:**
+- `depth` now carries the true level (2+) instead of clamping to 1 — every UI consumer tests `depth > 0` / `== 0`, so it renders correctly today and keeps real structure available.
+- Nested parents get honest `hasChildren`/`childCount` (also makes them collapsible); `collapsedParents` honored at every level.
+- `emitted` set is a cycle guard only — a cycle is NOT constructible through the public API (role-only index excludes subagents as candidate parents; explicit chains follow real spawns). Don't write a test for it.
+- Census caveat: `parent_thread_id` lives at `source.subagent.thread_spawn.parent_thread_id`, NOT at payload root. A root-level probe returns a false 0. Corrected census confirms 150 grandchildren, all `('thread_spawn','review')`.
+- Left `docs/summaries/2026-07.md` uncreated — that `agents.md` convention has been dormant since 2026-06; didn't restart it unilaterally.
+
+**Key files:**
+- `AgentSessions/Services/SubagentHierarchyBuilder.swift:124` — the DFS flatten
+- `AgentSessions/Views/UnifiedSessionsView.swift:3919` — indent moved out of the chevron's `else` branch (nested rows can now have children and would have rendered flush-left)
+- `AgentSessionsTests/SessionParserTests.swift:1735` — 3 new tests (grandchild survives, collapse root, collapse mid-level)
+
+**Next:**
+1. Owner visual QA: a `review` subagent row with thread children should now show a chevron + count and indent one level in.
+
+## 2026-07-19 21:15 · codex-live-status-parent-thread · QM/Runway now read top-level parent_thread_id
+status: done
+
+**State:** Committed `cb1c44f2` on main, unpushed. Closes follow-up 2 of the `codex-guardian-subagent` entry below: `CodexActiveSessionsModel.parseActiveSubagentSessionMeta` and `CodexRunwayModel.parentSessionID(from:)` now fall back to `payload.parent_thread_id`, so a RUNNING guardian is attributed to its parent instead of showing as an independent active session. Full suite 1725/3 skipped/0 failures.
+
+**Decided / don't redo:**
+- Neither live path classifies subagent *type* — they only ever read the parent link — so `{"subagent":{"other":"guardian"}}` needed no dedicated branch here, just the top-level fallback.
+- Gate widened from dict-only to any `subagent` value, so the string form `{"subagent":"review"}` now resolves a parent too. Intentional: matches `SessionIndexer` (f7de3891). Real behavior change beyond guardians.
+- Fallback stays gated on a subagent source. Corpus check: 961 rollouts carry `parent_thread_id`, **all** subagent-sourced, 0 non-subagent — so the guardrail is defensive only, kept to keep the 3 parse sites textually aligned.
+- Attribution is verified by test against a fixture confirmed field-identical to the real guardian `session_meta`, NOT by observing a live guardian. That gap is open.
+
+**Key files:**
+- `AgentSessions/Services/CodexActiveSessionsModel.swift:1295` / `AgentSessions/CodexStatus/CodexRunwayModel.swift:1755` — the two fixed reads
+- `AgentSessionsTests/CodexActiveSessionsRegistryTests.swift` + `CodexUsageParserTests.swift` — 6 new tests (guardian, string-form, non-subagent guardrail × both paths)
+
+**Next:**
+1. Owed: `docs/CHANGELOG.md` bullet — skipped because a parallel session has an unstaged bullet in that file and `git commit -- <path>` would sweep it in. Add after their work lands.
+2. Strike "Live-status guardian attribution" from the out-of-scope list in `docs/superpowers/plans/2026-07-19-codex-guardian-subagent-fix.md:472`.
+3. Owner QA on the next real guardian to confirm live behavior.
+
+## 2026-07-19 21:14 · codex-guardian-subagent · Cowork/work badges + guardian duplicate-row fix; all committed, unpushed
+status: in-progress
+
+**State:** Two features + one bug fix landed on main, 9 commits `57655242..e1312475`, NOT pushed. (1) Claude Cowork sessions now carry a `cowork` badge with live sidecar titles/archive parity (second overlay root); (2) Codex Desktop sandboxed tasks (cwd `~/Documents/Codex/<date>/<slug>`) carry a `work` badge — label chosen from Codex's own `codex_work_desktop` marker, deliberately NOT reusing Anthropic's "Cowork" branding for an OpenAI surface; (3) Codex guardian (approval-reviewer) subagents stopped duplicating their parent's row. Full suite 1716/3 skipped/0 failures. Opus whole-branch review READY TO MERGE. Verified end-to-end on the real corpus after reindex: 3321 codex rows, exactly 70 `guardian`, reported pair resolves parent→child, 0 guardians holding the parent's internal id.
+
+**Decided / don't redo:**
+- Codex needs no Cowork-equivalent ingestion: all 83 `~/Documents/Codex` threads already point `rollout_path` back into `~/.codex/sessions`. Nothing separate to discover.
+- ChatGPT desktop chats + claude.ai web chats are NOT locally readable (encrypted `.data` blobs / fragmentary LevelDB). Don't re-investigate.
+- Nesting via transcript-body `Reviewed Codex session id:` text = rejected; `payload.parent_thread_id` + existing cwd inference already suffice.
+- All classifiers are path-/cwd-/subagent_type-keyed because hydrated rows have NULL surface metadata.
+- Two commits here (`1ca28990`, `e1312475`) are a *parallel* session's stale work, committed on owner request; that session was still running.
+
+**Key files:**
+- `AgentSessions/Services/SessionIndexer.swift` — guardian `{"subagent":{"other":…}}` branch, BOTH parse sites (required: SearchIngest writes meta via `parseFileFull`)
+- `AgentSessions/Indexing/DB.swift` — `codex_guardian_subagent_reindex_v1` corpus-preserving marker
+- `docs/superpowers/plans/2026-07-19-codex-guardian-subagent-fix.md` + `…-claude-cowork-labeling.md` — executed plans
+
+**Next:**
+1. Owner QA, then push on GO.
+2. Two follow-ups running as separate sessions: grandchild rows silently dropped in `SubagentHierarchyBuilder` flatten (~150 rows, pre-existing); QM/Runway not reading top-level `parent_thread_id`.
+3. Still queued, untouched: Runway should read the Cowork sidecar root (`ClaudeRunwaySnapshotLoader:23` → `defaultRoots()`); fix stale "account is not Premium" line in `docs/superpowers/the-rollout-voice.md`.
+
 ## 2026-07-19 18:32 · usage-connection-resilience · QM "reconnecting forever" root-caused + fixed; QA/push pending
 status: in-progress
 
