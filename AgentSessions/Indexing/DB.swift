@@ -464,6 +464,17 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
         }
 
+        // Re-derive Codex session_meta so guardian approval-reviewer subagents
+        // ({"subagent":{"other":"guardian"}}) get subagent_type/parent_session_id
+        // populated by the fixed SessionIndexer extraction, and internal session
+        // ids stop pointing at the parent (deriveCodexInternalSessionID fix).
+        // Corpus-preserving per the guardrail above: session_meta only.
+        let codexGuardianReindex = "codex_guardian_subagent_reindex_v1"
+        if !migrationApplied(db, key: codexGuardianReindex) {
+            try reindexSessionMeta(db, sources: ["codex"])
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexGuardianReindex)
+        }
+
             try exec(db, "COMMIT;")
         } catch {
             try? exec(db, "ROLLBACK;")
