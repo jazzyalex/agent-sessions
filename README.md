@@ -42,7 +42,7 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Session Runway — live per-session quota burn-rate</em></p>
-  <img src="docs/assets/quota-meter-runway.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars" width="100%" style="max-width:960px;border-radius:8px;margin:5px 0;"/>
+  <img src="docs/assets/quota-meter-runway-rate-small.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars" width="100%" style="max-width:640px;border-radius:8px;margin:5px 0;"/>
 
   <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
   <picture>

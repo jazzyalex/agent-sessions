@@ -218,7 +218,8 @@
       margin: 56px auto 0;
       padding: 0 22px;
     }
-    .hero-shot img {
+    .hero-shot img,
+    .hero-shot video {
       width: 100%;
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-hero);
@@ -338,7 +339,8 @@
     .feat.showcase { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; }
     .feat.showcase .copy { padding: 4px 0; }
     .feat.showcase .shots { display: flex; flex-direction: column; gap: 12px; }
-    .feat.showcase .shots img { width: 100%; border-radius: 12px; box-shadow: var(--shadow-card); }
+    .feat.showcase .shots img,
+    .feat.showcase .shots video { width: 100%; border-radius: 12px; box-shadow: var(--shadow-card); }
     .feat.showcase .pair { display: flex; gap: 12px; }
     .feat.showcase .pair img { width: 50%; }
 
@@ -435,7 +437,9 @@
   </header>
 
   <div class="hero-shot">
-    <img src="assets/quota-meter-runway.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars for Codex and Claude">
+    <video src="assets/quota-meter-runway-rate.mp4" autoplay loop muted playsinline
+           poster="assets/quota-meter-light.png"
+           aria-label="Quota Meter with Session Runway showing live per-session quota burn-rate bars for Codex and Claude"></video>
   </div>
 
   <section class="band" id="features">
@@ -513,7 +517,9 @@
         </div>
         <div class="shots">
           <img src="assets/quota-meter-light.png" alt="Quota Meter with Session Runway per-session burn-rate bars for Codex and Claude">
-          <img src="assets/quota-meter-runway.gif" alt="Animated Session Runway showing live Codex and Claude per-session burn rates" loading="lazy">
+          <video src="assets/quota-meter-runway-rate.mp4" autoplay loop muted playsinline
+                 poster="assets/quota-meter-light.png"
+                 aria-label="Animated Session Runway showing live Codex and Claude per-session burn rates"></video>
           <div class="pair">
             <img src="assets/screenshot-cockpit-light.png" alt="Compact cockpit, light mode">
             <img src="assets/screenshot-cockpit-dark.png" alt="Compact cockpit, dark mode">
