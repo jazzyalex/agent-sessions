@@ -375,7 +375,8 @@ final class SessionRowDisplayTests: XCTestCase {
         filePath: String = "/Users/test/.codex/sessions/2026/07/18/rollout-2026-07-18T22-29-02-abc.jsonl",
         source: SessionSource = .codex,
         codexOriginator: String? = nil,
-        codexSurface: CodexSessionSurface? = nil
+        codexSurface: CodexSessionSurface? = nil,
+        subagentType: String? = nil
     ) -> Session {
         Session(
             id: "codex-work-test",
@@ -389,6 +390,7 @@ final class SessionRowDisplayTests: XCTestCase {
             cwd: cwd,
             repoName: nil,
             lightweightTitle: nil,
+            subagentType: subagentType,
             codexOriginator: codexOriginator,
             codexSurface: codexSurface
         )
@@ -468,5 +470,34 @@ final class SessionRowDisplayTests: XCTestCase {
             codexSurface: .desktop
         )
         XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["desk"])
+    }
+
+    func testCodexWorkSubagentGetsNoWorkPill() {
+        // Guardian approval reviewer inherits the parent's work cwd; it must
+        // not duplicate the parent's work pill (hydrated shape: nil surface
+        // metadata, subagent_type restored from DB).
+        let s = makeCodexSession(cwd: Self.codexWorkCwd, subagentType: "guardian")
+        XCTAssertTrue(s.isCodexWorkSession)
+        XCTAssertTrue(s.isSubagent)
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+    }
+
+    func testCodexWorkSubagentGetsNoWorkPillFreshParse() {
+        // Freshly-parsed shape: originator/surface metadata present. Must agree
+        // with the hydrated shape (no pill), not fall through to the switch's
+        // .subagent branch (which would render a desk pill off the
+        // codex_work_desktop originator).
+        let s = makeCodexSession(
+            cwd: Self.codexWorkCwd,
+            codexOriginator: "codex_work_desktop",
+            codexSurface: .subagent,
+            subagentType: "guardian"
+        )
+        XCTAssertTrue(UnifiedSessionsView.surfacePills(for: s).isEmpty)
+    }
+
+    func testCodexWorkRootSessionKeepsWorkPill() {
+        let s = makeCodexSession(cwd: Self.codexWorkCwd)
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
     }
 }

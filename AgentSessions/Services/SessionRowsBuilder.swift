@@ -340,6 +340,13 @@ enum SessionRowsBuilder {
         // cwd-shape check must win to keep sandboxed tasks distinct from
         // ordinary Desktop coding sessions.
         if session.isCodexWorkSession {
+            // A subagent spawned inside the work workspace (e.g. a guardian
+            // approval reviewer) inherits the parent's cwd; giving it the same
+            // work pill made it read as a duplicate of the parent row. It gets
+            // no surface pill — same as every other Codex subagent's hydrated
+            // rendering (the .none branch below) — and the hierarchy row
+            // treatment (nesting / "sub" marker) carries the semantics.
+            if session.isSubagent { return [] }
             return [.work(isArchived: session.isArchivedCodexDesktopSession)]
         }
 
