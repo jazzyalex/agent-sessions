@@ -335,6 +335,13 @@ enum SessionRowsBuilder {
         if let claudeDesktopPill = claudeDesktopSurfacePill(for: session, isArchived: isClaudeArchived) {
             return [claudeDesktopPill]
         }
+        // Before the surface switch: Codex reports these as originator
+        // "Codex Desktop", which classifies to .desktop, so the narrower
+        // cwd-shape check must win to keep sandboxed tasks distinct from
+        // ordinary Desktop coding sessions.
+        if session.isCodexWorkSession {
+            return [.work(isArchived: session.isArchivedCodexDesktopSession)]
+        }
 
         switch session.surface ?? session.codexSurface {
         case .desktop:

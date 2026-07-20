@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Cowork sessions are labelled as Cowork.** Claude's Cowork tasks were already in your history, but they wore the same **desk** badge as Claude Desktop's Code tab, so there was no way to tell a sandboxed Cowork run from a normal desktop coding session. They now carry their own **cowork** badge. Renaming a task inside Cowork retitles it here without a reindex, and archiving one puts it behind the same archive filter that already covers Claude Desktop — the transcript's archive strip included.
+- **Codex's sandboxed tasks get their own badge too.** Codex Desktop runs some tasks in a throwaway workspace under `~/Documents/Codex/<date>/<slug>/` instead of a repo you chose. Those sessions used to look identical to ordinary Codex Desktop work; they now carry a **work** badge, named after Codex's own `codex_work_desktop` marker rather than borrowing Claude's Cowork name for a different vendor's feature.
+
+### Bug Fixes
+- **Surface badges stop getting clipped on subagent rows.** Subagent rows spend part of the Agent column on their indent, which was enough to cut a six-character badge down to `cowo…`. Badges now always render whole.
+
 ## [4.6.1] - 2026-07-19
 
 ### Highlights

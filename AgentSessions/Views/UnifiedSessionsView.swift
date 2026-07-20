@@ -2860,6 +2860,11 @@ struct UnifiedSessionsView: View {
             ForEach(surfacePills, id: \.identity) { surfacePill in
                 Text(surfacePill.label)
                     .font(surfacePill.font)
+                    // Never truncate the pill itself: it is a 3-6 character token
+                    // whose whole value is being readable at a glance. Subagent
+                    // rows spend 12pt on their indent, which is enough to clip a
+                    // 6-character label like "cowork" into "cowo…".
+                    .fixedSize()
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
                     .background(surfacePill.fill)
@@ -2927,6 +2932,19 @@ struct UnifiedSessionsView: View {
             CodexSurfacePill(
                 label: "desk",
                 accessibilityLabel: isArchived ? "Codex Desktop archived session" : "Desktop app",
+                usesFullAccessibilityLabel: isArchived,
+                isArchived: isArchived
+            )
+        }
+
+        /// Codex Desktop's sandboxed per-task workspaces. Labelled "work" after
+        /// Codex's own `codex_work_desktop` originator rather than reusing
+        /// Claude's "cowork": Cowork is Anthropic branding, and applying it to an
+        /// OpenAI surface would invent a product name OpenAI does not use.
+        static func work(isArchived: Bool = false) -> CodexSurfacePill {
+            CodexSurfacePill(
+                label: "work",
+                accessibilityLabel: isArchived ? "Codex work archived session" : "Codex work session",
                 usesFullAccessibilityLabel: isArchived,
                 isArchived: isArchived
             )

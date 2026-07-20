@@ -367,4 +367,106 @@ final class SessionRowDisplayTests: XCTestCase {
         let legacyDirect = UnifiedSessionsView.surfacePills(for: s, isClaudeArchived: true)
         XCTAssertEqual(patched.map(\.identity), legacyDirect.map(\.identity))
     }
+
+    // MARK: - Codex work-desktop classification (2026-07-19)
+
+    private func makeCodexSession(
+        cwd: String?,
+        filePath: String = "/Users/test/.codex/sessions/2026/07/18/rollout-2026-07-18T22-29-02-abc.jsonl",
+        source: SessionSource = .codex,
+        codexOriginator: String? = nil,
+        codexSurface: CodexSessionSurface? = nil
+    ) -> Session {
+        Session(
+            id: "codex-work-test",
+            source: source,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: filePath,
+            eventCount: 0,
+            events: [],
+            cwd: cwd,
+            repoName: nil,
+            lightweightTitle: nil,
+            codexOriginator: codexOriginator,
+            codexSurface: codexSurface
+        )
+    }
+
+    private static let codexWorkCwd = "/Users/test/Documents/Codex/2026-07-18/i-m-attaching-my-site-logo"
+
+    func testIsCodexWorkSessionMatchesDatedWorkspaceCwd() {
+        let s = makeCodexSession(cwd: Self.codexWorkCwd)
+        XCTAssertTrue(s.isCodexWorkSession)
+    }
+
+    func testIsCodexWorkSessionMatchesLocalizedDocumentsPath() {
+        // ~/Documents is localizable and can be iCloud-backed, so the check keys
+        // on the Codex/<date>/<slug> shape rather than an absolute Documents path.
+        let s = makeCodexSession(cwd: "/Users/test/Documentos/Codex/2026-05-19/check-codex-app-github")
+        XCTAssertTrue(s.isCodexWorkSession)
+    }
+
+    func testIsCodexWorkSessionFalseForOrdinaryRepoCwd() {
+        let s = makeCodexSession(cwd: "/Users/test/Repository/Codex-History")
+        XCTAssertFalse(s.isCodexWorkSession)
+    }
+
+    func testIsCodexWorkSessionFalseWhenDateSegmentIsNotADate() {
+        // A directory literally named Codex with a non-date child must not match.
+        let s = makeCodexSession(cwd: "/Users/test/Projects/Codex/src/parser")
+        XCTAssertFalse(s.isCodexWorkSession)
+    }
+
+    func testIsCodexWorkSessionFalseForNonCodexSource() {
+        let s = makeCodexSession(cwd: Self.codexWorkCwd, source: .claude)
+        XCTAssertFalse(s.isCodexWorkSession)
+    }
+
+    func testIsCodexWorkSessionFalseWhenCwdMissing() {
+        let s = makeCodexSession(cwd: nil)
+        XCTAssertFalse(s.isCodexWorkSession)
+    }
+
+    // MARK: - Codex work surface pill
+
+    func testCodexWorkSessionGetsWorkPillNotDeskPill() {
+        // Freshly-parsed shape: Codex reports originator "Codex Desktop" and the
+        // surface classifier resolves .desktop — the cwd check must win.
+        let s = makeCodexSession(
+            cwd: Self.codexWorkCwd,
+            codexOriginator: "Codex Desktop",
+            codexSurface: .desktop
+        )
+        let pills = UnifiedSessionsView.surfacePills(for: s)
+        XCTAssertEqual(pills.map(\.label), ["work"])
+        XCTAssertEqual(pills.map(\.isArchived), [false])
+    }
+
+    func testHydratedCodexWorkSessionWithNilMetadataGetsWorkPill() {
+        // Hydrated-from-DB shape: codexOriginator/codexSurface are NULL, and cwd
+        // is the only surviving signal.
+        let s = makeCodexSession(cwd: Self.codexWorkCwd)
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
+    }
+
+    func testArchivedCodexWorkSessionGetsArchivedWorkPill() {
+        let s = makeCodexSession(
+            cwd: Self.codexWorkCwd,
+            filePath: "/Users/test/.codex/archived_sessions/rollout-2026-07-14T11-18-02-abc.jsonl"
+        )
+        let pills = UnifiedSessionsView.surfacePills(for: s)
+        XCTAssertEqual(pills.map(\.label), ["work"])
+        XCTAssertEqual(pills.map(\.isArchived), [true])
+    }
+
+    func testOrdinaryCodexDesktopSessionKeepsDeskPill() {
+        let s = makeCodexSession(
+            cwd: "/Users/test/Repository/Codex-History",
+            codexOriginator: "Codex Desktop",
+            codexSurface: .desktop
+        )
+        XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["desk"])
+    }
 }

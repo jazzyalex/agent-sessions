@@ -370,6 +370,44 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         return originSource?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "local-agent-mode"
     }
 
+    /// True for Codex Desktop's sandboxed per-task workspaces — the surface Codex
+    /// reports as `codex_work_desktop`, whose working directory it creates as
+    /// `~/Documents/Codex/<YYYY-MM-DD>/<slug>/` (with `work/` and `outputs/`
+    /// inside). This is Codex's analogue of Claude Cowork; see
+    /// [[isClaudeCoworkSession]].
+    ///
+    /// Keyed on `lightweightCwd` rather than `codexOriginator`/`codexSurface`
+    /// because cwd is persisted in `session_meta` and restored on hydration,
+    /// while the surface-metadata columns are routinely NULL for hydrated
+    /// sessions — the same trap documented on `isArchivedCodexDesktopSession`.
+    ///
+    /// Matches the `Codex/<date>/<slug>` shape anywhere in the path rather than
+    /// anchoring on `~/Documents`: that directory is localized (Documentos,
+    /// Dokumente) and may be iCloud-backed, so an absolute-path check would
+    /// silently miss non-English systems. The date segment keeps the shape
+    /// specific enough that an ordinary repo checkout cannot collide.
+    public var isCodexWorkSession: Bool {
+        guard source == .codex, let cwd = lightweightCwd, !cwd.isEmpty else { return false }
+        return Session.isCodexWorkWorkspacePath(cwd)
+    }
+
+    static func isCodexWorkWorkspacePath(_ path: String) -> Bool {
+        let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        guard components.count >= 3 else { return false }
+        let slug = components[components.count - 1]
+        let dateSegment = components[components.count - 2]
+        let parent = components[components.count - 3]
+        return parent == "Codex" && !slug.isEmpty && isISODateSegment(dateSegment)
+    }
+
+    private static func isISODateSegment(_ value: String) -> Bool {
+        guard value.count == 10 else { return false }
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4, parts[1].count == 2, parts[2].count == 2 else { return false }
+        return parts.allSatisfy { $0.allSatisfy(\.isNumber) }
+    }
+
     /// True for any Codex session that lives under `~/.codex/archived_sessions`
     /// (the folder Codex Desktop's "Archive" action writes to), regardless of the
     /// session's originating surface.
