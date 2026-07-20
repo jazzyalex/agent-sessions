@@ -72,5 +72,69 @@ final class MigrationCorpusPreservationTests: XCTestCase {
         XCTAssertEqual(searchCount, 2, "session_search must survive a full meta re-derive")
         XCTAssertEqual(toolIOCount, 2, "session_tool_io must survive a full meta re-derive")
     }
+
+    /// The tests above lock the `reindexSessionMeta` primitive itself, but not any
+    /// particular marker's use of it — `makeTestIndexDB()` always bootstraps a fresh,
+    /// empty database, so every `bootstrap` marker (including
+    /// `codex_guardian_subagent_reindex_v1`) runs as a no-op there and the effect of
+    /// re-running `bootstrap` against a POPULATED corpus is never exercised. That gap
+    /// would let someone "fix" the marker by copy-pasting the neighboring
+    /// `DELETE FROM session_search WHERE source='codex'` shape — the exact mistake the
+    /// guardrail comment above the markers in `DB.swift` warns against, and which 4 of
+    /// the 5 existing markers already exhibit — without any test noticing.
+    ///
+    /// This test drives `bootstrap` itself (via two real `IndexDB()` opens against the
+    /// same on-disk file) against a populated corpus, simulating an app relaunch after
+    /// an upgrade where this marker has not yet run.
+    func testBootstrapCodexGuardianReindexMarkerPreservesCorpusOnPopulatedDatabase() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+
+        // First open: a fresh database. `bootstrap` runs every marker — including
+        // codex_guardian_subagent_reindex_v1 — as a no-op against empty tables and
+        // records them all as applied in schema_migrations.
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        var db: IndexDB? = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        // Seed a populated corpus for BOTH sources, simulating an already-indexed
+        // install — the marker must only ever touch codex.
+        try await seedSession(db!, source: "codex", id: "codex-1")
+        try await seedSession(db!, source: "claude", id: "claude-1")
+
+        // Simulate an upgrade where this marker has never run on this install: clear
+        // only its own schema_migrations row. The four legacy (grandfathered,
+        // destructive) markers stay recorded as applied from the fresh-db bootstrap
+        // above, so their "wipe everything" bodies stay skipped and can't clobber the
+        // seed data — isolating the assertion to the marker under test.
+        try await db!.exec("DELETE FROM schema_migrations WHERE key = 'codex_guardian_subagent_reindex_v1';")
+        db = nil // close this connection before reopening the same on-disk file
+
+        // Re-open the SAME on-disk database — this re-runs `bootstrap` against
+        // populated tables, exactly like an app relaunch after upgrade.
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        let reopened = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        let codexMeta = try await reopened.rowCountForTesting(table: "session_meta", source: "codex")
+        let claudeMeta = try await reopened.rowCountForTesting(table: "session_meta", source: "claude")
+        XCTAssertEqual(codexMeta, 0, "bootstrap's codex_guardian_subagent_reindex_v1 marker should clear codex session_meta")
+        XCTAssertEqual(claudeMeta, 1, "the marker must not touch claude session_meta")
+
+        // Load-bearing: the FTS corpus must be preserved across the bootstrap run for
+        // BOTH sources. This is the assertion that fails if the marker is ever "fixed"
+        // into the destructive `DELETE FROM session_search WHERE source='codex'` shape.
+        for source in ["codex", "claude"] {
+            let search = try await reopened.rowCountForTesting(table: "session_search", source: source)
+            let toolIO = try await reopened.rowCountForTesting(table: "session_tool_io", source: source)
+            XCTAssertEqual(search, 1, "session_search[\(source)] must survive bootstrap's codex guardian reindex marker")
+            XCTAssertEqual(toolIO, 1, "session_tool_io[\(source)] must survive bootstrap's codex guardian reindex marker")
+        }
+    }
 }
 #endif
