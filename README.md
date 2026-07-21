@@ -21,7 +21,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg"><b>Download Agent Sessions 4.6.3 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg"><b>Download Agent Sessions 4.6.4 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -32,7 +32,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6.3** — The footer usage meters can finally be switched off: the three toggles that used to claim to do this never did anything, and one switch replaces them. The usage-source note ("via claude.ai") also stops breaking the footer layout. [See what's new ↓](#whats-new-in-463)
+> **New in 4.6.4** — Compact and Full Agent Cockpit are retired. The Quota Meter is the only mode, the View menu is a single toggle, and stale settings from the old modes are cleared for you. [See what's new ↓](#whats-new-in-464)
 
 ## Overview
 
@@ -74,16 +74,18 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.6.3
+## What's New in 4.6.4
 
-**TL;DR** - The footer usage meters can be switched off. Settings → Usage Tracking carried three toggles that claimed to control this and none of them did anything — they saved a value nothing read, and flipping usage tracking overwrote your choice anyway. One working switch replaces all three. The "via claude.ai" source note also stops pushing the footer out of line.
+**TL;DR** - Compact and Full Agent Cockpit are gone. The Quota Meter is the only mode now, the View menu is one toggle instead of a submenu, and if you last quit in Compact or Full you land on the Quota Meter with nothing to reconfigure.
 
-New in 4.6.3:
-- **Show usage in the footer** — one switch, applied immediately, no relaunch. Tracking keeps running while it's off, so the menu bar and Quota Meter are unaffected; this only decides whether the main window repeats the same numbers.
-- **Reset times are always shown** — they're part of reading a meter, so the footer no longer pretends that's optional. The menu bar keeps its own reset-indicator switches in its own menu.
-- **The source note stays on one line** — a reading served by the claude.ai web path or the CLI probe used to be tagged on a second line underneath, which grew the fixed-height footer and shoved everything out of alignment.
+New in 4.6.4:
+- **One mode, not three** — the Quota Meter absorbed what people actually used. Compact and Full carried a session list, search, By Project grouping and filter pills that duplicated the main window; those go with them.
+- **The View menu is a show/hide toggle** — ⌘⌥⇧C now hides the Quota Meter when it is already on screen, matching how every other macOS window toggle behaves. ⇧⌘M ("Cycle Cockpit View") is removed; cycling means nothing with one mode.
+- **Settings → Agent Cockpit is now Settings → Quota Meter** — the Compact Mode and Full Mode sections go with the modes they configured.
+- **Old settings clear themselves** — stale preferences and the saved Compact and Full window positions are swept on launch. Where you put the Quota Meter is untouched.
+- **The text-size button stops vanishing** — switching to Standard made the window narrower and the toolbar dropped that button first, hiding the only control that switched back to Enlarged. The toolbar now narrows the Session Runway control before dropping anything.
 
-**Recent releases** — 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. 4.5: dollar burn per session, priced per model, and a Quota Meter that stays put. 4.4: Codex 5-hour drop handled with honest "no limit" and "can't verify" states. Full history in the [changelog](docs/CHANGELOG.md).
+**Recent releases** — 4.6.3: the footer usage meters can finally be switched off. 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. 4.5: dollar burn per session, priced per model. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -139,7 +141,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.6.3.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg)
+1. [Download AgentSessions-4.6.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
