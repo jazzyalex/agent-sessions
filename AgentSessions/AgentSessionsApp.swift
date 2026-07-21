@@ -491,7 +491,7 @@ struct AgentSessionsApp: App {
             }
         }
 
-        Window("Agent Cockpit", id: "AgentCockpit") {
+        Window("Quota Meter", id: "AgentCockpit") {
             if AppRuntime.isRunningTests {
                 EmptyView()
             } else {
@@ -582,7 +582,7 @@ private struct FavoritesOnlyToggle: View {
     }
 }
 
-/// Tracks whether the cockpit window is on screen so the View menu's "Off" item
+/// Tracks whether the Quota Meter window is on screen so the View menu's toggle
 /// can carry an accurate checkmark. Window visibility is AppKit state, not
 /// SwiftUI state, so it has to be observed rather than read.
 ///
@@ -618,83 +618,48 @@ final class CockpitWindowVisibility: ObservableObject {
     }
 }
 
-/// The single View-menu entry for the cockpit: one radio group over "which mode
-/// is showing", with Off meaning the window is closed. Mode and visibility are
-/// the same question to a user — "what am I looking at?" — so splitting them
-/// into separate open/close/mode items made three entries out of one choice.
+/// The single View-menu entry for the Quota Meter: a show/hide toggle, which is
+/// the standard macOS pattern for a window (compare "Show Sidebar").
 ///
-/// Off matters beyond tidiness: compact chrome strips `.titled` and disables the
-/// standard window buttons, so Compact and Quota Meter have no titlebar close
-/// button at all. This is the discoverable way out (⌘W also works, handled in
-/// the HUD).
+/// This replaced a mode radio group when Full and Compact Agent Cockpit were
+/// retired — a submenu holding one mode is not a choice. One deliberate
+/// behavior change came with it: ⌘⌥⇧C on an already-visible Quota Meter now
+/// hides it, where it used to bring it to front. That only mattered for an
+/// unpinned window buried under other apps, and the Quota Meter's normal state
+/// is pinned at `.statusBar` level.
+///
+/// ⌘⇧M ("Cycle Cockpit View") was retired with the modes rather than
+/// repurposed: rebinding a chord that meant "next view" to "hide the window"
+/// would silently invert it under existing users' fingers.
+///
+/// The toggle matters beyond tidiness: compact chrome strips `.titled` and
+/// disables the standard window buttons, so the Quota Meter has no titlebar
+/// close button at all. This is the discoverable way out (⌘W also works,
+/// handled in the HUD).
 private struct AgentCockpitMenu: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var visibility = CockpitWindowVisibility.shared
-    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsFeatureEnabled: Bool = true
 
-    private var currentMode: AgentCockpitHUDDisplayMode {
-        AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? .full
-    }
-
     var body: some View {
-        Menu("Quota Meter / Agent Cockpit") {
-            modeItem(.limits, "Quota Meter")
-                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
-            Divider()
-            modeItem(.compact, "Compact Agent Cockpit")
-            modeItem(.full, "Full Agent Cockpit")
-            Divider()
-            // The cycle predates this menu but was only ever documented in the
-            // toolbar popover that the menu replaced, leaving a shortcut nobody
-            // could discover. A radio group cannot advertise "go to the next
-            // one" on a checkmark, so it gets its own entry.
-            Button("Cycle Cockpit View") {
-                select(currentMode.next())
-            }
-            .keyboardShortcut("m", modifiers: [.command, .shift])
-            Divider()
-            offItem
-        }
-        .disabled(!liveSessionsFeatureEnabled)
-        .help(
-            liveSessionsFeatureEnabled
-                ? "Choose which cockpit is on screen, or turn it off."
-                : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
-        )
-    }
-
-    /// Radio semantics: any activation selects, including re-activating the item
-    /// that is already checked. Ignoring the "unchecking" direction instead would
-    /// make ⌘⌥⇧C a no-op exactly when the Quota Meter is already the checked
-    /// mode — losing the bring-to-front the shortcut has always meant. Turning a
-    /// mode off is what Off is for.
-    private func modeItem(_ mode: AgentCockpitHUDDisplayMode, _ title: String) -> some View {
-        Toggle(title, isOn: Binding(
-            get: { visibility.isVisible && currentMode == mode },
-            set: { _ in select(mode) }
-        ))
-    }
-
-    private var offItem: some View {
-        Toggle("Off", isOn: Binding(
-            get: { !visibility.isVisible },
-            set: { isOn in
-                guard isOn else { return }
-                AppWindowRouter.closeAgentCockpitWindow()
+        Toggle("Quota Meter", isOn: Binding(
+            get: { visibility.isVisible },
+            set: { shouldShow in
+                if shouldShow {
+                    openWindow(id: "AgentCockpit")
+                } else {
+                    AppWindowRouter.closeAgentCockpitWindow()
+                }
                 visibility.refresh()
             }
         ))
-    }
-
-    /// Writes the legacy compact key alongside the mode so older readers of
-    /// `hudCompact` stay in sync. `openWindow` focuses an already-open window,
-    /// so this doubles as bring-to-front.
-    private func select(_ mode: AgentCockpitHUDDisplayMode) {
-        hudDisplayModeRaw = mode.rawValue
-        UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
-        openWindow(id: "AgentCockpit")
-        visibility.refresh()
+        .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+        .disabled(!liveSessionsFeatureEnabled)
+        .help(
+            liveSessionsFeatureEnabled
+                ? "Show or hide the Quota Meter."
+                : "Enable live session detection (Beta) in Settings → Quota Meter."
+        )
     }
 }
 

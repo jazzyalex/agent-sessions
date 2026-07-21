@@ -1089,7 +1089,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .menuBar: return "Menu Bar"
         case .unified: return "Unified Window"
         case .advanced: return "Advanced"
-        case .agentCockpit: return "Agent Cockpit"
+        case .agentCockpit: return "Quota Meter"
         case .codexCLI: return "Codex CLI"
         case .claudeResume: return "Claude Code"
         case .opencode: return "OpenCode"
@@ -1130,7 +1130,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 }
 
 private extension PreferencesView {
-    // Sidebar order: General → Agent Cockpit → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
+    // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
     var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
 }
 

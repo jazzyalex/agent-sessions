@@ -1729,7 +1729,7 @@ struct UnifiedSessionsView: View {
                     .help(
                         liveSessionsFeatureEnabled
                             ? "Show only live sessions in the list (Codex, Claude)"
-                            : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
+                            : "Enable live session detection (Beta) in Settings → Quota Meter."
                     )
 
                 Button(action: { showSubagentHierarchy.toggle() }) {
@@ -1870,15 +1870,15 @@ struct UnifiedSessionsView: View {
 
             ToolbarIconButton(
                 help: liveSessionsFeatureEnabled
-                    ? "Open Agent Cockpit."
-                    : "Enable Live sessions + Cockpit (Beta) in Settings → Agent Cockpit."
+                    ? "Open the Quota Meter."
+                    : "Enable live session detection (Beta) in Settings → Quota Meter."
             ) { _ in
                 ToolbarIcon(systemName: "rectangle.3.group")
             } action: {
                 openWindow(id: "AgentCockpit")
             }
             .disabled(!liveSessionsFeatureEnabled)
-            .accessibilityLabel(Text("Agent Cockpit"))
+            .accessibilityLabel(Text("Quota Meter"))
 
             ToolbarGroupDivider()
 

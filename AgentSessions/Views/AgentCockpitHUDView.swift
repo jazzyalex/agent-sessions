@@ -217,13 +217,12 @@ enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
         }
     }
 
-    static func initialMode(defaults: UserDefaults = .standard) -> AgentCockpitHUDDisplayMode {
-        if let raw = defaults.string(forKey: PreferencesKey.Cockpit.hudDisplayMode),
-           let mode = AgentCockpitHUDDisplayMode(rawValue: raw) {
-            return mode
-        }
-        let legacyCompact = defaults.object(forKey: PreferencesKey.Cockpit.hudCompact) as? Bool ?? false
-        return legacyCompact ? .compact : .full
+    /// Always the Quota Meter. Full and Compact are retired, so neither the
+    /// persisted mode nor the legacy `hudCompact` Bool can select a mode that no
+    /// longer renders. The `defaults` parameter is kept so the migration tests
+    /// can prime a suite with a legacy value and assert it is ignored.
+    static func initialMode(defaults _: UserDefaults = .standard) -> AgentCockpitHUDDisplayMode {
+        .limits
     }
 
     func next() -> AgentCockpitHUDDisplayMode {
@@ -799,9 +798,11 @@ struct AgentCockpitHUDView: View {
         min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
     }
 
-    private var hudDisplayMode: AgentCockpitHUDDisplayMode {
-        AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) ?? (legacyCompactMode ? .compact : .full)
-    }
+    /// The Quota Meter is the only surviving mode; Full and Compact are retired.
+    /// This resolves unconditionally rather than reading the persisted value, so
+    /// a stale `full` / `compact` string cannot render deprecated chrome even for
+    /// a single frame before `normalizeHUDDisplayMode()` repairs it.
+    private var hudDisplayMode: AgentCockpitHUDDisplayMode { .limits }
 
     /// Chrome modes are a Quota Meter concern only. Full has a permanent
     /// toolbar; Compact keeps its own hover-reveal.
@@ -1296,17 +1297,17 @@ struct AgentCockpitHUDView: View {
         compactToolbarRevealTask = nil
     }
 
+    /// Repairs persisted state to the Quota Meter. A user who last quit in Full
+    /// or Compact — or who has no stored mode at all, or a value from a future
+    /// build — lands on the Quota Meter instead of a retired mode. Idempotent:
+    /// once repaired, later launches take the early return.
     private func normalizeHUDDisplayMode() {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: PreferencesKey.Cockpit.hudDisplayMode) == nil {
-            setHUDDisplayMode(legacyCompactMode ? .compact : .full)
+        guard hudDisplayModeRaw != AgentCockpitHUDDisplayMode.limits.rawValue else {
+            // Keep the legacy Bool in step for older readers of `hudCompact`.
+            legacyCompactMode = true
             return
         }
-        guard AgentCockpitHUDDisplayMode(rawValue: hudDisplayModeRaw) == nil else {
-            legacyCompactMode = isCompact
-            return
-        }
-        setHUDDisplayMode(.full)
+        setHUDDisplayMode(.limits)
     }
 
     private func setHUDDisplayMode(_ mode: AgentCockpitHUDDisplayMode) {
@@ -1459,7 +1460,7 @@ struct AgentCockpitHUDView: View {
                 .font(.system(size: 11, weight: .medium))
         }
         .buttonStyle(HUDIconButtonStyle(isOn: false, tint: nil))
-        .help("Open Agent Cockpit settings")
+        .help("Open Quota Meter settings")
     }
 
     /// Quick Standard ⇄ Enlarged text-size toggle for the Quota Meter. Highlights when
@@ -1812,13 +1813,8 @@ struct AgentCockpitHUDView: View {
             .frame(width: 0, height: 0)
             .opacity(0)
 
-            // ⇧⌘M lives in the View menu now — a hidden button here bound the
-            // same shortcut a second time, and left the gesture advertised
-            // nowhere a user could find it.
-
             // Compact chrome has no close button for AppKit to press, so the
-            // standard ⌘W reaches performClose and merely beeps. Full keeps its
-            // titlebar button and must not get a second handler.
+            // standard ⌘W reaches performClose and merely beeps.
             if isCompact {
                 Button("") {
                     AppWindowRouter.closeAgentCockpitWindow()
@@ -2337,7 +2333,7 @@ struct AgentCockpitHUDView: View {
 
     private var disabledCallout: some View {
         PreferenceCallout {
-            Text("Live sessions + Cockpit (Beta) is disabled in Settings → Agent Cockpit.")
+            Text("Live session detection (Beta) is disabled in Settings → Quota Meter.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -6446,7 +6442,7 @@ private struct HUDSearchTextField: NSViewRepresentable {
     }
 }
 
-#Preview("Agent Cockpit HUD") {
+#Preview("Quota Meter") {
     AgentCockpitHUDView(
         codexIndexer: SessionIndexer(),
         claudeIndexer: ClaudeSessionIndexer(),

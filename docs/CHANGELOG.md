@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Compact and Full Agent Cockpit are retired; the Quota Meter is the only mode.** The View menu's three-mode submenu is replaced by a single **Quota Meter** toggle that shows and hides the window, the standard macOS pattern. If you last quit in Compact or Full, you land on the Quota Meter — no setting to restore, nothing to reconfigure.
+- **⌘⌥⇧C now toggles the Quota Meter.** It used to select the Quota Meter mode and bring the window forward; with one mode left, it shows and hides. Pressing it while the Quota Meter is already on screen now hides it.
+- **⇧⌘M ("Cycle Cockpit View") is removed.** Cycling between modes has no meaning with a single mode, and rebinding a chord that meant "next view" to something else would have inverted it under your fingers.
+- **Settings → Agent Cockpit is now Settings → Quota Meter.** The Compact Mode and Full Mode sections are gone with the modes they configured: default mode, compact size, auto-fit height, agent name in compact rows, tab subtitles, and the in-cockpit quota footer.
+
 ## [4.6.3] - 2026-07-20
 
 ### Highlights

@@ -104,7 +104,7 @@ extension PreferencesView {
 
     var agentCockpitTab: some View {
         VStack(alignment: .leading, spacing: 24) {
-            Text("Agent Cockpit")
+            Text("Quota Meter")
                 .font(.title2)
                 .fontWeight(.semibold)
 
@@ -117,10 +117,10 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Live Sessions + Cockpit BETA")
+            sectionHeader("Live Sessions BETA")
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Enable live session detection + Cockpit (Beta)", isOn: $codexActiveSessionsEnabled)
-                    .help("Beta feature. Tracks live/open Codex and Claude sessions, enables Cockpit live rows, and powers live dots/focus actions in Sessions.")
+                Toggle("Enable live session detection (Beta)", isOn: $codexActiveSessionsEnabled)
+                    .help("Beta feature. Tracks live/open Codex and Claude sessions, feeds the Quota Meter's session rows, and powers live dots/focus actions in Sessions.")
 
                 HStack(spacing: 12) {
                     TextField("Active registry directory (optional)", text: $codexActiveRegistryRootOverride)
@@ -159,57 +159,12 @@ extension PreferencesView {
                     .foregroundStyle(.secondary)
             }
 
-            sectionHeader("Compact Mode")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Default Cockpit Mode") {
-                    Picker("", selection: Binding(
-                        get: { AgentCockpitHUDDisplayMode(rawValue: cockpitHUDDisplayModeRaw) ?? .full },
-                        set: { mode in
-                            cockpitHUDDisplayModeRaw = mode.rawValue
-                            UserDefaults.standard.set(mode.usesCompactChrome, forKey: PreferencesKey.Cockpit.hudCompact)
-                        }
-                    )) {
-                        ForEach(AgentCockpitHUDDisplayMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
-                    .help("Choose whether Agent Cockpit opens as a full session list, compact session HUD, or Quota Meter.")
-                }
-
-                Toggle("Show agent name in compact mode", isOn: $cockpitShowAgentNameInCompact)
-                    .help("When disabled, compact rows hide the agent-name text to free horizontal space. Status dot and row numbering remain visible.")
-
-                labeledRow("Default Compact Size") {
-                    Picker("", selection: $cockpitCompactBaselineRows) {
-                        Text("Small").tag(3)
-                        Text("Medium").tag(4)
-                        Text("Large").tag(6)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
-                    .help("Sets the default compact window height by visible rows. Sessions above this count scroll inside the list.")
-                }
-
-                Toggle("Auto-fit compact height to visible sessions", isOn: $cockpitCompactAutoFitEnabled)
-                    .help("When enabled, compact mode grows/shrinks with visible session count. Off keeps compact height stable and uses scrolling.")
-            }
-
-            sectionHeader("Full Mode")
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle("Show tab subtitle under agent name", isOn: $cockpitShowTabSubtitleInFullMode)
-                    .help("Displays iTerm tab title as a muted subtitle under the agent label in full Agent Cockpit rows. Long titles are truncated with hover tooltips.")
-                Toggle("Show Quota Meter footer", isOn: $cockpitShowLimitsFooter)
-                    .help("Shows a compact Quota Meter footer at the bottom of the Cockpit window with 5-hour and weekly usage percentages for enabled providers.")
-            }
-
             sectionHeader("Quota Meter")
             VStack(alignment: .leading, spacing: 12) {
                 labeledRow("Projection") {
                     Toggle("Show 5h run-out token", isOn: $usageLimitCockpitProjectionEnabled)
                         .toggleStyle(.checkbox)
-                        .help("Show a compact token such as ▸2h in Cockpit when fresh 5h usage samples project exhaustion before reset.")
+                        .help("Show a compact token such as ▸2h in the Quota Meter when fresh 5h usage samples project exhaustion before reset.")
                 }
 
                 Text("Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")

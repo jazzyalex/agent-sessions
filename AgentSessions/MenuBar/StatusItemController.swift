@@ -230,7 +230,7 @@ final class StatusItemController: NSObject {
             menu.addItem(makeTitleItem("\(summary.activeCount) active • \(summary.waitingCount) waiting"))
             let cockpitVisible = AppWindowRouter.isAgentCockpitWindowVisible
             menu.addItem(makeActionItem(
-                title: cockpitVisible ? "Hide Agent Cockpit" : "Open Agent Cockpit",
+                title: cockpitVisible ? "Hide Quota Meter" : "Open Quota Meter",
                 action: cockpitVisible ? #selector(hideAgentCockpit) : #selector(openAgentCockpit)
             ))
             let sessionsVisible = AppWindowRouter.isAgentSessionsWindowVisible

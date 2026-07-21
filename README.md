@@ -98,7 +98,6 @@ New in 4.6.3:
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
 - Quota Meter with Session Runway shows **live burn rate per session** against your Codex and Claude 5-hour and weekly limits — in percent, tokens/hour, or dollars priced per model.
-- Agent Cockpit is the live command center for active Codex CLI, Claude CLI, and OpenCode CLI iTerm2 sessions, with active/waiting summaries, freshness diagnostics, and projected run-out alerts.
 - Local-only indexing designed for large histories.
 
 ## Quota Meter — Session Runway
@@ -109,31 +108,24 @@ An ordinary quota meter says "60% used." It won't say which of your three runnin
 - **Four lenses** — 5-hour, weekly, tokens/hour, or dollars; chosen from the meter and remembered.
 - **Priced per model** — the `$` lens rates each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed at what each actually runs at rather than blended into one number.
 - **Honest states** — a calm "no limit" when a provider drops a window, and "can't verify" rather than a wrong number if usage data changes shape.
-- **Stays where you put it** — drag it anywhere, right-click for controls. Quota Meter / Compact / Full / Off from the View menu (⌘⌥⇧C, ⇧⌘M).
+- **Stays where you put it** — drag it anywhere, right-click for controls. Show or hide it from the View menu (⌘⌥⇧C).
 
 <div align="center">
   <img src="docs/assets/quota-meter-light.png" alt="Quota Meter showing Codex and Claude 5h/weekly limits with Session Runway per-session burn-rate bars" width="100%" style="max-width:770px;border-radius:8px;margin:5px 0 22px;"/>
 </div>
 
-## Agent Cockpit (Beta)
-
-Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guides/codex-local-history.html), [Claude CLI](docs/guides/claude-code-jsonl-history.html), and [OpenCode CLI](docs/guides/opencode-sqlite-history.html) sessions, with shared active/waiting summaries and live Claude usage tracking. Click any session to jump straight into its transcript.
-
-<div align="center">
-  <img src="docs/assets/screenshot-cockpit-light.png" alt="Compact cockpit menu showing grouped active sessions in Light Mode" width="100%" style="max-width:820px;border-radius:8px;margin:5px 0;"/>
-</div>
-
-## Agent Cockpit Setup
+## Quota Meter Setup
 
 ### Prerequisites
 
-- Agent Sessions with Live Sessions enabled
-- iTerm2
-- Agents running in iTerm2
+- Agent Sessions with live session detection enabled
+- Agents running in a terminal, or in Codex or Claude Desktop
 
 ### Ideal Setup
 
-- Set the iTerm window title to the repo name
+Session rows read best when your terminal names them clearly:
+
+- Set the terminal window title to the repo name
 - Run that repo's agents in that window
 - Give each tab/session its own clear name
 - Use the same name for the tab, session, and badge
@@ -142,8 +134,7 @@ Agent Cockpit is the live command center for active iTerm2 [Codex CLI](docs/guid
 
 - One repo per desktop/Space if possible
 - Or keep several on one desktop if you prefer
-- Keep Agent Cockpit pinned in a corner so you can always see activity
-- Click from the cockpit to jump straight to a session
+- Keep the Quota Meter pinned in a corner so you can always see activity
 
 ## Install
 
