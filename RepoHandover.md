@@ -1,3 +1,49 @@
+## 2026-07-21 10:08 · perf-program-close · Perf program closed & merged; release recommended over chasing AV parity
+status: done
+
+**State:** The 2026-07 perf program is fully closed: W7 list-feel accepted by owner, search click-through auto-jump landed (9456faa3, Opus-approved clean), close-out review MERGE-READY, and `main` fast-forwarded 7bf60ebd→9456faa3 (95 commits, suite 1,183/0, Release green) — unpushed at merge time. The Swift-6 `didApplyStage1Window` fix was spun off as a chip and landed separately (68cb0c34).
+
+**Decided / don't redo:**
+- NSTableView list spike DEFERRED on evidence (SwiftUI Table = 18/5,228 main-thread samples; the AgentsView gap is platform-layer, not a bug). Re-open condition documented in the W7 plan — don't re-chase without it.
+- Strategy call answered: **release now**; resume perf only on real-world triggers (W8 = FSEvents + HUD leaf clocks, trigger = energy label sticking on a Release build).
+- Energy-label flap explained, not a defect: 8–10 min energy-impact averaging + timer wakeups + Debug build; it cleared on its own.
+
+**Key files:**
+- `docs/perf-master-plan.md` — W2/W6/W7 outcome notes (the program index)
+- `docs/superpowers/plans/2026-07-02-w7-list-feel.md` — Task 0 evidence, gate table, spike re-open condition
+
+**Next:**
+1. Push `main` when owner says push.
+2. Release pass (`/deploy` flow: QA sweep → CHANGELOG/appcast → notarize) — offered, pending owner GO.
+3. W8 only if the energy label sticks during normal use on a Release build.
+
+## 2026-07-20 15:19 · growth-discovery-program · Blog + analytics live; discovery constraint identified as top-of-funnel
+status: in-progress
+
+**State:** Marketing/growth session (no app code touched). The Rollout blog is live with 6 posts + 2 future-scheduled, GoatCounter analytics is wired into all 8 site pages and collecting, and measurement finally shows *why* stars aren't moving.
+
+**Decided / don't redo:**
+- **Star rate did NOT move** across the whole campaign (~2.6/day = pre-campaign baseline). Constraint is **top-of-funnel: only ~30 repo visitors/day**; visitor→star is a healthy ~9%. Need 2.3× traffic, not better conversion.
+- Downloads (+440/5d) are mostly **Sparkle auto-updates**, not new users — do NOT read them as acquisition, and don't build an in-app star nudge on that basis.
+- Referrers: **Google 103 (SEO, #1), hermesatlas 16, chatgpt 11; Reddit/LinkedIn/X = 0.** Social is for credibility/ratio, NOT stars.
+- **Directories are a spent lever** — Hermes Atlas works and is done; Claudetory/ToolHunter never published (7wk); rest are plugin-gated (no MCP feature). Don't submit more.
+- **HN parked** (2 karma, 2 of 3 Show HNs flagged). awesome-opencode #381 is **maintainer-gated** (fork-PR CI needs maintainer approval) — stop poking it.
+- OpenCode ecosystem PR auto-closed by a template bot → **re-submitted clean as #37567** (open, passing).
+- X reply post-mortem: parent 34.8K views, our reply **4 views** — posted 5.5h late, buried in ~200 replies, no hook/image. Nested self-replies under someone else's thread are near-invisible. Fix = fast (<30min), top-level, with screenshot.
+- Tooling (global, already written): `agent-browser` over CDP is now the default browser path (MCP chrome bridge is fallback + `~/.claude/bin/ensure-chrome-bridge.sh`); plus a hard rule never to ask the user to paste fetchable content.
+
+**Key files:**
+- `Marketing/STATUS.md` — read-first/update-last coordination dashboard + **content-pipeline registry** (two parallel Rollout threads collided on the 07-11/07-14 formats posts; registry prevents recurrence)
+- `Marketing/GROWTH_TRACKER_1k-summer.md` — goal math + `stars-log.csv` (launchd daily logger)
+- `Marketing/GROWTH_ANGLES.md` — strategy reset + answer-first reply drafts
+- `Marketing/PRODUCT_HUNT_KIT.md` — **finalized**: tagline locked, maker comment, paint-by-numbers video storyboard
+
+**Next:**
+1. **Goal reality check:** 721 stars, 47 days, ~2.6/day → lands ~843. 1k by Sept 1 needs a *spike*, not compounding content.
+2. **PH launch** is the only controllable spike — owner records 4 short clips per the storyboard + picks a Tue/Wed/Thu.
+3. Owner sends queued drafts: 3 answer-first Reddit replies, 2 expansion posts (r/ChatGPTCoding = discussion format, no link), comparison-article outreach.
+4. Optional build: X watcher to catch high-reach limit/cost posts within ~10 min (the fix for the 4-view problem).
+
 ## 2026-07-19 21:15 · subagent-grandchildren-drop · Grandchild sessions no longer dropped from the list
 status: done
 
