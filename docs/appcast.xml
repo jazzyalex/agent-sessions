@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.6.3</title>
-            <pubDate>Mon, 20 Jul 2026 10:51:27 -0700</pubDate>
+            <title>4.6.4</title>
+            <pubDate>Tue, 21 Jul 2026 11:02:51 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,14 +27,17 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.6.3</h2>
+<h2>What&#x27;s New in 4.6.4</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>You can switch the footer usage meters off, and it works now.</strong> Settings → Usage Tracking had three toggles for this — Show Codex strip, Show Claude strip, Show reset times — and every one of them was inert: they saved a value nothing read, and flipping usage tracking quietly overwrote whatever you&#x27;d chosen. They&#x27;re replaced by a single <strong>Show usage in the footer</strong> switch that genuinely hides the meters from the main window, straight away, without a relaunch. Usage tracking keeps running while it&#x27;s off, so the menu bar and the Quota Meter carry on as before — this only decides whether the main window shows the same numbers a second time. Reset times no longer have a toggle at all; they&#x27;re part of reading a meter, so the footer always shows them (the menu bar keeps its own reset-indicator switches in its own menu).</li>
+<li><strong>Compact and Full Agent Cockpit are retired; the Quota Meter is the only mode.</strong> The two larger cockpit modes carried a session list, search, By Project grouping and filter pills that duplicated what the main window already does better, so they are gone and the Quota Meter absorbs what people actually used it for. If you last quit in Compact or Full, you land on the Quota Meter — no setting to restore, nothing to reconfigure, and the old modes&#x27; leftover preferences and window positions are cleared for you on launch. Where you put the Quota Meter is untouched.</li>
+<li><strong>Two keyboard shortcuts change.</strong> <strong>⇧⌘M</strong> (&quot;Cycle Cockpit View&quot;) is gone — cycling means nothing with one mode. <strong>⌘⌥⇧C</strong> now shows and hides the Quota Meter, where it used to select the mode and bring the window forward; pressing it while the Quota Meter is on screen hides it.</li>
+<li><strong>The View menu is a single Quota Meter toggle</strong>, replacing the three-mode submenu, and <strong>Settings → Agent Cockpit is now Settings → Quota Meter</strong> — its Compact Mode and Full Mode sections go with the modes they configured.</li>
+<li><strong>Gone with the modes:</strong> the session search field and ⌘K, By Project grouping, the All/Active/Idle filter pills, ⌘1–9 and ⌘0 row focus, the row context menu, the full-mode toolbar row, and the Full/Compact quota footer with its hover drawer. The Quota Meter keeps its provider limit rows, Session Runway drawer, chrome modes, pin, enlarged text, the runway and probe popovers, the open-app and settings buttons, and ⌘W.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>The usage-source note stops breaking the footer layout.</strong> When a reading came from the claude.ai web path or the CLI probe rather than the provider&#x27;s usual source, the footer tagged it on a second line stacked under the meter — which grew the fixed-height strip and shoved the rest of the footer out of line. The tag now sits beside the meter and the strip stays one row. This affected the <strong>via CLI probe</strong> tag exactly as much as <strong>via claude.ai</strong>; both now share one label mapping.</li>
+<li><strong>The Quota Meter&#x27;s text-size button no longer disappears when you switch to Standard.</strong> Standard text makes the window about 30pt narrower, and the toolbar used to shed that button first — hiding the only control that switches back to Enlarged, so the setting was one-way from inside the window. The toolbar now narrows before it drops anything: the Session Runway control gives up its presentation half first, and every button stays put.</li>
 </ul>
 <h3>Reminder: What You Got in 4.6</h3>
 <ul>
@@ -43,13 +46,13 @@
 <li><strong>The Web API path stops telling signed-in users to &quot;sign in&quot;.</strong> When it couldn&#x27;t find a claude.ai session it advised signing in &quot;at claude.ai (default profile)&quot; — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can&#x27;t read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.</li>
 <li><strong>The Quota Meter&#x27;s right-click hint stays findable.</strong> In On-Demand mode the &quot;Right-click for controls&quot; hint used to show once and never again — but right-click is the only way back to the toolbar, so it now reappears on every hover.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.3">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.3</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.4</a></p>
 </div>
             ]]></description>
-            <sparkle:version>64</sparkle:version>
-            <sparkle:shortVersionString>4.6.3</sparkle:shortVersionString>
+            <sparkle:version>65</sparkle:version>
+            <sparkle:shortVersionString>4.6.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.3/AgentSessions-4.6.3.dmg" length="22082958" type="application/octet-stream" sparkle:edSignature="Ol1E663LW/gmKY70Dr8t4Eg40wVoWzJ1GOCzB+lqMhgL/GbKqtazGd1eZvbKtu0hLoUu4zWsD/h/1+lBcOSaCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg" length="21477841" type="application/octet-stream" sparkle:edSignature="i9U6stG9W3sS22HopHFVvNs6k8zKNT/0Exf1ZDJIbwS/BWbhaUDJUbVJch4uvlQQhYz1RCsU3guQn1qfvYrBCw=="/>
         </item>
     </channel>
 </rss>
