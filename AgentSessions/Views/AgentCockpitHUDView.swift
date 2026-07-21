@@ -195,80 +195,8 @@ private enum HUDToolbarSegment {
     case trailing
 }
 
-enum AgentCockpitHUDDisplayMode: String, CaseIterable, Identifiable {
-    case full
-    case compact
-    case limits
 
-    var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .full: return "Full"
-        case .compact: return "Compact"
-        case .limits: return "Quota Meter"
-        }
-    }
-
-    var usesCompactChrome: Bool {
-        switch self {
-        case .full: return false
-        case .compact, .limits: return true
-        }
-    }
-
-    /// Always the Quota Meter. Full and Compact are retired, so neither the
-    /// persisted mode nor the legacy `hudCompact` Bool can select a mode that no
-    /// longer renders. The `defaults` parameter is kept so the migration tests
-    /// can prime a suite with a legacy value and assert it is ignored.
-    static func initialMode(defaults _: UserDefaults = .standard) -> AgentCockpitHUDDisplayMode {
-        .limits
-    }
-
-    func next() -> AgentCockpitHUDDisplayMode {
-        switch self {
-        case .full: return .compact
-        case .compact: return .limits
-        case .limits: return .full
-        }
-    }
-}
-
-enum HUDSessionFilterMode: Equatable {
-    case all
-    case active
-    case idle
-}
-
-struct HUDGroup: Identifiable {
-    let id: String
-    let projectName: String
-    let rows: [HUDRow]
-    let activeCount: Int
-    let idleCount: Int
-    let freshIdleCount: Int
-    let staleIdleCount: Int
-
-    var hasActive: Bool { activeCount > 0 }
-    var hasFreshWaiting: Bool { freshIdleCount > 0 }
-    var isStaleOnly: Bool { activeCount == 0 && freshIdleCount == 0 && staleIdleCount > 0 }
-    var displayPriority: HUDDisplayPriority {
-        if hasActive { return .active }
-        if hasFreshWaiting { return .waitingFresh }
-        return .waitingStale
-    }
-    var collapseSyncKey: String { "\(id)|\(isStaleOnly ? 1 : 0)" }
-
-    var summaryText: String {
-        if activeCount > 0 && idleCount > 0 {
-            return "\(activeCount) active · \(idleCount) waiting"
-        }
-        if activeCount > 0 {
-            return "\(activeCount) active"
-        }
-        return "\(idleCount) waiting"
-    }
-}
 
 struct HUDLiveSessionSummary: Equatable {
     let activeCount: Int
@@ -320,21 +248,11 @@ private struct HUDWaitingCounts {
 private struct HUDPresentationInputs: Equatable {
     let canonicalRows: [HUDRow]
     let snapshotTimestamp: Date
-    let isCompact: Bool
-    let sessionFilterMode: HUDSessionFilterMode
-    let filterText: String
-    let groupByProject: Bool
-    let collapsedProjects: Set<String>
     let orderedRowIDs: [String]
     let isWindowVisibleForOrdering: Bool
 
     static func == (lhs: HUDPresentationInputs, rhs: HUDPresentationInputs) -> Bool {
         lhs.canonicalRows == rhs.canonicalRows
-            && lhs.isCompact == rhs.isCompact
-            && lhs.sessionFilterMode == rhs.sessionFilterMode
-            && lhs.filterText == rhs.filterText
-            && lhs.groupByProject == rhs.groupByProject
-            && lhs.collapsedProjects == rhs.collapsedProjects
             && lhs.orderedRowIDs == rhs.orderedRowIDs
             && lhs.isWindowVisibleForOrdering == rhs.isWindowVisibleForOrdering
     }
@@ -343,34 +261,17 @@ private struct HUDPresentationInputs: Equatable {
 private struct HUDPresentationState {
     let inputs: HUDPresentationInputs
     let rowsForDisplay: [HUDRow]
-    let visibleRows: [HUDRow]
-    let fullListLayoutSignature: Int
     let shownSessionCount: Int
-    let groupedVisibleRows: [HUDGroup]
-    let groupedRowsForCollapseSync: [HUDGroup]
-    let renderedRows: [HUDRow]
-    let shortcutIndexMap: [String: Int]
 
     static let empty = HUDPresentationState(
         inputs: HUDPresentationInputs(
             canonicalRows: [],
             snapshotTimestamp: .distantPast,
-            isCompact: false,
-            sessionFilterMode: .all,
-            filterText: "",
-            groupByProject: false,
-            collapsedProjects: [],
             orderedRowIDs: [],
             isWindowVisibleForOrdering: true
         ),
         rowsForDisplay: [],
-        visibleRows: [],
-        fullListLayoutSignature: 0,
-        shownSessionCount: 0,
-        groupedVisibleRows: [],
-        groupedRowsForCollapseSync: [],
-        renderedRows: [],
-        shortcutIndexMap: [:]
+        shownSessionCount: 0
     )
 }
 
@@ -700,11 +601,7 @@ struct AgentCockpitHUDView: View {
 
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var activeEnabled: Bool = true
-    @AppStorage(PreferencesKey.Cockpit.hudGroupByProject) private var groupByProject: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
-    @AppStorage(PreferencesKey.Cockpit.hudCompact) private var legacyCompactMode: Bool = false
     @AppStorage(PreferencesKey.Cockpit.hudPinned) private var isPinned: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) private var compactBaselineRows: Int = 4
     /// Defaults OFF, and must stay off until the compact height model accounts
     /// for the limits footer.
     ///
@@ -719,8 +616,6 @@ struct AgentCockpitHUDView: View {
     /// not this flag's to fix: the fix is teaching the height model about the
     /// footer (measure it, as the Quota Meter already does via
     /// `LimitsContentHeightKey`), then revisiting this default.
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) private var compactAutoFitEnabled: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.hudShowLimits) private var showLimits: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) private var reduceTransparency: Bool = true
 
     @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
@@ -731,11 +626,7 @@ struct AgentCockpitHUDView: View {
         return AnyShapeStyle(.regularMaterial)
     }
 
-    @State private var sessionFilterMode: HUDSessionFilterMode = .all
-    @State private var filterText: String = ""
-    @State private var collapsedProjects: Set<String> = []
     @State private var activeConsumerID = UUID()
-    @State private var searchFocusToken: Int = 0
     @State private var orderedRowIDs: [String] = []
     @State private var latestCanonicalRows: [HUDRow] = []
     @State private var latestCanonicalRowsSnapshotAt: Date = Date()
@@ -758,12 +649,9 @@ struct AgentCockpitHUDView: View {
     @State private var isPointerInsideWindow: Bool = false
     @State private var compactToolbarHideTask: Task<Void, Never>? = nil
     @State private var compactToolbarRevealTask: Task<Void, Never>? = nil
-    @State private var staleAutoCollapsedProjects: Set<String> = []
-    @State private var manuallyExpandedStaleProjects: Set<String> = []
     @State private var presentationState: HUDPresentationState = .empty
     @StateObject private var derivedState: AgentCockpitHUDDerivedStateModel
     @State private var limitsContentHeight: CGFloat = 30
-    @FocusState private var isSearchFocused: Bool
 
     private let fullBodyMinHeight: CGFloat = 170
     private let compactBodyRowHeight: CGFloat = 31
@@ -794,16 +682,6 @@ struct AgentCockpitHUDView: View {
         return formatter
     }()
 
-    private var effectiveCompactBaselineRows: Int {
-        min(max(compactBaselineRows, 3), Int(compactBodyMaxRowsWhenToolbarVisible))
-    }
-
-    /// The Quota Meter is the only surviving mode; Full and Compact are retired.
-    /// This resolves unconditionally rather than reading the persisted value, so
-    /// a stale `full` / `compact` string cannot render deprecated chrome even for
-    /// a single frame before `normalizeHUDDisplayMode()` repairs it.
-    private var hudDisplayMode: AgentCockpitHUDDisplayMode { .limits }
-
     /// Chrome modes are a Quota Meter concern only. Full has a permanent
     /// toolbar; Compact keeps its own hover-reveal.
     private var quotaMeterChrome: QuotaMeterChrome {
@@ -811,29 +689,18 @@ struct AgentCockpitHUDView: View {
     }
 
     private var resolvedShowsCompactToolbar: Bool {
-        guard isCompact else { return true }
-        guard isLimitsOnly else { return pointerDwelled }
         return quotaMeterChrome.showsChrome(pointerDwelled: pointerDwelled, demandRevealed: demandRevealed)
     }
 
     private var showsRightClickHint: Bool {
-        guard isLimitsOnly else { return false }
         return quotaMeterChrome.showsRightClickHint(
             pointerDwelled: pointerDwelled,
             demandRevealed: demandRevealed
         )
     }
 
-    private var isCompact: Bool {
-        hudDisplayMode.usesCompactChrome
-    }
-
-    private var isLimitsOnly: Bool {
-        hudDisplayMode == .limits
-    }
 
     private var measuredLimitsContentHeight: CGFloat {
-        guard isLimitsOnly else { return 30 }
         return max(30, limitsContentHeight)
     }
 
@@ -869,7 +736,7 @@ struct AgentCockpitHUDView: View {
                 codexIndexer: codexIndexer,
                 claudeIndexer: claudeIndexer,
                 opencodeIndexer: opencodeIndexer,
-                initialCompact: AgentCockpitHUDDisplayMode.initialMode().usesCompactChrome
+                initialCompact: true
             )
         )
     }
@@ -884,7 +751,6 @@ struct AgentCockpitHUDView: View {
             }
         }
         .onAppear {
-            normalizeHUDDisplayMode()
             activeCodex.setCockpitConsumerVisible(true, consumerID: activeConsumerID)
             activeCodex.setCockpitWindowVisible(true, consumerID: activeConsumerID)
             UserDefaults.standard.set(true, forKey: PreferencesKey.Cockpit.hudOpen)
@@ -924,11 +790,6 @@ struct AgentCockpitHUDView: View {
         let currentPresentationInputs = HUDPresentationInputs(
             canonicalRows: canonicalRows,
             snapshotTimestamp: presentationTimestamp,
-            isCompact: isCompact,
-            sessionFilterMode: sessionFilterMode,
-            filterText: filterText,
-            groupByProject: groupByProject,
-            collapsedProjects: collapsedProjects,
             orderedRowIDs: orderedRowIDs,
             isWindowVisibleForOrdering: isWindowVisibleForOrdering
         )
@@ -944,7 +805,7 @@ struct AgentCockpitHUDView: View {
         )
         .onAppear {
             derivedState.bind(activeCodex: activeCodex)
-            derivedState.setCompact(isCompact, activeCodex: activeCodex)
+            derivedState.setCompact(true, activeCodex: activeCodex)
             presentationClockNow = max(presentationClockNow, snapshotTimestamp)
             presentationState = Self.makePresentationState(from: currentPresentationInputs)
             synchronizeOrderedRows(
@@ -955,7 +816,6 @@ struct AgentCockpitHUDView: View {
             )
             latestCanonicalRows = canonicalRows
             latestCanonicalRowsSnapshotAt = presentationTimestamp
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: canonicalRows) { oldRows, rows in
             let presentationTimestamp = max(presentationClockNow, derivedState.snapshotTimestamp)
@@ -971,7 +831,6 @@ struct AgentCockpitHUDView: View {
                 canonicalRows: rows,
                 snapshotTimestamp: presentationTimestamp
             )
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onChange(of: isWindowVisibleForOrdering) { _, isVisible in
             guard isVisible else { return }
@@ -985,36 +844,8 @@ struct AgentCockpitHUDView: View {
                 incomingSnapshotAt: now
             )
             latestCanonicalRowsSnapshotAt = now
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
-        }
-        .onChange(of: displayState.groupedRowsForCollapseSync.map(\.collapseSyncKey)) { _, _ in
-            synchronizeCollapsedProjectsForStaleGroups(with: displayState.groupedRowsForCollapseSync)
-        }
-        .onChange(of: groupByProject) { _, _ in
-            refreshPresentationState(
-                canonicalRows: canonicalRows,
-                snapshotTimestamp: presentationTimestamp
-            )
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
-        }
-        .onChange(of: isCompact) { _, _ in
-            derivedState.setCompact(isCompact, activeCodex: activeCodex)
-            handleCompactModeChange()
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
-        }
-        .onChange(of: hudDisplayModeRaw) { _, _ in
-            normalizeHUDDisplayMode()
-        }
-        .onChange(of: sessionFilterMode) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
-        }
-        .onChange(of: filterText) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: orderedRowIDs) { _, _ in
-            refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
-        }
-        .onChange(of: collapsedProjects) { _, _ in
             refreshPresentationState(canonicalRows: canonicalRows, snapshotTimestamp: presentationTimestamp)
         }
         .onChange(of: activeEnabled) { _, _ in
@@ -1032,7 +863,6 @@ struct AgentCockpitHUDView: View {
             )
             latestCanonicalRowsSnapshotAt = presentationTimestamp
             refreshPresentationState(canonicalRows: latestCanonicalRows, snapshotTimestamp: presentationTimestamp)
-            synchronizeCollapsedProjectsForStaleGroups(with: presentationState.groupedRowsForCollapseSync)
         }
         .onHover { hovering in
             handleCompactWindowHoverChange(hovering)
@@ -1048,7 +878,7 @@ struct AgentCockpitHUDView: View {
         // pointer. Hand it an already-revealed state to land in; the ordinary
         // pointer-out collapse takes over from there.
         .onChange(of: quotaMeterChromeRaw) { _, _ in
-            guard isLimitsOnly, isPointerInsideWindow || showChromePopover else { return }
+            guard isPointerInsideWindow || showChromePopover else { return }
             switch quotaMeterChrome {
             case .always:
                 break
@@ -1061,7 +891,7 @@ struct AgentCockpitHUDView: View {
         // Both are overlays, never members of the layout: the no-expansion
         // promise of .onDemand is structural, not a rule a later edit has to
         // remember.
-        .applyIf(quotaMeterChrome.respondsToRightClick && isLimitsOnly) { view in
+        .applyIf(quotaMeterChrome.respondsToRightClick) { view in
             view.overlay(HUDRightClickCatcher(onRightClick: revealChromeOnDemand))
         }
         .overlay(alignment: .bottom) {
@@ -1077,7 +907,7 @@ struct AgentCockpitHUDView: View {
             guard height.isFinite, height > 0 else { return }
             limitsContentHeight = height
         }
-        .applyIf(isCompact) { view in
+        .applyIf(true) { view in
             view.ignoresSafeArea(.container, edges: .top)
         }
     }
@@ -1100,16 +930,10 @@ struct AgentCockpitHUDView: View {
         .background(
             AgentCockpitHUDWindowConfigurator(
                 isPinned: isPinned,
-                shownSessionCount: displayState.shownSessionCount,
-                isCompact: isCompact,
-                isLimitsOnly: isLimitsOnly,
                 limitsContentHeight: measuredLimitsContentHeight,
                 limitsContentWidth: measuredLimitsContentWidth,
                 activeEnabled: activeEnabled,
-                compactToolbarVisible: showsCompactToolbar,
-                groupByProject: groupByProject,
-                compactPreferredRows: effectiveCompactBaselineRows,
-                compactAutoFitEnabled: compactAutoFitEnabled
+                compactToolbarVisible: showsCompactToolbar
             )
             .allowsHitTesting(false)
         )
@@ -1126,7 +950,6 @@ struct AgentCockpitHUDView: View {
             RoundedRectangle(cornerRadius: AgentCockpitHUDTheme.cornerRadius, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
         )
-        .animation(.easeInOut(duration: 0.18), value: isCompact)
         )
     }
 
@@ -1151,29 +974,12 @@ struct AgentCockpitHUDView: View {
                     .padding(.vertical, 10)
             }
 
-            if isLimitsOnly {
-                HUDLimitsRowsPanel(
-                    activeRows: displayState.rowsForDisplay,
-                    showsChrome: showsCompactToolbar
-                )
-            } else {
-                bodyList(
-                    visibleRows: displayState.visibleRows,
-                    groupedRows: displayState.groupedVisibleRows,
-                    shortcutIndexMap: displayState.shortcutIndexMap,
-                    totalRowsCount: displayState.rowsForDisplay.count,
-                    showsCompactToolbar: showsCompactToolbar,
-                    fullListLayoutSignature: displayState.fullListLayoutSignature
-                )
-                .background(Color.clear)
-                .disabled(!activeEnabled)
-            }
+            HUDLimitsRowsPanel(
+                activeRows: displayState.rowsForDisplay,
+                showsChrome: showsCompactToolbar
+            )
 
-            if showLimits && !isLimitsOnly {
-                HUDLimitsBar(activeRows: displayState.rowsForDisplay)
-            }
-
-            hiddenShortcuts(renderedRows: displayState.renderedRows)
+            hiddenShortcuts
         }
     }
 
@@ -1183,11 +989,6 @@ struct AgentCockpitHUDView: View {
             from: HUDPresentationInputs(
                 canonicalRows: canonicalRows,
                 snapshotTimestamp: snapshotTimestamp,
-                isCompact: isCompact,
-                sessionFilterMode: sessionFilterMode,
-                filterText: filterText,
-                groupByProject: groupByProject,
-                collapsedProjects: collapsedProjects,
                 orderedRowIDs: orderedRowIDs,
                 isWindowVisibleForOrdering: isWindowVisibleForOrdering
             )
@@ -1197,9 +998,7 @@ struct AgentCockpitHUDView: View {
     /// Whether the dwell has anyone listening. Compact always listens; the Quota
     /// Meter only does when its chrome mode reads the pointer at all.
     private var dwellTimerArmed: Bool {
-        guard isCompact else { return false }
-        guard isLimitsOnly else { return true }
-        return quotaMeterChrome.armsDwellTimer()
+        quotaMeterChrome.armsDwellTimer()
     }
 
     /// A toolbar popover is its own window, so reaching for it reads as leaving
@@ -1211,13 +1010,6 @@ struct AgentCockpitHUDView: View {
 
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
         isPointerInsideWindow = hovering
-        guard isCompact else {
-            cancelCompactToolbarRevealTask()
-            cancelCompactToolbarHideTask()
-            clearRevealState()
-            return
-        }
-
         if hovering {
             // Hover intent: require a short dwell before revealing so a quick
             // accidental pass over the pinned window does not expand it. This
@@ -1266,25 +1058,12 @@ struct AgentCockpitHUDView: View {
     /// Explicit reveal on right-click. The hint keeps recurring on later hovers —
     /// right-click is the only route to the toolbar, so the reminder never retires.
     private func revealChromeOnDemand() {
-        guard quotaMeterChrome.respondsToRightClick, isLimitsOnly else { return }
+        guard quotaMeterChrome.respondsToRightClick else { return }
         cancelCompactToolbarHideTask()
         guard !demandRevealed else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
             demandRevealed = true
         }
-    }
-
-    private func handleCompactModeChange() {
-        guard isCompact else {
-            cancelCompactToolbarRevealTask()
-            cancelCompactToolbarHideTask()
-            pointerDwelled = false
-            demandRevealed = false
-            return
-        }
-        cancelCompactToolbarRevealTask()
-        pointerDwelled = false
-        demandRevealed = false
     }
 
     private func cancelCompactToolbarHideTask() {
@@ -1297,143 +1076,45 @@ struct AgentCockpitHUDView: View {
         compactToolbarRevealTask = nil
     }
 
-    /// Repairs persisted state to the Quota Meter. A user who last quit in Full
-    /// or Compact — or who has no stored mode at all, or a value from a future
-    /// build — lands on the Quota Meter instead of a retired mode. Idempotent:
-    /// once repaired, later launches take the early return.
-    private func normalizeHUDDisplayMode() {
-        guard hudDisplayModeRaw != AgentCockpitHUDDisplayMode.limits.rawValue else {
-            // Keep the legacy Bool in step for older readers of `hudCompact`.
-            legacyCompactMode = true
-            return
-        }
-        setHUDDisplayMode(.limits)
-    }
-
-    private func setHUDDisplayMode(_ mode: AgentCockpitHUDDisplayMode) {
-        hudDisplayModeRaw = mode.rawValue
-        legacyCompactMode = mode.usesCompactChrome
-    }
-
     @ViewBuilder
-    private func header(activeCount: Int, idleCount: Int) -> some View {
-        VStack(spacing: isCompact ? 0 : 8) {
+    private func header(activeCount _: Int, idleCount _: Int) -> some View {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
-                // Quota Meter intentionally omits the active/idle session dots and
-                // counters; those stay in the Full/Compact cockpit views below.
-                if !isLimitsOnly {
-                    HStack(spacing: 6) {
-                        Button {
-                            guard activeEnabled else { return }
-                            sessionFilterMode = .all
-                        } label: {
-                            Text("All \(activeCount + idleCount)")
-                        }
-                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .all, kind: .all))
-                        .help("Show all live sessions.")
-
-                        Button {
-                            guard activeEnabled else { return }
-                            sessionFilterMode = .active
-                        } label: {
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(Color(hex: "30d158"))
-                                    .frame(width: 7, height: 7)
-                                Text("\(activeCount)")
-                            }
-                        }
-                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .active, kind: .active))
-                        .help("Show active working sessions only.")
-
-                        Button {
-                            guard activeEnabled else { return }
-                            sessionFilterMode = .idle
-                        } label: {
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(Color(hex: "ffb340"))
-                                    .frame(width: 7, height: 7)
-                                Text("\(idleCount)")
-                            }
-                        }
-                        .buttonStyle(HUDFilterPillStyle(isOn: sessionFilterMode == .idle, kind: .idle))
-                        .help("Show waiting sessions only.")
-                    }
-                    .disabled(!activeEnabled)
-                    .opacity(activeEnabled ? 1 : 0.6)
-                } else {
-                    // Destinations zone: both buttons leave the Quota Meter for
-                    // another window, so they lead together and stay out of the
-                    // view-options cluster on the right.
-                    HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
-                        cockpitOpenButton
-                        cockpitSettingsButton
-                    }
+                // Destinations zone: both buttons leave the Quota Meter for
+                // another window, so they lead together and stay out of the
+                // view-options cluster on the right.
+                HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
+                    cockpitOpenButton
+                    cockpitSettingsButton
                 }
 
                 Spacer(minLength: 0)
 
-                if isLimitsOnly {
-                    // Sheds the text-size toggle, then the runway group, as width
-                    // runs out. Chrome and pin survive to the last rung; the
-                    // destinations zone is outside ViewThatFits and never drops.
-                    ViewThatFits(in: .horizontal) {
-                        limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: true)
-                        limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: false)
-                        limitsToolbarCluster(showRunway: false, showFontSize: false)
+                // Narrows before it deletes. Standard is ~30pt tighter than
+                // Enlarged, so the first rung down only drops the runway group's
+                // *presentation* half — the drawer toggle stays. Buttons are
+                // removed only on the bottom rungs, which normal widths never
+                // reach.
+                //
+                // The text-size toggle is deliberately the last thing to go: it
+                // is the only in-window control that returns you to Enlarged, so
+                // shedding it on the way down was a one-way trap out of Standard.
+                //
+                // Chrome and pin survive to the last rung; the destinations zone
+                // sits outside ViewThatFits and never drops.
+                ViewThatFits(in: .horizontal) {
+                    limitsToolbarCluster(showRunway: runwayControlAvailable, showFontSize: true)
+                    limitsToolbarCluster(showRunway: runwayControlAvailable, showRunwayPresentation: false, showFontSize: true)
+                    limitsToolbarCluster(showRunway: false, showFontSize: true)
+                    limitsToolbarCluster(showRunway: false, showFontSize: false)
 
-                        Color.clear
-                            .frame(width: 0, height: 1)
-                    }
-                } else {
-                    HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
-                        HStack(spacing: AgentCockpitHUDTheme.toolbarIntraGroupSpacing) {
-                            cockpitOpenButton
-                            cockpitSettingsButton
-                        }
-                        toolbarHairline
-                        cockpitPinButton
-                    }
+                    Color.clear
+                        .frame(width: 0, height: 1)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.top, 10)
-            .padding(.bottom, isCompact ? 10 : 0)
-
-            if !isCompact {
-                HStack(spacing: 8) {
-                    HUDSearchField(
-                        text: $filterText,
-                        placeholder: "Filter sessions...",
-                        focusToken: searchFocusToken
-                    )
-                    .disabled(!activeEnabled)
-                    .focused($isSearchFocused)
-                    .onExitCommand {
-                        guard activeEnabled else { return }
-                        if !filterText.isEmpty {
-                            filterText = ""
-                        }
-                        isSearchFocused = false
-                    }
-
-                    Button {
-                        guard activeEnabled else { return }
-                        groupByProject.toggle()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "square.grid.2x2")
-                            Text("By Project")
-                        }
-                    }
-                    .buttonStyle(HUDIconButtonStyle(isOn: groupByProject, tint: .accentColor))
-                    .help("Group sessions by project.")
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            .padding(.bottom, 10)
         }
     }
 
@@ -1557,10 +1238,12 @@ struct AgentCockpitHUDView: View {
 
     /// Fused runway group: 1pt gap lets the HUD background show through as the
     /// seam between the two squared-off inner edges.
-    private var runwayGroup: some View {
+    private func runwayGroup(showPresentation: Bool) -> some View {
         HStack(spacing: 1) {
             cockpitRunwayButton
-            runwayPresentationButton
+            if showPresentation {
+                runwayPresentationButton
+            }
         }
     }
 
@@ -1642,10 +1325,12 @@ struct AgentCockpitHUDView: View {
     /// One rung of the Quota Meter's trailing cluster. The chrome button is never
     /// shed — it is the only way back from `.onDemand`, so it outranks even the
     /// runway controls when width runs short.
-    private func limitsToolbarCluster(showRunway: Bool, showFontSize: Bool) -> some View {
+    private func limitsToolbarCluster(showRunway: Bool,
+                                      showRunwayPresentation: Bool = true,
+                                      showFontSize: Bool) -> some View {
         HStack(spacing: AgentCockpitHUDTheme.toolbarGroupSpacing) {
             if showRunway {
-                runwayGroup
+                runwayGroup(showPresentation: showRunwayPresentation)
             }
             cockpitProbeButton
             // Presentation pair: how the window renders itself, as opposed to
@@ -1662,282 +1347,16 @@ struct AgentCockpitHUDView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
-    @ViewBuilder
-    private func bodyList(visibleRows: [HUDRow],
-                          groupedRows: [HUDGroup],
-                          shortcutIndexMap: [String: Int],
-                          totalRowsCount: Int,
-                          showsCompactToolbar: Bool,
-                          fullListLayoutSignature: Int) -> some View {
-        Group {
-            if visibleRows.isEmpty {
-                emptyState(totalRowsCount: totalRowsCount)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isCompact ? .leading : .center)
-                    .padding(.horizontal, isCompact ? 14 : 0)
-            } else if shouldCenterCompactRows(visibleRows: visibleRows, showsCompactToolbar: showsCompactToolbar) {
-                compactCenteredBodyRows(visibleRows: visibleRows, shortcutIndexMap: shortcutIndexMap)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        if groupByProject {
-                            ForEach(Array(groupedRows.enumerated()), id: \.element.id) { index, group in
-                                if shouldShowStaleGroupsDivider(before: index, in: groupedRows) {
-                                    staleGroupsDivider
-                                }
-                                AgentCockpitHUDGroupHeader(
-                                    projectName: group.projectName,
-                                    activeCount: group.activeCount,
-                                    idleCount: group.idleCount,
-                                    isStaleOnly: group.isStaleOnly,
-                                    isCollapsed: collapsedProjects.contains(group.id)
-                                ) {
-                                    toggleCollapsed(projectID: group.id, isStaleOnly: group.isStaleOnly)
-                                }
-
-                                if !collapsedProjects.contains(group.id) {
-                                    ForEach(group.rows) { row in
-                                        AgentCockpitHUDRowView(
-                                            row: row,
-                                            shortcutIndex: shortcutIndexMap[row.id],
-                                            isSelected: false,
-                                            filterText: filterText,
-                                            isGrouped: true,
-                                            isCompact: isCompact,
-                                            isNewlyInserted: highlightedRowIDs.contains(row.id)
-                                        ) {
-                                            focus(row)
-                                        }
-                                        .contextMenu {
-                                            rowContextMenu(row)
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            ForEach(visibleRows) { row in
-                                AgentCockpitHUDRowView(
-                                    row: row,
-                                    shortcutIndex: shortcutIndexMap[row.id],
-                                    isSelected: false,
-                                    filterText: filterText,
-                                    isGrouped: false,
-                                    isCompact: isCompact,
-                                    isNewlyInserted: highlightedRowIDs.contains(row.id)
-                                ) {
-                                    focus(row)
-                                }
-                                .contextMenu {
-                                    rowContextMenu(row)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.vertical, isCompact ? 0 : 2)
-                    .id(fullListLayoutSignature)
-                }
-                .scrollIndicators(.visible)
-            }
+    /// The Quota Meter's chrome strips `.titled` and disables the standard
+    /// window buttons, so AppKit has no close button to press and the standard
+    /// Cmd+W reaches `performClose` and merely beeps. This puts it back.
+    private var hiddenShortcuts: some View {
+        Button("") {
+            AppWindowRouter.closeAgentCockpitWindow()
         }
-        .frame(
-            minHeight: isCompact
-                ? compactBodyMinHeight(
-                    visibleRowCount: visibleRows.count,
-                    showsCompactToolbar: showsCompactToolbar
-                )
-                : fullBodyMinHeight,
-            maxHeight: .infinity
-        )
-    }
-
-    /// Compact only — the Quota Meter's body is `HUDLimitsRowsPanel`, which never
-    /// reaches here.
-    ///
-    /// Under auto-fit the count is the whole answer, independent of the toolbar:
-    /// keying off `showsCompactToolbar` made the body shrink to the
-    /// hidden-toolbar minimum the moment the pointer left, which is the same
-    /// hover-driven resize the window-level sizing was just decoupled from.
-    private func compactBodyMinHeight(visibleRowCount: Int,
-                                      showsCompactToolbar: Bool) -> CGFloat {
-        if compactAutoFitEnabled {
-            let rows = min(max(visibleRowCount, 1), Int(compactBodyMaxRowsWhenToolbarVisible))
-            return CGFloat(rows) * compactBodyRowHeight
-        }
-        if showsCompactToolbar {
-            return CGFloat(effectiveCompactBaselineRows) * compactBodyRowHeight
-        }
-        return compactBodyMinRowsWhenToolbarHidden * compactBodyRowHeight
-    }
-
-    @ViewBuilder
-    private func compactCenteredBodyRows(visibleRows: [HUDRow],
-                                         shortcutIndexMap: [String: Int]) -> some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            ForEach(visibleRows) { row in
-                AgentCockpitHUDRowView(
-                    row: row,
-                    shortcutIndex: shortcutIndexMap[row.id],
-                    isSelected: false,
-                    filterText: filterText,
-                    isGrouped: false,
-                    isCompact: isCompact,
-                    isNewlyInserted: highlightedRowIDs.contains(row.id)
-                ) {
-                    focus(row)
-                }
-                .contextMenu {
-                    rowContextMenu(row)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func shouldCenterCompactRows(visibleRows: [HUDRow],
-                                         showsCompactToolbar: Bool) -> Bool {
-        guard isCompact else { return false }
-        guard !showsCompactToolbar else { return false }
-        guard !isPinned else { return false }
-        guard !groupByProject else { return false }
-        return visibleRows.count <= 4
-    }
-
-    @ViewBuilder
-    private func hiddenShortcuts(renderedRows: [HUDRow]) -> some View {
-        VStack(spacing: 0) {
-            Button("") {
-                guard activeEnabled else { return }
-                focusSearchField(selectAll: true)
-            }
-            .keyboardShortcut("k", modifiers: .command)
-            .frame(width: 0, height: 0)
-            .opacity(0)
-
-            // Compact chrome has no close button for AppKit to press, so the
-            // standard ⌘W reaches performClose and merely beeps.
-            if isCompact {
-                Button("") {
-                    AppWindowRouter.closeAgentCockpitWindow()
-                }
-                .keyboardShortcut("w", modifiers: .command)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-            }
-
-            ForEach(1...9, id: \.self) { n in
-                Button("") {
-                    guard activeEnabled else { return }
-                    guard renderedRows.indices.contains(n - 1) else { return }
-                    let row = renderedRows[n - 1]
-                    focus(row)
-                }
-                .keyboardShortcut(KeyEquivalent(Character(String(n))), modifiers: .command)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-            }
-
-            Button("") {
-                guard activeEnabled else { return }
-                guard renderedRows.indices.contains(9) else { return }
-                focus(renderedRows[9])
-            }
-            .keyboardShortcut("0", modifiers: .command)
-            .frame(width: 0, height: 0)
-            .opacity(0)
-        }
-    }
-
-    private static func renderedRows(visibleRows: [HUDRow],
-                                     groupedRows: [HUDGroup],
-                                     groupByProject: Bool,
-                                     collapsedProjects: Set<String>) -> [HUDRow] {
-        guard groupByProject else { return visibleRows }
-        return groupedRows.flatMap { group in
-            collapsedProjects.contains(group.id) ? [] : group.rows
-        }
-    }
-
-    private func toggleCollapsed(projectID: String, isStaleOnly: Bool) {
-        if collapsedProjects.contains(projectID) {
-            collapsedProjects.remove(projectID)
-            staleAutoCollapsedProjects.remove(projectID)
-            if isStaleOnly {
-                manuallyExpandedStaleProjects.insert(projectID)
-            }
-        } else {
-            collapsedProjects.insert(projectID)
-            if isStaleOnly {
-                manuallyExpandedStaleProjects.remove(projectID)
-            }
-        }
-    }
-
-    private func filteredRows(from rows: [HUDRow]) -> [HUDRow] {
-        Self.filteredRows(rows, mode: sessionFilterMode, query: filterText)
-    }
-
-    private func groupedRows(from rows: [HUDRow]) -> [HUDGroup] {
-        if isWindowVisibleForOrdering {
-            return Self.groupedRowsPreservingOrder(rows)
-        }
-        return Self.groupedRows(rows)
-    }
-
-    @ViewBuilder
-    private var staleGroupsDivider: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.10))
-            .frame(height: 0.5)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
-    }
-
-    @ViewBuilder
-    private func emptyState(totalRowsCount: Int) -> some View {
-        if isCompact {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(Color.secondary.opacity(0.45))
-                    .frame(width: 7, height: 7)
-                Text("No sessions")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 8)
-        } else {
-            Text(fullModeEmptyStateLabel(totalRowsCount: totalRowsCount))
-                .font(.system(size: 13, weight: .regular, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func fullModeEmptyStateLabel(totalRowsCount: Int) -> String {
-        let hasQuery = !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if hasQuery { return "No matching sessions" }
-
-        switch sessionFilterMode {
-        case .all:
-            return "No active sessions"
-        case .active:
-            return "No active sessions"
-        case .idle:
-            return totalRowsCount == 0 ? "No active sessions" : "No waiting sessions"
-        }
-    }
-
-    private func fullUngroupedLayoutSignature(for rows: [HUDRow]) -> Int {
-        guard !isCompact, !groupByProject else { return 0 }
-        var hasher = Hasher()
-        hasher.combine(rows.count)
-        for row in rows {
-            hasher.combine(row.id)
-            hasher.combine(row.projectName)
-            hasher.combine(row.displayName)
-            hasher.combine(row.cleanedTabTitle ?? "")
-        }
-        return hasher.finalize()
+        .keyboardShortcut("w", modifiers: .command)
+        .frame(width: 0, height: 0)
+        .opacity(0)
     }
 
     private static func makePresentationState(from inputs: HUDPresentationInputs) -> HUDPresentationState {
@@ -1945,52 +1364,10 @@ struct AgentCockpitHUDView: View {
             orderedRowIDs: inputs.orderedRowIDs,
             canonicalRows: inputs.canonicalRows
         )
-        let visibleRows = filteredRows(
-            rowsForDisplay,
-            mode: inputs.sessionFilterMode,
-            query: inputs.filterText
-        )
-        let fullListLayoutSignature = fullUngroupedLayoutSignature(
-            rows: visibleRows,
-            isCompact: inputs.isCompact,
-            groupByProject: inputs.groupByProject
-        )
-        let groupedVisibleRows = inputs.groupByProject
-            ? groupedRowsForPresentation(
-                visibleRows,
-                now: inputs.snapshotTimestamp,
-                isWindowVisibleForOrdering: inputs.isWindowVisibleForOrdering
-            )
-            : []
-        let groupedRowsForCollapseSync = inputs.groupByProject
-            ? groupedRowsForPresentation(
-                rowsForDisplay,
-                now: inputs.snapshotTimestamp,
-                isWindowVisibleForOrdering: inputs.isWindowVisibleForOrdering
-            )
-            : []
-        let renderedRows = renderedRows(
-            visibleRows: visibleRows,
-            groupedRows: groupedVisibleRows,
-            groupByProject: inputs.groupByProject,
-            collapsedProjects: inputs.collapsedProjects
-        )
-        let shortcutIndexMap = renderedRows.enumerated().reduce(into: [String: Int]()) { partial, pair in
-            let (index, row) = pair
-            if partial[row.id] == nil {
-                partial[row.id] = index + 1
-            }
-        }
         return HUDPresentationState(
             inputs: inputs,
             rowsForDisplay: rowsForDisplay,
-            visibleRows: visibleRows,
-            fullListLayoutSignature: fullListLayoutSignature,
-            shownSessionCount: visibleRows.count,
-            groupedVisibleRows: groupedVisibleRows,
-            groupedRowsForCollapseSync: groupedRowsForCollapseSync,
-            renderedRows: renderedRows,
-            shortcutIndexMap: shortcutIndexMap
+            shownSessionCount: rowsForDisplay.count
         )
     }
 
@@ -2006,30 +1383,6 @@ struct AgentCockpitHUDView: View {
         }
         let trailing = canonicalRows.filter { !orderedSet.contains($0.id) }
         return ordered + trailing
-    }
-
-    private static func fullUngroupedLayoutSignature(rows: [HUDRow],
-                                                     isCompact: Bool,
-                                                     groupByProject: Bool) -> Int {
-        guard !isCompact, !groupByProject else { return 0 }
-        var hasher = Hasher()
-        hasher.combine(rows.count)
-        for row in rows {
-            hasher.combine(row.id)
-            hasher.combine(row.projectName)
-            hasher.combine(row.displayName)
-            hasher.combine(row.cleanedTabTitle ?? "")
-        }
-        return hasher.finalize()
-    }
-
-    private static func groupedRowsForPresentation(_ rows: [HUDRow],
-                                                   now: Date,
-                                                   isWindowVisibleForOrdering: Bool) -> [HUDGroup] {
-        if isWindowVisibleForOrdering {
-            return groupedRowsPreservingOrder(rows, now: now)
-        }
-        return groupedRows(rows, now: now)
     }
 
     private func rowsOrderedForDisplay(from canonicalRows: [HUDRow]) -> [HUDRow] {
@@ -2088,81 +1441,6 @@ struct AgentCockpitHUDView: View {
         queueInsertionHighlights(for: merge.inserted)
     }
 
-    private func synchronizeCollapsedProjectsForStaleGroups(with groups: [HUDGroup]) {
-        let synchronized = Self.synchronizeCollapsedProjectsForStaleGroups(
-            isCompact: isCompact,
-            groupByProject: groupByProject,
-            groups: groups,
-            collapsedProjects: collapsedProjects,
-            staleAutoCollapsedProjects: staleAutoCollapsedProjects,
-            manuallyExpandedStaleProjects: manuallyExpandedStaleProjects
-        )
-        collapsedProjects = synchronized.collapsedProjects
-        staleAutoCollapsedProjects = synchronized.staleAutoCollapsedProjects
-        manuallyExpandedStaleProjects = synchronized.manuallyExpandedStaleProjects
-    }
-
-    static func synchronizeCollapsedProjectsForStaleGroups(
-        isCompact: Bool,
-        groupByProject: Bool,
-        groups: [HUDGroup],
-        collapsedProjects: Set<String>,
-        staleAutoCollapsedProjects: Set<String>,
-        manuallyExpandedStaleProjects: Set<String>
-    ) -> (collapsedProjects: Set<String>, staleAutoCollapsedProjects: Set<String>, manuallyExpandedStaleProjects: Set<String>) {
-        var collapsedProjects = collapsedProjects
-        var staleAutoCollapsedProjects = staleAutoCollapsedProjects
-        var manuallyExpandedStaleProjects = manuallyExpandedStaleProjects
-
-        guard isCompact, groupByProject else {
-            if !staleAutoCollapsedProjects.isEmpty {
-                collapsedProjects.subtract(staleAutoCollapsedProjects)
-            }
-            staleAutoCollapsedProjects.removeAll(keepingCapacity: false)
-            manuallyExpandedStaleProjects.removeAll(keepingCapacity: false)
-            return (collapsedProjects, staleAutoCollapsedProjects, manuallyExpandedStaleProjects)
-        }
-
-        let staleOnlyIDs = Set(groups.lazy.filter(\.isStaleOnly).map(\.id))
-        let noLongerStale = staleAutoCollapsedProjects.subtracting(staleOnlyIDs)
-        if !noLongerStale.isEmpty {
-            collapsedProjects.subtract(noLongerStale)
-            staleAutoCollapsedProjects.subtract(noLongerStale)
-        }
-
-        manuallyExpandedStaleProjects.formIntersection(staleOnlyIDs)
-
-        for group in groups where group.isStaleOnly {
-            guard !staleAutoCollapsedProjects.contains(group.id),
-                  !manuallyExpandedStaleProjects.contains(group.id) else {
-                continue
-            }
-            collapsedProjects.insert(group.id)
-            staleAutoCollapsedProjects.insert(group.id)
-        }
-
-        staleAutoCollapsedProjects.formIntersection(staleOnlyIDs)
-        return (collapsedProjects, staleAutoCollapsedProjects, manuallyExpandedStaleProjects)
-    }
-
-    private func shouldShowStaleGroupsDivider(before index: Int, in groups: [HUDGroup]) -> Bool {
-        guard isCompact, groupByProject else { return false }
-        guard groups.indices.contains(index) else { return false }
-        guard groups[index].isStaleOnly else { return false }
-        guard groups.contains(where: { !$0.isStaleOnly }) else { return false }
-        return index == 0 || !groups[index - 1].isStaleOnly
-    }
-
-    private func queueInsertionHighlights(for ids: [String]) {
-        let freshIDs = Set(ids)
-        guard !freshIDs.isEmpty else { return }
-        highlightedRowIDs.formUnion(freshIDs)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-            withAnimation(.easeOut(duration: 0.20)) {
-                highlightedRowIDs.subtract(freshIDs)
-            }
-        }
-    }
 
     private func handleWindowVisibilityChange(isVisible: Bool) {
         activeCodex.setCockpitWindowVisible(isVisible, consumerID: activeConsumerID)
@@ -2177,79 +1455,6 @@ struct AgentCockpitHUDView: View {
         withAnimation(.easeInOut(duration: 0.14)) {
             isCockpitWindowKey = isKey
         }
-    }
-
-    private func focusSearchField(selectAll: Bool) {
-        isSearchFocused = true
-        if selectAll {
-            searchFocusToken &+= 1
-        }
-    }
-
-    private func focus(_ row: HUDRow) {
-        guard activeEnabled else { return }
-        if CodexActiveSessionsModel.tryFocusITerm2(itermSessionId: row.itermSessionId, tty: row.tty) {
-            return
-        }
-        if let url = row.revealURL {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    @ViewBuilder
-    private func rowContextMenu(_ row: HUDRow) -> some View {
-        Button("Go to Session") {
-            goToSession(row)
-        }
-        .disabled(!activeEnabled || !row.navigationConfidence.isNavigable)
-        .help(row.navigationConfidence.isNavigable
-              ? "Select this session in the main Agent Sessions window and open its transcript."
-              : "No exact session match found — only a working-directory fallback is available.")
-
-        Button("Focus in iTerm2") {
-            focus(row)
-        }
-        .disabled(!activeEnabled || !canFocus(row))
-        .help("Focus the existing iTerm2 tab/window for this session.")
-
-        Divider()
-
-        Button("Reveal Log") {
-            revealLog(row)
-        }
-        .disabled(!activeEnabled || row.logPath == nil)
-        .help("Reveal the session log in Finder.")
-
-        Button("Open Working Directory") {
-            openWorkingDirectory(row)
-        }
-        .disabled(!activeEnabled || row.workingDirectory == nil)
-        .help("Open the working directory in Finder.")
-
-        Divider()
-
-        Button("Copy Session ID") {
-            copyToPasteboard(row.runtimeSessionID ?? row.resolvedSessionID)
-        }
-        .disabled((row.runtimeSessionID ?? row.resolvedSessionID) == nil)
-
-        Button("Copy Tab Title") {
-            copyToPasteboard(normalizedTabTitle(row))
-        }
-        .disabled(normalizedTabTitle(row) == nil)
-
-        Button("Copy Working Directory Path") {
-            copyToPasteboard(row.workingDirectory)
-        }
-        .disabled(row.workingDirectory == nil)
-    }
-
-    private func canFocus(_ row: HUDRow) -> Bool {
-        CodexActiveSessionsModel.canAttemptITerm2Focus(
-            itermSessionId: row.itermSessionId,
-            tty: row.tty,
-            termProgram: row.termProgram
-        ) || row.revealURL != nil
     }
 
     private func goToSession(_ row: HUDRow) {
@@ -2816,26 +2021,15 @@ struct AgentCockpitHUDView: View {
         return false
     }
 
-    static func filteredRows(_ rows: [HUDRow], mode: HUDSessionFilterMode, query: String) -> [HUDRow] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return rows.filter { row in
-            let statePass: Bool = {
-                switch mode {
-                case .all:
-                    return true
-                case .active:
-                    return row.liveState == .active
-                case .idle:
-                    return row.liveState == .idle
-                }
-            }()
-            guard statePass else { return false }
-            guard !trimmed.isEmpty else { return true }
-            let lowered = trimmed.lowercased()
-            return row.projectName.lowercased().contains(lowered)
-                || row.displayName.lowercased().contains(lowered)
-                || row.preview.lowercased().contains(lowered)
-                || (row.cleanedTabTitle?.lowercased().contains(lowered) ?? false)
+
+    private func queueInsertionHighlights(for ids: [String]) {
+        let freshIDs = Set(ids)
+        guard !freshIDs.isEmpty else { return }
+        highlightedRowIDs.formUnion(freshIDs)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+            withAnimation(.easeOut(duration: 0.20)) {
+                highlightedRowIDs.subtract(freshIDs)
+            }
         }
     }
 
@@ -2851,77 +2045,7 @@ struct AgentCockpitHUDView: View {
         Set(existing) != Set(incoming)
     }
 
-    static func groupedRows(_ rows: [HUDRow], now: Date = Date()) -> [HUDGroup] {
-        var buckets: [String: [HUDRow]] = [:]
-        buckets.reserveCapacity(rows.count)
 
-        for row in rows {
-            buckets[row.projectName, default: []].append(row)
-        }
-
-        var out: [HUDGroup] = buckets.map { projectName, projectRows in
-            let sortedRows = sortRows(projectRows, now: now)
-            let counts = waitingCounts(for: sortedRows, now: now)
-            return HUDGroup(
-                id: projectName,
-                projectName: projectName,
-                rows: sortedRows,
-                activeCount: counts.active,
-                idleCount: counts.idle,
-                freshIdleCount: counts.freshIdle,
-                staleIdleCount: counts.staleIdle
-            )
-        }
-
-        out.sort { a, b in
-            if a.displayPriority != b.displayPriority {
-                return a.displayPriority.rawValue < b.displayPriority.rawValue
-            }
-            return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
-        }
-
-        return out
-    }
-
-    static func groupedRowsPreservingOrder(_ rows: [HUDRow], now: Date = Date()) -> [HUDGroup] {
-        var buckets: [String: [HUDRow]] = [:]
-        var order: [String] = []
-        buckets.reserveCapacity(rows.count)
-        order.reserveCapacity(rows.count)
-
-        for row in rows {
-            if buckets[row.projectName] == nil {
-                order.append(row.projectName)
-            }
-            buckets[row.projectName, default: []].append(row)
-        }
-
-        let groups: [HUDGroup] = order.compactMap { projectName -> HUDGroup? in
-            guard let projectRows = buckets[projectName] else { return nil }
-            let sortedRows = sortRows(projectRows, now: now)
-            let counts = waitingCounts(for: sortedRows, now: now)
-            return HUDGroup(
-                id: projectName,
-                projectName: projectName,
-                rows: sortedRows,
-                activeCount: counts.active,
-                idleCount: counts.idle,
-                freshIdleCount: counts.freshIdle,
-                staleIdleCount: counts.staleIdle
-            )
-        }
-
-        return groups.sorted { a, b in
-            if a.displayPriority != b.displayPriority {
-                return a.displayPriority.rawValue < b.displayPriority.rawValue
-            }
-            guard let aIndex = order.firstIndex(of: a.projectName),
-                  let bIndex = order.firstIndex(of: b.projectName) else {
-                return a.projectName.localizedCaseInsensitiveCompare(b.projectName) == .orderedAscending
-            }
-            return aIndex < bIndex
-        }
-    }
 
     private static func waitingCounts(for rows: [HUDRow], now: Date = Date()) -> HUDWaitingCounts {
         var active = 0
@@ -3758,59 +2882,7 @@ private struct HUDRightClickCatcher: NSViewRepresentable {
     }
 }
 
-private enum HUDExpansionDirection {
-    case up
-    case down
-}
 
-private struct HUDWindowExpansionDirectionReader: NSViewRepresentable {
-    let onChange: (HUDExpansionDirection) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { [weak view] in
-            context.coordinator.update(from: view?.window)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.onChange = onChange
-        DispatchQueue.main.async { [weak nsView] in
-            context.coordinator.update(from: nsView?.window)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onChange: onChange)
-    }
-
-    final class Coordinator {
-        var onChange: (HUDExpansionDirection) -> Void
-        private var lastDirection: HUDExpansionDirection?
-
-        init(onChange: @escaping (HUDExpansionDirection) -> Void) {
-            self.onChange = onChange
-        }
-
-        func update(from window: NSWindow?) {
-            guard let window,
-                  let visibleFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else {
-                emit(.up)
-                return
-            }
-            let frame = window.frame
-            let direction: HUDExpansionDirection = frame.midY >= visibleFrame.midY ? .down : .up
-            emit(direction)
-        }
-
-        private func emit(_ direction: HUDExpansionDirection) {
-            guard direction != lastDirection else { return }
-            lastDirection = direction
-            onChange(direction)
-        }
-    }
-}
 
 /// An isolated view that observes usage models independently so that
 /// polling updates don't cause the entire AgentCockpitHUDView to re-render.
@@ -4181,296 +3253,7 @@ private enum HUDSharedClock {
     static let fiveSecond = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 }
 
-private struct HUDLimitsBar: View {
-    let activeRows: [HUDRow]
-    @EnvironmentObject private var codexUsageModel: CodexUsageModel
-    @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
-    @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled = false
-    @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled = false
-    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled = true
-    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled = true
-    @AppStorage(PreferencesKey.usageDisplayMode) private var usageDisplayModeRaw = UsageDisplayMode.left.rawValue
-    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
-    @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
-    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
-    @State private var clockNow = Date()
-    @State private var isHovering = false
-    @State private var isHoveringExpandedPanel = false
-    @State private var activeVariant: Int = 0
-    @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
-    @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
-    @State private var expansionDirection: HUDExpansionDirection = .up
-
-    private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
-    private var runwayVisibility: QuotaMeterRunwayVisibility {
-        QuotaMeterRunwayVisibility.current(raw: runwayVisibilityRaw)
-    }
-
-    private var autoExpandNeeded: Bool {
-        activeVariant >= 3 || (activeVariant == 2 && hasActiveProjection)
-    }
-
-    private var visibleCodexRunwaySnapshot: CodexRunwaySnapshot? {
-        quotaMeterVisibleRunwaySnapshot(from: codexRunwaySnapshot, visibility: runwayVisibility)
-    }
-
-    private var visibleClaudeRunwaySnapshot: CodexRunwaySnapshot? {
-        quotaMeterVisibleRunwaySnapshot(from: claudeRunwaySnapshot, visibility: runwayVisibility)
-    }
-
-    private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
-        source == .claude ? visibleClaudeRunwaySnapshot : visibleCodexRunwaySnapshot
-    }
-
-    private var hasActiveProjection: Bool {
-        guard projectedRunoutEnabled else { return false }
-        return entries.contains { entry in
-            formatUsageProjectionLabel(
-                runoutAt: entry.fiveHourProjectedRunoutAt,
-                observedAt: entry.fiveHourProjectionObservedAt,
-                now: clockNow
-            ) != nil
-        }
-    }
-
-    private var contentRefreshID: String {
-        var parts: [String] = [mode.rawValue]
-        parts.append(projectedRunoutEnabled ? "projection-on" : "projection-off")
-        parts.append("runway-\(runwayVisibility.rawValue)")
-        if codexAgentEnabled && codexUsageEnabled {
-            parts.append(
-                [
-                    "codex",
-                    String(codexUsageModel.fiveHourRemainingPercent),
-                    codexUsageModel.fiveHourResetText,
-                    String(codexUsageModel.weekRemainingPercent),
-                    codexUsageModel.weekResetText,
-                    codexUsageModel.lastEventTimestamp?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    codexUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    codexUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    codexUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    codexUsageModel.isUpdating ? "updating" : "idle",
-                    codexUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil"
-                ].joined(separator: "|")
-            )
-        }
-        if claudeAgentEnabled && claudeUsageEnabled {
-            parts.append(
-                [
-                    "claude",
-                    String(claudeUsageModel.sessionRemainingPercent),
-                    claudeUsageModel.sessionResetText,
-                    String(claudeUsageModel.weekAllModelsRemainingPercent),
-                    claudeUsageModel.weekAllModelsResetText,
-                    claudeUsageModel.lastUpdate?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    claudeUsageModel.fiveHourProjectedRunoutAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    claudeUsageModel.fiveHourProjectionObservedAt?.timeIntervalSinceReferenceDate.description ?? "nil",
-                    claudeUsageModel.isUpdating ? "updating" : "idle",
-                    claudeUsageModel.authStatus.map { String(describing: $0.state) } ?? "auth-nil",
-                    // presentationState inputs beyond the fields above — a stale/
-                    // transient flip must rebuild the bar into its reconnecting cell.
-                    claudeUsageModel.dataIsStale ? "stale" : "fresh",
-                    claudeUsageModel.transientReason ?? "transient-nil"
-                ].joined(separator: "|")
-            )
-        }
-        parts.append(activeRows.map {
-            "\($0.id)|\($0.displayName)|\($0.parentSessionID ?? "")|\($0.logPath ?? "")"
-        }.joined(separator: ","))
-        parts.append(isHovering ? "hover" : "rest")
-        return parts.joined(separator: "||")
-    }
-
-    private var entries: [HUDLimitsProviderEntry] {
-        var out: [HUDLimitsProviderEntry] = []
-        if codexAgentEnabled && codexUsageEnabled {
-            out.append(HUDLimitsProviderEntry(
-                source: .codex,
-                fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
-                weekLeft: codexUsageModel.weekRemainingPercent,
-                fiveHourResetText: codexUsageModel.fiveHourResetText,
-                weekResetText: codexUsageModel.weekResetText,
-                hasFiveHourRateLimit: codexUsageModel.hasFiveHourRateLimit,
-                hasWeekRateLimit: codexUsageModel.hasWeekRateLimit,
-                usageFormatSuspect: codexUsageModel.usageFormatSuspect,
-                isInitialLoading: codexUsageModel.isUpdating && codexUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: codexUsageModel.lastEventTimestamp,
-                fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: codexUsageModel.fiveHourOnTrackObservedAt,
-                aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
-                authStatus: codexUsageModel.authStatus,
-                presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
-                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption
-            ))
-        }
-        if claudeAgentEnabled && claudeUsageEnabled {
-            out.append(HUDLimitsProviderEntry(
-                source: .claude,
-                fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
-                weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
-                fiveHourResetText: claudeUsageModel.sessionResetText,
-                weekResetText: claudeUsageModel.weekAllModelsResetText,
-                isInitialLoading: claudeUsageModel.isUpdating && claudeUsageModel.lastSuccessAt == nil,
-                lastDataTimestamp: claudeUsageModel.lastUpdate,
-                fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
-                fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
-                fiveHourOnTrackObservedAt: claudeUsageModel.fiveHourOnTrackObservedAt,
-                aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
-                authStatus: claudeUsageModel.authStatus,
-                presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
-                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption
-            ))
-        }
-        return out
-    }
-
-    /// True when any shown provider needs auth remediation — HUDLimitsBarContent
-    /// swaps that provider's meter text for the compact AuthRemediationBanner
-    /// (icon + headline + command chip + Copy button), which is taller than a
-    /// plain meter row.
-    private var hasAlarmingAuth: Bool {
-        entries.contains { entry in
-            if case .needsAction = entry.presentationState { return true }
-            return false
-        }
-    }
-
-    /// Signed-in bar keeps its exact 22pt clipped look (unchanged). When a
-    /// provider is alarming, the compact banner's content (~19pt) plus its own
-    /// 4pt top/bottom padding needs ~27pt, so grow the row just enough to clear
-    /// it without clipping the command chip / Copy button.
-    private var barContentHeight: CGFloat { hasAlarmingAuth ? 28 : 22 }
-
-    /// Divider rectangle (0.5pt) + bar content height — used both for the bar's
-    /// own frame and to keep the expanded panel's alignment offset in sync when
-    /// the bar grows for an alarming auth banner.
-    private var barTotalHeight: CGFloat { barContentHeight + 0.5 }
-
-    var body: some View {
-        if entries.isEmpty {
-            EmptyView()
-        } else {
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.10))
-                    .frame(height: 0.5)
-                HUDLimitsBarContent(entries: entries, mode: mode, now: clockNow)
-                    .id(contentRefreshID)
-                    .frame(height: barContentHeight)
-                    .clipped()
-                    .onPreferenceChange(LimitsBarVariantKey.self) { activeVariant = $0 }
-            }
-            .onHover { isHovering = $0 }
-            .background(
-                HUDWindowExpansionDirectionReader { direction in
-                    expansionDirection = direction
-                }
-                .allowsHitTesting(false)
-            )
-            .onReceive(Self.clockTimer) { clockNow = $0 }
-            .overlay(alignment: .bottom) {
-                if shouldShowExpandedPanel && expansionDirection == .up {
-                    expandedPanel
-                        .alignmentGuide(.bottom) { d in d[.bottom] + barTotalHeight }
-                }
-            }
-            .overlay(alignment: .top) {
-                if shouldShowExpandedPanel && expansionDirection == .down {
-                    expandedPanel
-                        .alignmentGuide(.top) { d in d[.top] - barTotalHeight }
-                }
-            }
-            .task(id: runwayRequestID) {
-                await refreshRunwaySnapshot()
-            }
-        }
-    }
-
-    private static let clockTimer = HUDSharedClock.fiveSecond
-
-    private var shouldShowExpandedPanel: Bool {
-        isHovering || isHoveringExpandedPanel || autoExpandNeeded
-    }
-
-    private var expandedPanel: some View {
-        HUDLimitsExpandedPanel(
-            entries: entries,
-            mode: mode,
-            now: clockNow,
-            codexRunwaySnapshot: visibleCodexRunwaySnapshot,
-            claudeRunwaySnapshot: visibleClaudeRunwaySnapshot,
-            forceEmptyDrawer: runwayVisibility == .alwaysOn
-        )
-        .id(contentRefreshID)
-        .frame(maxWidth: .infinity)
-        .onHover { hovering in
-            isHoveringExpandedPanel = hovering
-        }
-        .transition(.opacity.animation(.easeIn(duration: 0.05)))
-    }
-
-    private var runwayRequestID: String {
-        "\(codexRunwayRequest?.id ?? "codex-off")||\(claudeRunwayRequest?.id ?? "claude-off")"
-    }
-
-    private var codexRunwayRequest: CodexRunwaySnapshotRequest? {
-        // Feed the runway the active limit window (5h when present, else weekly),
-        // with its length so the m/h yardstick stays absolute. When OpenAI drops
-        // the 5h window the runway keeps showing sessions burning the weekly cap.
-        return Self.runwayRequest(
-            activeRows: activeRows,
-            projectedRunoutEnabled: projectedRunoutEnabled,
-            codexAgentEnabled: codexAgentEnabled,
-            codexUsageEnabled: codexUsageEnabled,
-            fiveHourRemainingPercent: codexUsageModel.activeLimitRemainingPercent,
-            fiveHourResetText: codexUsageModel.activeLimitResetText,
-            fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
-            fiveHourProjectionObservedAt: codexUsageModel.fiveHourProjectionObservedAt,
-            windowMinutes: codexUsageModel.activeLimitWindowMinutes,
-            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
-            weekRemainingPercent: codexUsageModel.weekRemainingPercent,
-            weekResetText: codexUsageModel.weekResetText,
-            now: clockNow,
-            maxRows: 4,
-            forceVisible: runwayVisibility == .alwaysOn
-        )
-    }
-
-    private var claudeRunwayRequest: CodexRunwaySnapshotRequest? {
-        return HUDRunwayRequestBuilder.claudeRequest(
-            activeRows: activeRows,
-            projectedRunoutEnabled: projectedRunoutEnabled,
-            claudeAgentEnabled: claudeAgentEnabled,
-            claudeUsageEnabled: claudeUsageEnabled,
-            fiveHourRemainingPercent: claudeUsageModel.sessionRemainingPercent,
-            fiveHourResetText: claudeUsageModel.sessionResetText,
-            fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
-            fiveHourProjectionObservedAt: claudeUsageModel.fiveHourProjectionObservedAt,
-            presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
-            weekRemainingPercent: claudeUsageModel.weekAllModelsRemainingPercent,
-            weekResetText: claudeUsageModel.weekAllModelsResetText,
-            now: clockNow,
-            maxRows: 4,
-            forceVisible: runwayVisibility == .alwaysOn
-        )
-    }
-
-    private func refreshRunwaySnapshot() async {
-        if let request = codexRunwayRequest {
-            let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
-            if !Task.isCancelled { codexRunwaySnapshot = snapshot }
-        } else {
-            codexRunwaySnapshot = nil
-        }
-        if let request = claudeRunwayRequest {
-            let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
-            if !Task.isCancelled { claudeRunwaySnapshot = snapshot }
-        } else {
-            claudeRunwaySnapshot = nil
-        }
-    }
-
+private struct HUDLimitsRowsPanel: View {
     static func runwayRequest(activeRows: [HUDRow],
                               projectedRunoutEnabled: Bool,
                               codexAgentEnabled: Bool,
@@ -4505,12 +3288,7 @@ private struct HUDLimitsBar: View {
         )
     }
 
-    static func runwayIdentities(from rows: [HUDRow]) -> [RunwaySessionIdentity] {
-        HUDRunwayIdentityReducer.identities(from: rows)
-    }
-}
 
-private struct HUDLimitsRowsPanel: View {
     let activeRows: [HUDRow]
     /// The reset-credits line is part of the chrome layer, revealed and hidden
     /// with the toolbar rather than on its own hover.
@@ -4724,7 +3502,7 @@ private struct HUDLimitsRowsPanel: View {
         // Feed the active limit window (5h when present, else weekly) — using
         // fiveHourRemainingPercent here fails the `> 0` guard once the 5h window
         // is dropped, which killed the runway entirely.
-        return HUDLimitsBar.runwayRequest(
+        return Self.runwayRequest(
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
             codexAgentEnabled: codexAgentEnabled,
@@ -4778,25 +3556,6 @@ private struct HUDLimitsRowsPanel: View {
     }
 }
 
-private struct HUDLimitsExpandedPanel: View {
-    let entries: [HUDLimitsProviderEntry]
-    let mode: UsageDisplayMode
-    let now: Date
-    let codexRunwaySnapshot: CodexRunwaySnapshot?
-    let claudeRunwaySnapshot: CodexRunwaySnapshot?
-    var forceEmptyDrawer: Bool = false
-
-    var body: some View {
-        HUDLimitsDetailPanel(
-            entries: entries,
-            mode: mode,
-            now: now,
-            codexRunwaySnapshot: codexRunwaySnapshot,
-            claudeRunwaySnapshot: claudeRunwaySnapshot,
-            forceEmptyDrawer: forceEmptyDrawer
-        )
-    }
-}
 
 private struct HUDChromeVisibilityPopover: View {
     @Binding var quotaMeterChromeRaw: String
@@ -4965,235 +3724,6 @@ private struct HUDRunwayPresentationPopover: View {
     }
 }
 
-private struct HUDLimitsDetailPanel: View {
-    let entries: [HUDLimitsProviderEntry]
-    let mode: UsageDisplayMode
-    let now: Date
-    var codexRunwaySnapshot: CodexRunwaySnapshot? = nil
-    var claudeRunwaySnapshot: CodexRunwaySnapshot? = nil
-    var forceEmptyDrawer: Bool = false
-    @EnvironmentObject private var codexUsageModel: CodexUsageModel
-    @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(PreferencesKey.usageLimitCockpitProjectionEnabled) private var projectedRunoutEnabled = true
-    @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
-    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
-
-    private var shouldReserveFiveHourProjectionSlot: Bool {
-        guard projectedRunoutEnabled else { return false }
-        return entries.contains { entry in
-            formatUsageProjectionLabel(
-                runoutAt: entry.fiveHourProjectedRunoutAt,
-                observedAt: entry.fiveHourProjectionObservedAt,
-                now: now
-            ) != nil
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.primary.opacity(0.10))
-                .frame(height: 0.5)
-            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                if index > 0 {
-                    Rectangle()
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 0.5)
-                        .padding(.horizontal, 10)
-                }
-                // Same shared-state degradation as the footer / menu bar / limits
-                // bar: an untrustworthy provider shows the remediation chip or the
-                // reconnecting cell instead of a misleading "0% / --" detail row.
-                let probeState = probeCoordinator.displayState(for: entry.source, now: now)
-                switch entry.presentationState {
-                case .needsAction(let auth):
-                    HStack(spacing: 0) {
-                        HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 22)
-                case _ where isProbeVisible(probeState):
-                    HStack(spacing: 0) {
-                        HUDLimitsProbeCell(source: entry.source, failed: isProbeFailed(probeState))
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 22)
-                case .idle(let auth):
-                    HStack(spacing: 0) {
-                        HUDLimitsIdleCell(source: entry.source, detail: auth.detail)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 22)
-                case .reconnecting:
-                    HStack(spacing: 0) {
-                        HUDLimitsRetryCell(source: entry.source, caption: entry.reconnectingCaption)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 22)
-                case .live:
-                    // Grid keeps the "5h:" / "Wk:" columns aligned within a provider row.
-                    Grid(alignment: .leading, horizontalSpacing: HUDLimitsColumnLayout.detailGridSpacing, verticalSpacing: 0) {
-                        detailRow(entry: entry, reserveProjectionSlot: shouldReserveFiveHourProjectionSlot)
-                    }
-                    .padding(.horizontal, 10)
-                    // `.leading` is load-bearing: maxWidth alone centers, which left
-                    // the provider rows indented while the reset-credits line below
-                    // them — and every other case in this switch — sat flush left.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if entry.source == .codex,
-                   let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: now) {
-                    HStack(spacing: 0) {
-                        Text(creditsLine)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.top, 1)
-                }
-                runwayBlock(for: entry.source)
-            }
-        }
-        .background(.regularMaterial)
-        .shadow(color: Color.black.opacity(0.10), radius: 4, x: 0, y: -3)
-    }
-
-    @ViewBuilder
-    private func runwayBlock(for source: UsageTrackingSource) -> some View {
-        let snapshot = source == .claude ? claudeRunwaySnapshot : codexRunwaySnapshot
-        if let snapshot {
-            HUDRunwayPanel(snapshot: snapshot, now: now, agentLabel: source == .claude ? "Claude" : "Codex")
-        } else if forceEmptyDrawer {
-            HUDRunwayEmptyPanel(agentLabel: source == .claude ? "Claude" : "Codex")
-        }
-    }
-
-    @ViewBuilder
-    private func detailRow(entry: HUDLimitsProviderEntry, reserveProjectionSlot: Bool) -> some View {
-        // Three distinct states per window: present (percent + reset), a dropped
-        // window → calm "no limit" (or "can't verify" when the format is suspect),
-        // and a present-but-stale reset → the existing "--"/unavailable copy.
-        let suspect = entry.usageFormatSuspect
-        let fiveAbsent = !entry.hasFiveHourRateLimit
-        let weekAbsent = !entry.hasWeekRateLimit
-        let fiveStale = !fiveAbsent && isResetInfoUnavailable(raw: entry.fiveHourResetText)
-        let weekStale = !weekAbsent && isResetInfoUnavailable(raw: entry.weekResetText)
-        let activeLens = activeRunwayLensWindow(rawPresentation: runwayPresentationRaw, fiveAbsent: fiveAbsent, weekAbsent: weekAbsent)
-        let projection = projectedRunoutEnabled
-            ? formatUsageProjectionLabel(
-                runoutAt: entry.fiveHourProjectedRunoutAt,
-                observedAt: entry.fiveHourProjectionObservedAt,
-                now: now
-            )
-            : nil
-        GridRow {
-            Group {
-                if entry.source == .claude {
-                    Image("FooterIconClaude")
-                        .renderingMode(.original)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    Image("FooterIconCodex")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-                }
-            }
-            .frame(width: 14, height: 14)
-            if fiveAbsent {
-                // No 5h limit, but a session may still be burning the (weekly) cap.
-                // Lead with the calm "no limit", then the burn indicator — instead
-                // of the confusing "— ▶2h 25m no limit". Span the three 5h columns
-                // so the phrase reads cleanly without truncation.
-                // No 5h limit → no run-out to project (a "▶Xh" here would be a lie).
-                // Instead show honest token throughput ("30K tk/h") when a session is
-                // actively burning — magnitude of burn without a fictitious deadline.
-                let burnRate = entry.aggregateTokensPerHour
-                let spansThree = (projection != nil || reserveProjectionSlot)
-                // Pin the spanning cell to the exact width of the columns it covers
-                // so the variable-width burn chip can't stretch the shared Grid
-                // tracks and reflow the whole panel as burn starts/stops.
-                let spanWidth = spansThree
-                    ? HUDLimitsColumnLayout.detailFiveHourPercentWidth
-                        + HUDLimitsColumnLayout.detailFiveHourProjectionWidth
-                        + HUDLimitsColumnLayout.detailFiveHourResetWidth
-                        + HUDLimitsColumnLayout.detailGridSpacing * 2
-                    : HUDLimitsColumnLayout.detailFiveHourPercentWidth
-                        + HUDLimitsColumnLayout.detailFiveHourResetWidth
-                        + HUDLimitsColumnLayout.detailGridSpacing
-                HStack(spacing: 6) {
-                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
-                        .foregroundStyle(.secondary)
-                    if let burnRate, burnRate > 0 {
-                        Text(formatTokenRatePerHour(burnRate))
-                            .foregroundStyle(hudProjectionColor(colorScheme))
-                    }
-                }
-                .frame(width: spanWidth, alignment: .leading)
-                .gridCellColumns(spansThree ? 3 : 2)
-            } else {
-                HStack(spacing: 0) {
-                    runwayLensLabel("5h: ", active: activeLens == .fiveHour)
-                    Text(fiveStale ? "--" : "\(mode.numericPercent(fromLeft: entry.fiveHourLeft))%")
-                        .foregroundStyle(fiveStale ? Color.secondary : hudPctColor(entry.fiveHourLeft))
-                }
-                .frame(width: HUDLimitsColumnLayout.detailFiveHourPercentWidth, alignment: .leading)
-                if projection != nil || reserveProjectionSlot {
-                    HUDLimitsProjectionToken(projection: projection, reserve: reserveProjectionSlot)
-                        .frame(width: HUDLimitsColumnLayout.detailFiveHourProjectionWidth, alignment: .leading)
-                }
-                Text("↻ \(fiveResetText(entry: entry, unavailable: fiveStale))")
-                    .foregroundStyle(.secondary)
-                    .frame(width: HUDLimitsColumnLayout.detailFiveHourResetWidth, alignment: .leading)
-            }
-            Text("|")
-                .foregroundStyle(Color.primary.opacity(0.25))
-                .frame(width: HUDLimitsColumnLayout.detailSeparatorWidth, alignment: .center)
-            HStack(spacing: 0) {
-                runwayLensLabel("Wk: ", active: activeLens == .week)
-                if weekAbsent {
-                    Text("—").foregroundStyle(.secondary)
-                } else {
-                    Text(weekStale ? "--" : "\(mode.numericPercent(fromLeft: entry.weekLeft))%")
-                        .foregroundStyle(weekStale ? Color.secondary : hudPctColor(entry.weekLeft))
-                }
-            }
-            .frame(width: HUDLimitsColumnLayout.detailWeekPercentWidth, alignment: .leading)
-            Text(weekAbsent ? (suspect ? "can't verify" : "no limit") : "↻ \(weekResetText(entry: entry, unavailable: weekStale))")
-                .foregroundStyle(.secondary)
-                .frame(width: HUDLimitsColumnLayout.detailWeekResetWidth, alignment: .leading)
-        }
-        .font(.system(size: 12, weight: .medium, design: .monospaced))
-        .foregroundStyle(Color.primary)
-        .frame(minHeight: 22)
-        .lineLimit(1)
-    }
-
-    private func fiveResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
-        if unavailable { return UsageStaleThresholds.unavailableCopy }
-        return formatUsageRelativeTimeLabel(
-            UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now),
-            now: now
-        ) ?? "—"
-    }
-
-    private func weekResetText(entry: HUDLimitsProviderEntry, unavailable: Bool) -> String {
-        if unavailable { return UsageStaleThresholds.unavailableCopy }
-        return formatUsageWeeklyResetLabel(
-            UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now),
-            now: now
-        ) ?? "—"
-    }
-}
 
 /// Drives the runway load-bar shimmer with a real 0.8s timer that only runs
 /// while a burning row is on screen. Scheduling and invalidating a `Timer`
@@ -5524,16 +4054,6 @@ private enum RunwayTimeFormatting {
     }
 }
 
-/// Reports which ViewThatFits variant the HUD limits bar chose
-/// (1 = full resets + projection, 2 = full resets without projection,
-///  3 = bottleneck reset, 4 = no resets, 5 = bottleneck only).
-private struct LimitsBarVariantKey: PreferenceKey {
-    static let defaultValue: Int = 0
-    static func reduce(value: inout Int, nextValue: () -> Int) {
-        let next = nextValue()
-        if next != 0 { value = next }
-    }
-}
 
 /// Shared percent color used by HUDLimitsDetailPanel and HUDLimitsProviderText.
 private func hudPctColor(_ left: Int) -> Color {
@@ -5704,76 +4224,6 @@ private struct HUDOnTrackSmile: View {
     }
 }
 
-private struct HUDLimitsBarContent: View {
-    let entries: [HUDLimitsProviderEntry]
-    let mode: UsageDisplayMode
-    let now: Date
-    @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            // Variant 1: Full — both windows with reset times and projection when it fits
-            entriesRow(showResets: true, onlyBottleneck: false, showProjection: true)
-                .preference(key: LimitsBarVariantKey.self, value: 1)
-            // Variant 1 fallback: keep reset times before spending width on projection
-            entriesRow(showResets: true, onlyBottleneck: false, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 2)
-            // Variant 2: Bottleneck with reset — keep at least the limiting reset visible
-            entriesRow(showResets: true, onlyBottleneck: true, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 3)
-            // Variant 3: No resets — both windows, percent only
-            entriesRow(showResets: false, onlyBottleneck: false, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 4)
-            // Variant 4: Bottleneck only — whichever window has fewer % left
-            entriesRow(showResets: false, onlyBottleneck: true, showProjection: false)
-                .preference(key: LimitsBarVariantKey.self, value: 5)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-    }
-
-    @ViewBuilder private func entriesRow(showResets: Bool, onlyBottleneck: Bool, showProjection: Bool) -> some View {
-        HStack(spacing: 10) {
-            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                if index > 0 {
-                    Text("|")
-                        .foregroundStyle(Color.primary.opacity(0.25))
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                }
-                let probeState = probeCoordinator.displayState(for: entry.source, now: now)
-                switch entry.presentationState {
-                case .needsAction(let auth):
-                    // The HUD bar is a single 22pt, clipped row and the window
-                    // resizes to content, so always use the compact banner here —
-                    // the full (two-line) banner would overflow. Keep the provider
-                    // icon so the alarming provider stays attributable.
-                    HUDLimitsAuthCell(source: entry.source, status: auth)
-                case _ where isProbeVisible(probeState):
-                    HUDLimitsProbeCell(source: entry.source, failed: isProbeFailed(probeState))
-                case .idle(let auth):
-                    // Signed in, token lapsed from inactivity: calm cell — no
-                    // spinner, no Fix chip; the next session refreshes it.
-                    HUDLimitsIdleCell(source: entry.source, detail: auth.detail)
-                case .reconnecting:
-                    // Actively retrying: spinner + quiet caption, never a broken
-                    // "0% / --" meter (mirrors the footer's FooterRetryChip).
-                    HUDLimitsRetryCell(source: entry.source, caption: entry.reconnectingCaption)
-                case .live:
-                    HUDLimitsProviderText(
-                        entry: entry,
-                        mode: mode,
-                        showResets: showResets,
-                        onlyBottleneck: onlyBottleneck,
-                        showProjection: showProjection,
-                        now: now
-                    )
-                }
-            }
-        }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-    }
-}
 
 /// Compact auth-remediation cell for the HUD limits surfaces: the provider icon
 /// (matching HUDLimitsProviderText) followed by the AuthRemediationBanner.
@@ -6271,176 +4721,9 @@ private struct HUDIconButtonStyle: ButtonStyle {
     }
 }
 
-private enum HUDFilterPillKind {
-    case all
-    case active
-    case idle
-}
 
-private struct HUDFilterPillStyle: ButtonStyle {
-    let isOn: Bool
-    let kind: HUDFilterPillKind
-    @Environment(\.colorScheme) private var hudColorScheme
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(background.opacity(configuration.isPressed ? 0.85 : 1.0))
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(border, lineWidth: 0.5)
-            )
-            .opacity(isOn ? 1.0 : 0.72)
-    }
 
-    private var foreground: Color {
-        guard isOn else { return .secondary }
-        switch kind {
-        case .all:
-            return .primary
-        case .active:
-            return Color(hex: "30d158")
-        case .idle:
-            return idleColor
-        }
-    }
-
-    private var background: Color {
-        guard isOn else { return Color.primary.opacity(0.04) }
-        switch kind {
-        case .all:
-            return Color.primary.opacity(0.10)
-        case .active:
-            return Color(hex: "30d158").opacity(0.16)
-        case .idle:
-            return idleColor.opacity(0.16)
-        }
-    }
-
-    private var border: Color {
-        guard isOn else { return Color.primary.opacity(0.10) }
-        switch kind {
-        case .all:
-            return Color.primary.opacity(0.18)
-        case .active:
-            return Color(hex: "30d158").opacity(0.35)
-        case .idle:
-            return idleColor.opacity(0.35)
-        }
-    }
-
-    private var idleColor: Color {
-        hudColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
-    }
-}
-
-private struct HUDSearchField: View {
-    @Binding var text: String
-    let placeholder: String
-    let focusToken: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            HUDSearchTextField(
-                text: $text,
-                placeholder: placeholder,
-                focusToken: focusToken
-            )
-            .frame(minHeight: 18)
-
-            if !text.isEmpty {
-                Text("esc")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.primary.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            }
-
-            Text("⌘K")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color.primary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-        )
-    }
-}
-
-private struct HUDSearchTextField: NSViewRepresentable {
-    @Binding var text: String
-    let placeholder: String
-    let focusToken: Int
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    func makeNSView(context: Context) -> NSTextField {
-        let tf = NSTextField(string: text)
-        tf.placeholderString = placeholder
-        tf.isBezeled = false
-        tf.isBordered = false
-        tf.drawsBackground = false
-        tf.focusRingType = .none
-        tf.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-        tf.delegate = context.coordinator
-        tf.lineBreakMode = .byTruncatingTail
-        return tf
-    }
-
-    func updateNSView(_ tf: NSTextField, context: Context) {
-        context.coordinator.parent = self
-        if tf.stringValue != text {
-            tf.stringValue = text
-        }
-        if tf.placeholderString != placeholder {
-            tf.placeholderString = placeholder
-        }
-        if focusToken != context.coordinator.lastFocusToken {
-            context.coordinator.lastFocusToken = focusToken
-            DispatchQueue.main.async {
-                guard let window = tf.window else { return }
-                window.makeFirstResponder(tf)
-                tf.currentEditor()?.selectAll(nil)
-            }
-        }
-    }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: HUDSearchTextField
-        var lastFocusToken: Int = 0
-
-        init(parent: HUDSearchTextField) {
-            self.parent = parent
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let tf = obj.object as? NSTextField else { return }
-            if parent.text != tf.stringValue {
-                parent.text = tf.stringValue
-            }
-        }
-    }
-}
 
 #Preview("Quota Meter") {
     AgentCockpitHUDView(

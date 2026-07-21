@@ -770,6 +770,7 @@ extension AgentSessionsApp {
         if UpdaterController.shared == nil || UpdaterController.shared !== updaterController {
             UpdaterController.shared = updaterController
         }
+        DeprecatedCockpitDefaultsCleanup.run()
         ensureStatusItemController()
         setupMenuBarDefaultsObserverIfNeeded()
         updateUsageModels()

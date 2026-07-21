@@ -4,11 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **The Quota Meter's text-size button no longer disappears when you switch to Standard.** Standard text makes the window about 30pt narrower, and the toolbar used to shed that button first — hiding the only control that switches back to Enlarged, so the setting was one-way from inside the window. The toolbar now narrows before it drops anything: the Session Runway control gives up its presentation half first, and every button stays put.
+
 ### Changed
 - **Compact and Full Agent Cockpit are retired; the Quota Meter is the only mode.** The View menu's three-mode submenu is replaced by a single **Quota Meter** toggle that shows and hides the window, the standard macOS pattern. If you last quit in Compact or Full, you land on the Quota Meter — no setting to restore, nothing to reconfigure.
 - **⌘⌥⇧C now toggles the Quota Meter.** It used to select the Quota Meter mode and bring the window forward; with one mode left, it shows and hides. Pressing it while the Quota Meter is already on screen now hides it.
 - **⇧⌘M ("Cycle Cockpit View") is removed.** Cycling between modes has no meaning with a single mode, and rebinding a chord that meant "next view" to something else would have inverted it under your fingers.
 - **Settings → Agent Cockpit is now Settings → Quota Meter.** The Compact Mode and Full Mode sections are gone with the modes they configured: default mode, compact size, auto-fit height, agent name in compact rows, tab subtitles, and the in-cockpit quota footer.
+- **Cockpit-only features retired with the modes:** the session search field and ⌘K, By Project grouping, the All/Active/Idle filter pills, ⌘1–9 and ⌘0 row focus, the row context menu (Go to Session, Focus in iTerm2, Reveal Log, Open Working Directory, the three Copy items), the full-mode toolbar row, and the Full/Compact quota footer with its hover drawer. The Quota Meter keeps its provider limit rows, Session Runway drawer, chrome modes, pin, enlarged text, the runway and probe popovers, the open-app and settings buttons, and ⌘W.
+- Stale settings from the retired modes are removed from your preferences on launch, along with the saved Compact and Full window positions. Your Quota Meter position is untouched.
 
 ## [4.6.3] - 2026-07-20
 

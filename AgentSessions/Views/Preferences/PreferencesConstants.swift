@@ -179,17 +179,8 @@ enum PreferencesKey {
     enum Cockpit {
         static let codexActiveSessionsEnabled = "CockpitCodexActiveSessionsEnabled"
         static let codexActiveRegistryRootOverride = "CockpitCodexActiveRegistryRootOverride"
-        static let hudShowAgentNameInCompact = "CockpitHUDShowAgentNameInCompact"
-        static let hudCompactBaselineRows = "CockpitHUDCompactBaselineRows"
-        static let hudCompactAutoFitEnabled = "CockpitHUDCompactAutoFitEnabled"
-        static let showTabSubtitleInFullMode = "CockpitShowTabSubtitleInFullMode"
-        static let codexLiveFilterMode = "CockpitCodexLiveFilterMode"
         static let hudOpen = "CockpitHUDOpen"
-        static let hudGroupByProject = "CockpitHUDGroupByProject"
-        static let hudDisplayMode = "CockpitHUDDisplayMode"
-        static let hudCompact = "CockpitHUDCompact"
         static let hudPinned = "CockpitHUDPinned"
-        static let hudShowLimits = "CockpitHUDShowLimits"
         static let showProbeSessionsInHUD = "CockpitShowProbeSessionsInHUD"
         static let hudReduceTransparency = "CockpitHUDReduceTransparency"
     }

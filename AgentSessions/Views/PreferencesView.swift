@@ -27,12 +27,6 @@ struct PreferencesView: View {
     // Cockpit: active-session registry + iTerm focus
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) var codexActiveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride) var codexActiveRegistryRootOverride: String = ""
-    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) var cockpitHUDDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
-    @AppStorage(PreferencesKey.Cockpit.hudShowAgentNameInCompact) var cockpitShowAgentNameInCompact: Bool = true
-    @AppStorage(PreferencesKey.Cockpit.hudCompactBaselineRows) var cockpitCompactBaselineRows: Int = 4
-    @AppStorage(PreferencesKey.Cockpit.hudCompactAutoFitEnabled) var cockpitCompactAutoFitEnabled: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.showTabSubtitleInFullMode) var cockpitShowTabSubtitleInFullMode: Bool = true
-    @AppStorage(PreferencesKey.Cockpit.hudShowLimits) var cockpitShowLimitsFooter: Bool = true
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) var cockpitReduceTransparency: Bool = true
     // Codex probe cleanup prefs
     @AppStorage(PreferencesKey.codexProbeCleanupMode) var codexProbeCleanupMode: String = "none" // none | auto

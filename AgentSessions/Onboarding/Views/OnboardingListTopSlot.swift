@@ -173,7 +173,6 @@ private struct QuotaMeterPromoActivator: View {
     let providers: QuotaMeterProviderAvailability
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
-    @AppStorage(PreferencesKey.Cockpit.hudDisplayMode) private var hudDisplayModeRaw: String = AgentCockpitHUDDisplayMode.initialMode().rawValue
 
     /// Only counts providers the user actually has: a Codex-only user whose
     /// Claude tracking happens to be off does not need "Enable", and switching
@@ -205,11 +204,6 @@ private struct QuotaMeterPromoActivator: View {
         if providers.hasClaude {
             claudeUsageEnabled = true
         }
-        hudDisplayModeRaw = AgentCockpitHUDDisplayMode.limits.rawValue
-        UserDefaults.standard.set(
-            AgentCockpitHUDDisplayMode.limits.usesCompactChrome,
-            forKey: PreferencesKey.Cockpit.hudCompact
-        )
         coordinator.recordQuotaMeterActivated()
         AppWindowRouter.showAgentCockpitWindow()
     }
