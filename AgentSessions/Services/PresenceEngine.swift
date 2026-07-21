@@ -1012,6 +1012,20 @@ actor PresenceEngine {
             out.append(contentsOf: itermPresences)
         }
 
+        // Claude Desktop chats leave no process/tty/iTerm footprint — only their transcript
+        // files. Synthesize presences for recently-written transcripts no probe has claimed,
+        // so Desktop chats become first-class live sessions in the same pipeline.
+        let claimedLogPaths = Set(out.flatMap { presence -> [String] in
+            var paths = presence.openSessionLogPaths
+            if let logPath = presence.sessionLogPath { paths.append(logPath) }
+            return paths
+        }.map { ClaudeDesktopPresenceScanner.normalizePath($0) })
+        out.append(contentsOf: ClaudeDesktopPresenceScanner.scan(
+            roots: claudeSessionRoots,
+            now: now,
+            excludingNormalizedLogPaths: claimedLogPaths
+        ))
+
         return RefreshDiscoveryResult(
             loaded: out,
             didProbeProcesses: shouldProbeProcesses,
