@@ -22,7 +22,8 @@ enum ClaudeDesktopPresenceScanner {
     }
 
     /// Scan the Claude session roots for recently-modified top-level transcripts that no
-    /// existing presence already claims, and synthesize Desktop presences for them.
+    /// existing presence already claims and that were written by the Desktop app (see
+    /// `isClaudeDesktopTranscript`), and synthesize Desktop presences for them.
     ///
     /// The Claude root is `~/.claude` (per `ClaudeSessionDiscovery.sessionsRoot()`); the
     /// transcripts live at `projects/<project>/<session>.jsonl`, so the walk targets the
@@ -63,11 +64,13 @@ enum ClaudeDesktopPresenceScanner {
 
         return candidates
             .sorted { $0.mtime > $1.mtime }
+            .filter { isClaudeDesktopTranscript(logPath: $0.path) }
             .prefix(maxPresences)
             .map { candidate in
                 var presence = CodexActivePresence()
                 presence.source = .claude
                 presence.kind = desktopKind
+                presence.schemaVersion = 1
                 presence.publisher = "claude-desktop-scan"
                 presence.sessionId = URL(fileURLWithPath: candidate.path)
                     .deletingPathExtension().lastPathComponent
@@ -78,12 +81,35 @@ enum ClaudeDesktopPresenceScanner {
             }
     }
 
-    /// Whose turn is it? Reads only the transcript tail. `true` when the last substantive
-    /// entry is an assistant message that ENDS its turn (the user should respond).
+    /// True when the transcript was written by the Claude **Desktop** app, identified by the
+    /// `entrypoint == "claude-desktop"` marker its records carry. Claude Code CLI transcripts
+    /// live in the same `projects` tree but carry `entrypoint == "cli"` and already have a
+    /// terminal/iTerm footprint the other probes claim; requiring the Desktop marker keeps an
+    /// exited CLI session from lingering as a phantom live Desktop presence for the window.
+    /// Reads only the head (the marker rides on the first user/assistant record), bounded to
+    /// the already-window-filtered candidates so it stays cheap.
+    private static func isClaudeDesktopTranscript(logPath: String) -> Bool {
+        guard let handle = FileHandle(forReadingAtPath: logPath) else { return false }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 96 * 1024)) ?? Data()
+        guard !head.isEmpty else { return false }
+        for line in String(decoding: head, as: UTF8.self).split(separator: "\n").prefix(200) {
+            guard line.first == "{",
+                  let lineData = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let entrypoint = object["entrypoint"] as? String else { continue }
+            return entrypoint == "claude-desktop"
+        }
+        return false
+    }
+
+    /// Whose turn is it? Reads only the transcript tail. `true` only when the newest
+    /// assistant message handed the turn back to the user — a `stop_reason` of `end_turn`
+    /// or `stop_sequence`, matching `ClaudeRunwayRecentSessionScanner.isIdleMarker`.
     ///
-    /// Subtlety: tool calls are assistant messages too (`tool_use` blocks), so "assistant
-    /// last" alone does NOT mean the turn is over — a running tool means the agent is still
-    /// working. A `user` entry (tool results ride in user entries) also means mid-turn.
+    /// Everything else means still working: a `tool_use` stop (a tool is running), a
+    /// non-terminal stop (`max_tokens`, `null`, `refusal`), or a trailing `user` entry
+    /// (tool results ride in user entries). Returns nil only when the tail can't be read.
     static func lastTurnIsEndOfAssistantTurn(logPath: String?) -> Bool? {
         guard let logPath, let handle = FileHandle(forReadingAtPath: logPath) else { return nil }
         defer { try? handle.close() }
@@ -98,13 +124,10 @@ enum ClaudeDesktopPresenceScanner {
                   let type = object["type"] as? String else { continue }
             if type == "user" { return false }        // tool result / user prompt => mid-turn
             guard type == "assistant" else { continue }
-            let message = object["message"] as? [String: Any]
-            if let stop = message?["stop_reason"] as? String, stop == "tool_use" { return false }
-            if let content = message?["content"] as? [[String: Any]],
-               let lastBlock = content.last?["type"] as? String, lastBlock == "tool_use" {
-                return false                            // tool running => still working
+            guard let stop = (object["message"] as? [String: Any])?["stop_reason"] as? String else {
+                return false                            // no terminal stop yet => still working
             }
-            return true                                 // assistant finished its turn
+            return stop == "end_turn" || stop == "stop_sequence"
         }
         return nil
     }
