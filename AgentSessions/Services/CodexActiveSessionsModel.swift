@@ -2221,6 +2221,25 @@ final class CodexActiveSessionsModel {
                     }
                     // No match → fall through to mtime heuristic
                 }
+            } else if presence.source == .claude, presence.kind == ClaudeDesktopPresenceScanner.desktopKind {
+                // Claude Desktop chats: no tty/iTerm to probe. A transcript being written
+                // right now means the agent is working; otherwise whose-turn comes from the
+                // transcript tail. Only a definitively mid-turn tail (tool result pending or
+                // a non-terminal stop) keeps it working; a turn handed back to the user, or a
+                // tail we can't read, prefers openIdle rather than asserting a false "working".
+                let heuristic = heuristicLiveStateFromLogMTime(
+                    logPath: presence.sessionLogPath,
+                    sourceFilePath: presence.sourceFilePath,
+                    now: now,
+                    activeWriteWindow: activeWriteWindow(for: .claude)
+                )
+                if heuristic == .activeWorking {
+                    state = .activeWorking
+                } else if ClaudeDesktopPresenceScanner.lastTurnIsEndOfAssistantTurn(logPath: presence.sessionLogPath) == false {
+                    state = .activeWorking
+                } else {
+                    state = .openIdle
+                }
             }
 
             var activeWriteWindow = activeWriteWindow(for: presence.source)
