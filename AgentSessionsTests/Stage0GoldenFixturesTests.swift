@@ -188,6 +188,21 @@ final class Stage0GoldenFixturesTests: XCTestCase {
                        "session.shutdown event should survive parsing as .meta")
     }
 
+    func testCopilotAutoModeAndUsageCheckpointEventsSurviveParsing() throws {
+        // Copilot 1.0.65 emits two additive session-level event types:
+        // session.auto_mode_resolved (auto model selection) and
+        // session.usage_checkpoint (running AIU/premium-request usage). Both use
+        // the standard {type,id,parentId,timestamp,data} envelope and carry no
+        // renderable content, so the parser's default branch preserves them as
+        // .meta. Non-breaking, same as session.shutdown before them.
+        let url = FixturePaths.stage0FixtureURL("agents/copilot/schema_drift.jsonl")
+        guard let full = CopilotSessionParser.parseFileFull(at: url) else { return XCTFail("full parse returned nil") }
+        XCTAssertFalse(metaEvents(withType: "session.auto_mode_resolved", in: full.events).isEmpty,
+                       "session.auto_mode_resolved event should survive parsing as .meta")
+        XCTAssertFalse(metaEvents(withType: "session.usage_checkpoint", in: full.events).isEmpty,
+                       "session.usage_checkpoint event should survive parsing as .meta")
+    }
+
     func testCopilotSubdirLayoutV1Parses() throws {
         // Exercises the v1.0.11+ storage layout: <uuid>/events.jsonl
         let name = "agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"

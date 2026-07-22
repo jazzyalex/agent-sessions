@@ -1,6 +1,6 @@
 agent_sessions_version: 4.6
-as_of_commit: caa930ea
-as_of_date: 2026-07-17
+as_of_commit: f1063c57
+as_of_date: 2026-07-22
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -34,16 +34,17 @@ notes:
   - "2026-06-24 targeted follow-up: updated OpenClaw 2026.6.9->2026.6.10 after openclaw doctor --fix and a fresh local-agent prebump matched baseline; updated Hermes 0.15.1->0.17.0 after hermes update and a fresh state.db prebump matched baseline. Final weekly report scripts/probe_scan_output/agent_watch/20260624-185801Z/report.json reports supports_latest for OpenClaw and Hermes. Antigravity 1.0.11 is current but remains blocked because agy -p answers without creating a monitored brain markdown artifact. Cursor remains verified at installed 2026.6.2 because cursor-agent update and cursor-agent --print are blocked by headless authentication."
   - "2026-07-13 weekly format check: bumped Codex 0.142.5->0.144.3 and Claude 2.1.202->2.1.207 after additive schema drift. Codex 0.144.x adds a `world_state` context-snapshot event (parser resolves it to .meta; added to codex small + schema_drift fixtures with a survives-parsing test). Claude subagent transcripts (~/.claude/projects/**/<parentUUID>/subagents/*.jsonl) add agentId (user/assistant/attachment) and attributionAgent (assistant) keys; added an authentic subagent fixture pair (claude/subagent/<uuid>.jsonl + <uuid>/subagents/agent-*.jsonl with a .meta.json sidecar) so the keys land where they really occur and detectSubagentInfo path-detection is exercised (testClaudeSubagentFixtureDetectsParent). Both drifts are non-breaking (unknown keys ignored, unknown types -> .meta). Bumped OpenCode 1.17.13->1.17.18 and Pi 0.80.3->0.80.6 (prebump scripts/probe_scan_output/agent_watch/20260713-172121Z-prebump/report.json, fresh_matches_baseline=True), and Antigravity 1.0.14->1.0.16 (real-home prebump scripts/probe_scan_output/agent_watch/20260713-173118Z-prebump/report.json, fresh_matches_baseline=True). Usage probes all healthy (codex_status_probe, claude_usage_probe, claude_status ok=true). Weekly report scripts/probe_scan_output/agent_watch/20260713-163616Z/report.json. Held: Copilot 1.0.65 (upstream 1.0.70 not installed), Hermes 0.17.0 (upstream 0.18.2 not installed), Cursor 2026.6.24 (upstream 2026.7.9 not installed), OpenClaw 2026.6.11 (current)."
   - "2026-07-17 weekly format check: bumped Codex 0.144.3->0.144.5 (prebump scripts/probe_scan_output/agent_watch/20260717-061144Z-prebump/report.json, fresh_matches_baseline=True, no drift) and Claude 2.1.207->2.1.211 after additive schema drift. Claude 2.1.211 adds a session-level `mode` event ({type, mode, sessionId}, observed only as mode=normal) alongside the existing permission-mode marker; 3,638 occurrences across 99 local sessions. It is non-breaking: the event carries no content, so role resolves to meta and SessionEventKind.from falls through both switches to its final `return .meta` — it is handled by the fallback, not a named case. Added to claude small + schema_drift fixtures with testClaudeSchemaDriftModeEventSurvivesParsing (passes; 24/24 Stage0GoldenFixturesTests green). NOTE: prebump cannot see this drift — `mode` is interactive-only and the claude_print one-shot driver never emits it, so prebump reported fresh_matches_baseline=True while the weekly scan of real sessions correctly flagged format_drift_detected. Treat a green prebump as necessary but not sufficient for interactive-only event families. Claude prebump required --allow-real-home (Keychain OAuth unavailable in sandbox; apiKeySource=none -> 'Not logged in'). Usage probes all healthy (codex_status_probe, claude_usage_probe, claude_status ok=true). Weekly report scripts/probe_scan_output/agent_watch/20260717-060450Z/report.json; claude prebump 20260717-061321Z-prebump. Held: Copilot 1.0.65 (upstream 1.0.71 not installed), Hermes 0.17.0 (upstream 0.18.2 not installed), Cursor 2026.6.24 (upstream 2026.7.16 not installed). Still blocked_stale_sample pending prebump: OpenCode 1.18.3, OpenClaw 2026.7.1, Pi 0.80.10."
+  - "2026-07-22 full format check: bumped Codex 0.144.6->0.145.0, Claude 2.1.215->2.1.217, OpenCode 1.18.3->1.18.4, Pi 0.80.10->0.81.1, and Antigravity 1.0.16->1.1.1. All five matched baseline from fresh real-session prebump (codex/opencode/pi from sandbox; claude/antigravity required --allow-real-home for Keychain/OAuth) with no unknown types/keys; no parser, fixture, or UI change for these. Codex 0.145.0 confirms the ongoing 2026 session-format changes (session_meta gained thread_source/session_id/structured source.subagent; state_5.sqlite thread index relocated to ~/.codex/sqlite/) are already covered — AS reads rollout JSONL, not the SQLite index. FORMAT DRIFT: Copilot 1.0.65 (verified==installed) emits two additive session-level event types, session.auto_mode_resolved ({chosenModel, reasoningBucket, categoryScores, predictedLabel, confidence, candidateModels}) and session.usage_checkpoint ({totalNanoAiu, totalPremiumRequests, modelCacheState}); both use the standard envelope, carry no renderable content, and are preserved via CopilotSessionParser's default branch as .meta. Added both to copilot/schema_drift.jsonl with testCopilotAutoModeAndUsageCheckpointEventsSurviveParsing; Copilot verified stays 1.0.65 (no version change, fixture-only coverage). Usage probes all healthy (codex_status_probe, claude_usage_probe, claude_status ok=true); discovery contracts all pass. Not validated this run: Hermes (driver produced no final response), OpenClaw (auth/config error), Cursor (needs CURSOR_API_KEY, absent from real HOME) — all held at prior verified versions, no evidence of drift. Also hardened scripts/agent_watch.py so an unexecutable agent binary (a botched opencode npm install left a shebang-less stub -> Exec format error) no longer aborts the whole weekly scan (commit f1063c57). Weekly report scripts/probe_scan_output/agent_watch/20260722-042913Z/report.json; prebump reports 20260722-042605Z-prebump (codex), 20260722-043446Z-prebump (all), 20260722-044346Z-prebump (real-home)."
 agents:
   codex_cli:
-    max_verified_version: "0.144.6"
+    max_verified_version: "0.145.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.215"
+    max_verified_version: "2.1.217"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -52,7 +53,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl"
   antigravity:
-    max_verified_version: "1.0.16"
+    max_verified_version: "1.1.1"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
@@ -67,7 +68,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.18.3"
+    max_verified_version: "1.18.4"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -110,7 +111,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.80.10"
+    max_verified_version: "0.81.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
     unsupported_surfaces:
