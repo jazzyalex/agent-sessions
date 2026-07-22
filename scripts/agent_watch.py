@@ -119,6 +119,13 @@ def _run_cmd(argv: list[str], timeout: int) -> tuple[int, str, str]:
         return 127, "", f"Command not found: {argv[0]}"
     except subprocess.TimeoutExpired:
         return 124, "", f"Timed out after {timeout}s"
+    except OSError as exc:
+        # A broken/unexecutable binary on PATH (e.g. an "Exec format error"
+        # from a shebang-less stub, or a permission error) must not abort the
+        # whole scan. Record it as a failed command for this one agent and let
+        # the caller continue with the rest. 126 is the conventional shell code
+        # for "command found but not executable".
+        return 126, "", f"Cannot execute {argv[0]}: {exc}"
 
 
 def _read_verified_versions_from_matrix(matrix_path: Path) -> dict[str, str]:
