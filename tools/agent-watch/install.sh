@@ -4,7 +4,33 @@
 # install.sh --render-only <dest>  — just render the plist (test hook).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 LABEL="com.agentsessions.agent-watch"
+CONFIG="$REPO_ROOT/docs/agent-support/agent-watch-config.json"
+
+# The commands the monitor actually invokes, read from its own config rather
+# than guessed. Guessing gets this wrong: Antigravity's binary is `agy`, not
+# `antigravity`, and Cursor's is `cursor-agent`, not `cursor` — and a lookalike
+# name silently resolves to nothing, so the scheduled run reports a healthy
+# agent as missing.
+agent_commands() {
+  [ -f "$CONFIG" ] || return 0
+  python3 - "$CONFIG" <<'PYEOF'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        config = json.load(fh)
+except (OSError, ValueError):
+    sys.exit(0)
+
+for agent in config.get("agents", {}).values():
+    argv = agent.get("installed_version_cmd") or []
+    if argv:
+        print(argv[0])
+PYEOF
+}
 
 render() { # dest
   local dest="$1" tmpl="$HERE/$LABEL.plist.template"
@@ -13,12 +39,21 @@ render() { # dest
   # /opt/homebrew/bin, or a node prefix that is not on the default PATH. Bake
   # whatever resolves right now into the plist, or the scheduled run reports a
   # missing binary as drift.
+  local bindirs="" dir cmd resolved
+  # A while-read loop, not `xargs -n1 dirname`: a Homebrew prefix or a user
+  # directory can contain spaces, and xargs would split the path on them.
   # `|| true` per lookup: most machines are missing at least one agent CLI, and
   # under `set -e` a single miss would abort the render.
-  local bindirs
-  bindirs="$(for c in python3 curl gh codex claude opencode openclaw hermes copilot cursor pi antigravity; do
-               command -v "$c" 2>/dev/null || true
-             done | xargs -n1 dirname 2>/dev/null | awk '!seen[$0]++' | paste -sd: -)"
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    resolved="$(command -v "$cmd" 2>/dev/null || true)"
+    [ -n "$resolved" ] || continue
+    dir="$(dirname "$resolved")"
+    case ":$bindirs:" in
+      *":$dir:"*) ;;
+      *) bindirs="${bindirs:+$bindirs:}$dir" ;;
+    esac
+  done < <(printf '%s\n' python3 curl gh; agent_commands)
   local pathval="${bindirs:+$bindirs:}/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   sed -e "s#__RUN_WEEKLY_SH__#$HERE/run-weekly.sh#g" \
       -e "s#__HOME__#$HOME#g" \
