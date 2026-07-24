@@ -86,7 +86,10 @@ struct OnboardingListTopSlot: View {
     /// so that stays a pure state machine, matching `QuotaMeterPromoActivator`.
     /// Opening the page is the whole action — nothing is sent anywhere.
     private func openRepository() {
-        NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL)
+        // Only retire the ask if the page actually opened. If no browser is
+        // available the click did nothing, and recording it as answered would
+        // silently cost the user the ask they just tried to accept.
+        guard NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL) else { return }
         coordinator.recordStarOpened()
     }
 }
