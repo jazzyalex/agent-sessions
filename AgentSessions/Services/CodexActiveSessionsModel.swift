@@ -3061,7 +3061,13 @@ final class CodexActiveSessionsModel {
         parseLsofMachineOutput(text, sessionsRoots: sessionsRoots, source: .codex)
     }
 
-    nonisolated static func parseLsofMachineOutput(_ text: String, sessionsRoots: [String], source: SessionSource) -> [Int: LsofPIDInfo] {
+    /// - Parameter headlessEligiblePIDs: PIDs already vetted as agent CLI runs without a
+    ///   controlling terminal (see `headlessAgentPIDs`). They are kept even though no tty
+    ///   turns up on their stdio fds; everything else still has to look like a live terminal.
+    nonisolated static func parseLsofMachineOutput(_ text: String,
+                                                   sessionsRoots: [String],
+                                                   source: SessionSource,
+                                                   headlessEligiblePIDs: Set<Int> = []) -> [Int: LsofPIDInfo] {
         var infos: [Int: LsofPIDInfo] = [:]
 
         var currentPID: Int? = nil
@@ -3146,10 +3152,13 @@ final class CodexActiveSessionsModel {
             }
         }
 
-        // Keep only entries that look like a live terminal session.
+        // Keep only entries that look like a live session.
         // Some open Codex sessions have not opened a rollout JSONL yet; keep tty-only rows.
-        return infos.filter { _, v in
-            v.tty != nil && (v.sessionLogPath != nil || v.cwd != nil)
+        // Headless CLI runs have no tty at all — they are admitted on the strength of the
+        // caller's `ps` vetting, and still need a cwd or session log to be identifiable.
+        return infos.filter { pid, v in
+            let looksLive = v.tty != nil || headlessEligiblePIDs.contains(pid)
+            return looksLive && (v.sessionLogPath != nil || v.cwd != nil)
         }
     }
 
@@ -3299,6 +3308,13 @@ final class CodexActiveSessionsModel {
     }
 
     nonisolated private static func executableNeedleCandidates(from tokens: [String], depth: Int) -> [String] {
+        executableTokenPaths(from: tokens, depth: depth).map(commandBasename)
+    }
+
+    /// The unshortened executable tokens a command resolves to, in the same order
+    /// `executableNeedleCandidates` yields their basenames. Callers that need to
+    /// judge *where* the executable lives (rather than what it is called) use this.
+    nonisolated private static func executableTokenPaths(from tokens: [String], depth: Int) -> [String] {
         guard !tokens.isEmpty, depth < 2 else { return [] }
         var index = 0
 
@@ -3323,24 +3339,58 @@ final class CodexActiveSessionsModel {
         }
 
         guard index < tokens.count else { return [] }
-        let executable = commandBasename(tokens[index])
+        let executableToken = tokens[index]
+        let executable = commandBasename(executableToken)
         guard !executable.isEmpty else { return [] }
 
-        var out: [String] = [executable]
+        var out: [String] = [executableToken]
         out.reserveCapacity(3)
 
         if shellExecutables.contains(executable),
            let commandString = shellCommandString(from: tokens, startAt: index + 1) {
             let nested = splitCommandTokens(commandString)
-            out.append(contentsOf: executableNeedleCandidates(from: nested, depth: depth + 1))
+            out.append(contentsOf: executableTokenPaths(from: nested, depth: depth + 1))
             return out
         }
 
         if wrapperExecutables.contains(executable),
            let wrapped = firstWrappedExecutableToken(from: tokens, startAt: index + 1, wrapperExecutable: executable) {
-            out.append(commandBasename(wrapped))
+            out.append(wrapped)
         }
         return out
+    }
+
+    /// True when the command's resolved executable lives inside a macOS `.app` bundle.
+    ///
+    /// Agent CLIs are matched by scanning `ps` command lines for a needle, but a GUI
+    /// app can basename to the same needle: `/Applications/Claude.app/Contents/MacOS/Claude`
+    /// and each `Claude Helper` renderer both reduce to "claude". A controlling terminal
+    /// used to be the thing separating them, which also (wrongly) excluded headless CLI
+    /// runs. Bundle location separates them without depending on a tty.
+    nonisolated static func isAppBundleExecutable(_ command: String) -> Bool {
+        let paths = executableTokenPaths(from: splitCommandTokens(command), depth: 0)
+        guard !paths.isEmpty else { return false }
+        return paths.contains(where: isPathInsideAppBundle)
+    }
+
+    nonisolated private static func isPathInsideAppBundle(_ token: String) -> Bool {
+        let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        guard !stripped.isEmpty else { return false }
+        return stripped.lowercased().contains(".app/contents/")
+    }
+
+    /// PIDs matching an agent needle that have *no* controlling terminal.
+    ///
+    /// These are CLI runs started by launchd, a shell script, or another app —
+    /// `claude -p` with stdin on a pipe — so `ps` reports their tty as `??`. GUI
+    /// app-bundle executables are excluded because they share the needle basename.
+    nonisolated static func headlessAgentPIDs(from infos: [PSCommandInfo], needles: [String]) -> [Int] {
+        let pids = infos.lazy
+            .filter { $0.tty == nil }
+            .filter { commandContainsNeedle($0.command, needles: needles) }
+            .filter { !isAppBundleExecutable($0.command) }
+            .map(\.pid)
+        return Array(Set(pids)).sorted()
     }
 
     nonisolated private static func splitCommandTokens(_ command: String) -> [String] {

@@ -1046,16 +1046,21 @@ actor PresenceEngine {
         }
 
         let commandInfos = psData.map { CodexActiveSessionsModel.parsePSCommandListOutput(String(decoding: $0, as: UTF8.self)) } ?? []
-        let claudeCommandPIDs = Array(
-            Set(
-                commandInfos
-                    .filter { info in
-                        guard info.tty != nil else { return false }
-                        return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["claude", "claude-code"])
-                    }
-                    .map(\.pid)
-            )
-        ).sorted()
+        let claudeTTYPIDs = Set(
+            commandInfos
+                .filter { info in
+                    guard info.tty != nil else { return false }
+                    return CodexActiveSessionsModel.commandContainsNeedle(info.command, needles: ["claude", "claude-code"])
+                }
+                .map(\.pid)
+        )
+        // Headless runs (`claude -p` from launchd, a script, or another app) never carry a
+        // tty, so the terminal-shaped filter above cannot see them. They are matched by
+        // needle and separated from Claude Desktop by app-bundle location instead.
+        let claudeHeadlessPIDs = Set(
+            CodexActiveSessionsModel.headlessAgentPIDs(from: commandInfos, needles: ["claude", "claude-code"])
+        )
+        let claudeCommandPIDs = Array(claudeTTYPIDs.union(claudeHeadlessPIDs)).sorted()
         let opencodeCommandPIDs = Array(
             Set(
                 commandInfos
@@ -1093,7 +1098,8 @@ actor PresenceEngine {
                 queryArguments: ["-w", "-a", "-p", claudeCommandPIDs.map(String.init).joined(separator: ","), "-u", user, "-nP", "-F", "pftn"],
                 sessionsRoots: claudeSessionRoots,
                 source: .claude,
-                timeout: timeout
+                timeout: timeout,
+                headlessEligiblePIDs: claudeHeadlessPIDs
             )
         }
         let opencodeInfos = await discoverLsofPIDInfos(
@@ -1162,10 +1168,11 @@ actor PresenceEngine {
                     info.termProgram = envMeta.termProgram
                     info.itermSessionId = envMeta.itermSessionId
                 }
+                let isHeadless = source == .claude && claudeHeadlessPIDs.contains(info.pid)
                 var presence = CodexActivePresence()
                 presence.schemaVersion = 1
                 presence.publisher = "agent-sessions-process"
-                presence.kind = "interactive"
+                presence.kind = isHeadless ? "headless" : "interactive"
                 presence.source = source
                 presence.sessionId = info.sessionID
                 presence.sessionLogPath = info.sessionLogPath
@@ -1199,7 +1206,8 @@ actor PresenceEngine {
                                       queryArguments: [String],
                                       sessionsRoots: [String],
                                       source: SessionSource,
-                                      timeout: TimeInterval) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo] {
+                                      timeout: TimeInterval,
+                                      headlessEligiblePIDs: Set<Int> = []) async -> [Int: CodexActiveSessionsModel.LsofPIDInfo] {
         guard let out = await runManagedCommand(
             kind: .processDiscovery,
             generation: generation,
@@ -1210,7 +1218,12 @@ actor PresenceEngine {
             return [:]
         }
         let roots = sessionsRoots.map(CodexActiveSessionsModel.normalizePath)
-        return CodexActiveSessionsModel.parseLsofMachineOutput(String(decoding: out, as: UTF8.self), sessionsRoots: roots, source: source)
+        return CodexActiveSessionsModel.parseLsofMachineOutput(
+            String(decoding: out, as: UTF8.self),
+            sessionsRoots: roots,
+            source: source,
+            headlessEligiblePIDs: headlessEligiblePIDs
+        )
     }
 
     // MARK: - Classification (ported from classifyLiveStatesAsync)
