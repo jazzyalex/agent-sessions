@@ -13,6 +13,24 @@ extension UserDefaults {
         static let quotaMeterAskState = "OnboardingQuotaMeterAskState"
         static let quotaMeterDeclinedAtMajorMinor = "OnboardingQuotaMeterDeclinedAtMajorMinor"
         static let cockpitEverOpened = "OnboardingCockpitEverOpened"
+        static let starAskState = "OnboardingStarAskState"
+        static let starAskSnoozedUntil = "OnboardingStarAskSnoozedUntil"
+    }
+
+    /// Lifecycle of the one-time GitHub star ask.
+    ///
+    /// Unlike the feedback and Quota Meter cards, the retry is on a clock rather
+    /// than a version bump: releases ship every few days here, so a bump-gated
+    /// retry would land almost immediately and read as nagging.
+    enum StarAskState: String {
+        /// Not yet shown — eligible once the retention trigger fires.
+        case notAsked
+        /// "Maybe later" once — eligible again after `starAskSnoozedUntil`.
+        case snoozed
+        /// Dismissed outright, or a second "Maybe later" — never ask again.
+        case dismissedForever
+        /// The user opened the repository — never ask again.
+        case starred
     }
 
     /// Lifecycle of the Quota Meter activation card. Mirrors `FeedbackAskState`:
@@ -112,5 +130,17 @@ extension UserDefaults {
     var onboardingCockpitEverOpened: Bool {
         get { bool(forKey: OnboardingKeys.cockpitEverOpened) }
         set { set(newValue, forKey: OnboardingKeys.cockpitEverOpened) }
+    }
+
+    /// Lifecycle state of the one-time GitHub star ask.
+    var onboardingStarAskState: StarAskState {
+        get { StarAskState(rawValue: string(forKey: OnboardingKeys.starAskState) ?? "") ?? .notAsked }
+        set { set(newValue.rawValue, forKey: OnboardingKeys.starAskState) }
+    }
+
+    /// When a "Maybe later" on the star ask expires. Nil until the first snooze.
+    var onboardingStarAskSnoozedUntil: Date? {
+        get { object(forKey: OnboardingKeys.starAskSnoozedUntil) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.starAskSnoozedUntil) }
     }
 }

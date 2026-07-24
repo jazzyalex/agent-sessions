@@ -1,13 +1,17 @@
 import SwiftUI
+import AppKit
 
 /// Lightweight container mounted at the top of the session list. It hosts exactly
-/// one card — What's New, then Quota Meter, then feedback — and carries the
-/// sheets for the compact What's New panel, the Quota Meter explainer, and the
+/// one card — What's New, then Quota Meter, then star, then feedback — and carries
+/// the sheets for the compact What's New panel, the Quota Meter explainer, and the
 /// standalone feedback prompt. Renders nothing when there is nothing to show.
 ///
 /// Order is activation before extraction: the Quota Meter card asks the user to
-/// try something, the feedback card asks them for something. Feedback waits for
-/// 10 sessions or 14 days regardless, so the two rarely compete.
+/// try something, the star and feedback cards ask them for something. Feedback
+/// waits for 10 sessions or 14 days regardless, so the two rarely compete.
+///
+/// The star card outranks feedback because it terminates — see
+/// `OnboardingCoordinator.shouldShowStarCard()`.
 struct OnboardingListTopSlot: View {
     @ObservedObject var coordinator: OnboardingCoordinator
     /// Which quota providers the user actually has sessions for. Kept per
@@ -57,6 +61,15 @@ struct OnboardingListTopSlot: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            } else if coordinator.shouldShowStarCard() {
+                StarCard(
+                    palette: palette,
+                    onOpen: openRepository,
+                    onSnooze: { coordinator.snoozeStarAsk() },
+                    onDismiss: { coordinator.dismissStarAskForever() }
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             } else if coordinator.shouldShowFeedbackCard() {
                 FeedbackCard(
                     palette: palette,
@@ -67,6 +80,14 @@ struct OnboardingListTopSlot: View {
                 .padding(.top, 8)
             }
         }
+    }
+
+    /// The star card's one side effect. Kept here rather than in the coordinator
+    /// so that stays a pure state machine, matching `QuotaMeterPromoActivator`.
+    /// Opening the page is the whole action — nothing is sent anywhere.
+    private func openRepository() {
+        NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL)
+        coordinator.recordStarOpened()
     }
 }
 
@@ -253,6 +274,59 @@ struct WhatsNewCard: View {
         .padding(.vertical, 8)
         .background(RoundedRectangle(cornerRadius: 10).fill(palette.tipFill))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.tipStroke, lineWidth: 1))
+    }
+}
+
+/// Dismissible "star the repo" card, shown once the retention bar is met.
+///
+/// Three exits, because the ask has three honest answers: star it, ask me later,
+/// or never. `star.circle` rather than a bare `star` — the session list already
+/// spends that glyph on per-session favourites one row below.
+struct StarCard: View {
+    let palette: OnboardingPalette
+    var onOpen: () -> Void
+    var onSnooze: () -> Void
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "star.circle")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(palette.accentBlue)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Been useful?")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("A star on GitHub is how people find Agent Sessions. One click, nothing sent.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Star on GitHub", action: onOpen)
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+
+            Button("Maybe later", action: onSnooze)
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Don't ask again")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
     }
 }
 
