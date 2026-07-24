@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.agentsessions.agent-watch</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>__RUN_WEEKLY_SH__</string>
+  </array>
+  <!-- Weekday 1 = Monday. A missed run fires on the next wake, which is the
+       point: this is a review task, not a deadline. -->
+  <key>StartCalendarInterval</key><dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>__PATH__</string>
+    <key>HOME</key><string>__HOME__</string>
+  </dict>
+  <key>StandardOutPath</key><string>__OUT_ROOT__/launchd.log</string>
+  <key>StandardErrorPath</key><string>__OUT_ROOT__/launchd.log</string>
+</dict></plist>

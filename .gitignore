@@ -102,3 +102,6 @@ docs/assets/geo-test-2.pdf
 # repo triage automation runtime artifacts
 tools/triage/out/
 tools/triage/state.json
+
+# weekly agent-format drift scan launchd logs
+tools/agent-watch/out/
