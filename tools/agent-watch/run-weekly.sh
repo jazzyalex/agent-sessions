@@ -8,6 +8,11 @@
 #      unattended run across nine agents. A token is resolved at run time from
 #      the gh CLI rather than baked into the plist, so no secret is written to
 #      disk.
+#
+# The token is exported into agent_watch.py's own process only. It reaches the
+# GitHub API through a 0600 curl config file (never process arguments), and
+# agent_watch.py strips GITHUB_TOKEN/GH_TOKEN from every command it spawns, so
+# no monitored agent CLI inherits it. See scripts/agent_watch.py `_child_env`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
