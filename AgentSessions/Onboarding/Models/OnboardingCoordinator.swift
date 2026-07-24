@@ -27,6 +27,12 @@ final class OnboardingCoordinator: ObservableObject {
     /// someone who keeps the app around without opening many sessions.
     static let starAskDaysThreshold: Double = 30
 
+    /// Launches a round of the star ask may go unanswered before it spends
+    /// itself. Ignoring a card is an answer; without this the ask would repeat
+    /// on every eligible launch forever, which is exactly the nagging the
+    /// "Maybe later" / dismiss pair exists to prevent.
+    static let starAskMaxImpressionsPerRound = 3
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -73,6 +79,9 @@ final class OnboardingCoordinator: ObservableObject {
     private let whatsNewAvailableProvider: (String) -> Bool
     private let now: () -> Date
     private var hasChecked: Bool = false
+    /// One impression per launch, not per render: `.onAppear` fires again every
+    /// time the list rebuilds the card.
+    private var didCountStarImpressionThisLaunch: Bool = false
     /// True for the duration of a launch that showed the first-run setup — feedback
     /// must never appear in the same session as first run.
     private(set) var didPresentFreshInstallThisLaunch: Bool = false
@@ -354,11 +363,35 @@ final class OnboardingCoordinator: ObservableObject {
     func snoozeStarAsk() {
         starCardSuppressedThisLaunch = true
         didConsumeTopSlotAskThisLaunch = true
+        endStarAskRound()
+    }
 
+    /// Records that this launch put the star card on screen.
+    ///
+    /// `shouldShowStarCard()` is a pure query the view runs while rendering, so
+    /// nothing about being *seen* advances the state — a user who quits without
+    /// touching the card would get it again on every eligible launch, forever,
+    /// and the feedback card behind it would never surface. Three unanswered
+    /// launches end the round exactly as "Maybe later" would.
+    func noteStarCardShown() {
+        guard !didCountStarImpressionThisLaunch else { return }
+        didCountStarImpressionThisLaunch = true
+
+        let seen = defaults.onboardingStarAskImpressions + 1
+        defaults.onboardingStarAskImpressions = seen
+        guard seen >= Self.starAskMaxImpressionsPerRound else { return }
+        endStarAskRound()
+    }
+
+    /// The one transition both "Maybe later" and silence take: first round buys
+    /// two weeks and a retry, second round is a no.
+    private func endStarAskRound() {
         switch defaults.onboardingStarAskState {
         case .notAsked:
             defaults.onboardingStarAskState = .snoozed
             defaults.onboardingStarAskSnoozedUntil = now().addingTimeInterval(Self.starAskSnoozeInterval)
+            // The retry gets its own budget of launches.
+            defaults.onboardingStarAskImpressions = 0
         case .snoozed:
             defaults.onboardingStarAskState = .dismissedForever
         case .starred, .dismissedForever:

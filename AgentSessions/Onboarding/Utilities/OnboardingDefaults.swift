@@ -15,6 +15,7 @@ extension UserDefaults {
         static let cockpitEverOpened = "OnboardingCockpitEverOpened"
         static let starAskState = "OnboardingStarAskState"
         static let starAskSnoozedUntil = "OnboardingStarAskSnoozedUntil"
+        static let starAskImpressions = "OnboardingStarAskImpressions"
     }
 
     /// Lifecycle of the one-time GitHub star ask.
@@ -142,5 +143,12 @@ extension UserDefaults {
     var onboardingStarAskSnoozedUntil: Date? {
         get { object(forKey: OnboardingKeys.starAskSnoozedUntil) as? Date }
         set { set(newValue, forKey: OnboardingKeys.starAskSnoozedUntil) }
+    }
+
+    /// Launches that have shown the star card in the current round without the
+    /// user answering. Reset when a round ends; caps how long silence can run.
+    var onboardingStarAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.starAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.starAskImpressions) }
     }
 }

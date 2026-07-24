@@ -245,6 +245,97 @@ final class OnboardingStarCardTests: XCTestCase {
         XCTAssertEqual(defaults.onboardingStarAskState, .starred)
     }
 
+    // MARK: - Impressions (silence is an answer)
+
+    /// `shouldShowStarCard()` is a pure render-time query, so nothing about being
+    /// seen used to advance the state. A user who never touched the card got it
+    /// on every eligible launch forever.
+    @MainActor
+    func testThreeIgnoredLaunchesEndTheRoundLikeMaybeLater() {
+        let defaults = makeDefaults("Star.ignoredRound")
+        markRetained(defaults)
+
+        for launch in 1...OnboardingCoordinator.starAskMaxImpressionsPerRound {
+            let coordinator = makeCoordinator(defaults: defaults)
+            XCTAssertTrue(coordinator.shouldShowStarCard(), "launch \(launch) should still show it")
+            coordinator.noteStarCardShown()
+        }
+
+        XCTAssertEqual(defaults.onboardingStarAskState, .snoozed)
+        XCTAssertEqual(
+            defaults.onboardingStarAskSnoozedUntil,
+            Self.referenceNow.addingTimeInterval(OnboardingCoordinator.starAskSnoozeInterval)
+        )
+        XCTAssertFalse(makeCoordinator(defaults: defaults).shouldShowStarCard())
+    }
+
+    /// The retry round is bounded too, so the whole ask terminates without the
+    /// user ever answering it.
+    @MainActor
+    func testIgnoringTheRetryRoundSilencesItForever() {
+        let defaults = makeDefaults("Star.ignoredTwice")
+        markRetained(defaults)
+
+        for _ in 1...OnboardingCoordinator.starAskMaxImpressionsPerRound {
+            makeCoordinator(defaults: defaults).noteStarCardShown()
+        }
+        XCTAssertEqual(defaults.onboardingStarAskState, .snoozed)
+
+        let afterSnooze = Self.referenceNow.addingTimeInterval(OnboardingCoordinator.starAskSnoozeInterval + 60)
+        for _ in 1...OnboardingCoordinator.starAskMaxImpressionsPerRound {
+            let coordinator = makeCoordinator(defaults: defaults, now: afterSnooze)
+            XCTAssertTrue(coordinator.shouldShowStarCard())
+            coordinator.noteStarCardShown()
+        }
+
+        XCTAssertEqual(defaults.onboardingStarAskState, .dismissedForever)
+        let muchLater = makeCoordinator(defaults: defaults, now: Self.referenceNow.addingTimeInterval(365 * 86_400))
+        XCTAssertFalse(muchLater.shouldShowStarCard())
+    }
+
+    /// The retry round gets its own budget rather than inheriting a spent one.
+    @MainActor
+    func testEndingTheFirstRoundResetsTheImpressionBudget() {
+        let defaults = makeDefaults("Star.budgetReset")
+        markRetained(defaults)
+        for _ in 1...OnboardingCoordinator.starAskMaxImpressionsPerRound {
+            makeCoordinator(defaults: defaults).noteStarCardShown()
+        }
+        XCTAssertEqual(defaults.onboardingStarAskImpressions, 0)
+    }
+
+    /// An impression is one launch that showed the card, not one render.
+    /// `.onAppear` fires again every time the list rebuilds.
+    @MainActor
+    func testRepeatedRendersInOneLaunchCountOnce() {
+        let defaults = makeDefaults("Star.oneImpressionPerLaunch")
+        markRetained(defaults)
+        let coordinator = makeCoordinator(defaults: defaults)
+
+        for _ in 0..<10 { coordinator.noteStarCardShown() }
+
+        XCTAssertEqual(defaults.onboardingStarAskImpressions, 1)
+        XCTAssertEqual(defaults.onboardingStarAskState, .notAsked)
+        XCTAssertTrue(coordinator.shouldShowStarCard(), "one launch's renders must not spend the round")
+    }
+
+    /// The point of bounding the round: the card below it eventually gets the slot.
+    @MainActor
+    func testFeedbackCardIsUnblockedOnceTheStarAskSpendsItself() {
+        let defaults = makeDefaults("Star.unblocksFeedback")
+        markRetained(defaults)
+
+        for _ in 1...OnboardingCoordinator.starAskMaxImpressionsPerRound {
+            let coordinator = makeCoordinator(defaults: defaults)
+            XCTAssertTrue(coordinator.shouldShowStarCard())
+            coordinator.noteStarCardShown()
+        }
+
+        let nextLaunch = makeCoordinator(defaults: defaults)
+        XCTAssertFalse(nextLaunch.shouldShowStarCard())
+        XCTAssertTrue(nextLaunch.shouldShowFeedbackCard(), "feedback must not be starved by an ignored star card")
+    }
+
     // MARK: - Persistence and destination
 
     @MainActor

@@ -70,6 +70,9 @@ struct OnboardingListTopSlot: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+                // Being ignored is an answer. The coordinator counts one
+                // impression per launch however often this fires.
+                .onAppear { coordinator.noteStarCardShown() }
             } else if coordinator.shouldShowFeedbackCard() {
                 FeedbackCard(
                     palette: palette,
