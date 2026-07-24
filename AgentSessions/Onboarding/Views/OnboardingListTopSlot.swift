@@ -310,10 +310,12 @@ struct StarCard: View {
                 .buttonStyle(.link)
                 .font(.system(size: 12, weight: .semibold))
 
+            // Same link style as the primary action, one weight lighter — the
+            // accent colour is `.link`'s own, so tinting it here would not reach
+            // the layer that draws it.
             Button("Maybe later", action: onSnooze)
                 .buttonStyle(.link)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
