@@ -16,6 +16,7 @@ extension UserDefaults {
         static let starAskState = "OnboardingStarAskState"
         static let starAskSnoozedUntil = "OnboardingStarAskSnoozedUntil"
         static let starAskImpressions = "OnboardingStarAskImpressions"
+        static let starAskDueSince = "OnboardingStarAskDueSince"
     }
 
     /// Lifecycle of the one-time GitHub star ask.
@@ -150,5 +151,12 @@ extension UserDefaults {
     var onboardingStarAskImpressions: Int {
         get { integer(forKey: OnboardingKeys.starAskImpressions) }
         set { set(newValue, forKey: OnboardingKeys.starAskImpressions) }
+    }
+
+    /// When the star ask first became due. Drives the aging rule that lets it
+    /// overtake a Quota Meter card the user is neither acting on nor dismissing.
+    var onboardingStarAskDueSince: Date? {
+        get { object(forKey: OnboardingKeys.starAskDueSince) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.starAskDueSince) }
     }
 }

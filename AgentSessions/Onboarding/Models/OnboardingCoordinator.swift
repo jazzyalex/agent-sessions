@@ -33,6 +33,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// "Maybe later" / dismiss pair exists to prevent.
     static let starAskMaxImpressionsPerRound = 3
 
+    /// Days the star ask may wait behind the Quota Meter card before it takes
+    /// the slot for itself.
+    static let starAskPriorityAfterDays: Double = 14
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -113,6 +117,13 @@ final class OnboardingCoordinator: ObservableObject {
 
         let previousMajorMinor = defaults.onboardingLastSeenAppMajorMinor ?? defaults.onboardingLastActionMajorMinor
         defaults.onboardingLastSeenAppMajorMinor = majorMinor
+
+        // Stamped once, the first launch on which the star ask qualifies. The
+        // aging rule needs to know how long it has been waiting, and the card
+        // itself may never render while another card holds the slot.
+        if defaults.onboardingStarAskDueSince == nil, starAskTriggerMet() {
+            defaults.onboardingStarAskDueSince = now()
+        }
 
         if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
             didPresentFreshInstallThisLaunch = true
@@ -256,6 +267,7 @@ final class OnboardingCoordinator: ObservableObject {
     ///     least once. Tracking alone is not "using it" — that is precisely the
     ///     audience that has the data flowing but has never seen the window.
     func shouldShowQuotaMeterCard(hasCodexOrClaudeSessions: Bool, isQuotaMeterActive: Bool) -> Bool {
+        guard !starAskOutranksQuotaMeterCard() else { return false }
         guard whatsNewMajorMinor == nil else { return false }
         guard !didConsumeTopSlotAskThisLaunch else { return false }
         guard !quotaMeterCardSuppressedThisLaunch else { return false }
@@ -408,6 +420,22 @@ final class OnboardingCoordinator: ObservableObject {
 
         guard defaults.onboardingStarAskState != .starred else { return }
         defaults.onboardingStarAskState = .dismissedForever
+    }
+
+    /// Whether the star ask has waited long enough to take the slot from the
+    /// Quota Meter card.
+    ///
+    /// Fixed priority alone is not enough. The Quota Meter card only leaves the
+    /// slot when the user activates it or dismisses it — someone who does
+    /// neither, and simply ignores it, holds the slot on every launch
+    /// indefinitely. The star ask sits below it and would never be seen. After
+    /// two weeks of waiting it goes first; it then spends itself within two
+    /// rounds and hands the slot straight back, so this cannot deadlock the
+    /// other direction.
+    func starAskOutranksQuotaMeterCard() -> Bool {
+        guard let dueSince = defaults.onboardingStarAskDueSince else { return false }
+        guard now().timeIntervalSince(dueSince) / 86_400 >= Self.starAskPriorityAfterDays else { return false }
+        return shouldShowStarCard()
     }
 
     /// Retention test for the star ask: earliest of 25 sessions opened or 30 days

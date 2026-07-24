@@ -336,6 +336,80 @@ final class OnboardingStarCardTests: XCTestCase {
         XCTAssertTrue(nextLaunch.shouldShowFeedbackCard(), "feedback must not be starved by an ignored star card")
     }
 
+    // MARK: - Aging past the Quota Meter card
+
+    @MainActor
+    private func showsQuotaMeter(_ coordinator: OnboardingCoordinator) -> Bool {
+        coordinator.shouldShowQuotaMeterCard(hasCodexOrClaudeSessions: true, isQuotaMeterActive: false)
+    }
+
+    /// Fresh, the Quota Meter card still wins: activation before extraction.
+    @MainActor
+    func testQuotaMeterKeepsPriorityBeforeTheStarAskAges() {
+        let defaults = makeDefaults("Star.quotaFirst")
+        markRetained(defaults)
+        defaults.onboardingStarAskDueSince = Self.referenceNow
+
+        let coordinator = makeCoordinator(defaults: defaults)
+        XCTAssertTrue(showsQuotaMeter(coordinator))
+        XCTAssertFalse(coordinator.starAskOutranksQuotaMeterCard())
+    }
+
+    /// The Quota Meter card only leaves the slot when the user acts on it, so a
+    /// user who ignores it would otherwise hold the star ask off forever.
+    @MainActor
+    func testStarAskTakesTheSlotAfterWaitingTwoWeeks() {
+        let defaults = makeDefaults("Star.agedPastQuota")
+        markRetained(defaults)
+        defaults.onboardingStarAskDueSince =
+            Self.referenceNow.addingTimeInterval(-(OnboardingCoordinator.starAskPriorityAfterDays + 1) * 86_400)
+
+        let coordinator = makeCoordinator(defaults: defaults)
+        XCTAssertTrue(coordinator.starAskOutranksQuotaMeterCard())
+        XCTAssertFalse(showsQuotaMeter(coordinator), "the aged star ask takes the slot")
+        XCTAssertTrue(coordinator.shouldShowStarCard())
+    }
+
+    /// Aging must not hand the slot over when the star ask is not actually due —
+    /// otherwise it would suppress the Quota Meter card for nothing.
+    @MainActor
+    func testAgingDoesNotSuppressQuotaMeterOnceTheStarAskIsResolved() {
+        let defaults = makeDefaults("Star.agedButResolved")
+        markRetained(defaults)
+        defaults.onboardingStarAskDueSince =
+            Self.referenceNow.addingTimeInterval(-365 * 86_400)
+        defaults.onboardingStarAskState = .starred
+
+        let coordinator = makeCoordinator(defaults: defaults)
+        XCTAssertFalse(coordinator.starAskOutranksQuotaMeterCard())
+        XCTAssertTrue(showsQuotaMeter(coordinator), "a spent star ask must give the slot back")
+    }
+
+    /// The stamp is written once, on the first launch the ask qualifies, because
+    /// the card may never render while another card holds the slot.
+    @MainActor
+    func testDueSinceIsStampedOnceAtLaunchCheck() {
+        let defaults = makeDefaults("Star.dueSinceStamp")
+        markRetained(defaults)
+
+        makeCoordinator(defaults: defaults).checkAndPresentIfNeeded()
+        XCTAssertEqual(defaults.onboardingStarAskDueSince, Self.referenceNow)
+
+        let later = makeCoordinator(defaults: defaults, now: Self.referenceNow.addingTimeInterval(86_400))
+        later.checkAndPresentIfNeeded()
+        XCTAssertEqual(defaults.onboardingStarAskDueSince, Self.referenceNow, "the stamp must not move")
+    }
+
+    @MainActor
+    func testDueSinceIsNotStampedBeforeTheAskQualifies() {
+        let defaults = makeDefaults("Star.dueSinceNotYet")
+        defaults.onboardingSessionsOpenedCount = 2
+        defaults.onboardingFirstLaunchDate = Self.referenceNow
+
+        makeCoordinator(defaults: defaults).checkAndPresentIfNeeded()
+        XCTAssertNil(defaults.onboardingStarAskDueSince)
+    }
+
     // MARK: - Persistence and destination
 
     @MainActor
