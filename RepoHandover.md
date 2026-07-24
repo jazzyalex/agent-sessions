@@ -1,3 +1,22 @@
+## 2026-07-22 13:09 · agent-format-check-2026-07-22 · Codex 0.145.0 verified; full format check + agent_watch hardening (pushed)
+status: done
+
+**State:** Triggered by "big change in Codex CLI session formats." Confirmed AS already supports Codex 0.145.0 — rollout JSONL unchanged; new `session_meta` fields (thread_source/session_id/structured source.subagent) parsed+tested; the state_5.sqlite thread index (now under `~/.codex/sqlite/`) is NOT read by AS. Ran full format check: **8 of 9 agents verified fresh**, 0 drift except Copilot (covered). All 4 commits pushed to origin/main (…→3b1a0cf0).
+
+**Decided / don't redo:**
+- Copilot 1.0.65 drift = two additive event types (`session.auto_mode_resolved`, `session.usage_checkpoint`); non-breaking (parser default→.meta). Covered in copilot schema_drift fixture + `testCopilotAutoModeAndUsageCheckpointEventsSurviveParsing`. Verified stays 1.0.65 (no version change).
+- Hermes 0.17.0 IS verified at installed version via weekly local-schema evidence (state.db matches baseline, not stale). Do NOT install 0.19.0 — its `-z` oneshot is broken (returns "no final response" for EVERY provider, not auth; doctor shows core healthy), so updating would regress it to blocked_stale_sample.
+- Bumped: Codex 0.145.0, Claude 2.1.217, OpenCode 1.18.4, Pi 0.81.1, Antigravity 1.1.1, Cursor 2026.7.20.
+- Fixed two env issues (outside repo): broken `opencode` npm install (ran its postinstall.mjs → 1.18.4) and crashing `~/.local/bin/cursor` shim (`"$1"`→`"${1:-}"`).
+
+**Key files:**
+- `scripts/agent_watch.py` — `_run_cmd` now catches OSError (rc 126) so one unexecutable agent binary can't abort the weekly scan
+- `docs/agent-support/agent-support-{matrix,ledger}.yml`, `docs/agent-json-tracking.md` — 2026-07-22 verification records
+
+**Next:**
+1. OpenClaw is the only truly-unresolved agent — needs a fresh OpenClaw/Codex OAuth sign-in, then `agent_watch.py --mode prebump --allow-real-home --agent openclaw`.
+2. To push Hermes to supports_latest: repair its `-z` runtime → `hermes update` (0.19.0) → fresh prebump.
+
 ## 2026-07-21 10:08 · perf-program-close · Perf program closed & merged; release recommended over chasing AV parity
 status: done
 
