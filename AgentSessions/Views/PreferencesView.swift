@@ -876,6 +876,7 @@ struct PreferencesView: View {
         case .openclaw: scheduleOpenClawProbe()
         case .cursor: scheduleCursorProbe()
         case .pi: schedulePiProbe()
+        case .kimi: break // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
         }
     }
 
@@ -901,6 +902,8 @@ struct PreferencesView: View {
             return cursorResolvedPath
         case .pi:
             return piResolvedPath
+        case .kimi:
+            return nil // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
         }
     }
 
@@ -936,6 +939,8 @@ struct PreferencesView: View {
         case .pi:
             let value = piSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .kimi:
+            return nil // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
         }
     }
 

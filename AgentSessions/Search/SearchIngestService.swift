@@ -381,6 +381,8 @@ actor SearchIngestService {
             return CursorSessionParser.parseFileFull(at: url)
         case .pi:
             return PiSessionParser.parseFileFull(at: url)
+        case .kimi:
+            return KimiSessionParser.parseFileFull(at: url)
         }
     }
 }

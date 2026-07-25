@@ -60,6 +60,8 @@ enum AgentEnablement {
             return isAvailable(.cursor, defaults: defaults)
         case .pi:
             return isAvailable(.pi, defaults: defaults)
+        case .kimi:
+            return isAvailable(.kimi, defaults: defaults)
         default:
             return true
         }
@@ -77,6 +79,7 @@ enum AgentEnablement {
         case .openclaw: return PreferencesKey.Agents.openClawEnabled
         case .cursor:   return PreferencesKey.Agents.cursorEnabled
         case .pi:       return PreferencesKey.Agents.piEnabled
+        case .kimi:     return PreferencesKey.Agents.kimiEnabled
         }
     }
 
@@ -181,6 +184,7 @@ enum AgentEnablement {
             setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
             setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
             setEnabledInternal(.pi, enabled: isAvailable(.pi, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.kimi, enabled: isAvailable(.kimi, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -194,6 +198,7 @@ enum AgentEnablement {
             let openclaw = isAvailable(.openclaw, defaults: defaults)
             let cursor = isAvailable(.cursor, defaults: defaults)
             let pi = isAvailable(.pi, defaults: defaults)
+            let kimi = isAvailable(.kimi, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -205,6 +210,7 @@ enum AgentEnablement {
             setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
             setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
             setEnabledInternal(.pi, enabled: pi, defaults: defaults)
+            setEnabledInternal(.kimi, enabled: kimi, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -265,6 +271,9 @@ enum AgentEnablement {
         case .pi:
             let custom = defaults.string(forKey: PreferencesKey.Paths.piSessionsRootOverride) ?? ""
             root = PiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .kimi:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.kimiSessionsRootOverride) ?? ""
+            root = KimiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {
@@ -302,6 +311,8 @@ enum AgentEnablement {
             return binaryDetectedCached("agent") || binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
         case .pi:
             return binaryDetectedCached("pi")
+        case .kimi:
+            return binaryDetectedCached("kimi")
         }
     }
 
@@ -354,6 +365,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.cursorCLIAvailable) as? Bool
         case .pi:
             return defaults.object(forKey: PreferencesKey.piCLIAvailable) as? Bool
+        case .kimi:
+            return defaults.object(forKey: PreferencesKey.kimiCLIAvailable) as? Bool
         }
     }
 

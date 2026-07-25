@@ -339,6 +339,7 @@ struct UnifiedSessionsView: View {
     let openclawIndexer: OpenClawSessionIndexer
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
+    let kimiIndexer: KimiSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -484,6 +485,7 @@ struct UnifiedSessionsView: View {
          openclawIndexer: OpenClawSessionIndexer,
          cursorIndexer: CursorSessionIndexer,
          piIndexer: PiSessionIndexer,
+         kimiIndexer: KimiSessionIndexer,
          analyticsReady: Bool,
          analyticsPhase: AnalyticsIndexPhase,
          analyticsIsStale: Bool,
@@ -500,6 +502,7 @@ struct UnifiedSessionsView: View {
         self.openclawIndexer = openclawIndexer
         self.cursorIndexer = cursorIndexer
         self.piIndexer = piIndexer
+        self.kimiIndexer = kimiIndexer
         self.analyticsReady = analyticsReady
         self.analyticsPhase = analyticsPhase
         self.analyticsIsStale = analyticsIsStale
@@ -566,6 +569,11 @@ struct UnifiedSessionsView: View {
                 transcriptCache: piIndexer.searchTranscriptCache,
                 update: { piIndexer.updateSession($0) },
                 parseFull: { url, _ in PiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
+            ),
+            .kimi: .init(
+                transcriptCache: kimiIndexer.searchTranscriptCache,
+                update: { kimiIndexer.updateSession($0) },
+                parseFull: { url, _ in KimiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
             ),
         ])
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
@@ -1647,7 +1655,8 @@ struct UnifiedSessionsView: View {
                                droidIndexer: droidIndexer,
                                openclawIndexer: openclawIndexer,
                                cursorIndexer: cursorIndexer,
-                               piIndexer: piIndexer)
+                               piIndexer: piIndexer,
+                               kimiIndexer: kimiIndexer)
                 .environmentObject(focusCoordinator)
                 .environmentObject(searchState)
                 .id("transcript-host")
@@ -1669,6 +1678,7 @@ struct UnifiedSessionsView: View {
                         case .openclaw: return "OpenClaw"
                         case .cursor: return "Cursor"
                         case .pi: return "Pi"
+                        case .kimi: return "Kimi Code"
                         }
                     }()
                     let accent: Color = sourceAccent(s)
@@ -2431,6 +2441,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeCursor { unified.includeCursor = true }
         case .pi:
             if !unified.includePi { unified.includePi = true }
+        case .kimi:
+            if !unified.includeKimi { unified.includeKimi = true }
         }
     }
 
@@ -2487,6 +2499,8 @@ struct UnifiedSessionsView: View {
             if unified.cursorAgentEnabled, let e = cursorIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty, !CursorSessionIndexer.isDBOnlySession(e) { cursorIndexer.reloadSession(id: id); return true }
         case .pi:
             if unified.piAgentEnabled, let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
+        case .kimi:
+            if unified.kimiAgentEnabled, let e = kimiIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { kimiIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -2849,6 +2863,7 @@ struct UnifiedSessionsView: View {
         case .openclaw: label = "OpenClaw"
         case .cursor: label = "Cursor"
         case .pi: label = "Pi"
+        case .kimi: label = "Kimi Code"
         }
         let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
         return HStack(spacing: 6) {
@@ -3382,6 +3397,7 @@ struct UnifiedSessionsView: View {
         case .openclaw: return Color.agentOpenClaw
         case .cursor: return Color.agentCursor
         case .pi: return Color.agentPi
+        case .kimi: return Color.agentKimi
         }
     }
 
@@ -3875,6 +3891,7 @@ private struct TranscriptHostView: View {
     let openclawIndexer: OpenClawSessionIndexer
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
+    let kimiIndexer: KimiSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -3905,6 +3922,14 @@ private struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .pi ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: kimiIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "Kimi Code",
+                enableCaching: false
+            )
+            .opacity(kind == .kimi ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()

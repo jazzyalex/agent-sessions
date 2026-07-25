@@ -276,6 +276,8 @@ struct OnboardingPalette {
             return Color(red: 0.20, green: 0.60, blue: 0.70)
         case .pi:
             return Color.agentPi
+        case .kimi:
+            return Color.agentKimi
         }
     }
 }

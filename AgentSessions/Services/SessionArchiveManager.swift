@@ -461,6 +461,14 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                     map[s.id] = url
                 }
             }
+        case .kimi:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.kimiSessionsRootOverride)
+            let discovery = KimiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
+            for url in discovery.discoverSessionFiles() {
+                if let id = KimiSessionDiscovery.sessionID(forWireFile: url) {
+                    map[id] = url
+                }
+            }
         }
 
         return map
@@ -490,6 +498,8 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
             return CursorSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         case .pi:
             return PiSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
+        case .kimi:
+            return KimiSessionParser.parseFileFull(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
         }
     }
 

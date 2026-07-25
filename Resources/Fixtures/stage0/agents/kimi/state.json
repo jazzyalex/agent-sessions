@@ -1,0 +1,16 @@
+{
+  "createdAt": "2026-07-25T03:35:09.904Z",
+  "updatedAt": "2026-07-25T03:37:59.618Z",
+  "title": "hi",
+  "isCustomTitle": false,
+  "agents": {
+    "main": {
+      "homedir": "/Users/alexm/.kimi-code/sessions/wd_project_ac3bb318f98e/session_9eb1bf57-c1af-48a5-b658-0e8d9fe794f5/agents/main",
+      "type": "main",
+      "parentAgentId": null
+    }
+  },
+  "custom": {},
+  "workDir": "/private/tmp/as-agent-lab/kimi/project",
+  "lastPrompt": "hi"
+}

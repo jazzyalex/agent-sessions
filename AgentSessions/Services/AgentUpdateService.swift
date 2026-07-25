@@ -447,6 +447,8 @@ private extension AgentUpdateService {
             return nil
         case .pi:
             return nil
+        case .kimi:
+            return nil
         }
     }
 

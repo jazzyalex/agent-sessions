@@ -83,6 +83,7 @@ enum PreferencesKey {
     static let droidCLIAvailable = "DroidCLIAvailable"
     static let cursorCLIAvailable = "CursorCLIAvailable"
     static let piCLIAvailable = "PiCLIAvailable"
+    static let kimiCLIAvailable = "KimiCLIAvailable"
 
     enum Agents {
         static let didSeedEnabledAgents = "DidSeedEnabledAgents_v1"
@@ -96,6 +97,7 @@ enum PreferencesKey {
         static let openClawEnabled = "AgentEnabledOpenClaw"
         static let cursorEnabled = "AgentEnabledCursor"
         static let piEnabled = "AgentEnabledPi"
+        static let kimiEnabled = "AgentEnabledKimi"
         static let knownAvailableProviders = "KnownAvailableProviders"
     }
 
@@ -153,6 +155,7 @@ enum PreferencesKey {
         static let openClawBinaryOverride = "OpenClawBinaryOverride"
         static let cursorSessionsRootOverride = "CursorSessionsRootOverride"
         static let piSessionsRootOverride = "PiSessionsRootOverride"
+        static let kimiSessionsRootOverride = "KimiSessionsRootOverride"
     }
 
     enum Archives {

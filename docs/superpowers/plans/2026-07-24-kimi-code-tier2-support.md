@@ -40,8 +40,12 @@ On-disk layout under `~/.kimi-code/` (overridable by `KIMI_CODE_HOME`):
 `wire.jsonl` line 1 is always the journal envelope:
 
 ```json
-{"type":"metadata","protocol_version":"1.5","created_at":1750000000000}
+{"type":"metadata","protocol_version":"1.4","created_at":1784950509920}
 ```
+
+**Confirmed against a real 0.29.1 capture 2026-07-24.** Note the installed CLI emits `protocol_version` **1.4**, not the `1.5` constant in `migration.ts` at source HEAD — monitor the emitted value, not the source constant.
+
+Also confirmed by that capture, and NOT inferable from the type definitions: `config.update` never carries a bare `model` key. The user's selection arrives as `modelAlias` (`"moonshot-ai/kimi-k2.7-code"`); `llm.request` carries both `modelAlias` and the concrete `model` (`"kimi-k2.7-code"`). A parser that looks only for `model` yields a nil model for every Kimi session.
 
 Every later line is a flattened op: `{"type": <opType>, ...payload, "time": <epoch ms>}`.
 
@@ -1050,7 +1054,15 @@ git commit -- AgentSessions -m "feat(kimi): add Kimi Code UI surfaces, colors, a
 - Consumes: `Session` values produced by Task 4.
 - Produces: `enum KimiResumeCommandBuilder` with `static func command(for session: Session) -> String?`.
 
-Kimi Code's documented resume affordances are the `-c` flag (continue the most recent session) and the interactive `/sessions` picker. There is no verified `--resume <id>` flag at CLI 0.29.1, so this task builds a `cd`-then-`kimi -c` command and nothing more.
+Verified against `kimi --help` at the installed 0.29.1:
+
+```
+  -S, --session [id]   Resume a session. With ID: resume that session.
+                       Without ID: interactively pick.
+  -c, --continue       Continue the previous session for the working directory.
+```
+
+So Kimi Code **can** resume a specific session by id. Since `Session.id` is exactly the `<sessionId>` directory name that Kimi itself uses, we build `cd <workdir> && kimi -S <sessionId>` and fall back to `kimi -c` only when the id is somehow empty.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1067,9 +1079,9 @@ final class KimiResumeCommandBuilderTests: XCTestCase {
                 cwd: cwd, repoName: nil, lightweightTitle: nil)
     }
 
-    func testBuildsContinueCommandWithQuotedWorkingDirectory() {
+    func testResumesSpecificSessionByID() {
         XCTAssertEqual(KimiResumeCommandBuilder.command(for: session(cwd: "/tmp/as agent/project")),
-                       "cd '/tmp/as agent/project' && kimi -c")
+                       "cd '/tmp/as agent/project' && kimi -S 'sess-1'")
     }
 
     func testReturnsNilWithoutWorkingDirectory() {
@@ -1078,7 +1090,7 @@ final class KimiResumeCommandBuilderTests: XCTestCase {
 
     func testEscapesSingleQuotesInPath() {
         XCTAssertEqual(KimiResumeCommandBuilder.command(for: session(cwd: "/tmp/o'brien")),
-                       "cd '/tmp/o'\\''brien' && kimi -c")
+                       "cd '/tmp/o'\\''brien' && kimi -S 'sess-1'")
     }
 }
 ```
@@ -1111,13 +1123,15 @@ import Foundation
 
 /// Builds the shell command that reopens a Kimi Code session.
 ///
-/// Kimi Code resumes by working directory: `kimi -c` continues the most recent
-/// session for the current cwd. There is no verified `--resume <id>` flag at
-/// CLI 0.29.1, so the session id is not passed through.
+/// `kimi -S <id>` resumes a specific session; `kimi -c` continues the most
+/// recent session for the working directory. `Session.id` is the same
+/// `<sessionId>` directory name Kimi uses, so `-S` is exact and preferred.
 enum KimiResumeCommandBuilder {
     static func command(for session: Session) -> String? {
         guard let cwd = session.cwd ?? session.lightweightCwd, !cwd.isEmpty else { return nil }
-        return "cd \(shellQuoted(cwd)) && \(KimiCLIEnvironment.binaryName) -c"
+        let binary = KimiCLIEnvironment.binaryName
+        guard !session.id.isEmpty else { return "cd \(shellQuoted(cwd)) && \(binary) -c" }
+        return "cd \(shellQuoted(cwd)) && \(binary) -S \(shellQuoted(session.id))"
     }
 
     private static func shellQuoted(_ value: String) -> String {
@@ -1226,7 +1240,16 @@ In `docs/agent-support/agent-watch-config.json`, add under `agents`:
     }
 ```
 
-Note there is **no** `prebump` block. Prebump drivers are Python classes registered in `scripts/agent_watch_prebump_drivers.py` (`DRIVERS[...]`), and Kimi Code has no verified non-interactive one-shot mode at 0.29.1. Kimi is therefore monitored from real local sessions via the weekly `local_schema` contract only — the same posture Hermes and Cursor have held. Do not invent a `kimi_prompt` driver in this task; adding one is a follow-up gated on confirming a headless invocation.
+Note there is no `prebump` block **yet**. Kimi Code does have a headless one-shot mode — verified at the installed 0.29.1:
+
+```
+  -p, --prompt <prompt>       Run one prompt non-interactively and print the response.
+  --output-format <format>    text | stream-json
+```
+
+so a `kimi_prompt` driver is genuinely buildable. But prebump drivers are Python classes that must be registered in `DRIVERS` in `scripts/agent_watch_prebump_drivers.py`, with a `home_override` sandbox (`KIMI_CODE_HOME`) and a `discover_session` contract — that is its own task, not a bullet inside a docs task.
+
+Ship this task with weekly `local_schema` monitoring only (the posture Hermes and Cursor hold), and record the driver as a tracked follow-up. Per the 2026-07-17 finding in the matrix notes, a green prebump is necessary but not sufficient for interactive-only event families anyway — for Kimi, `turn.steer`, `plan_mode.*`, and `permission.*` ops will never appear in a `-p` one-shot, so the weekly real-session scan remains the primary drift signal either way.
 
 Note also the matrix key is `kimi_code` while the watch-config key and `SessionSource` rawValue are `kimi`. That asymmetry matches the existing `codex_cli` / `codex` and `copilot_cli` / `copilot` pairs — keep it.
 

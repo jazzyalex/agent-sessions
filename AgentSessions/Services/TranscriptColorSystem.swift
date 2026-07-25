@@ -99,6 +99,9 @@ enum TranscriptColorSystem {
         case .pi:
             // Green-cyan accent, distinct from Gemini and Cursor.
             return adaptiveBrand(NSColor(calibratedRed: 0.05, green: 0.62, blue: 0.48, alpha: 1.0))
+        case .kimi:
+            // Indigo-violet accent, distinct from Codex's blue and OpenCode's purple.
+            return adaptiveBrand(NSColor(calibratedRed: 0.46, green: 0.34, blue: 0.82, alpha: 1.0))
         }
     }
 

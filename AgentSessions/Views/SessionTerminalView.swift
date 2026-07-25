@@ -306,6 +306,7 @@ struct SessionTerminalView: View {
         case .openclaw: return "OpenClaw"
         case .cursor: return "Cursor"
         case .pi: return "Pi"
+        case .kimi: return "Kimi Code"
         }
     }
 
