@@ -1525,6 +1525,8 @@ struct UnifiedSessionsView: View {
             return true // session.id from transcript UUID; falls back to --continue
         case .pi:
             return true // session file path or id; falls back to --continue
+        case .kimi:
+            return true // session.id is the on-disk session dir; falls back to --continue
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         default:

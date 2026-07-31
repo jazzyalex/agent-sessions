@@ -32,9 +32,7 @@ enum KimiSessionParser {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         if !allowLargeFile, size > defaultFullParseMaxBytes { return nil }
 
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        var lines = contents.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        if let lineLimit, lines.count > lineLimit { lines = Array(lines.prefix(lineLimit)) }
+        guard let lines = loadLines(url, lineLimit: lineLimit) else { return nil }
 
         var events: [SessionEvent] = []
         var startTime: Date?
@@ -86,6 +84,46 @@ enum KimiSessionParser {
                        lightweightTitle: title,
                        customTitle: customTitle,
                        surface: .cli)
+    }
+
+    /// Streams newline-delimited lines, stopping once `lineLimit` is reached.
+    ///
+    /// The preview path must never materialise the whole journal: a single
+    /// `llm.tools_snapshot` op is ~70KB and `llm.request` repeats once per
+    /// retry, so an active session's `wire.jsonl` grows fast — and
+    /// `parseLightweight` runs over every discovered file on every scan.
+    /// Mirrors `PiSessionParser.loadPreviewEntries`.
+    private static func loadLines(_ url: URL, lineLimit: Int?) -> [String]? {
+        guard let lineLimit else {
+            guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            return contents.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        }
+
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var lines: [String] = []
+        var buffer = Data()
+        let newline = Data([0x0A])
+
+        while lines.count < lineLimit {
+            let chunk = (try? handle.read(upToCount: 64 * 1024)) ?? Data()
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+
+            while lines.count < lineLimit, let range = buffer.range(of: newline) {
+                let lineData = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
+                buffer = Data(buffer[range.upperBound..<buffer.endIndex])
+                if lineData.isEmpty { continue }
+                if let line = String(data: lineData, encoding: .utf8) { lines.append(line) }
+            }
+        }
+
+        if lines.count < lineLimit, !buffer.isEmpty,
+           let line = String(data: buffer, encoding: .utf8), !line.isEmpty {
+            lines.append(line)
+        }
+        return lines
     }
 
     private static func readSidecar(for url: URL) -> Sidecar? {

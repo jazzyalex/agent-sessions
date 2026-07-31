@@ -112,6 +112,25 @@ final class KimiSessionParserTests: XCTestCase {
         XCTAssertEqual(session.eventCount, 3, "only the 3 user messages are non-meta")
     }
 
+    /// The preview path streams and stops at its line cap, so it must succeed on
+    /// a journal far larger than the full-parse ceiling without materialising it.
+    /// A regression here (slurping the file) would show up as a stall on every
+    /// scan, since parseLightweight runs over every discovered session.
+    func testPreviewParseHandlesJournalLargerThanFullParseCeiling() throws {
+        let wire = try stagedFixture()
+        let handle = try FileHandle(forWritingTo: wire)
+        try handle.seekToEnd()
+        let filler = (#"{"type":"llm.request","kind":"loop","time":1784950600000}"# + "\n").data(using: .utf8)!
+        for _ in 0..<400 { try handle.write(contentsOf: filler) }
+        try handle.truncate(atOffset: UInt64(KimiSessionParser.defaultFullParseMaxBytes + 1))
+        try handle.close()
+
+        let session = try XCTUnwrap(KimiSessionParser.parseFile(at: wire))
+
+        XCTAssertEqual(session.id, "session_9eb1bf57-c1af-48a5-b658-0e8d9fe794f5")
+        XCTAssertEqual(session.lightweightCwd, "/private/tmp/as-agent-lab/kimi/project")
+    }
+
     func testParseFileFullSkipsOversizedFileUnlessExplicitlyAllowed() throws {
         let wire = try stagedFixture()
         let handle = try FileHandle(forWritingTo: wire)

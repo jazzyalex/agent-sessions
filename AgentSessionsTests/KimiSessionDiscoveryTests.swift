@@ -50,7 +50,13 @@ final class KimiSessionDiscoveryTests: XCTestCase {
         XCTAssertTrue(KimiSessionDiscovery(customRoot: root.path).discoverSessionFiles().isEmpty)
     }
 
-    func testDefaultRootIsKimiCodeSessions() {
+    /// `sessionsRoot()` honours `KIMI_CODE_HOME` before falling back to
+    /// `~/.kimi-code`, so only assert the home-relative default when the
+    /// developer's environment does not override it.
+    func testDefaultRootIsKimiCodeSessions() throws {
+        try XCTSkipIf(ProcessInfo.processInfo.environment["KIMI_CODE_HOME"]?.isEmpty == false,
+                      "KIMI_CODE_HOME overrides the default root in this environment")
+
         let root = KimiSessionDiscovery().sessionsRoot()
         XCTAssertTrue(root.path.hasSuffix("/.kimi-code/sessions"))
     }

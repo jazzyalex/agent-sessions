@@ -74,6 +74,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
     @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.piEnabled) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
+    @AppStorage(PreferencesKey.Agents.kimiEnabled) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
