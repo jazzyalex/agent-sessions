@@ -128,6 +128,15 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
             )
 
             let result = await SessionIndexingEngine.hydrateOrScan(config: config)
+
+            // No `files`/`session_meta` writes here: Pi's analytics rows come from the same
+            // shared path every other tier-2 analytics source uses — `UnifiedSessionIndexer`
+            // kicks `SearchIngestService` after each refresh, and that writes `upsertFile` +
+            // `upsertSessionMeta` from a fresh `SessionFileStat`. Writing them from this
+            // indexer instead would store `Session.modifiedAt` (activity-derived, not the
+            // file's mtime) in `files`, which is exactly what search ingest compares against
+            // to decide a path is current — every Pi transcript would fail that check and be
+            // fully re-parsed on every kick.
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.allSessions = result.sessions
@@ -155,7 +164,8 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
         var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
-        Task { @MainActor [weak self] in self?.sessions = results }
+        let publishedResults = results
+        Task { @MainActor [weak self] in self?.sessions = publishedResults }
     }
 
     func updateSession(_ updated: Session) {

@@ -3,6 +3,70 @@ import XCTest
 
 final class AnalyticsIndexerTests: XCTestCase {
 
+    func testPiAndKimiAreAnalyticsSupportedSources() {
+        XCTAssertTrue(AnalyticsSourceSupport.sources.contains(.pi))
+        XCTAssertTrue(AnalyticsSourceSupport.rawValues.contains(SessionSource.pi.rawValue))
+        XCTAssertTrue(AnalyticsAgentFilter.piOnly.matches(.pi))
+        XCTAssertFalse(AnalyticsAgentFilter.piOnly.matches(.codex))
+
+        XCTAssertTrue(AnalyticsSourceSupport.sources.contains(.kimi))
+        XCTAssertTrue(AnalyticsSourceSupport.rawValues.contains(SessionSource.kimi.rawValue))
+        XCTAssertTrue(AnalyticsAgentFilter.kimiOnly.matches(.kimi))
+        XCTAssertFalse(AnalyticsAgentFilter.kimiOnly.matches(.pi))
+    }
+
+    /// Every analytics-supported source needs exactly one dedicated `AnalyticsAgentFilter`
+    /// case, otherwise the Analytics agent picker has no way to isolate it and the source
+    /// only ever appears folded into "All Agents". The converse is deliberately not
+    /// asserted: `.openclawOnly` filters a source analytics does not roll up.
+    func testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter() {
+        for source in AnalyticsSourceSupport.sources {
+            let matching = AnalyticsAgentFilter.allCases.filter { $0 != .all && $0.matches(source) }
+            XCTAssertEqual(matching.count, 1,
+                           "\(source.rawValue) needs exactly one dedicated agent filter, found \(matching.map(\.rawValue))")
+        }
+    }
+
+    func testPiSessionMetaCanPopulateAnalyticsRollups() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let now = Date()
+        let session = Session(
+            id: "pi-analytics",
+            source: .pi,
+            startTime: now.addingTimeInterval(-120),
+            endTime: now,
+            model: "pi-test-model",
+            filePath: "/tmp/pi-analytics.jsonl",
+            fileSizeBytes: 512,
+            eventCount: 4,
+            events: [],
+            cwd: "/tmp/pi-project",
+            repoName: "pi-project",
+            lightweightTitle: "Analyze Pi sessions",
+            lightweightCommands: 1
+        )
+
+        try await db.upsertFile(
+            path: session.filePath,
+            mtime: Int64(session.modifiedAt.timeIntervalSince1970),
+            size: Int64(session.fileSizeBytes ?? 0),
+            source: SessionSource.pi.rawValue
+        )
+        try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+        let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.pi.rawValue])
+        let failures = await indexer.fullBuild(onSourceComplete: { _ in })
+
+        XCTAssertTrue(failures.isEmpty)
+        let sessionMetaCount = try await db.rowCountForTesting(table: "session_meta", source: "pi")
+        let sessionDaysCount = try await db.rowCountForTesting(table: "session_days", source: "pi")
+        let rollupsDailyCount = try await db.rowCountForTesting(table: "rollups_daily", source: "pi")
+        XCTAssertEqual(sessionMetaCount, 1)
+        XCTAssertEqual(sessionDaysCount, 1)
+        XCTAssertEqual(rollupsDailyCount, 1)
+    }
+
     // MARK: - deriveSessionDayRows tests
 
     func testDaySplitSingleDay() throws {

@@ -706,9 +706,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @MainActor private var analyticsProgressBySource: [String: (processed: Int, total: Int)] = [:]
     private var analyticsBuildTask: Task<Void, Never>?
     var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
-    private static let analyticsSupportedSources: Set<String> = [
-        "codex", "claude", "antigravity", "opencode", "hermes", "copilot", "droid"
-    ]
+    private static let analyticsSupportedSources = AnalyticsSourceSupport.rawValues
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
@@ -1247,21 +1245,35 @@ final class UnifiedSessionIndexer: ObservableObject {
         rebuildClaudeArchiveOverlay()
     }
 
+    /// Every provider's current enabled state, mirrored from `AgentEnablement` into the
+    /// published properties. Single source of truth for "which providers are on right
+    /// now" — read by both the enablement-sync diff below and `enabledAnalyticsSources()`.
+    /// Built from `allCases` over an exhaustive switch rather than written out as a
+    /// dictionary literal: a literal can silently omit a provider, whereas the switch
+    /// below will not compile until a newly added `SessionSource` is handled.
+    var enablementBySource: [SessionSource: Bool] {
+        Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, isAgentEnabled($0)) })
+    }
+
+    func isAgentEnabled(_ source: SessionSource) -> Bool {
+        switch source {
+        case .codex: return codexAgentEnabled
+        case .claude: return claudeAgentEnabled
+        case .antigravity: return antigravityAgentEnabled
+        case .opencode: return openCodeAgentEnabled
+        case .hermes: return hermesAgentEnabled
+        case .copilot: return copilotAgentEnabled
+        case .droid: return droidAgentEnabled
+        case .openclaw: return openClawAgentEnabled
+        case .cursor: return cursorAgentEnabled
+        case .pi: return piAgentEnabled
+        case .kimi: return kimiAgentEnabled
+        }
+    }
+
     func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
         let beforeSources = enabledAnalyticsSources()
-        let previousEnablementBySource: [SessionSource: Bool] = [
-            .codex: codexAgentEnabled,
-            .claude: claudeAgentEnabled,
-            .antigravity: antigravityAgentEnabled,
-            .opencode: openCodeAgentEnabled,
-            .hermes: hermesAgentEnabled,
-            .copilot: copilotAgentEnabled,
-            .droid: droidAgentEnabled,
-            .openclaw: openClawAgentEnabled,
-            .cursor: cursorAgentEnabled,
-            .pi: piAgentEnabled,
-            .kimi: kimiAgentEnabled
-        ]
+        let previousEnablementBySource = enablementBySource
         let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
         let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
         let c3 = AgentEnablement.isEnabled(.antigravity, defaults: defaults)
@@ -2437,16 +2449,15 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// Returns the subset of currently enabled agents that support analytics.
+    ///
+    /// Derived from `enablementBySource` rather than its own per-provider list. The two
+    /// used to be maintained in parallel — a new analytics provider had to be added to
+    /// `AnalyticsSourceSupport` *and* remembered here — and nothing failed if you forgot
+    /// the second one: the provider simply never entered an analytics build. Sharing the
+    /// map means the omission now breaks enablement sync too, which is loud.
     func enabledAnalyticsSources() -> Set<String> {
-        var enabled = Set<String>()
-        if codexAgentEnabled { enabled.insert("codex") }
-        if claudeAgentEnabled { enabled.insert("claude") }
-        if antigravityAgentEnabled { enabled.insert("antigravity") }
-        if openCodeAgentEnabled { enabled.insert("opencode") }
-        if hermesAgentEnabled { enabled.insert("hermes") }
-        if copilotAgentEnabled { enabled.insert("copilot") }
-        if droidAgentEnabled { enabled.insert("droid") }
-        return enabled.intersection(Self.analyticsSupportedSources)
+        let enabled = enablementBySource.lazy.filter(\.value).map(\.key.rawValue)
+        return Set(enabled).intersection(Self.analyticsSupportedSources)
     }
 
     /// Returns the set of analytics-supported sources that haven't completed a full backfill.

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Analytics: Added Pi and Kimi Code session statistics, including Pi-only and Kimi-only filtering, project discovery, agent breakdowns, and indexed session/message/duration rollups.
+
 ## [4.6.4] - 2026-07-21
 
 ### Highlights

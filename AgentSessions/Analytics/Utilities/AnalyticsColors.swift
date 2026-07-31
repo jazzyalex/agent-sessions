@@ -105,6 +105,8 @@ extension Color {
             return .agentCursor
         } else if lower == "pi" || lower.contains("pi coding") {
             return .agentPi
+        } else if lower.contains("kimi") {
+            return .agentKimi
         } else {
             return .accentColor
         }
@@ -134,6 +136,8 @@ extension Color {
                 return .agentCursorGray
             } else if lower == "pi" || lower.contains("pi coding") {
                 return .agentPiGray
+            } else if lower.contains("kimi") {
+                return .agentKimiGray
             } else {
                 return .secondary
             }

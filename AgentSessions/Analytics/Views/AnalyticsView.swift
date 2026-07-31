@@ -11,6 +11,12 @@ struct AnalyticsView: View {
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
+    // Pi and Kimi default to their availability probe, not `true`: `AgentEnablement`
+    // gates both on the CLI actually being present, so a literal would show their
+    // agent filters to everyone whenever `seedIfNeeded` has not written an explicit
+    // value yet — which is every preview and test run. Matches PreferencesView.
+    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
+    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -21,7 +27,8 @@ struct AnalyticsView: View {
 
     private var hasEnabledSources: Bool {
         codexAgentEnabled || claudeAgentEnabled || antigravityAgentEnabled ||
-        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled
+        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled ||
+        piAgentEnabled || kimiAgentEnabled
     }
 
     var body: some View {
@@ -95,6 +102,8 @@ struct AnalyticsView: View {
         .onChange(of: hermesAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: piAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: kimiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         // Apply preferredColorScheme only for explicit Light/Dark modes
         // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
@@ -336,7 +345,7 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
+        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && piAgentEnabled && kimiAgentEnabled)
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
@@ -348,6 +357,8 @@ struct AnalyticsView: View {
         if hermesAgentEnabled { out.append(.hermesOnly) }
         if copilotAgentEnabled { out.append(.copilotOnly) }
         if droidAgentEnabled { out.append(.droidOnly) }
+        if piAgentEnabled { out.append(.piOnly) }
+        if kimiAgentEnabled { out.append(.kimiOnly) }
         return out
     }
 
@@ -392,7 +403,9 @@ extension View {
         opencodeIndexer: opencodeIndexer,
         hermesIndexer: hermesIndexer,
         copilotIndexer: copilotIndexer,
-        droidIndexer: DroidSessionIndexer()
+        droidIndexer: DroidSessionIndexer(),
+        piIndexer: PiSessionIndexer(),
+        kimiIndexer: KimiSessionIndexer()
     )
 
     AnalyticsView(service: service)

@@ -116,10 +116,9 @@ agents:
   pi:
     max_verified_version: "0.81.1"
     version_field: "not_logged"
-    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, and weekly session-format monitoring"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
-      - "analytics"
       - "usage/rate-limit tracking"
       - "subagent hierarchy"
     evidence_docs:
@@ -138,10 +137,9 @@ agents:
   kimi_code:
     max_verified_version: "0.31.1"
     version_field: "not_logged"
-    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, and weekly session-format monitoring"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
-      - "analytics"
       - "usage/rate-limit tracking"
       - "subagent hierarchy"
       - "launch-in-terminal resume (copy-resume only; no CLI probe surface)"
