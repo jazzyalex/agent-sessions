@@ -218,6 +218,50 @@ Record every upstream check, even if no changes are needed.
 - Fixtures:
   - `Resources/Fixtures/stage0/agents/droid/{session_store_small,session_store_large,stream_json_small,stream_json_large,session_store_schema_drift,stream_json_schema_drift}.jsonl`
 
+## Kimi Code (`kimi`, Moonshot AI) — added 2026-07-25
+- Verified CLI version: `0.29.2` (npm `@moonshot-ai/kimi-code`; the CLI auto-updates).
+- Session roots:
+  - `$KIMI_CODE_HOME` or `~/.kimi-code`
+  - Journals: `sessions/wd_<slug>_<sha256[0:12]>/<sessionId>/agents/<agentId>/wire.jsonl`
+  - Only `agents/main` is a session; sibling agent dirs are subagent journals and are excluded.
+  - Sidecar: `<sessionId>/state.json` (`title`, `isCustomTitle`, `workDir`, `lastPrompt`, `archived`)
+  - Root index: `session_index.jsonl` (`{sessionId, sessionDir, workDir}` / `{sessionId, deleted:true}`)
+- Format notes:
+  - Line 1 is the journal envelope: `{type:"metadata", protocol_version, created_at}` (epoch ms).
+  - Later lines are flattened ops: `{type, ...payload, time}` (epoch ms).
+  - Conversation content is `context.append_message` with `message.role` in
+    `system|user|assistant|tool`, `message.content[]` parts (`text`/`think`/`image_url`/
+    `audio_url`/`video_url`), `message.toolCalls[]`, and `message.toolCallId` on tool results.
+  - `turn.prompt`/`turn.steer` duplicate the prompt text and resolve to `.meta` so prompts are
+    not counted twice.
+- Facts only a real capture revealed (do not trust the source constants):
+  - Emitted `protocol_version` is **1.4**, not the `1.5` constant in
+    `packages/agent-core-v2/src/wire/migration/migration.ts` at source HEAD.
+  - `config.update` carries **`modelAlias`** (`"moonshot-ai/kimi-k2.7-code"`), never a bare
+    `model`; `llm.request` carries both `modelAlias` and concrete `model` (`"kimi-k2.7-code"`).
+  - Session directories are prefixed `session_<uuid>`; `kimi -S session_<uuid>` resolves that id.
+- Recent changes:
+  - 2026-07-25 weekly scan flagged `permission.set_mode` (`{mode,time,type}`) as an unknown type.
+    Additive, no renderable content, resolves to `.meta` via the parser fallback; appended to the
+    fixture baseline. Rescan: `unknown_types: []`, `supports_installed_only`, severity low.
+- Deliberately not read: `packages/minidb` (bespoke binary Bitcask-style KV store) is gated behind
+  `persistence_minidb_readmodel` (`default:false`) and is only a derived read model.
+- Monitoring caveat: no prebump driver yet. `kimi -p` is a real headless mode so one is buildable,
+  but drivers are Python classes in `DRIVERS` in `scripts/agent_watch_prebump_drivers.py`. Weekly
+  `local_schema` is currently the only drift signal.
+- Adding a JSONL agent to `scripts/agent_watch.py` is **not config-only**: four hardcoded maps need
+  the new name (`verified_map`, two `matrix_key` maps, and the agent tuple in
+  `_baseline_type_keys_for_agent`).
+- Parser entry points:
+  - `AgentSessions/Services/KimiSessionParser.swift`
+  - `AgentSessions/Services/KimiSessionDiscovery.swift`
+  - `AgentSessions/KimiResume/KimiResumeCommandBuilder.swift`
+- Fixtures:
+  - `Resources/Fixtures/stage0/agents/kimi/{small.jsonl,state.json}`
+  - Gap: the capture account was suspended for insufficient balance (429 `provider.rate_limit`), so
+    the fixture has no assistant message and no tool call; the `.assistant`/`.tool_call`/
+    `.tool_result` parser paths are unexercised by fixture. Re-capture on a funded account.
+
 ## Support Matrix Link
 - `docs/agent-support/agent-support-matrix.yml`
 - This memory bank references the matrix for "max verified" agent versions.

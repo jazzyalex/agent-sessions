@@ -511,6 +511,28 @@
           "required_types": ["session", "message"]
         }
       }
+    },
+    "kimi": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["kimi", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.kimi_code.max_verified_version",
+      "upstream": [
+        { "kind": "npm_latest", "package": "@moonshot-ai/kimi-code" }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "jsonl", "format", "schema", "transcript", "storage", "migration", "wire", "protocol_version"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["$KIMI_CODE_HOME", "~/.kimi-code"],
+          "glob": "sessions/**/agents/main/wire.jsonl",
+          "required_types": ["metadata", "context.append_message"],
+          "max_lines": 2500
+        },
+        "freshness_window_days": 30
+      }
     }
   }
 }

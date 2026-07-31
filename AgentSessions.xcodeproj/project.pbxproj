@@ -73,6 +73,7 @@
 		20E79D2FC12457C2AD5CCB0A /* UnifiedSearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C29E004E088B0110C36DAAAC /* UnifiedSearchState.swift */; };
 		21A2B7DC31A63FEB4C316C15 /* PerfSignpost.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C68DFDDE07CC8C0EE7E6E6 /* PerfSignpost.swift */; };
 		22047AEA4AB1CEB601B2D6D9 /* PreferencesView+Layout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FDF7F775847439915BB0C6C /* PreferencesView+Layout.swift */; };
+		2265AC4941970336C44F1B30 /* KimiResumeCommandBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E59B42B08669EF803B1BDBA /* KimiResumeCommandBuilderTests.swift */; };
 		22D7C3CBAAB06C3EF5BB149C /* WhatsNewPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79714DEBBDCDA7E48A76E6F5 /* WhatsNewPanelView.swift */; };
 		234FE1D3DDA01DAF1A249158 /* ClaudeUsageSourceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35C4B3819D890B69E867FFB /* ClaudeUsageSourceManager.swift */; };
 		24524E88038B4281ADC04D50 /* WindowFocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9159BA43088946369D1A3FA3 /* WindowFocusCoordinator.swift */; };
@@ -84,6 +85,7 @@
 		27BB05A35A471ED1FFC1C708 /* AntigravityTranscriptParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5C3395AC2B4F1F9896C8D8 /* AntigravityTranscriptParser.swift */; };
 		27D65795FBB9A8C67FA36577 /* ClaudeRunwaySnapshotLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49D561C823DF3D2B9F08E1E /* ClaudeRunwaySnapshotLoader.swift */; };
 		288E91B39896BB860B423D66 /* ClaudeSessionIDHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC22A5E02E467F75F38C932 /* ClaudeSessionIDHelper.swift */; };
+		28E75806995F590B0ABA55F0 /* KimiResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D278B7DB3B81B81E14D3CDA /* KimiResumeCommandBuilder.swift */; };
 		28E99A62167E3F8259961EBB /* RunwayPriceTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349A78100A34B0CEF7C7EB9E /* RunwayPriceTable.swift */; };
 		2945B436E48D3A77B56E83F9 /* HermesResumeCommandBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F9C389CE8ABE2E70026198C /* HermesResumeCommandBuilder.swift */; };
 		29842731F65B52E09B2A273D /* AppearanceHostingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D41C7E29CA7A68BEC72BA4 /* AppearanceHostingView.swift */; };
@@ -559,6 +561,7 @@
 		1CEF79B7E9C647086B5CC323 /* OpenCodeTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeTranscriptView.swift; path = AgentSessions/Views/OpenCodeTranscriptView.swift; sourceTree = SOURCE_ROOT; };
 		1E4A5D9227D8C4D69B07535D /* OpenClawSyncTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/OpenClawSyncTests.swift; sourceTree = SOURCE_ROOT; };
 		1E4C4564CA93E42759CAAE8B /* HeadlessAgentPresenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/HeadlessAgentPresenceTests.swift; sourceTree = SOURCE_ROOT; };
+		1E59B42B08669EF803B1BDBA /* KimiResumeCommandBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/KimiResumeCommandBuilderTests.swift; sourceTree = SOURCE_ROOT; };
 		1F6B29196A4FDB37934D43CC /* PinnedSessionsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/PinnedSessionsView.swift; sourceTree = SOURCE_ROOT; };
 		2095336D58948BF31FB74EB7 /* CrashReportStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/CrashReporting/CrashReportStore.swift; sourceTree = SOURCE_ROOT; };
 		214B1D26E0D5AB39144C1382 /* OpenClawTranscriptView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Views/OpenClawTranscriptView.swift; sourceTree = SOURCE_ROOT; };
@@ -732,6 +735,7 @@
 		8AC54FCC94EC9F1A7A25BE98 /* OpenClawSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/OpenClawSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
 		8C35EECDEE4FA059F107D4E7 /* OptionalDateEquality.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/OptionalDateEquality.swift; sourceTree = SOURCE_ROOT; };
 		8CE29EC91B53B1B1309B298C /* UsageResetTextTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/UsageResetTextTests.swift; sourceTree = SOURCE_ROOT; };
+		8D278B7DB3B81B81E14D3CDA /* KimiResumeCommandBuilder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/KimiResume/KimiResumeCommandBuilder.swift; sourceTree = SOURCE_ROOT; };
 		8D4509ADD90E0871F4CBC066 /* OpenCodeCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeCLIEnvironment.swift; path = AgentSessions/OpenCode/OpenCodeCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		8DC22A5E02E467F75F38C932 /* ClaudeSessionIDHelper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeResume/ClaudeSessionIDHelper.swift; sourceTree = SOURCE_ROOT; };
 		8DFCF251FDCACECB39D27901 /* ClaudeCredentialFingerprintTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ClaudeOAuth/ClaudeCredentialFingerprintTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1480,6 +1484,7 @@
 				224B7655A6CC7C3E3C3D6B7F /* Pi */,
 				5DC9ECA4EAC133CDE4FF2A37 /* ReverseJSONLTailReader.swift */,
 				6C47D1F8DE971D142E8DD32B /* Shared */,
+				CEDA97161BA187D72AD38B57 /* KimiResume */,
 			);
 			path = AgentSessions;
 			sourceTree = SOURCE_ROOT;
@@ -1607,6 +1612,7 @@
 				1E4C4564CA93E42759CAAE8B /* HeadlessAgentPresenceTests.swift */,
 				A41F008CC9A18910C72A1A43 /* KimiSessionDiscoveryTests.swift */,
 				A68F04B1FE6FAB14000F57CF /* KimiSessionParserTests.swift */,
+				1E59B42B08669EF803B1BDBA /* KimiResumeCommandBuilderTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -1865,6 +1871,14 @@
 				8377C59F44C93382D44E3A6D /* CodexRateLimitWindowClassifier.swift */,
 			);
 			path = CodexStatus;
+			sourceTree = "<group>";
+		};
+		CEDA97161BA187D72AD38B57 /* KimiResume */ = {
+			isa = PBXGroup;
+			children = (
+				8D278B7DB3B81B81E14D3CDA /* KimiResumeCommandBuilder.swift */,
+			);
+			name = KimiResume;
 			sourceTree = "<group>";
 		};
 		CFA90001000000000000000A /* ClaudeResume */ = {
@@ -2574,6 +2588,7 @@
 				6FEE88318AD2970CAB36B3E8 /* KimiSessionDiscovery.swift in Sources */,
 				6522C054F1A5199237F6E4B8 /* KimiSessionParser.swift in Sources */,
 				B25525B6C430CD3BFA5E7384 /* KimiSessionIndexer.swift in Sources */,
+				28E75806995F590B0ABA55F0 /* KimiResumeCommandBuilder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2711,6 +2726,7 @@
 				A7F7596115762B845A507D83 /* HeadlessAgentPresenceTests.swift in Sources */,
 				09408FD3D8663A6A9E8724B3 /* KimiSessionDiscoveryTests.swift in Sources */,
 				1EA7B8F88FE04F7994FBB531 /* KimiSessionParserTests.swift in Sources */,
+				2265AC4941970336C44F1B30 /* KimiResumeCommandBuilderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

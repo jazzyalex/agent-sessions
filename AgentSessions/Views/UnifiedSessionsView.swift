@@ -1626,6 +1626,16 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
+        case .kimi:
+            // Tier-2: no Kimi settings surface, so the binary is always the
+            // bare `kimi` on PATH.
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            let builder = KimiResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: builder.strategy(forSessionID: session.id),
+                                                          binaryCommand: "kimi") else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            pb.setString(command, forType: .string)
+
         case .antigravity:
             let settings = AntigravityCLISettings.shared
             guard let sid = antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session) else { return }

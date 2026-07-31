@@ -1324,7 +1324,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
     fps: list[dict[str, Any]] = []
 
-    if agent_name in ("codex", "claude", "copilot", "droid", "pi"):
+    if agent_name in ("codex", "claude", "copilot", "droid", "pi", "kimi"):
         for p in filtered:
             if not p.endswith(".jsonl"):
                 continue
@@ -2437,6 +2437,7 @@ def _run_prebump(
                 "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
                 "antigravity": "antigravity", "opencode": "opencode", "hermes": "hermes",
                 "openclaw": "openclaw", "cursor": "cursor", "pi": "pi",
+                "kimi": "kimi_code",
             }.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
@@ -2571,6 +2572,7 @@ def main(argv: list[str]) -> int:
         "openclaw": matrix_versions.get("openclaw"),
         "cursor": matrix_versions.get("cursor"),
         "pi": matrix_versions.get("pi"),
+        "kimi": matrix_versions.get("kimi_code"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -2719,6 +2721,7 @@ def main(argv: list[str]) -> int:
                     "openclaw": "openclaw",
                     "cursor": "cursor",
                     "pi": "pi",
+                    "kimi": "kimi_code",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)

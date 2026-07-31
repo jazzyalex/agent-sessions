@@ -84,7 +84,7 @@ final class KimiSessionParserTests: XCTestCase {
 
         for family in ["metadata", "tools.set_active_tools", "llm.request",
                        "llm.tools_snapshot", "turn.steer", "turn.cancel",
-                       "context.append_loop_event"] {
+                       "context.append_loop_event", "permission.set_mode"] {
             let matches = session.events.filter { $0.rawJSON.contains("\"type\":\"\(family)\"") }
             XCTAssertFalse(matches.isEmpty, "fixture should contain \(family)")
             XCTAssertTrue(matches.allSatisfy { $0.kind == .meta }, "\(family) must resolve to .meta")

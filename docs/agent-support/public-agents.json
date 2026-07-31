@@ -8,6 +8,7 @@
     { "id": "pi", "public_name": "Pi" },
     { "id": "antigravity", "public_name": "Antigravity CLI" },
     { "id": "hermes", "public_name": "Hermes" },
-    { "id": "openclaw", "public_name": "OpenClaw" }
+    { "id": "openclaw", "public_name": "OpenClaw" },
+    { "id": "kimi", "public_name": "Kimi Code" }
   ]
 }
