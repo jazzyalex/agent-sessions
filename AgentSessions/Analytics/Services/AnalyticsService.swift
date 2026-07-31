@@ -19,13 +19,12 @@ final class AnalyticsService: ObservableObject {
     private let hermesIndexer: HermesSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
     private let droidIndexer: DroidSessionIndexer
+    private let piIndexer: PiSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
     private let repository: AnalyticsRepository?
 
-    private static let analyticsSupportedSources: Set<SessionSource> = [
-        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid
-    ]
+    private static let analyticsSupportedSources = AnalyticsSourceSupport.sources
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 
     init(codexIndexer: SessionIndexer,
@@ -34,7 +33,8 @@ final class AnalyticsService: ObservableObject {
          opencodeIndexer: OpenCodeSessionIndexer,
          hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer) {
+         droidIndexer: DroidSessionIndexer,
+         piIndexer: PiSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.antigravityIndexer = antigravityIndexer
@@ -42,6 +42,7 @@ final class AnalyticsService: ObservableObject {
         self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
         self.droidIndexer = droidIndexer
+        self.piIndexer = piIndexer
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -90,6 +91,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -122,6 +124,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -377,7 +380,9 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            raw = [SessionSource.codex.rawValue, SessionSource.claude.rawValue, SessionSource.antigravity.rawValue, SessionSource.opencode.rawValue, SessionSource.hermes.rawValue, SessionSource.copilot.rawValue, SessionSource.droid.rawValue, SessionSource.openclaw.rawValue]
+            // Keep the legacy OpenClaw DB query path while centralizing sources that
+            // participate in analytics build/readiness tracking.
+            raw = AnalyticsSourceSupport.sources.union([.openclaw]).map(\.rawValue).sorted()
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
@@ -394,6 +399,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.droid.rawValue]
         case .openclawOnly:
             raw = [SessionSource.openclaw.rawValue]
+        case .piOnly:
+            raw = [SessionSource.pi.rawValue]
         }
         return raw.filter { enabled.contains($0) }
     }
@@ -724,10 +731,13 @@ final class AnalyticsService: ObservableObject {
 
     private func setupObservers() {
         // Observe when session data changes (for auto-refresh when window visible)
-        Publishers.CombineLatest3(
-            Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, antigravityIndexer.$allSessions, opencodeIndexer.$allSessions),
-            Publishers.CombineLatest(hermesIndexer.$allSessions, copilotIndexer.$allSessions),
-            droidIndexer.$allSessions
+        Publishers.CombineLatest(
+            Publishers.CombineLatest3(
+                Publishers.CombineLatest4(codexIndexer.$allSessions, claudeIndexer.$allSessions, antigravityIndexer.$allSessions, opencodeIndexer.$allSessions),
+                Publishers.CombineLatest(hermesIndexer.$allSessions, copilotIndexer.$allSessions),
+                droidIndexer.$allSessions
+            ),
+            piIndexer.$allSessions
         )
             .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
             .sink { _ in
@@ -735,13 +745,16 @@ final class AnalyticsService: ObservableObject {
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest3(
-            Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
-            Publishers.CombineLatest(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase),
-            droidIndexer.$launchPhase
+        Publishers.CombineLatest(
+            Publishers.CombineLatest3(
+                Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
+                Publishers.CombineLatest(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase),
+                droidIndexer.$launchPhase
+            ),
+            piIndexer.$launchPhase
         )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in
+            .sink { [weak self] _ in
                 self?.updateReadiness()
             }
             .store(in: &cancellables)
@@ -759,7 +772,8 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.opencode, opencodeIndexer.launchPhase),
                 (SessionSource.hermes, hermesIndexer.launchPhase),
                 (SessionSource.copilot, copilotIndexer.launchPhase),
-                (SessionSource.droid, droidIndexer.launchPhase)
+                (SessionSource.droid, droidIndexer.launchPhase),
+                (SessionSource.pi, piIndexer.launchPhase)
             ].filter { enabled.contains($0.0) }.map { $0.1 }
             let phasesReady = phases.allSatisfy { phase in
                 switch phase {

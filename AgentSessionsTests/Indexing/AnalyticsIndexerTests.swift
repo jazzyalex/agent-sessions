@@ -3,6 +3,56 @@ import XCTest
 
 final class AnalyticsIndexerTests: XCTestCase {
 
+    func testPiIsAnAnalyticsSupportedSource() {
+        XCTAssertEqual(
+            AnalyticsSourceSupport.sources,
+            Set([.codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid, .pi])
+        )
+        XCTAssertTrue(AnalyticsSourceSupport.rawValues.contains(SessionSource.pi.rawValue))
+        XCTAssertTrue(AnalyticsAgentFilter.piOnly.matches(.pi))
+        XCTAssertFalse(AnalyticsAgentFilter.piOnly.matches(.codex))
+    }
+
+    func testPiSessionMetaCanPopulateAnalyticsRollups() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let now = Date()
+        let session = Session(
+            id: "pi-analytics",
+            source: .pi,
+            startTime: now.addingTimeInterval(-120),
+            endTime: now,
+            model: "pi-test-model",
+            filePath: "/tmp/pi-analytics.jsonl",
+            fileSizeBytes: 512,
+            eventCount: 4,
+            events: [],
+            cwd: "/tmp/pi-project",
+            repoName: "pi-project",
+            lightweightTitle: "Analyze Pi sessions",
+            lightweightCommands: 1
+        )
+
+        try await db.upsertFile(
+            path: session.filePath,
+            mtime: Int64(session.modifiedAt.timeIntervalSince1970),
+            size: Int64(session.fileSizeBytes ?? 0),
+            source: SessionSource.pi.rawValue
+        )
+        try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+        let indexer = AnalyticsIndexer(db: db, enabledSources: [SessionSource.pi.rawValue])
+        let failures = await indexer.fullBuild(onSourceComplete: { _ in })
+
+        XCTAssertTrue(failures.isEmpty)
+        let sessionMetaCount = try await db.rowCountForTesting(table: "session_meta", source: "pi")
+        let sessionDaysCount = try await db.rowCountForTesting(table: "session_days", source: "pi")
+        let rollupsDailyCount = try await db.rowCountForTesting(table: "rollups_daily", source: "pi")
+        XCTAssertEqual(sessionMetaCount, 1)
+        XCTAssertEqual(sessionDaysCount, 1)
+        XCTAssertEqual(rollupsDailyCount, 1)
+    }
+
     // MARK: - deriveSessionDayRows tests
 
     func testDaySplitSingleDay() throws {

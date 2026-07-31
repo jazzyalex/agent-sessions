@@ -128,6 +128,33 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
             )
 
             let result = await SessionIndexingEngine.hydrateOrScan(config: config)
+            guard self.refreshToken == token, !Task.isCancelled else { return }
+
+            if let db = try? IndexDB() {
+                do {
+                    let persistedPaths = Set(result.sessions.map(\.filePath))
+                    let indexedPaths = Set((try? await db.fetchIndexedFiles(for: SessionSource.pi.rawValue).map(\.path)) ?? [])
+                    let removedPaths = Array(indexedPaths.subtracting(persistedPaths))
+
+                    try await db.begin()
+                    if !removedPaths.isEmpty {
+                        _ = try await db.deleteSessionsForPaths(source: SessionSource.pi.rawValue, paths: removedPaths)
+                    }
+                    for session in result.sessions {
+                        try await db.upsertFile(
+                            path: session.filePath,
+                            mtime: Int64(session.modifiedAt.timeIntervalSince1970),
+                            size: Int64(session.fileSizeBytes ?? 0),
+                            source: SessionSource.pi.rawValue
+                        )
+                        try await db.upsertSessionMetaCore(SessionIndexer.sessionMetaRow(from: session))
+                    }
+                    try await db.commit()
+                } catch {
+                    await db.rollbackSilently()
+                }
+            }
+
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.allSessions = result.sessions
@@ -155,7 +182,8 @@ final class PiSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
         var results = FilterEngine.filterSessions(allSessions, filters: filters, transcriptCache: transcriptCache, allowTranscriptGeneration: !FeatureFlags.filterUsesCachedTranscriptOnly)
         if hideZeroMessageSessionsPref { results = results.filter { $0.messageCount > 0 } }
         if hideLowMessageSessionsPref { results = results.filter { $0.messageCount == 0 || $0.messageCount > 2 } }
-        Task { @MainActor [weak self] in self?.sessions = results }
+        let publishedResults = results
+        Task { @MainActor [weak self] in self?.sessions = publishedResults }
     }
 
     func updateSession(_ updated: Session) {

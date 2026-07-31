@@ -673,9 +673,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @MainActor private var analyticsProgressBySource: [String: (processed: Int, total: Int)] = [:]
     private var analyticsBuildTask: Task<Void, Never>?
     var isAnalyticsIndexing: Bool { analyticsPhase == .queued || analyticsPhase == .building }
-    private static let analyticsSupportedSources: Set<String> = [
-        "codex", "claude", "antigravity", "opencode", "hermes", "copilot", "droid"
-    ]
+    private static let analyticsSupportedSources = AnalyticsSourceSupport.rawValues
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
     private static let analyticsLastBuiltAtDefaultsKey = "AnalyticsLastBuiltAt"
     private let providerRefreshCoordinator = ProviderRefreshCoordinator(coalesceWindowSeconds: 10)
@@ -2374,6 +2372,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if hermesAgentEnabled { enabled.insert("hermes") }
         if copilotAgentEnabled { enabled.insert("copilot") }
         if droidAgentEnabled { enabled.insert("droid") }
+        if piAgentEnabled { enabled.insert("pi") }
         return enabled.intersection(Self.analyticsSupportedSources)
     }
 

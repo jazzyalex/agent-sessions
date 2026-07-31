@@ -1060,7 +1060,8 @@ extension AgentSessionsApp {
             opencodeIndexer: opencodeIndexer,
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
-            droidIndexer: droidIndexer
+            droidIndexer: droidIndexer,
+            piIndexer: piIndexer
         )
         analyticsService = service
 

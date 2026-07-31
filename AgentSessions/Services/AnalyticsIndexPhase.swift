@@ -22,6 +22,14 @@ enum AnalyticsIndexPhase: Equatable, Sendable {
     static let backfillVersion: Int = 1
 }
 
+enum AnalyticsSourceSupport {
+    static let sources: Set<SessionSource> = [
+        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid, .pi
+    ]
+
+    static let rawValues: Set<String> = Set(sources.map(\.rawValue))
+}
+
 struct AnalyticsBuildProgress: Equatable, Sendable {
     let processedSessions: Int
     let totalSessions: Int

@@ -11,6 +11,7 @@ struct AnalyticsView: View {
     @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = true
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -21,7 +22,8 @@ struct AnalyticsView: View {
 
     private var hasEnabledSources: Bool {
         codexAgentEnabled || claudeAgentEnabled || antigravityAgentEnabled ||
-        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled
+        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled ||
+        piAgentEnabled
     }
 
     var body: some View {
@@ -95,6 +97,7 @@ struct AnalyticsView: View {
         .onChange(of: hermesAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        .onChange(of: piAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
         // Apply preferredColorScheme only for explicit Light/Dark modes
         // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
@@ -336,7 +339,7 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled)
+        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && copilotAgentEnabled && droidAgentEnabled && piAgentEnabled)
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
@@ -348,6 +351,7 @@ struct AnalyticsView: View {
         if hermesAgentEnabled { out.append(.hermesOnly) }
         if copilotAgentEnabled { out.append(.copilotOnly) }
         if droidAgentEnabled { out.append(.droidOnly) }
+        if piAgentEnabled { out.append(.piOnly) }
         return out
     }
 
@@ -392,7 +396,8 @@ extension View {
         opencodeIndexer: opencodeIndexer,
         hermesIndexer: hermesIndexer,
         copilotIndexer: copilotIndexer,
-        droidIndexer: DroidSessionIndexer()
+        droidIndexer: DroidSessionIndexer(),
+        piIndexer: PiSessionIndexer()
     )
 
     AnalyticsView(service: service)

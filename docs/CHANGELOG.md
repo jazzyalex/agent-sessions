@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Analytics: Added Pi session statistics, including Pi-only filtering, project discovery, agent breakdowns, and indexed session/message/duration rollups.
+
 ## [4.6.4] - 2026-07-21
 
 ### Highlights
@@ -261,7 +264,7 @@ All notable changes to this project will be documented in this file.
 ## [3.8] - 2026-05-12
 ### Features
 - Agent Sessions is no longer just for CLI agents: Codex Desktop and Claude Desktop sessions now sit more naturally beside CLI histories, making the app a stronger hub for browsing, filtering, and identifying sessions regardless of whether they came from the terminal or a native desktop app.
-- Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status, analytics, and usage tracking remain unsupported.
+- Pi CLI agent: Added tier-2 local support for Pi JSONL sessions under `~/.pi/agent/sessions`, including discovery, browsing, search, Preferences controls, Pi accent colors, and Resume/Copy Resume commands via `pi --session`; Agent Cockpit/live status and usage tracking remain unsupported, while analytics support was added later.
 
 ### Bug Fixes
 - Session list: Archived Codex Desktop filtering now supports archived-only browsing and keeps archived Desktop rows visually distinct on the existing `desk` pill.
