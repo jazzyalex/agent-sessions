@@ -566,6 +566,15 @@ private struct ClaudeWebSessionCookieCallout: View {
     @AppStorage(PreferencesKey.claudeUsageEnabled)
     private var claudeUsageEnabledForCloud: Bool = false
 
+    /// Both halves of the gate `AgentCockpitHUDView.entries` applies — usage tracking
+    /// alone is not sufficient; the Claude agent must be enabled too (default true).
+    @AppStorage(PreferencesKey.Agents.claudeEnabled)
+    private var claudeAgentEnabledForCloud: Bool = true
+
+    private var cloudPrerequisitesMet: Bool {
+        claudeAgentEnabledForCloud && claudeUsageEnabledForCloud
+    }
+
     private let store = ClaudeManualWebCookieStore.shared
 
     var body: some View {
@@ -589,13 +598,17 @@ private struct ClaudeWebSessionCookieCallout: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 2) {
+                        // Deliberately NOT `.disabled()`. That blocks both directions,
+                        // so a user who enabled this and later turned off usage
+                        // tracking could not turn it back off. The enable is enforced
+                        // in ClaudeCloudLiveModel.effectivelyEnabled() instead — the
+                        // model stops polling — leaving this control always operable.
                         Toggle("Show Claude cloud sessions in Quota Meter (experimental)",
                                isOn: $claudeCloudSessionsEnabled)
                             .font(.caption)
-                            .disabled(!claudeUsageEnabledForCloud)
-                        Text(claudeUsageEnabledForCloud
+                        Text(cloudPrerequisitesMet
                              ? "Sessions running on Anthropic's servers appear as live rows next to your local agents. Read-only; nothing is stored on disk. Uses an undocumented API that may change."
-                             : "Turn on Claude usage tracking first — cloud sessions appear inside the Claude block in the Quota Meter, so there is nowhere to show them without it.")
+                             : "Needs the Claude agent and Claude usage tracking on — cloud sessions render inside the Claude block in the Quota Meter, so there is nowhere to show them otherwise. Nothing is fetched while this is unmet.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

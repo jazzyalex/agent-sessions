@@ -26,6 +26,27 @@ final class ClaudeCloudLiveModel {
 
     static let shared = ClaudeCloudLiveModel()
 
+    /// The cloud toggle alone is not enough to make this feature do anything.
+    ///
+    /// Cloud rows are injected into the Claude runway snapshot, and the Quota Meter
+    /// only builds a Claude provider entry when `claudeAgentEnabled &&
+    /// claudeUsageEnabled` — with no entry there is nowhere to inject, so the rows
+    /// cannot render at any cost. Gating only the *toggle* in Preferences was not
+    /// enough: a stored-true value left the model polling claude.ai every 30s for
+    /// rows nobody could draw, and left `cloudStatusLine` free to report failures for
+    /// an inert feature. The effective enable therefore lives here, not in the view.
+    /// `nonisolated` because it reads only `UserDefaults` and touches no actor state —
+    /// inheriting the class's `@MainActor` would force every caller (including the
+    /// catalog's `isEnabled` closure and tests) onto the main actor for a pure read.
+    nonisolated static func effectivelyEnabled(defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled) else { return false }
+        guard defaults.bool(forKey: PreferencesKey.claudeUsageEnabled) else { return false }
+        // `Agents.claudeEnabled` defaults to TRUE, so an unset key means enabled —
+        // `bool(forKey:)` alone would read false and wrongly disable the feature.
+        let agentSet = defaults.object(forKey: PreferencesKey.Agents.claudeEnabled) != nil
+        return agentSet ? defaults.bool(forKey: PreferencesKey.Agents.claudeEnabled) : true
+    }
+
     /// Mapped rows ready for the HUD. Empty whenever the feature is off, the cookie
     /// is missing, or the source is in a cleared failure state.
     private(set) var rows: [HUDRow] = []
@@ -54,7 +75,7 @@ final class ClaudeCloudLiveModel {
     private init(catalog: ClaudeCloudSessionCatalog? = nil) {
         self.catalog = catalog ?? ClaudeCloudSessionCatalog(
             sessionKeyProvider: { ClaudeManualWebCookieStore.shared.currentSessionKey() },
-            isEnabled: { UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled) }
+            isEnabled: { Self.effectivelyEnabled() }
         )
     }
 
