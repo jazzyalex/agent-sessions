@@ -24,6 +24,15 @@ final class ClaudeCloudAPIClientTests: XCTestCase {
         XCTAssertEqual(ClaudeCloudAPIClient.mapHTTP(429, retryAfter: nil), .rateLimited(until: nil))
     }
 
+    /// Regression: a 403 must not be terminal. `.expired` clears the row list, and an
+    /// edge 403 is not proof the cookie died — treating it as terminal made rows
+    /// vanish and reappear on the next poll.
+    func test_mapHTTP_403_isTransientNotExpired() {
+        let mapped = ClaudeCloudAPIClient.mapHTTP(403, retryAfter: nil)
+        XCTAssertEqual(mapped, .offline)
+        XCTAssertNotEqual(mapped, .expired, "403 must not clear the session list")
+    }
+
     func test_mapHTTP_200_isNil() {
         XCTAssertNil(ClaudeCloudAPIClient.mapHTTP(200, retryAfter: nil))
     }

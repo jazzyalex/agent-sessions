@@ -141,10 +141,15 @@ actor ClaudeCloudAPIClient {
         switch status {
         case 200..<300:
             return nil
-        case 401, 403:
-            // 403 here is an auth outcome, not the Cloudflare interstitial: that only
-            // reaches non-URLSession clients, which this actor never is.
+        case 401:
             return .expired
+        case 403:
+            // Deliberately NOT .expired. `expired` clears the row list, and an edge
+            // 403 is not proof the cookie died — Cloudflare can challenge an
+            // otherwise-valid request. Treating it as terminal made rows vanish and
+            // reappear on the next poll. Degrade transiently and keep what we have;
+            // a genuinely dead cookie still surfaces as a 401.
+            return .offline
         case 429:
             return .rateLimited(until: parseRetryAfter(retryAfter))
         default:

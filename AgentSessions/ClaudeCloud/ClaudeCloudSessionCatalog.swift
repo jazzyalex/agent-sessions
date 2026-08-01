@@ -29,13 +29,22 @@ enum ClaudeCloudFilter {
         rows.filter { $0.environmentKind == cloudKind }
     }
 
-    /// Reduce to sessions worth a live row: still active, and either working or
-    /// waiting on the user. Completed, failed and archived sessions are not live.
+    /// Reduce to sessions worth a live row.
+    ///
+    /// Presence is `status == "active"` and nothing else. It deliberately does NOT
+    /// depend on `worker_status`, because a cloud session is continuously alive
+    /// whether or not its worker happens to be mid-token — the same way a local
+    /// session stays listed while it waits at a prompt. An earlier version also
+    /// required `status_bucket ∈ {working, review_ready}`, which made the row blink
+    /// out between turns: `worker_status` is `idle` for 168 of 178 sessions at any
+    /// moment, so the row was absent far more often than present.
+    ///
+    /// `worker_status` and `status_bucket` still decide how the row is *styled*;
+    /// they no longer decide whether it exists.
     static func activeRows(_ rows: [ClaudeCloudRawSession]) -> [ClaudeCloudSession] {
         rows.compactMap { row -> ClaudeCloudSession? in
             guard row.status == "active" else { return nil }
             let bucket = row.statusBucket
-            guard bucket == "working" || bucket == "review_ready" else { return nil }
 
             // worker_status is authoritative when it says "running". It also takes
             // WORKER_STATUS_UNSPECIFIED (6 of 177 observed), which carries no

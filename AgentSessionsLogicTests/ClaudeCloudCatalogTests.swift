@@ -34,14 +34,25 @@ final class ClaudeCloudCatalogTests: XCTestCase {
 
     // MARK: - Active predicate
 
-    func test_activeRowsExcludeArchivedCompletedAndFailed() {
+    func test_activeRowsExcludeArchivedSessions() {
         let rows = [raw("cse_working", kind: "anthropic_cloud"),
                     raw("cse_review", kind: "anthropic_cloud", bucket: "review_ready", worker: "idle"),
                     raw("cse_done", kind: "anthropic_cloud", status: "archived",
-                        bucket: "completed", worker: "idle"),
-                    raw("cse_failed", kind: "anthropic_cloud", bucket: "failed", worker: "idle")]
+                        bucket: "completed", worker: "idle")]
         let ids = ClaudeCloudFilter.activeRows(ClaudeCloudFilter.cloudOnly(rows)).map(\.id)
         XCTAssertEqual(Set(ids), Set(["cse_working", "cse_review"]))
+    }
+
+    /// Regression: presence must not depend on worker_status. An active session
+    /// whose worker is momentarily idle stays listed — tying visibility to
+    /// worker_status made the row blink out between turns, because worker_status
+    /// is "idle" for the overwhelming majority of sessions at any instant.
+    func test_activeSessionStaysListedWhileWorkerIsIdle() {
+        let rows = ClaudeCloudFilter.cloudOnly(
+            [raw("cse_between_turns", kind: "anthropic_cloud", bucket: "completed", worker: "idle")])
+        let row = ClaudeCloudFilter.activeRows(rows).first
+        XCTAssertEqual(row?.id, "cse_between_turns", "an active session must not vanish between turns")
+        XCTAssertEqual(row?.isWorking, false, "…but it is styled as not working")
     }
 
     func test_runningWorkerMapsToWorking() {
