@@ -106,6 +106,29 @@ Add `windowDurationMins` to the candidate list. Keep the existing names — olde
 
 ---
 
+> **ORDERING CORRECTION (2026-08-01):** Task 4 must land BEFORE Task 3, not after.
+> Persistence restores through `apply()`, which stamps `lastUpdate` — that both
+> suppresses the `.idle` verdict Task 4 adds and renders restored cold-start data as
+> live, because `QuotaData.codex(from:)` passes neither `dataIsStale` nor
+> `transientReason`. The plan's own warning about "trusting figures that stopped
+> updating" applied to its own task order. Task 4 is done (`12ed23b3`).
+>
+> **Task 3 therefore now requires the staleness plumbing as its first step**, not as a
+> nice-to-have: add `dataIsStale` + `transientReason` to `CodexUsageModel`, pass them
+> through `QuotaData.codex(from:)`, and only then restore. Without it, persistence makes
+> the meter confidently wrong instead of vaguely wrong.
+>
+> That same plumbing also fixes a defect found reviewing Task 4: `.transient` covers
+> offline, 5xx AND 429, so a cold-start rate-limit window currently reads "No active
+> Codex session" when the truth is "rate limited, retrying, no session needed".
+>
+> Two smaller Task 4 review findings to fold in while here:
+> - `.idle` does not reset `AuthStatusNotifier`'s one-shot episode where `.ok` did, so a
+>   second genuine sign-out in one run could go unnotified.
+> - `UsageMenuBar` renders a moon glyph for Codex idle, but the dropdown's idle
+>   explainer is Claude-only (`StatusItemController` uses `codexResetMenuTitle` for
+>   Codex rows) — a glyph with no explanation anywhere in the menu.
+
 ## Task 3: Persist the Codex usage snapshot
 
 **Files:**
