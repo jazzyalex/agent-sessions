@@ -999,8 +999,6 @@ struct AgentCockpitHUDView: View {
                     .padding(.vertical, 10)
             }
 
-            cloudStatusLine
-
             HUDLimitsRowsPanel(
                 activeRows: displayState.rowsForDisplay,
                 showsChrome: showsCompactToolbar
@@ -1020,55 +1018,6 @@ struct AgentCockpitHUDView: View {
                 isWindowVisibleForOrdering: isWindowVisibleForOrdering
             )
         )
-    }
-
-    /// Why the cloud source is showing what it is showing.
-    ///
-    /// The spec requires every `ClaudeCloudSourceState` to reach a surface: a state
-    /// that is computed and drawn nowhere is indistinguishable from a hang, which is
-    /// exactly how the earlier "no rows and no explanation" behaved. Unit tests
-    /// asserted each state has distinct copy, but nothing asserted the copy was
-    /// rendered — so this line is the missing half of that guarantee.
-    ///
-    /// Silent in the two states that need no explanation: off, and working normally
-    /// with rows already on screen.
-    @ViewBuilder
-    private var cloudStatusLine: some View {
-        let model = ClaudeCloudLiveModel.shared
-        let state = model.state
-        let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled)
-        // This line explains PROBLEMS, not normalcy. "No cloud sessions running" is
-        // the ordinary steady state — local sessions do not announce their own
-        // absence either, and a permanent caption restating it is pure noise.
-        //
-        // Still spoken: every state where something is wrong or the numbers cannot
-        // be trusted (not connected, expired, rate limited, offline, contract drift,
-        // and rows retained past their freshness). Those are the cases where silence
-        // and "broken" would look identical, which is why this line exists.
-        let quiet: Bool = {
-            if !enabled { return true }
-            switch state {
-            case .empty: return true          // nothing running — unremarkable
-            case .disabled: return true       // pre-first-poll; resolves within seconds
-            case .ok: return !state.isStale   // rows on screen and fresh
-            default: return false             // a real condition worth naming
-            }
-        }()
-        if !quiet {
-            let message = state.displayMessage
-            HStack(spacing: 6) {
-                Image(systemName: state.isStale ? "exclamationmark.triangle" : "cloud")
-                    .font(.caption2)
-                Text(message)
-                    .font(.caption2)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-        }
     }
 
     /// Whether the dwell has anyone listening. Compact always listens; the Quota
@@ -3543,12 +3492,68 @@ private struct HUDLimitsRowsPanel: View {
         }
     }
 
+    /// Why the cloud source is showing what it is showing.
+    ///
+    /// The spec requires every `ClaudeCloudSourceState` to reach a surface: a state
+    /// that is computed and drawn nowhere is indistinguishable from a hang, which is
+    /// exactly how the earlier "no rows and no explanation" behaved. Unit tests
+    /// asserted each state has distinct copy, but nothing asserted the copy was
+    /// rendered — so this line is the missing half of that guarantee.
+    ///
+    /// Silent in the two states that need no explanation: off, and working normally
+    /// with rows already on screen.
+    @ViewBuilder
+    private var cloudStatusLine: some View {
+        let model = ClaudeCloudLiveModel.shared
+        let state = model.state
+        let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled)
+        // This line explains PROBLEMS, not normalcy. "No cloud sessions running" is
+        // the ordinary steady state — local sessions do not announce their own
+        // absence either, and a permanent caption restating it is pure noise.
+        //
+        // Still spoken: every state where something is wrong or the numbers cannot
+        // be trusted (not connected, expired, rate limited, offline, contract drift,
+        // and rows retained past their freshness). Those are the cases where silence
+        // and "broken" would look identical, which is why this line exists.
+        let quiet: Bool = {
+            if !enabled { return true }
+            switch state {
+            case .empty: return true          // nothing running — unremarkable
+            case .disabled: return true       // pre-first-poll; resolves within seconds
+            case .ok: return !state.isStale   // rows on screen and fresh
+            default: return false             // a real condition worth naming
+            }
+        }()
+        if !quiet {
+            let message = state.displayMessage
+            HStack(spacing: 6) {
+                Image(systemName: state.isStale ? "exclamationmark.triangle" : "cloud")
+                    .font(.caption2)
+                Text(message)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+        }
+    }
+
     var body: some View {
         Group {
             if entries.isEmpty {
                 emptyRow
             } else {
                 VStack(spacing: 0) {
+                    // Inside the measured region on purpose. This previously rendered
+                    // in `hudStack`, outside the GeometryReader that emits
+                    // `LimitsContentHeightKey`, so its ~26pt never reached
+                    // `limitsWindowHeight` — the pinned window is fixed-size
+                    // (minSize == maxSize) with clipped content, so every time the line
+                    // appeared it silently cut the last row off the bottom.
+                    cloudStatusLine
                     ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
                             // Group separation: whitespace does the grouping, with a

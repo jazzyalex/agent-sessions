@@ -189,7 +189,17 @@ Cloud rows are appended into `snapshot.rows`, so a local overflow summary ("+2 s
 ## Task 8: Decide the leftovers
 
 - [ ] **Heartbeat file** (`ClaudeCloudLiveModel.note()` → `cloud-debug.json`): DEBUG-only and test-guarded. It is the only working instrument in this app — recommend keeping, but the owner should decide explicitly rather than by default.
-- [ ] **Verify the `bridge` assumption.** The filter excludes 168 `environment_kind == "bridge"` sessions on the assumption the local indexer already shows them. **This was never checked.** Confirm a bridge session appears locally; if it does not, those sessions are invisible everywhere and the filter is wrong.
+- [x] **`bridge` assumption — VERIFIED 2026-08-01, exclusion is correct.** Of 172
+  `environment_kind == "bridge"` sessions, only **3** pass the live filter (`status ==
+  active` plus recency), and one of those three is the very Claude Desktop session the
+  user was working in — which AS was already rendering as a local row. Live bridge
+  sessions are local Desktop sessions the indexer already shows, so excluding them from
+  cloud rows avoids duplicates rather than hiding anything.
+
+  Method note: an earlier title-match against `claude-code-sessions` showed only 33%
+  overlap and looked alarming. That instrument was wrong — it compared all 172 rows
+  (overwhelmingly archived) against a 152-entry registry that rotates. Scoping the
+  question to *live* rows is what made it answerable.
 - [x] **Misleading commit messages — DECIDED 2026-08-01: leave as-is.** `a2e0e027` and
   `e78093ef` describe fixes for symptoms that were not occurring (the cloud feature was
   switched off at the time, so what looked like flickering cloud rows was a
