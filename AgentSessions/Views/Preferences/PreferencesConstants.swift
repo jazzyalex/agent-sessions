@@ -6,6 +6,10 @@ enum PreferencesKey {
     static let showUsageStrip = "ShowUsageStrip"
     static let showClaudeUsageStrip = "ShowClaudeUsageStrip"
     static let codexUsageEnabled = "CodexUsageEnabled"
+    /// Show actively-running Claude cloud sessions as live Quota Meter rows.
+    /// Off by default: enabling it makes network requests carrying the stored
+    /// claude.ai session cookie, which is not something to start silently.
+    static let claudeCloudSessionsEnabled = "ClaudeCloudSessionsEnabled"
     static let codexAllowStatusProbe = "CodexAllowStatusProbe"
     static let codexProbeCleanupMode = "CodexProbeCleanupMode"
     static let claudeUsageEnabled = "ClaudeUsageEnabled"

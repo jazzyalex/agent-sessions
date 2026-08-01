@@ -19,6 +19,11 @@ struct HUDRebuildGate {
         /// without it in `Inputs`, `shouldRebuild` sees no versioned-input
         /// change and the HUD would show stale titles for up to 5s.
         var skipAgentsPreamble: Bool
+        /// Bumped whenever the Claude cloud-session poll returns a different set of
+        /// live rows. Cloud rows arrive from the network rather than from the presence
+        /// poll, so without a version here `shouldRebuild` would see no changed input
+        /// and a cloud session could take up to `staleReclassifyInterval` to appear.
+        var cloudRowsVersion: UInt64 = 0
     }
 
     let staleReclassifyInterval: TimeInterval
