@@ -5,6 +5,90 @@ decision if one was made. Newest on top.
 
 ---
 
+## Codex Usage Meter
+
+### Codex OAuth failure cooldown has no user-initiated bypass
+- **What:** After a failed usage fetch, `CodexOAuthUsageFetcher` sets a 30-minute
+  failure cooldown. `refreshNow` goes through the same gate, so there is no way for
+  the user to force a retry. Wi-Fi returning 20 seconds after an offline launch can
+  leave the Codex meter dark for up to half an hour unless the CLI-RPC fallback
+  happens to rescue it.
+- **Where:** `AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift`
+  (~:141-159, the cooldown gate), `refreshNow` in `CodexStatusService.swift`.
+- **Fix shape:** bypass the failure cooldown for user-initiated refreshes, and
+  ideally reset it on a network-path change (NWPathMonitor) so recovery is
+  automatic rather than merely possible.
+- **Why deferred (2026-08-01):** pre-existing, untouched by the 2026-08-01 meter
+  work, and it deserves its own change with tests rather than an addendum to a long
+  session. **This is the largest remaining real defect in Codex cold-start
+  behaviour** — bigger than the snapshot persistence that was dropped in its favour.
+
+### `.idle` can mislabel a cold-start transient failure
+- **What:** `CodexUsageModel.handleAuthFetchResult` promotes `.ok` → `.idle`
+  ("No active Codex session") when a completed fetch returned nothing and nothing
+  has ever been applied. `CodexUsageFetchResult.transient` covers offline, 5xx AND
+  429 alike, so a cold launch during a rate-limit window reads "no active session"
+  when the truth is "rate limited, retrying — no session needed".
+- **Where:** `AgentSessions/CodexStatus/CodexStatusService.swift` (the promotion
+  before `applyAuthState`), `QuotaData.codex(from:)` in
+  `AgentSessions/Views/CockpitFooterView.swift:159-176` (passes neither
+  `dataIsStale` nor `transientReason`, unlike `claude(from:)`).
+- **Fix shape:** carry a reason on `.transient`, plus a latch — follow-up ticks
+  return `.skippedCooldown`, which would otherwise flip the caption back — then make
+  the promotion reason-aware. Best done together with the cooldown item above.
+- **Why deferred (2026-08-01):** requires a three-way conjunction (cold launch AND
+  no rollout from today/yesterday AND a transient first fetch), self-heals on the
+  next success, and **no 429 has ever been observed on the Codex endpoint** (the
+  documented 429 storms were Claude's edge). Also strictly better than the infinite
+  "reconnecting…" spinner it replaced. Revisit only if a Codex-side 429 is actually
+  seen.
+
+### Two smaller findings from the same review
+- `.idle` does not reset `AuthStatusNotifier`'s one-shot episode where `.ok` did
+  (`AgentSessions/Shared/AuthStatusNotifier.swift:43-46`), so a second genuine
+  sign-out within one run could go unnotified.
+- `UsageMenuBar` renders a moon glyph for Codex idle, but the dropdown's idle
+  explainer is Claude-only (Codex rows go through `codexResetMenuTitle`), so the
+  glyph has no explanation anywhere in the menu.
+
+---
+
+## Claude Cloud Sessions
+
+### Reconsider the surface: presence badge instead of runway rows
+- **What:** Cloud sessions currently render as rows inside the Quota Meter's runway
+  block, with the literal "Cloud" where a rate would be. **The owner questioned
+  whether this belongs there at all, and the question is a good one.** Runway's
+  grammar is rate-per-session — every row answers "how fast is this eating my
+  budget?" A cloud row answers "unknown", takes a slot in a consumption-ranked list,
+  and cannot be acted on (no reveal, no navigation, no resume).
+- **Decisive argument:** cloud sessions bill the same account-level quota, so the
+  Claude 5h/weekly figures **already include them**. Nothing is missing from the
+  measurement. What is missing is only awareness — "something is running over
+  there" — which is a presence signal, not a metering one.
+- **Evidence it is the wrong container:** the friction during implementation
+  (slot competition, an empty progress bar, a pseudo-rate label, three rounds of
+  ordering corrections) is what happens when an object is put into a container whose
+  language it cannot speak.
+- **Proposed shape:** a compact indicator on the Claude provider row — e.g.
+  `⛅ 2 cloud · 1 working` — outside the consumption ranking. Keeps the awareness
+  value, frees the 4 detail slots for rows that carry real rates, removes the
+  pseudo-rate and empty bar, and makes the ordering question disappear.
+- **Cost to switch:** small. The endpoint, filter, catalog and live model all stand
+  unchanged; only `appendingClaudeCloudRows` and the `RunwayAttributionConfidence
+  .cloud` case (~80 lines) would be replaced.
+- **Sizing input:** the account has 6 cloud sessions total and 0-2 live at any time,
+  which argues for a low-weight affordance rather than rows.
+- **Also unresolved if rows are kept:** the pinned window's hard 270pt cap
+  (`limitsRowHeight × limitsMaximumRows`) has no scrolling, so a saturated panel
+  clips silently; and with 4+ local sessions burning, cloud rows lose every detail
+  slot and are not counted in the "+N sessions" summary either, so a live cloud
+  session can go invisible on a busy day.
+- **Why deferred (2026-08-01):** a design decision, deliberately not made at the end
+  of a long session. Nothing shipped is stranded by it.
+
+---
+
 ## Usage Tracking
 
 ### Verify the Claude Web API usage source actually works
