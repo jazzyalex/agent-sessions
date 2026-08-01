@@ -987,6 +987,8 @@ struct AgentCockpitHUDView: View {
                     .padding(.vertical, 10)
             }
 
+            cloudStatusLine
+
             HUDLimitsRowsPanel(
                 activeRows: displayState.rowsForDisplay,
                 showsChrome: showsCompactToolbar
@@ -1006,6 +1008,43 @@ struct AgentCockpitHUDView: View {
                 isWindowVisibleForOrdering: isWindowVisibleForOrdering
             )
         )
+    }
+
+    /// Why the cloud source is showing what it is showing.
+    ///
+    /// The spec requires every `ClaudeCloudSourceState` to reach a surface: a state
+    /// that is computed and drawn nowhere is indistinguishable from a hang, which is
+    /// exactly how the earlier "no rows and no explanation" behaved. Unit tests
+    /// asserted each state has distinct copy, but nothing asserted the copy was
+    /// rendered — so this line is the missing half of that guarantee.
+    ///
+    /// Silent in the two states that need no explanation: off, and working normally
+    /// with rows already on screen.
+    @ViewBuilder
+    private var cloudStatusLine: some View {
+        let model = ClaudeCloudLiveModel.shared
+        let state = model.state
+        let shouldExplain: Bool = {
+            switch state {
+            case .disabled: return false
+            case .ok: return model.rows.isEmpty || state.isStale
+            default: return true
+            }
+        }()
+        if shouldExplain {
+            HStack(spacing: 6) {
+                Image(systemName: state.isStale ? "exclamationmark.triangle" : "cloud")
+                    .font(.caption2)
+                Text(state.displayMessage)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+        }
     }
 
     /// Whether the dwell has anyone listening. Compact always listens; the Quota
