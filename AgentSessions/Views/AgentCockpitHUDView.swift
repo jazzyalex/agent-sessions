@@ -2896,15 +2896,13 @@ func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
     // The memberwise init defaults `aggregateTokensPerHour` back to nil, so copy it
     // explicitly — otherwise rebuilding the snapshot silently drops the "burning"
     // figure the provider row reads.
-    // Cloud rows go FIRST, not last. `HUDRunwayPanel` renders `rows` and then
-    // `burstSummary`, and that summary ("+2 sessions") counts *local* burns folded
-    // away by RunwayOverflowRule — which runs before this injection and never sees
-    // cloud rows. Appending put the Cloud rows between the local rows and their own
-    // summary, so the "+N" read as though it counted the cloud sessions. Leading with
-    // them keeps the summary adjacent to the rows it actually describes.
+    // Appended, and `HUDRunwayPanel` additionally renders them below the "+N
+    // sessions" summary. Array position here does not decide display order — the
+    // panel partitions on `confidence == .cloud` — but appending keeps the local
+    // ranking that RunwayOverflowRule produced untouched and intact.
     var merged = CodexRunwaySnapshot(
         baseline: snapshot.baseline,
-        rows: rows + snapshot.rows,
+        rows: snapshot.rows + rows,
         burstSummary: snapshot.burstSummary
     )
     merged.aggregateTokensPerHour = snapshot.aggregateTokensPerHour
@@ -3974,7 +3972,17 @@ private struct HUDRunwayPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 if snapshot.hasRunwayContent {
-                    ForEach(Array(snapshot.rows.enumerated()), id: \.element.id) { index, row in
+                    // The per-agent budget is 5 rows: up to 4 detail rows, then the
+                    // combined "+N sessions" row. Detail slots belong to consumption
+                    // first — RunwayOverflowRule already ranked the heaviest burns —
+                    // so cloud rows, which have no measurable rate at all (no local
+                    // transcript), take only whatever slots are left over and never
+                    // displace a burning session.
+                    let burnRows = snapshot.rows.filter { $0.confidence != .cloud }
+                    let cloudRows = snapshot.rows.filter { $0.confidence == .cloud }
+                    let freeSlots = max(0, HUDRunwayLayout.maxDetailRows - burnRows.count)
+                    let detailRows = burnRows + cloudRows.prefix(freeSlots)
+                    ForEach(Array(detailRows.enumerated()), id: \.element.id) { index, row in
                         runwayRow(row, index: index)
                     }
                     if let summary = snapshot.burstSummary {
@@ -4182,6 +4190,13 @@ private enum HUDRunwayLayout {
     static let minBarWidth: CGFloat = 62
     static let columnSpacing: CGFloat = 8
     static let rowHeight: CGFloat = 14
+
+    /// Detail rows per agent, before the combined "+N sessions" row — 5 total.
+    /// Must match the `maxRows:` passed to the runway request builder (the two
+    /// call sites in `refreshRunwaySnapshot`), which is what caps the ranked burn
+    /// rows; cloud rows are capped against the same budget so the two cannot sum
+    /// past it.
+    static let maxDetailRows = 4
 
     /// Rate column width. "137m/h" fits 52; token rates like "56.5M tk/h" (and the
     /// capped "999M"/"9.9B" forms) need more; weekly "%/h" is short.
