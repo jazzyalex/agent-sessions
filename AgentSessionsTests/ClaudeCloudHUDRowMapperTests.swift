@@ -61,18 +61,25 @@ final class ClaudeCloudHUDRowMapperTests: XCTestCase {
         XCTAssertEqual(a?.id, "claude-cloud:cse_a")
     }
 
-    func test_missingTimestampLeavesElapsedBlank() throws {
+    func test_missingTimestampStillCarriesNoElapsedString() throws {
         let row = try XCTUnwrap(
             ClaudeCloudHUDRowMapper.rows(from: [session("cse_e", lastEventAt: nil)]).first)
-        XCTAssertEqual(row.elapsed, "", "no timestamp must not read as 'just started'")
+        XCTAssertEqual(row.elapsed, "")
         XCTAssertNil(row.lastSeenAt)
     }
 
-    func test_elapsedFormatsFromLastEvent() throws {
-        let now = Date(timeIntervalSince1970: 1_785_000_000 + 3 * 60)
-        let row = try XCTUnwrap(
-            ClaudeCloudHUDRowMapper.rows(from: [session("cse_f")], now: now).first)
-        XCTAssertEqual(row.elapsed, "3m")
+    /// Regression: a formatted age string changes every poll even when the server
+    /// state is identical, and HUDRow equality includes it — which churned `rows`
+    /// and forced a snapshot rebuild each time. The real timestamp still travels on
+    /// `lastSeenAt`; only the derived string is suppressed.
+    func test_elapsedIsNotBakedIn_soRowsDoNotChurnBetweenPolls() throws {
+        let early = Date(timeIntervalSince1970: 1_785_000_000 + 3 * 60)
+        let later = Date(timeIntervalSince1970: 1_785_000_000 + 90 * 60)
+        let a = try XCTUnwrap(ClaudeCloudHUDRowMapper.rows(from: [session("cse_f")], now: early).first)
+        let b = try XCTUnwrap(ClaudeCloudHUDRowMapper.rows(from: [session("cse_f")], now: later).first)
+        XCTAssertEqual(a.elapsed, "")
+        XCTAssertEqual(a, b, "identical server state must map to an equal row regardless of clock")
+        XCTAssertNotNil(a.lastSeenAt)
     }
 
     func test_unreadCountAppearsWhenNothingMoreUrgent() throws {

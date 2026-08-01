@@ -96,6 +96,11 @@ enum RunwayAttributionConfidence: Equatable, Sendable {
     case waiting       // active/working but no burn measured yet → spinner
     case idle          // finished its turn (handed back to user) → calm "—"
     case unsupported
+    /// Runs on Anthropic's infrastructure, so no local transcript exists and no burn
+    /// can ever be measured for it. Renders the literal "Cloud" instead of a rate —
+    /// deliberately NOT `.idle`, which would short-circuit to the calm dash and lose
+    /// the distinction between "finished its turn" and "rate is unknowable".
+    case cloud
 }
 
 enum RunwayDeadline: Equatable, Sendable {

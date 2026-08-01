@@ -350,6 +350,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     // never ran and no cloud row ever appeared. This model only reads.
     private var cloudRows: [HUDRow] { ClaudeCloudLiveModel.shared.rows }
     private var cloudRowsVersion: UInt64 { ClaudeCloudLiveModel.shared.version }
+    private var cloudRowsCancellable: AnyCancellable?
     private var cancellables: Set<AnyCancellable> = []
     private var activeCancellable: AnyCancellable?
     private var subagentBadgeCancellable: AnyCancellable?
@@ -478,6 +479,17 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         subagentBadgeCancellable = activeCodex.badgeTicks.sink { [weak self] _ in
             self?.scheduleRebuild()
         }
+        // Cloud rows arrive from a network poll, not from the presence stream, so
+        // nothing else here would ever rebuild the snapshot when they change. The
+        // model held the correct rows for minutes while the HUD kept rendering a
+        // snapshot built before they arrived.
+        cloudRowsCancellable = NotificationCenter.default
+            .publisher(for: ClaudeCloudLiveModel.rowsDidChange)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.rebuildGate.forceNextRebuild()
+                self.scheduleRebuild()
+            }
         scheduleRebuild()
     }
 
@@ -1024,18 +1036,26 @@ struct AgentCockpitHUDView: View {
     private var cloudStatusLine: some View {
         let model = ClaudeCloudLiveModel.shared
         let state = model.state
-        let shouldExplain: Bool = {
-            switch state {
-            case .disabled: return false
-            case .ok: return model.rows.isEmpty || state.isStale
-            default: return true
-            }
+        let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled)
+        // Quiet only when there is genuinely nothing to say: the feature is off, or
+        // it is working with fresh rows on screen. Everything else speaks — including
+        // the pre-first-poll case, which previously rendered as silence because the
+        // catalog's initial state is `.disabled`. Silence and "broken" looked
+        // identical, which is the whole failure this line exists to prevent.
+        let quiet: Bool = {
+            if !enabled { return true }
+            if case .ok = state { return !model.rows.isEmpty && !state.isStale }
+            return false
         }()
-        if shouldExplain {
+        if !quiet {
+            let message: String = {
+                if case .disabled = state { return "Cloud sessions — starting…" }
+                return state.displayMessage
+            }()
             HStack(spacing: 6) {
                 Image(systemName: state.isStale ? "exclamationmark.triangle" : "cloud")
                     .font(.caption2)
-                Text(state.displayMessage)
+                Text(message)
                     .font(.caption2)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2852,6 +2872,86 @@ private func quotaMeterVisibleRunwaySnapshot(from snapshot: CodexRunwaySnapshot?
     }
 }
 
+/// Appends Claude cloud sessions to a runway snapshot as rate-less rows.
+///
+/// Cloud sessions run on Anthropic's infrastructure, so they have no local
+/// transcript and can never produce token activity — which is what every runway
+/// rate is derived from. `HUDRunwayIdentityReducer` therefore excludes them (it
+/// requires a non-empty `logPath`), and no amount of fixing upstream would help:
+/// the rate is unknowable, not merely missing.
+///
+/// So they are injected here instead, *after* all rate maths, ranking and overflow
+/// folding are final. Appended rows carry `displayRate: 0`, which cannot perturb
+/// `maxDisplayRate` (floored at 1), reordering, or the "+N sessions" summary.
+///
+/// Runs at render time rather than in the loader for two reasons: the loader body
+/// executes off the main actor while `ClaudeCloudLiveModel` is main-actor isolated,
+/// and the loader only re-runs on a 5s bucket — so cloud rows would lag, and would
+/// vanish entirely whenever the quota request is nil.
+func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
+                              cloudHUDRows: [HUDRow]) -> CodexRunwaySnapshot? {
+    let cloud = cloudHUDRows.filter { $0.id.hasPrefix(ClaudeCloudHUDRowMapper.rowIDPrefix) }
+    guard !cloud.isEmpty else { return snapshot }
+
+    // Working sessions first, then alphabetical — a stable order, so rows do not
+    // shuffle between polls.
+    let ordered = cloud.sorted { lhs, rhs in
+        let lhsActive = lhs.liveState == .active
+        let rhsActive = rhs.liveState == .active
+        if lhsActive != rhsActive { return lhsActive }
+        return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+    }
+
+    var seen = Set(snapshot?.rows.map(\.id) ?? [])
+    let rows: [RunwayPauseImpactRow] = ordered.compactMap { row in
+        guard seen.insert(row.id).inserted else { return nil }
+        return RunwayPauseImpactRow(
+            id: row.id,
+            displayName: row.displayName,
+            isGoal: false,
+            deadline: .unavailable,
+            gainedSeconds: 0,
+            displayRate: 0,
+            confidence: .cloud
+        )
+    }
+    guard !rows.isEmpty else { return snapshot }
+
+    guard let snapshot else {
+        // No quota snapshot at all — Claude usage may be unfetched, at 0%, or its
+        // reset text unparsable. Cloud rows must still show, so synthesise a carrier.
+        // Only `baseline.rateUnit` is ever read on this path (the rate cell and the
+        // layout widths); nothing consumes the other baseline fields in the strip.
+        // Do not reuse this snapshot for anything that reads them.
+        let now = Date()
+        return CodexRunwaySnapshot(
+            baseline: RunwayProviderBaseline(
+                source: .claude,
+                remainingPercent: 0,
+                resetAt: now,
+                currentRunoutAt: now,
+                observedAt: now,
+                hasProjectedRunout: false,
+                windowMinutes: 300,
+                rateUnit: .quotaMinutesPerHour
+            ),
+            rows: rows,
+            burstSummary: nil
+        )
+    }
+
+    // The memberwise init defaults `aggregateTokensPerHour` back to nil, so copy it
+    // explicitly — otherwise rebuilding the snapshot silently drops the "burning"
+    // figure the provider row reads.
+    var merged = CodexRunwaySnapshot(
+        baseline: snapshot.baseline,
+        rows: snapshot.rows + rows,
+        burstSummary: snapshot.burstSummary
+    )
+    merged.aggregateTokensPerHour = snapshot.aggregateTokensPerHour
+    return merged
+}
+
 private struct LimitsContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
@@ -3372,7 +3472,15 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     private func visibleRunwaySnapshot(for source: UsageTrackingSource) -> CodexRunwaySnapshot? {
-        let snapshot = source == .claude ? claudeRunwaySnapshot : codexRunwaySnapshot
+        var snapshot = source == .claude ? claudeRunwaySnapshot : codexRunwaySnapshot
+        if source == .claude {
+            // Read during body evaluation on purpose: `ClaudeCloudLiveModel` is
+            // @Observable, so this registers a dependency and the strip updates the
+            // moment the poll lands — independent of the HUD rebuild gate, which is
+            // what starved these rows before.
+            snapshot = appendingClaudeCloudRows(to: snapshot,
+                                                cloudHUDRows: ClaudeCloudLiveModel.shared.rows)
+        }
         return quotaMeterVisibleRunwaySnapshot(from: snapshot, visibility: runwayVisibility)
     }
 
@@ -4020,6 +4128,9 @@ private struct HUDRunwayLoadBar: View {
             return 0
         case .unsupported:
             return 0
+        case .cloud:
+            // No measurable burn exists, so an empty track is the honest bar.
+            return 0
         case .direct, .mixed:
             return 0.82
         }
@@ -4077,6 +4188,11 @@ private enum RunwayTimeFormatting {
     static func rate(_ value: Double,
                      unit: RunwayRateUnit,
                      confidence: RunwayAttributionConfidence = .mixed) -> String {
+        // Before the unit switch on purpose: a cloud session has no local transcript,
+        // so every unit below would otherwise invent a number ("flat", "0m/h",
+        // "0 tk/h", "$0/h") for a rate that cannot be measured at all. One guard here
+        // covers the visible cell and the load bar's accessibility label.
+        if confidence == .cloud { return "Cloud" }
         switch unit {
         case .quotaMinutesPerHour:
             return quotaRate(value, confidence: confidence)

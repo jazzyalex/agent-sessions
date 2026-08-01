@@ -682,6 +682,21 @@ private struct OpenPinnedSessionsWindowButton: View {
 
 @MainActor
 final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
+
+    /// The only launch hook that always runs.
+    ///
+    /// The cloud poll was previously started from `rebuildIfReady` (gated by a weak
+    /// `activeCodex` and the HUD rebuild gate), then from `runStartupTasksIfNeeded`
+    /// (which fires on a *window appearing*). Both are invisible to a menu-bar-only
+    /// launch with the Quota Meter pinned, so the fetch never ran and the source sat
+    /// at its initial state forever. `applicationDidFinishLaunching` has no such
+    /// precondition. `startIfNeeded()` is idempotent and a no-op while the feature
+    /// toggle is off.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !AppRuntime.isRunningTests else { return }
+        Task { @MainActor in ClaudeCloudLiveModel.shared.startIfNeeded() }
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         let item = NSMenuItem(

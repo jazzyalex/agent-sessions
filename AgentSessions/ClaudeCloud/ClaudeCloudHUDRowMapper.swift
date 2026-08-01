@@ -10,8 +10,11 @@ import Foundation
 enum ClaudeCloudHUDRowMapper {
 
     /// Row ids are namespaced so a cloud row can never collide with a local row that
-    /// happens to share an identifier.
-    static func rowID(for sessionID: String) -> String { "claude-cloud:\(sessionID)" }
+    /// happens to share an identifier, and so cloud rows can be recognised again
+    /// downstream without carrying a separate flag.
+    static let rowIDPrefix = "claude-cloud:"
+
+    static func rowID(for sessionID: String) -> String { "\(rowIDPrefix)\(sessionID)" }
 
     static let projectLabel = "Claude Cloud"
 
@@ -25,7 +28,13 @@ enum ClaudeCloudHUDRowMapper {
                 displayName: session.title,
                 liveState: session.isWorking ? .active : .idle,
                 preview: preview(for: session),
-                elapsed: elapsed(since: session.lastEventAt, now: now),
+                // Deliberately empty. A formatted age ("42s" -> "72s") changes on
+                // every poll even when the server state is identical, and `HUDRow`
+                // equality includes it — so baking one in made `rows` churn every
+                // 30s and forced the ~35ms snapshot rebuild the gate exists to skip.
+                // The runway row renders no elapsed column; `lastSeenAt` below still
+                // carries the real timestamp for anything that needs it.
+                elapsed: "",
                 lastSeenAt: session.lastEventAt,
                 itermSessionId: nil,
                 revealURL: nil,
