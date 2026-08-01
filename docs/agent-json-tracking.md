@@ -229,9 +229,23 @@ Record every upstream check, even if no changes are needed.
 - Format notes:
   - Line 1 is the journal envelope: `{type:"metadata", protocol_version, created_at}` (epoch ms).
   - Later lines are flattened ops: `{type, ...payload, time}` (epoch ms).
-  - Conversation content is `context.append_message` with `message.role` in
-    `system|user|assistant|tool`, `message.content[]` parts (`text`/`think`/`image_url`/
-    `audio_url`/`video_url`), `message.toolCalls[]`, and `message.toolCallId` on tool results.
+  - **`context.append_message` carries only USER turns in practice.** The `ContextMessage` type
+    permits assistant/tool roles, but the running agent never writes them there.
+  - **The assistant's own output streams as `context.append_loop_event`** — this is the single
+    most important fact about the format:
+
+    | `event.type` | payload | maps to |
+    |---|---|---|
+    | `content.part` + `part.type: "text"` | the answer | `.assistant` |
+    | `content.part` + `part.type: "think"` | private reasoning | `.meta` (never rendered) |
+    | `tool.call` | `{toolCallId, name, args, description}` | `.tool_call` |
+    | `tool.result` | `{toolCallId, result.output, result.isError}` | `.tool_result` / `.error` |
+    | `step.begin` / `step.end` | loop bookkeeping, usage, finishReason | `.meta` |
+
+    Treating this family as `.meta` renders a transcript containing the user's prompts and
+    **nothing else** — no replies, no tools. The first implementation did exactly that, and it was
+    invisible for a week because the only fixture came from a suspended account that never produced
+    assistant output. Any future parser change here must be checked against a *funded* capture.
   - `turn.prompt`/`turn.steer` duplicate the prompt text and resolve to `.meta` so prompts are
     not counted twice.
 - Facts only a real capture revealed (do not trust the source constants):
@@ -256,11 +270,17 @@ Record every upstream check, even if no changes are needed.
   - `AgentSessions/Services/KimiSessionParser.swift`
   - `AgentSessions/Services/KimiSessionDiscovery.swift`
   - `AgentSessions/KimiResume/KimiResumeCommandBuilder.swift`
-- Fixtures:
-  - `Resources/Fixtures/stage0/agents/kimi/{small.jsonl,state.json}`
-  - Gap: the capture account was suspended for insufficient balance (429 `provider.rate_limit`), so
-    the fixture has no assistant message and no tool call; the `.assistant`/`.tool_call`/
-    `.tool_result` parser paths are unexercised by fixture. Re-capture on a funded account.
+- Fixtures (`Resources/Fixtures/stage0/agents/kimi/`):
+  - `small.jsonl` — 200-line authentic session at 0.31.1: 13 user turns, 6 assistant parts,
+    19 tool calls across 7 tools (Bash/Agent/Glob/Write/ExitPlanMode/Read/Grep), 1 failing tool
+    (`.error`), plan mode, full compaction, `usage.record`. Larger than sibling fixtures (~67KB) on
+    purpose: it is the only defence against the loop-event class of bug described above.
+  - `state.json` — the sidecar.
+  - `subagent_agent-0.jsonl` — a real subagent journal. Same schema as the main one; discovery
+    excludes it by design, and the parser derives the *parent* session id from the directory layout.
+  - Long strings are truncated to 160 chars and `$HOME` is rewritten to `/Users/fixture`; every op
+    line is otherwise real.
+  - Remaining uncovered: image/audio/video content parts, and `turn.steer`.
 
 ## Support Matrix Link
 - `docs/agent-support/agent-support-matrix.yml`

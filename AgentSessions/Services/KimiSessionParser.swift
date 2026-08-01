@@ -156,6 +156,10 @@ enum KimiSessionParser {
                                    time: Date?,
                                    line: String,
                                    index: Int) -> [SessionEvent] {
+        if type == "context.append_loop_event", let event = object["event"] as? [String: Any] {
+            return loopEvents(event, time: time, line: line, index: index)
+        }
+
         guard type == "context.append_message",
               let message = object["message"] as? [String: Any],
               let role = message["role"] as? String else {
@@ -203,6 +207,71 @@ enum KimiSessionParser {
                                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
         }
         return out
+    }
+
+    /// The agent loop streams its own output as `context.append_loop_event`, NOT
+    /// as `context.append_message`. Confirmed against real 0.29.2 journals:
+    /// `context.append_message` carries only *user* turns, while the assistant's
+    /// answer, its reasoning, and every tool call/result arrive as nested loop
+    /// events. Treating this whole family as `.meta` renders a session with the
+    /// user's prompts and nothing else.
+    ///
+    /// Shapes (`event.type`):
+    ///   content.part -> {part: {type: "text"|"think", ...}}
+    ///   tool.call    -> {toolCallId, name, args, description}
+    ///   tool.result  -> {toolCallId, result: {output, isError?}}
+    ///   step.begin / step.end -> loop bookkeeping (usage, finishReason)
+    private static func loopEvents(_ event: [String: Any],
+                                   time: Date?,
+                                   line: String,
+                                   index: Int) -> [SessionEvent] {
+        func meta(_ suffix: String) -> [SessionEvent] {
+            [SessionEvent(id: "\(index)-\(suffix)", timestamp: time, kind: .meta, role: nil, text: nil,
+                          toolName: nil, toolInput: nil, toolOutput: nil,
+                          messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
+        }
+
+        switch event["type"] as? String {
+        case "content.part":
+            guard let part = event["part"] as? [String: Any] else { return meta("lp") }
+            // `think` is reasoning, not the answer; keep it out of the rendered
+            // body for the same reason textContent(from:) drops think parts.
+            guard part["type"] as? String == "text",
+                  let text = part["text"] as? String, !text.isEmpty else { return meta("lp") }
+            return [SessionEvent(id: "\(index)-la", timestamp: time, kind: .assistant, role: "assistant",
+                                 text: text, toolName: nil, toolInput: nil, toolOutput: nil,
+                                 messageID: event["stepUuid"] as? String, parentID: nil,
+                                 isDelta: true, rawJSON: line)]
+
+        case "tool.call":
+            let args = event["args"].flatMap { value -> String? in
+                guard JSONSerialization.isValidJSONObject(value),
+                      let data = try? JSONSerialization.data(withJSONObject: value,
+                                                             options: [.sortedKeys]) else { return nil }
+                return String(data: data, encoding: .utf8)
+            }
+            return [SessionEvent(id: "\(index)-tc", timestamp: time, kind: .tool_call, role: "assistant",
+                                 text: event["description"] as? String,
+                                 toolName: event["name"] as? String,
+                                 toolInput: args,
+                                 toolOutput: nil,
+                                 messageID: event["toolCallId"] as? String, parentID: nil,
+                                 isDelta: false, rawJSON: line)]
+
+        case "tool.result":
+            let result = event["result"] as? [String: Any]
+            let isError = (result?["isError"] as? Bool) == true
+            return [SessionEvent(id: "\(index)-tr", timestamp: time,
+                                 kind: isError ? .error : .tool_result, role: "tool", text: nil,
+                                 toolName: nil, toolInput: nil,
+                                 toolOutput: result?["output"] as? String,
+                                 messageID: event["toolCallId"] as? String,
+                                 parentID: event["parentUuid"] as? String,
+                                 isDelta: false, rawJSON: line)]
+
+        default:
+            return meta("lp")
+        }
     }
 
     /// Flattens nested ContentParts. `think` parts are reasoning, not answer
