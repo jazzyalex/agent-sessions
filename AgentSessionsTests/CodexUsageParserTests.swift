@@ -294,6 +294,37 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.weekRemainingPercent, 99)
     }
 
+    /// Regression: the real field is `windowDurationMins`. Confirmed by grepping the
+    /// native binary of codex-cli 0.146.0, which contains it 7 times and contains
+    /// none of the previously-guessed names. Until it was recognised, a lone
+    /// length-less window made the classifier mark the response suspect with no
+    /// windows, `guard hasData` dropped it silently, and the entire CLI-RPC fallback
+    /// was dead — every OAuth cooldown tick fell through to a path that could never
+    /// succeed.
+    func testCLIRPCProbeReadsWindowDurationMinsFromLiveCLIShape() throws {
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": [
+                "rateLimits": [
+                    "primary": [
+                        "usedPercent": 1,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 1_800_100_000
+                    ]
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let snapshot = CodexCLIRPCProbe.parseRateLimitsResponseForTesting(data)
+
+        XCTAssertNotNil(snapshot, "a lone weekly window must not be discarded as suspect")
+        XCTAssertEqual(snapshot?.weekRemainingPercent, 99,
+                       "windowDurationMins 10080 routes the window to weekly, not 5h")
+        XCTAssertEqual(snapshot?.hasFiveHourRateLimit, false)
+    }
+
     func testCLIRPCProbeMarksOnlyReturnedWindowAsAvailable() throws {
         let payload: [String: Any] = [
             "jsonrpc": "2.0",

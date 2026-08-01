@@ -153,6 +153,13 @@ actor CodexOAuthUsageFetcher {
 
         guard let tokenSet = await credentials.resolve() else {
             os_log("CodexOAuth: no credentials available", log: log, type: .info)
+            // Record the attempt so the cooldown gate above applies to this path too.
+            // Returning without stamping `lastFetchAt` meant a signed-out user never
+            // established a cooldown at all, so every tick fell straight through to
+            // the CLI-RPC probe — which spawns a `codex app-server` process. On a
+            // background tick that is a process spawn per minute, indefinitely.
+            lastFetchAt = now
+            lastFetchFailed = true
             return .transient
         }
 

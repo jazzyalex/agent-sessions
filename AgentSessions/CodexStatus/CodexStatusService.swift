@@ -2334,9 +2334,24 @@ actor CodexStatusService {
                 lastAppliedSourceFileMTime = nil
             }
         }
-        guard let sourceFile else { return }
-
+        // Fetch BEFORE the source-file guard. This is the authoritative live limits
+        // call, and it must not depend on a local log file existing — that is the
+        // whole point of it being authoritative.
+        //
+        // It previously sat below `guard let sourceFile else { return }`. Because
+        // `newestCandidateFile` searches by date-path with `daysBack: 1`, it only
+        // looks in today's and yesterday's session directories; with no Codex CLI run
+        // in that window `sourceFile` is nil, the tick returned here, and the fetch
+        // never happened. In `.menuBackground` mode — a pinned HUD with the app not
+        // frontmost, i.e. the normal state — that meant the Codex meter read
+        // "reconnecting…" forever while the endpoint was answering 200 the whole time.
+        //
+        // Cost is bounded by the fetcher's own cooldowns (60s after success, 30min
+        // after failure), so this adds one HTTPS GET per tick only when no rollout
+        // exists — exactly what `.active` mode already pays.
         _ = await refreshPreferredLiveLimits(visibleFastPath: false)
+
+        guard let sourceFile else { return }
 
         // Only parse when the file changes; otherwise rely on the cached snapshot.
         guard let mtime = fileModificationDate(sourceFile) else { return }

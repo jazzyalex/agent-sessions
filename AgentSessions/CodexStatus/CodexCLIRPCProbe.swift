@@ -63,7 +63,12 @@ actor CodexCLIRPCProbe {
 
         do {
             let response = try await runRPC(binary: codexBin)
-            lastProbeFailed = false
+            // A nil response is a failure for cooldown purposes: the RPC completed
+            // but carried nothing usable (e.g. an error object from a signed-out
+            // app-server). Treating it as success applied only the 60s success
+            // cooldown, so a permanently-unusable app-server was re-spawned every
+            // minute forever.
+            lastProbeFailed = (response == nil)
             return response
         } catch RPCError.unsupported {
             os_log("CodexRPC: app-server RPC not supported, disabling permanently", log: log, type: .info)
@@ -220,12 +225,19 @@ actor CodexCLIRPCProbe {
         return Date(timeIntervalSince1970: TimeInterval(resetsAt))
     }
 
-    /// Extracts a declared window length in minutes. The app-server's field
-    /// name for this is unconfirmed, so this tries several plausible
-    /// candidates before giving up; when every window returns nil the router
-    /// falls back to the legacy positional mapping (primary=5h, secondary=weekly).
+    /// Extracts a declared window length in minutes.
+    ///
+    /// `windowDurationMins` is the real field — confirmed by grepping the native
+    /// `codex` binary of codex-cli 0.146.0, which contains it 7 times and contains
+    /// none of the other names here. Until it was added this probe never matched
+    /// anything, so every window resolved to nil, the classifier marked the response
+    /// suspect with no windows, and `guard hasData` discarded it silently: the whole
+    /// CLI-RPC fallback path was dead.
+    ///
+    /// The speculative names are kept in case older CLIs used them, but they are
+    /// exactly that — speculative. Only the first is known to exist.
     private nonisolated static func extractWindowMinutes(_ window: [String: Any]) -> Int? {
-        for key in ["windowMinutes", "windowSizeMinutes", "windowMinutesTotal"] {
+        for key in ["windowDurationMins", "windowMinutes", "windowSizeMinutes", "windowMinutesTotal"] {
             if let minutes = window[key] as? Int { return minutes }
             if let minutes = window[key] as? Double { return Int(minutes.rounded()) }
         }
