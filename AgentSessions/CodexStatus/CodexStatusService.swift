@@ -668,6 +668,32 @@ final class CodexUsageModel: ObservableObject {
                 state = .signedOut
             }
         }
+        // Credentials are fine but no usage figures have ever landed — say so,
+        // rather than spinning "reconnecting…" at a state that will never resolve
+        // on its own. `.idle` renders the calm "no active session" cell.
+        //
+        // Every term here is load-bearing; none is defensive padding.
+        //
+        //   `!fetchIsOK` — a successful fetch must never be promoted. `apply()`
+        //   and this handler are separate main-actor hops with no guaranteed
+        //   order, so on success `lastUpdate` may still be nil here. Omitting
+        //   this announced "no active session" at the instant data arrived;
+        //   testHandleAuthFetchResultOkPublishesSilentOk pins it.
+        //
+        //   `!isUpdating` — a manual refresh is in flight (set by `refreshNow`,
+        //   cleared by `apply()` or a 65s timeout). Do not declare a terminal
+        //   state while an attempt is still running.
+        //
+        //   `lastUpdate == nil` — nothing has ever been applied. Note this is
+        //   narrower than "no usage figures ever landed": `apply()` stamps it for
+        //   any snapshot, including account/model fragments and
+        //   rate-limits-unavailable markers. That errs toward staying on
+        //   "reconnecting…" rather than falsely claiming idle, which is the safe
+        //   direction.
+        if state == .ok, !fetchIsOK, lastUpdate == nil, !isUpdating {
+            state = .idle
+        }
+
         // Drop a stale verdict: a newer poll began while we awaited above.
         guard generation == authGeneration else { return }
         applyAuthState(state)

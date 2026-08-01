@@ -62,6 +62,30 @@ final class CodexUsageModelAuthWiringTests: XCTestCase {
         XCTAssertEqual(model.authStatus?.state, .ok)
     }
 
+    /// Regression: a completed fetch that returned NO usable data, with nothing
+    /// ever applied, reads as `.idle` ("no active session") rather than spinning
+    /// "reconnecting…" at a state that will never resolve on its own.
+    ///
+    /// Seeds `AS_TEST_CODEX_AUTH_PATH` with a real token file. The non-`.ok` path
+    /// runs the full stateful classifier, which reads credentials from disk — so
+    /// without this the verdict depends on whether the HOST happens to have
+    /// ~/.codex/auth.json. On a machine without creds the classifier returns
+    /// `.cliNotInstalled` or `.unknown` and this test fails for reasons unrelated
+    /// to what it is testing. Present creds short-circuit classify to `.ok`,
+    /// which is the precondition the promotion is defined against.
+    func testCompletedFetchWithNoDataPublishesIdle() async throws {
+        let path = NSTemporaryDirectory() + "codex-auth-\(UUID().uuidString).json"
+        try #"{"tokens":{"access_token":"t","account_id":"a"}}"#
+            .write(toFile: path, atomically: true, encoding: .utf8)
+        setenv("AS_TEST_CODEX_AUTH_PATH", path, 1)
+        defer { unsetenv("AS_TEST_CODEX_AUTH_PATH"); try? FileManager.default.removeItem(atPath: path) }
+
+        let model = CodexUsageModel()
+        await model.handleAuthFetchResult(.transient)
+        XCTAssertEqual(model.authStatus?.state.isAlarming, false)
+        XCTAssertEqual(model.authStatus?.state, .idle)
+    }
+
     // MARK: - Success-path authoritative override (pure helpers)
 
     /// Only a DEFINITIVE `.signedOut` from the throttled probe overrides the
