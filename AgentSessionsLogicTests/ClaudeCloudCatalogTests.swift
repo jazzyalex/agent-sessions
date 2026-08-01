@@ -10,10 +10,11 @@ final class ClaudeCloudCatalogTests: XCTestCase {
                      bucket: String = "working",
                      worker: String = "running",
                      conn: String = "connected",
-                     title: String? = "t") -> ClaudeCloudRawSession {
+                     title: String? = "t",
+                     lastEventAt: Date? = Date(timeIntervalSince1970: 1_785_000_000 - 300)) -> ClaudeCloudRawSession {
         ClaudeCloudRawSession(id: id, title: title, status: status, statusBucket: bucket,
                               workerStatus: worker, connectionStatus: conn,
-                              environmentKind: kind, lastEventAt: nil, unread: 0)
+                              environmentKind: kind, lastEventAt: lastEventAt, unread: 0)
     }
 
     // MARK: - Cloud filter
@@ -39,38 +40,82 @@ final class ClaudeCloudCatalogTests: XCTestCase {
                     raw("cse_review", kind: "anthropic_cloud", bucket: "review_ready", worker: "idle"),
                     raw("cse_done", kind: "anthropic_cloud", status: "archived",
                         bucket: "completed", worker: "idle")]
-        let ids = ClaudeCloudFilter.activeRows(ClaudeCloudFilter.cloudOnly(rows)).map(\.id)
+        let ids = ClaudeCloudFilter.activeRows(ClaudeCloudFilter.cloudOnly(rows), now: now).map(\.id)
         XCTAssertEqual(Set(ids), Set(["cse_working", "cse_review"]))
     }
+
+    private func aged(_ id: String, hoursAgo: Double, bucket: String = "working",
+                      worker: String = "idle") -> ClaudeCloudRawSession {
+        ClaudeCloudRawSession(id: id, title: "t", status: "active", statusBucket: bucket,
+                              workerStatus: worker, connectionStatus: "connected",
+                              environmentKind: "anthropic_cloud",
+                              lastEventAt: Date(timeIntervalSince1970: 1_785_000_000 - hoursAgo * 3600),
+                              unread: 0)
+    }
+
+    private let now = Date(timeIntervalSince1970: 1_785_000_000)
 
     /// Regression: presence must not depend on worker_status. An active session
     /// whose worker is momentarily idle stays listed — tying visibility to
     /// worker_status made the row blink out between turns, because worker_status
     /// is "idle" for the overwhelming majority of sessions at any instant.
-    func test_activeSessionStaysListedWhileWorkerIsIdle() {
+    func test_recentlyActiveSessionStaysListedWhileWorkerIsIdle() {
+        let rows = ClaudeCloudFilter.cloudOnly([aged("cse_between_turns", hoursAgo: 0.2,
+                                                     bucket: "completed")])
+        let row = ClaudeCloudFilter.activeRows(rows, now: now).first
+        XCTAssertEqual(row?.id, "cse_between_turns", "must not vanish between turns")
+        XCTAssertEqual(row?.isWorking, false, "…but is styled as not working")
+    }
+
+    /// Regression: `status == "active"` means only "not archived". Two real sessions
+    /// carried it 14 hours and 116 days after their last event, so without a recency
+    /// test the strip accumulates zombies indefinitely.
+    func test_staleActiveSessionIsDropped() {
+        let rows = ClaudeCloudFilter.cloudOnly([aged("cse_zombie", hoursAgo: 14)])
+        XCTAssertTrue(ClaudeCloudFilter.activeRows(rows, now: now).isEmpty,
+                      "14h-old session must not render as live")
+    }
+
+    func test_ancientSessionClaimingWorkingIsStillDropped() {
+        // Observed live: idle since April, still reporting status_bucket "working".
+        let rows = ClaudeCloudFilter.cloudOnly([aged("cse_april", hoursAgo: 2784,
+                                                     bucket: "working",
+                                                     worker: "WORKER_STATUS_UNSPECIFIED")])
+        XCTAssertTrue(ClaudeCloudFilter.activeRows(rows, now: now).isEmpty,
+                      "status_bucket alone must never keep a row alive")
+    }
+
+    /// A session actively emitting tokens is live even if its timestamp lags.
+    func test_runningWorkerSurvivesRegardlessOfAge() {
+        let rows = ClaudeCloudFilter.cloudOnly([aged("cse_running", hoursAgo: 99, worker: "running")])
+        let row = ClaudeCloudFilter.activeRows(rows, now: now).first
+        XCTAssertEqual(row?.id, "cse_running")
+        XCTAssertEqual(row?.isWorking, true)
+    }
+
+    func test_missingTimestampIsTreatedAsNotLive() {
         let rows = ClaudeCloudFilter.cloudOnly(
-            [raw("cse_between_turns", kind: "anthropic_cloud", bucket: "completed", worker: "idle")])
-        let row = ClaudeCloudFilter.activeRows(rows).first
-        XCTAssertEqual(row?.id, "cse_between_turns", "an active session must not vanish between turns")
-        XCTAssertEqual(row?.isWorking, false, "…but it is styled as not working")
+            [raw("cse_no_ts", kind: "anthropic_cloud", worker: "idle", lastEventAt: nil)])
+        XCTAssertTrue(ClaudeCloudFilter.activeRows(rows, now: now).isEmpty,
+                      "absent last_event_at must degrade to hidden, not to always-visible")
     }
 
     func test_runningWorkerMapsToWorking() {
         let rows = ClaudeCloudFilter.cloudOnly([raw("cse_a", kind: "anthropic_cloud")])
-        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows).first?.isWorking, true)
+        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows, now: now).first?.isWorking, true)
     }
 
     func test_unspecifiedWorkerStatusFallsBackToBucket() {
         let rows = ClaudeCloudFilter.cloudOnly(
             [raw("cse_x", kind: "anthropic_cloud", worker: "WORKER_STATUS_UNSPECIFIED")])
-        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows).first?.isWorking, true,
+        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows, now: now).first?.isWorking, true,
                        "bucket=working carries it when worker_status is uninformative")
     }
 
     func test_reviewReadyIsNotWorkingButIsStillLive() {
         let rows = ClaudeCloudFilter.cloudOnly(
             [raw("cse_r", kind: "anthropic_cloud", bucket: "review_ready", worker: "idle")])
-        let row = ClaudeCloudFilter.activeRows(rows).first
+        let row = ClaudeCloudFilter.activeRows(rows, now: now).first
         XCTAssertEqual(row?.isWorking, false)
         XCTAssertEqual(row?.isAwaitingReview, true)
     }
@@ -78,12 +123,12 @@ final class ClaudeCloudCatalogTests: XCTestCase {
     func test_disconnectedIsSurfacedNotDropped() {
         let rows = ClaudeCloudFilter.cloudOnly(
             [raw("cse_d", kind: "anthropic_cloud", conn: "disconnected")])
-        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows).first?.isDisconnected, true)
+        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows, now: now).first?.isDisconnected, true)
     }
 
     func test_missingTitleGetsAPlaceholderRatherThanEmptyRow() {
         let rows = ClaudeCloudFilter.cloudOnly([raw("cse_n", kind: "anthropic_cloud", title: nil)])
-        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows).first?.title, "Cloud session")
+        XCTAssertEqual(ClaudeCloudFilter.activeRows(rows, now: now).first?.title, "Cloud session")
     }
 
     // MARK: - State machine (anti-spinner guards)

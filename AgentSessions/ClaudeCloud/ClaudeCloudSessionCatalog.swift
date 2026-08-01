@@ -32,31 +32,47 @@ enum ClaudeCloudFilter {
         rows.filter { $0.environmentKind == cloudKind }
     }
 
-    /// Reduce to sessions worth a live row.
+    /// How recently a session must have emitted an event to count as live.
     ///
-    /// Presence is `status == "active"` and nothing else. It deliberately does NOT
-    /// depend on `worker_status`, because a cloud session is continuously alive
-    /// whether or not its worker happens to be mid-token — the same way a local
-    /// session stays listed while it waits at a prompt. An earlier version also
-    /// required `status_bucket ∈ {working, review_ready}`, which made the row blink
-    /// out between turns: `worker_status` is `idle` for 168 of 178 sessions at any
-    /// moment, so the row was absent far more often than present.
+    /// Measured against the server, `status == "active"` means only **not archived**.
+    /// Two sessions carrying it were last touched 14 hours and 116 days ago, and the
+    /// 116-day-old one still reported `status_bucket: "working"` — so neither field
+    /// can be trusted as a liveness signal on its own.
+    static let liveWindow: TimeInterval = 60 * 60
+
+    /// Reduce to sessions worth a live row: not archived, and either working right
+    /// now or active within `liveWindow`.
     ///
-    /// `worker_status` and `status_bucket` still decide how the row is *styled*;
-    /// they no longer decide whether it exists.
-    static func activeRows(_ rows: [ClaudeCloudRawSession]) -> [ClaudeCloudSession] {
+    /// Recency is the load-bearing test, chosen over the two obvious alternatives:
+    /// `status == "active"` alone admits zombies indefinitely (a session idle since
+    /// April), while gating on `worker_status == "running"` makes the row blink out
+    /// between turns, since `worker_status` is `idle` for the overwhelming majority
+    /// of sessions at any instant. Recency is stable across turns and still expires.
+    ///
+    /// `worker_status` and `status_bucket` decide how a surviving row is *styled*.
+    static func activeRows(_ rows: [ClaudeCloudRawSession],
+                           now: Date = Date()) -> [ClaudeCloudSession] {
         rows.compactMap { row -> ClaudeCloudSession? in
             guard row.status == "active" else { return nil }
             let bucket = row.statusBucket
 
+            let isRunning = row.workerStatus == "running"
+            let isRecent = row.lastEventAt.map { now.timeIntervalSince($0) <= liveWindow } ?? false
+            // A missing timestamp is treated as not-recent rather than assumed live,
+            // so a field rename degrades to "hidden" instead of "everything forever".
+            guard isRunning || isRecent else { return nil }
+
             // worker_status is authoritative when it says "running". It also takes
             // WORKER_STATUS_UNSPECIFIED (6 of 177 observed), which carries no
             // information — fall back to the bucket rather than rendering a literal.
+            // `status_bucket` alone cannot be trusted: a session idle for 116 days
+            // still reported "working". Fall back to it only when `worker_status`
+            // carries no information AND the session is recently active.
             let working: Bool
-            if row.workerStatus == "running" {
+            if isRunning {
                 working = true
             } else if row.workerStatus == "WORKER_STATUS_UNSPECIFIED" {
-                working = bucket == "working"
+                working = bucket == "working" && isRecent
             } else {
                 working = false
             }
