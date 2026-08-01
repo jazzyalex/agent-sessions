@@ -129,7 +129,49 @@ Add `windowDurationMins` to the candidate list. Keep the existing names — olde
 >   explainer is Claude-only (`StatusItemController` uses `codexResetMenuTitle` for
 >   Codex rows) — a glyph with no explanation anywhere in the menu.
 
-## Task 3: Persist the Codex usage snapshot
+## Task 3: Persist the Codex usage snapshot — **NOT BUILDING (decided 2026-08-01)**
+
+Reviewed and dropped. Task 1 removed the need, and the payoff is far smaller than the
+plan assumed.
+
+**Cold start is 1-3 seconds, not ~60.** `setVisibility` fires an immediate `refreshTick()`
+on the hidden→visible transition, `restartRefresherLoop` ticks before its first sleep, and
+the fetcher's cooldown state is in-memory so a fresh process is never cooldown-blocked.
+
+**The template caps the value.** `ClaudeUsageSourceManager` only restores snapshots under a
+30-minute hard expiry and marks 10-30 min data stale — and `dataIsStale` makes
+`presentationState` return `.reconnecting`, so the footer shows a spinner, not numbers. A
+correct Codex mirror therefore buys exactly one thing: skipping a 1-3 second spinner on a
+relaunch within ~10 minutes. The 2-day-gap scenario that motivated this work would have its
+snapshot discarded as expired; Task 1 already fixed that case at the source.
+
+**The cost is not small.** `apply()` cannot be reused for restore — it stamps
+`lastUpdate = now`, feeds `UsageLimitProjectionTracker`, and feeds `UsageLimitNotifier`
+with `.oauth` mapped to `.fresh`, so a restored snapshot could re-fire a limit notification
+on every relaunch. That needs a parallel `applyRestored()` path, a new Codable DTO
+(`CodexUsageSnapshot` is not Codable and carries probe/token fields that must not persist),
+plus the staleness plumbing — in the largest, most-recently-churned file in the app.
+
+**The 429 mislabel does not justify it either.** It requires a three-way conjunction (cold
+launch AND no rollout from today/yesterday AND a transient first fetch), self-heals on the
+next success, and this repo has no observed 429s on the Codex endpoint — the documented
+storms were Claude's edge.
+
+### Follow-ups worth keeping (not scheduled)
+
+1. **The 30-minute OAuth failure cooldown has no user-initiated bypass.** `refreshNow` goes
+   through the same gate, so Wi-Fi returning 20s after an offline launch can leave the meter
+   dark for up to 30 minutes unless the CLI-RPC fallback rescues it. This dominates
+   cold-start recovery and is a bigger real defect than anything Task 3 addressed.
+2. **`.idle` can mislabel a cold-start transient failure** until the next successful fetch.
+   Revisit only if a Codex-side 429 is ever actually observed. The correct fix is
+   reason-aware promotion (needs a reason on `CodexUsageFetchResult.transient` plus a latch,
+   since follow-up ticks return `.skippedCooldown`), done together with (1).
+
+<details>
+<summary>Original Task 3 plan, kept for reference</summary>
+
+
 
 **Files:**
 - Create: `AgentSessions/CodexStatus/CodexUsageSnapshotStore.swift`
@@ -141,6 +183,8 @@ Codex state is in-memory only — `ClaudeUsageSnapshotStore` has no Codex counte
 - [ ] Steps: write failing round-trip test → register file → implement mirroring the Claude store → load on init as a stale-marked seed (never as live data) → run suite → commit.
 
 **Risk:** a restored snapshot must never render as fresh. Gate it so `dataIsStale` is true until a live fetch lands, or this reintroduces the "trusting figures that stopped updating" failure.
+
+</details>
 
 ---
 
