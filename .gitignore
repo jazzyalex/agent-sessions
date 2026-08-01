@@ -68,6 +68,10 @@ scripts/energy_samples*/
 side-chat-probes-tmp/
 *-probes-tmp/
 
+# Local research corpus (local only, never published).
+# Holds derived data (corpus.db, financial.json) that must not reach the public repo.
+mycelium-lab/
+
 # Local release artifacts (use GitHub Releases instead of tracking binaries)
 *.dmg
 
