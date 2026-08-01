@@ -558,6 +558,14 @@ private struct ClaudeWebSessionCookieCallout: View {
     @AppStorage(PreferencesKey.claudeCloudSessionsEnabled)
     private var claudeCloudSessionsEnabled: Bool = false
 
+    /// Cloud rows are injected into the Claude runway snapshot, and the Quota Meter
+    /// only builds a Claude provider entry when usage tracking is on
+    /// (`AgentCockpitHUDView.entries`). With it off there is no block to inject into,
+    /// so the rows cannot render at any cost. The dependency is surfaced here rather
+    /// than left as a switch that silently does nothing.
+    @AppStorage(PreferencesKey.claudeUsageEnabled)
+    private var claudeUsageEnabledForCloud: Bool = false
+
     private let store = ClaudeManualWebCookieStore.shared
 
     var body: some View {
@@ -584,7 +592,10 @@ private struct ClaudeWebSessionCookieCallout: View {
                         Toggle("Show Claude cloud sessions in Quota Meter (experimental)",
                                isOn: $claudeCloudSessionsEnabled)
                             .font(.caption)
-                        Text("Sessions running on Anthropic's servers appear as live rows next to your local agents. Read-only; nothing is stored on disk. Uses an undocumented API that may change.")
+                            .disabled(!claudeUsageEnabledForCloud)
+                        Text(claudeUsageEnabledForCloud
+                             ? "Sessions running on Anthropic's servers appear as live rows next to your local agents. Read-only; nothing is stored on disk. Uses an undocumented API that may change."
+                             : "Turn on Claude usage tracking first — cloud sessions appear inside the Claude block in the Quota Meter, so there is nowhere to show them without it.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -190,7 +190,14 @@ Cloud rows are appended into `snapshot.rows`, so a local overflow summary ("+2 s
 
 - [ ] **Heartbeat file** (`ClaudeCloudLiveModel.note()` → `cloud-debug.json`): DEBUG-only and test-guarded. It is the only working instrument in this app — recommend keeping, but the owner should decide explicitly rather than by default.
 - [ ] **Verify the `bridge` assumption.** The filter excludes 168 `environment_kind == "bridge"` sessions on the assumption the local indexer already shows them. **This was never checked.** Confirm a bridge session appears locally; if it does not, those sessions are invisible everywhere and the filter is wrong.
-- [ ] **Amend two commit messages.** `a2e0e027` and `e78093ef` describe fixes for symptoms that were not occurring (the feature was switched off at the time). The code changes stand; the rationale is wrong. Amend while unpushed, or leave a corrective note.
+- [x] **Misleading commit messages — DECIDED 2026-08-01: leave as-is.** `a2e0e027` and
+  `e78093ef` describe fixes for symptoms that were not occurring (the cloud feature was
+  switched off at the time, so what looked like flickering cloud rows was a
+  locally-indexed session). The **code in both is correct and still stands** — only the
+  rationale is wrong, and the accurate account is recorded in `df0cc7af`, `4ebf8ec0` and
+  this document. A corrective note commit would add archaeology noise to a branch that is
+  unpushed and likely squashed on merge. Rewriting is unavailable anyway: interactive
+  rebase is blocked in this environment, so nothing but HEAD can be amended.
 
 ---
 
