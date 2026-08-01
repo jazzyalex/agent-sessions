@@ -344,21 +344,12 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
     // MARK: Claude cloud sessions
     //
     // Cloud sessions have no local process, so they cannot come from the presence
-    // poll. They are fetched over the network on the same cadence and folded into
-    // the snapshot. Every failure resolves to a `ClaudeCloudSourceState` inside the
-    // catalog, so nothing here can throw into the local-row path.
-    private lazy var cloudCatalog = ClaudeCloudSessionCatalog(
-        sessionKeyProvider: { ClaudeManualWebCookieStore.shared.currentSessionKey() },
-        isEnabled: { UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled) }
-    )
-    private var cloudRows: [HUDRow] = []
-    private var cloudRowsVersion: UInt64 = 0
-    private var cloudRefreshInFlight = false
-    private var lastCloudRefreshAt: Date?
-    /// The cloud list is a network call; poll it far less often than the ~2s
-    /// presence tick. Liveness granularity of half a minute is ample for a row
-    /// that says "still working", and it keeps well clear of rate limiting.
-    private let cloudRefreshInterval: TimeInterval = 30
+    // poll. The fetch is owned by `ClaudeCloudLiveModel`, NOT by this model: an
+    // earlier version polled from `rebuildIfReady`, which returns early when the
+    // weak `activeCodex` is unbound and is gated by `HUDRebuildGate`, so the fetch
+    // never ran and no cloud row ever appeared. This model only reads.
+    private var cloudRows: [HUDRow] { ClaudeCloudLiveModel.shared.rows }
+    private var cloudRowsVersion: UInt64 { ClaudeCloudLiveModel.shared.version }
     private var cancellables: Set<AnyCancellable> = []
     private var activeCancellable: AnyCancellable?
     private var subagentBadgeCancellable: AnyCancellable?
@@ -518,38 +509,6 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         }
     }
 
-    /// Kick a cloud-list refresh at most once per `cloudRefreshInterval`, never
-    /// overlapping. Returns immediately; when the fetch lands it bumps
-    /// `cloudRowsVersion` and forces one rebuild so the new rows are picked up.
-    ///
-    /// Deliberately fire-and-forget: the local rows must never wait on, or be
-    /// affected by, a network call.
-    private func refreshCloudRowsIfDue(now: Date) {
-        guard UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled) else {
-            if !cloudRows.isEmpty {
-                cloudRows = []
-                cloudRowsVersion &+= 1
-            }
-            return
-        }
-        guard !cloudRefreshInFlight else { return }
-        if let last = lastCloudRefreshAt, now.timeIntervalSince(last) < cloudRefreshInterval { return }
-        cloudRefreshInFlight = true
-        lastCloudRefreshAt = now
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.cloudCatalog.refresh()
-            let mapped = ClaudeCloudHUDRowMapper.rows(from: self.cloudCatalog.sessions)
-            self.cloudRefreshInFlight = false
-            guard mapped != self.cloudRows else { return }
-            self.cloudRows = mapped
-            self.cloudRowsVersion &+= 1
-            self.rebuildGate.forceNextRebuild()
-            self.rebuildIfReady()
-        }
-    }
-
     private func rebuildIfReady(activeCodex: CodexActiveSessionsModel? = nil) {
         let activeCodex = activeCodex ?? self.activeCodex
         guard let activeCodex else { return }
@@ -562,7 +521,7 @@ private final class AgentCockpitHUDDerivedStateModel: ObservableObject {
         let skipAgentsPreamble = UserDefaults.standard.object(forKey: PreferencesKey.Unified.skipAgentsPreamble) == nil
             ? true
             : UserDefaults.standard.bool(forKey: PreferencesKey.Unified.skipAgentsPreamble)
-        refreshCloudRowsIfDue(now: now)
+        ClaudeCloudLiveModel.shared.startIfNeeded()
         let gateInputs = HUDRebuildGate.Inputs(
             membershipVersion: activeCodex.activeMembershipVersion,
             badgeVersion: activeCodex.subagentBadgeVersion,

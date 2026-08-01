@@ -801,6 +801,10 @@ extension AgentSessionsApp {
         LaunchProfiler.reset(windowLabel)
         LaunchProfiler.log("Window appeared")
         LaunchProfiler.log("UnifiedSessionIndexer.refresh() invoked")
+        // Cloud rows must not depend on which window is open, nor on the app ever
+        // becoming frontmost — a menu-bar-only launch never posts didBecomeActive.
+        // Idempotent, and a no-op while the feature toggle is off.
+        ClaudeCloudLiveModel.shared.startIfNeeded()
         onboardingCoordinator.checkAndPresentIfNeeded()
         Task {
             await AppReadyGate.waitUntilReady()
@@ -878,6 +882,10 @@ extension AgentSessionsApp {
         activeCodexSessions.setAppActive(true)
         codexUsageModel.setAppActive(true)
         claudeUsageModel.setAppActive(true)
+        // Started here, not from the Quota Meter view: cloud rows must not depend on
+        // which window happens to be open. Idempotent, and a no-op while the
+        // feature toggle is off.
+        ClaudeCloudLiveModel.shared.startIfNeeded()
         archiveManager.syncPinnedSessionsNow()
     }
 

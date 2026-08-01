@@ -66,6 +66,7 @@
 		1BFFFE9DABB9F97E7988EA77 /* ImageBrowserIndexCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55F3DA1B53A2B4BEA17820FA /* ImageBrowserIndexCacheTests.swift */; };
 		1C6DD2214140E6A5D9089AA8 /* TranscriptBlockListLinkifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B914E31C45E2BF13B3A7F3 /* TranscriptBlockListLinkifyTests.swift */; };
 		1D0AD620E3E044DB875B125B /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B86A8EFF02D440EADEB98F0 /* UpdateChecker.swift */; };
+		1D855537E5F83011BCF57E46 /* ClaudeCloudLiveModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100935AC7633BB01056061B3 /* ClaudeCloudLiveModel.swift */; };
 		1DF96B1C0DC1FE25ED7D3B9D /* QuickLookPreviewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1963DBC1070EFA0B5456ACF /* QuickLookPreviewController.swift */; };
 		1E2F2DE066304D55C8B158B8 /* TranscriptDerivedStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92B3997F1DDB13B7AC35CE3 /* TranscriptDerivedStateTests.swift */; };
 		1EA7B8F88FE04F7994FBB531 /* KimiSessionParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A68F04B1FE6FAB14000F57CF /* KimiSessionParserTests.swift */; };
@@ -554,6 +555,7 @@
 		0C46BBDD0EA77A2B1EDAE78A /* AuthRemediationBanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Shared/Views/AuthRemediationBanner.swift; sourceTree = SOURCE_ROOT; };
 		0DDD967AC4CCB8C88A1752E1 /* ImageBrowserViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ImageBrowserViewModel.swift; sourceTree = SOURCE_ROOT; };
 		0F0FF569592BFE502A97E9AE /* ProgressThrottler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/ProgressThrottler.swift; sourceTree = SOURCE_ROOT; };
+		100935AC7633BB01056061B3 /* ClaudeCloudLiveModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeCloud/ClaudeCloudLiveModel.swift; sourceTree = SOURCE_ROOT; };
 		1074E2B1681C2BEB28D59B2F /* Base64ImageDataURLScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Utilities/Base64ImageDataURLScanner.swift; sourceTree = SOURCE_ROOT; };
 		10B180483734CCCEA78309FB /* KeychainResultTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/KeychainResultTests.swift; sourceTree = SOURCE_ROOT; };
 		1116C1BDB5B78A25018D8CDD /* TranscriptTurnTimingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptTurnTimingTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1299,6 +1301,7 @@
 				E9987983C8FFAF9DA752C414 /* ClaudeCloudSourceState.swift */,
 				01F3B5C44B4685603BD64BC9 /* ClaudeCloudSessionCatalog.swift */,
 				FF913F1A4F8CD46819746264 /* ClaudeCloudHUDRowMapper.swift */,
+				100935AC7633BB01056061B3 /* ClaudeCloudLiveModel.swift */,
 			);
 			name = ClaudeCloud;
 			sourceTree = "<group>";
@@ -2633,6 +2636,7 @@
 				D8CD0006443A4CAD07E83839 /* ClaudeCloudSourceState.swift in Sources */,
 				0FB461F6F93A19DA038C296F /* ClaudeCloudSessionCatalog.swift in Sources */,
 				04EF3AF42BF8AD0871A5D2D2 /* ClaudeCloudHUDRowMapper.swift in Sources */,
+				1D855537E5F83011BCF57E46 /* ClaudeCloudLiveModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

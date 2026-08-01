@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let catalogLog = OSLog(subsystem: "com.triada.AgentSessions", category: "ClaudeCloud")
 
 /// A cloud session reduced to what a live row needs.
 struct ClaudeCloudSession: Identifiable, Equatable, Sendable {
@@ -97,24 +100,37 @@ final class ClaudeCloudSessionCatalog {
         guard isEnabled() else {
             state = .disabled
             sessions = []
+            os_log("cloud: disabled (toggle off)", log: catalogLog, type: .info)
             return
         }
         guard let key = sessionKeyProvider(), !key.isEmpty else {
             state = .notConnected
             sessions = []
+            os_log("cloud: no sessionKey — keychain read returned nil/empty",
+                   log: catalogLog, type: .error)
             return
         }
 
         do {
             let raw = try await client.listSessions(sessionKey: key)
-            let live = ClaudeCloudFilter.activeRows(ClaudeCloudFilter.cloudOnly(raw))
+            let cloud = ClaudeCloudFilter.cloudOnly(raw)
+            let live = ClaudeCloudFilter.activeRows(cloud)
             sessions = live
             state = live.isEmpty ? .empty : .ok(count: live.count)
+            // The three counts localise any future "nothing shows up" instantly:
+            // raw=0 is fetch/auth, cloud=0 is the environment_kind filter,
+            // live=0 is the active predicate.
+            os_log("cloud: raw=%{public}d cloud=%{public}d live=%{public}d",
+                   log: catalogLog, type: .info, raw.count, cloud.count, live.count)
         } catch let error as ClaudeCloudError {
             apply(error)
+            os_log("cloud: refresh failed — %{public}@", log: catalogLog, type: .error,
+                   String(describing: error))
         } catch {
             // Any unexpected error is treated as transport rather than swallowed.
             apply(.offline)
+            os_log("cloud: refresh failed (unexpected) — %{public}@", log: catalogLog,
+                   type: .error, String(describing: error))
         }
     }
 
