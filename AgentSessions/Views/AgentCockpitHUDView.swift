@@ -2896,9 +2896,15 @@ func appendingClaudeCloudRows(to snapshot: CodexRunwaySnapshot?,
     // The memberwise init defaults `aggregateTokensPerHour` back to nil, so copy it
     // explicitly — otherwise rebuilding the snapshot silently drops the "burning"
     // figure the provider row reads.
+    // Cloud rows go FIRST, not last. `HUDRunwayPanel` renders `rows` and then
+    // `burstSummary`, and that summary ("+2 sessions") counts *local* burns folded
+    // away by RunwayOverflowRule — which runs before this injection and never sees
+    // cloud rows. Appending put the Cloud rows between the local rows and their own
+    // summary, so the "+N" read as though it counted the cloud sessions. Leading with
+    // them keeps the summary adjacent to the rows it actually describes.
     var merged = CodexRunwaySnapshot(
         baseline: snapshot.baseline,
-        rows: snapshot.rows + rows,
+        rows: rows + snapshot.rows,
         burstSummary: snapshot.burstSummary
     )
     merged.aggregateTokensPerHour = snapshot.aggregateTokensPerHour
@@ -3492,6 +3498,9 @@ private struct HUDLimitsRowsPanel: View {
         }
     }
 
+    @AppStorage(PreferencesKey.claudeCloudSessionsEnabled)
+    private var claudeCloudSessionsEnabledForStatus: Bool = false
+
     /// Why the cloud source is showing what it is showing.
     ///
     /// The spec requires every `ClaudeCloudSourceState` to reach a surface: a state
@@ -3506,7 +3515,10 @@ private struct HUDLimitsRowsPanel: View {
     private var cloudStatusLine: some View {
         let model = ClaudeCloudLiveModel.shared
         let state = model.state
-        let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled)
+        // `@AppStorage`, not a bare UserDefaults read: the raw read does not
+        // invalidate the body, so after switching the feature off a stale error
+        // caption lingered until the next 30s poll happened to change `state`.
+        let enabled = claudeCloudSessionsEnabledForStatus
         // This line explains PROBLEMS, not normalcy. "No cloud sessions running" is
         // the ordinary steady state — local sessions do not announce their own
         // absence either, and a permanent caption restating it is pure noise.
