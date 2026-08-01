@@ -1037,21 +1037,25 @@ struct AgentCockpitHUDView: View {
         let model = ClaudeCloudLiveModel.shared
         let state = model.state
         let enabled = UserDefaults.standard.bool(forKey: PreferencesKey.claudeCloudSessionsEnabled)
-        // Quiet only when there is genuinely nothing to say: the feature is off, or
-        // it is working with fresh rows on screen. Everything else speaks — including
-        // the pre-first-poll case, which previously rendered as silence because the
-        // catalog's initial state is `.disabled`. Silence and "broken" looked
-        // identical, which is the whole failure this line exists to prevent.
+        // This line explains PROBLEMS, not normalcy. "No cloud sessions running" is
+        // the ordinary steady state — local sessions do not announce their own
+        // absence either, and a permanent caption restating it is pure noise.
+        //
+        // Still spoken: every state where something is wrong or the numbers cannot
+        // be trusted (not connected, expired, rate limited, offline, contract drift,
+        // and rows retained past their freshness). Those are the cases where silence
+        // and "broken" would look identical, which is why this line exists.
         let quiet: Bool = {
             if !enabled { return true }
-            if case .ok = state { return !model.rows.isEmpty && !state.isStale }
-            return false
+            switch state {
+            case .empty: return true          // nothing running — unremarkable
+            case .disabled: return true       // pre-first-poll; resolves within seconds
+            case .ok: return !state.isStale   // rows on screen and fresh
+            default: return false             // a real condition worth naming
+            }
         }()
         if !quiet {
-            let message: String = {
-                if case .disabled = state { return "Cloud sessions — starting…" }
-                return state.displayMessage
-            }()
+            let message = state.displayMessage
             HStack(spacing: 6) {
                 Image(systemName: state.isStale ? "exclamationmark.triangle" : "cloud")
                     .font(.caption2)
