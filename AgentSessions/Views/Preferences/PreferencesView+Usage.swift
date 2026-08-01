@@ -552,6 +552,12 @@ private struct ClaudeWebSessionCookieCallout: View {
     @State private var hasCookie: Bool = false
     @State private var showHelp: Bool = false
 
+    /// Live Quota Meter rows for Claude cloud sessions. Off by default and offered
+    /// only once a cookie is saved, since the fetch depends on it — a switch that
+    /// cannot work is worse than no switch.
+    @AppStorage(PreferencesKey.claudeCloudSessionsEnabled)
+    private var claudeCloudSessionsEnabled: Bool = false
+
     private let store = ClaudeManualWebCookieStore.shared
 
     var body: some View {
@@ -570,6 +576,18 @@ private struct ClaudeWebSessionCookieCallout: View {
                         Button("Remove") { removeCookie() }
                             .buttonStyle(.link)
                             .font(.caption)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle("Show Claude cloud sessions in Quota Meter (experimental)",
+                               isOn: $claudeCloudSessionsEnabled)
+                            .font(.caption)
+                        Text("Sessions running on Anthropic's servers appear as live rows next to your local agents. Read-only; nothing is stored on disk. Uses an undocumented API that may change.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
