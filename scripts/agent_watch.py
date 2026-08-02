@@ -589,6 +589,117 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
     }
 
 
+_KIMI_LOOP_EVENT_TYPE = "context.append_loop_event"
+
+
+def _kimi_wire_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    """
+    Schema fingerprint for Kimi Code `agents/<id>/wire.jsonl` journals.
+
+    Everything Kimi renders — assistant text, reasoning, tool calls, tool results —
+    arrives nested under `context.append_loop_event` -> `event`, never at the top
+    level (see docs/agent-json-tracking.md -> "Kimi Code"). A top-level-only
+    fingerprint therefore sees one opaque `context.append_loop_event` bucket and is
+    blind to the entire renderable surface, so this walks into `event` and emits
+    namespaced buckets into the same `type_keys` map `_schema_diff()` compares.
+
+    Synthetic buckets (prefixes cannot collide with a real top-level wire op):
+      `event.<event.type>`               keys of the loop event; count = histogram
+      `part.<part.type>`                 keys of a `content.part` payload
+      `part.<part.type>.<multi-per-step>`  more than one part of that type inside a
+                                         single step, i.e. streamed/partial text.
+                                         KimiSessionParser emits one whole event per
+                                         part, so this shape would fragment
+                                         transcripts and inflate assistant counts.
+      `event.<event.type>.result`        keys inside `tool.result`'s `result` object,
+                                         where `isError` drives error classification.
+
+    Nested shape changes (a value that stops being an object) get their own
+    `.<non-object>` bucket rather than being silently skipped.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    total_lines: int = 0
+    loop_events: int = 0
+    # (turnId, step, stepUuid, part.type) -> count, to spot streamed parts.
+    part_runs: dict[tuple[Any, Any, Any, str], int] = {}
+
+    lines: list[str] = []
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            lines.append(line)
+            if len(lines) > max_lines:
+                lines.pop(0)
+
+    def _add(bucket: str, keys: Any = ()) -> None:
+        type_counts[bucket] = type_counts.get(bucket, 0) + 1
+        ks = type_keys.setdefault(bucket, set())
+        for k in keys:
+            if isinstance(k, str):
+                ks.add(k)
+
+    def _named(value: Any) -> str:
+        return value if isinstance(value, str) and value else "<missing-type>"
+
+    for raw in lines:
+        total_lines += 1
+        s = raw.strip()
+        try:
+            obj = json.loads(s)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        top_type = _named(obj.get("type"))
+        _add(top_type, obj.keys())
+        if top_type != _KIMI_LOOP_EVENT_TYPE:
+            continue
+
+        loop_events += 1
+        event = obj.get("event")
+        if not isinstance(event, dict):
+            _add("event.<non-object>")
+            continue
+
+        event_type = _named(event.get("type"))
+        _add(f"event.{event_type}", event.keys())
+
+        if "part" in event:
+            part = event.get("part")
+            if isinstance(part, dict):
+                part_type = _named(part.get("type"))
+                _add(f"part.{part_type}", part.keys())
+                run = (event.get("turnId"), event.get("step"), event.get("stepUuid"), part_type)
+                part_runs[run] = part_runs.get(run, 0) + 1
+            else:
+                _add(f"event.{event_type}.part.<non-object>")
+
+        if "result" in event:
+            result = event.get("result")
+            if isinstance(result, dict):
+                _add(f"event.{event_type}.result", result.keys())
+            else:
+                _add(f"event.{event_type}.result.<non-object>")
+
+    for (_turn, _step, _step_uuid, part_type), count in part_runs.items():
+        if count > 1:
+            _add(f"part.{part_type}.<multi-per-step>")
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_lines": total_lines,
+        "loop_events_parsed": loop_events,
+        "parse_errors": parse_errors,
+    }
+
+
 _ROLE_MAP = {
     "user": "user", "human": "user",
     "assistant": "assistant", "model": "assistant",
@@ -1324,13 +1435,23 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
     fps: list[dict[str, Any]] = []
 
-    if agent_name in ("codex", "claude", "copilot", "droid", "pi", "kimi"):
+    if agent_name in ("codex", "claude", "copilot", "droid", "pi"):
         for p in filtered:
             if not p.endswith(".jsonl"):
                 continue
             bp = Path(p)
             if bp.exists():
                 fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+    elif agent_name == "kimi":
+        # Kimi needs the nested loop-event fingerprint: the fixtures' renderable
+        # content lives under `context.append_loop_event` -> `event`, so a plain
+        # top-level baseline would leave every nested addition undetectable.
+        for p in filtered:
+            if not p.endswith(".jsonl"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_kimi_wire_schema_fingerprint(bp, max_lines=5000))
     elif agent_name == "antigravity":
         # Antigravity has two on-disk formats: legacy markdown brain artifacts and
         # the current antigravity-cli JSONL transcripts. Fingerprint each fixture by
@@ -2462,6 +2583,8 @@ def _run_prebump(
                     )
             elif agent_name == "cursor":
                 fp = _cursor_transcript_schema_fingerprint(result.session_path, max_lines=5000)
+            elif agent_name == "kimi":
+                fp = _kimi_wire_schema_fingerprint(result.session_path, max_lines=5000)
             else:
                 fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
             if baseline_type_keys:
@@ -2729,7 +2852,9 @@ def main(argv: list[str]) -> int:
                 local_fp: dict[str, Any] | None = None
                 newest: Path | None = None
 
-                if kind == "jsonl_newest":
+                # `kimi_wire_newest` selects the same way as `jsonl_newest` but
+                # fingerprints the nested loop-event structure as well.
+                if kind in ("jsonl_newest", "kimi_wire_newest"):
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     required_types = list(local_schema_cfg.get("required_types") or [])
                     exclude_globs_cfg = local_schema_cfg.get("exclude_globs")
@@ -2741,7 +2866,10 @@ def main(argv: list[str]) -> int:
                     else:
                         newest = _newest_file(roots, glob, exclude_globs=exclude_globs)
                     if newest:
-                        local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
+                        if kind == "kimi_wire_newest":
+                            local_fp = _kimi_wire_schema_fingerprint(newest, max_lines=max_lines)
+                        else:
+                            local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
                 elif kind == "antigravity_markdown_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)

@@ -219,7 +219,7 @@ Record every upstream check, even if no changes are needed.
   - `Resources/Fixtures/stage0/agents/droid/{session_store_small,session_store_large,stream_json_small,stream_json_large,session_store_schema_drift,stream_json_schema_drift}.jsonl`
 
 ## Kimi Code (`kimi`, Moonshot AI) — added 2026-07-25
-- Verified CLI version: `0.29.2` (npm `@moonshot-ai/kimi-code`; the CLI auto-updates).
+- Verified CLI version: `0.31.1` (npm `@moonshot-ai/kimi-code`; the CLI auto-updates).
 - Session roots:
   - `$KIMI_CODE_HOME` or `~/.kimi-code`
   - Journals: `sessions/wd_<slug>_<sha256[0:12]>/<sessionId>/agents/<agentId>/wire.jsonl`
@@ -229,23 +229,19 @@ Record every upstream check, even if no changes are needed.
 - Format notes:
   - Line 1 is the journal envelope: `{type:"metadata", protocol_version, created_at}` (epoch ms).
   - Later lines are flattened ops: `{type, ...payload, time}` (epoch ms).
-  - **`context.append_message` carries only USER turns in practice.** The `ContextMessage` type
-    permits assistant/tool roles, but the running agent never writes them there.
-  - **The assistant's own output streams as `context.append_loop_event`** — this is the single
-    most important fact about the format:
-
-    | `event.type` | payload | maps to |
-    |---|---|---|
-    | `content.part` + `part.type: "text"` | the answer | `.assistant` |
-    | `content.part` + `part.type: "think"` | private reasoning | `.meta` (never rendered) |
-    | `tool.call` | `{toolCallId, name, args, description}` | `.tool_call` |
-    | `tool.result` | `{toolCallId, result.output, result.isError}` | `.tool_result` / `.error` |
-    | `step.begin` / `step.end` | loop bookkeeping, usage, finishReason | `.meta` |
-
-    Treating this family as `.meta` renders a transcript containing the user's prompts and
-    **nothing else** — no replies, no tools. The first implementation did exactly that, and it was
-    invisible for a week because the only fixture came from a suspended account that never produced
-    assistant output. Any future parser change here must be checked against a *funded* capture.
+  - Conversation content is split across **two** op families. Reading only the first renders a
+    Kimi session as user turns alone (see 2026-08-01 below):
+    - `context.append_message` — **user turns only** in practice. `message.content[]` carries
+      parts (`text`/`think`/`image_url`/`audio_url`/`video_url`). The `Message` type also allows
+      `role: assistant|tool` with `message.toolCalls[]`/`message.toolCallId`, but no observed
+      journal emits those; the parser keeps those branches only as a forward-compat fallback.
+    - `context.append_loop_event` — **everything the model produced**, as `{type, event, time}`:
+      - `event.type: "content.part"` → `part.type: "text"` (assistant answer) or `"think"`
+        (reasoning; dropped from the rendered body, same rule as message content parts)
+      - `event.type: "tool.call"` → `{toolCallId, name, args, description, display, stepUuid}`
+      - `event.type: "tool.result"` → `{parentUuid, toolCallId, result:{output[, isError][, note]}}`.
+        Failure is flagged by the **nested** `result.isError`; there is no top-level error flag.
+      - `event.type: "step.begin"`/`"step.end"` bracket each loop step and carry no content.
   - `turn.prompt`/`turn.steer` duplicate the prompt text and resolve to `.meta` so prompts are
     not counted twice.
 - Facts only a real capture revealed (do not trust the source constants):
@@ -254,10 +250,33 @@ Record every upstream check, even if no changes are needed.
   - `config.update` carries **`modelAlias`** (`"moonshot-ai/kimi-k2.7-code"`), never a bare
     `model`; `llm.request` carries both `modelAlias` and concrete `model` (`"kimi-k2.7-code"`).
   - Session directories are prefixed `session_<uuid>`; `kimi -S session_<uuid>` resolves that id.
+  - Assistant replies and tool calls are **never** `context.append_message`. Across seven real
+    captures, all 23 `context.append_message` ops were `role: "user"` with no `toolCalls`.
 - Recent changes:
   - 2026-07-25 weekly scan flagged `permission.set_mode` (`{mode,time,type}`) as an unknown type.
     Additive, no renderable content, resolves to `.meta` via the parser fallback; appended to the
     fixture baseline. Rescan: `unknown_types: []`, `supports_installed_only`, severity low.
+  - **2026-08-01 — fixture gap closed, and it was hiding a parser defect.**
+    - The "cannot capture without a funded account" blocker was a **false negative**: it came from
+      checking only `context.append_message`, which is user-only by design. A local capture with
+      6 assistant replies and 19 tool calls already existed.
+    - `KimiSessionParser` only handled `context.append_message`, so everything else fell to
+      `.meta`. Its `.assistant`/`.tool_call`/`.tool_result` branches were therefore **unreachable
+      against real data** — a new fixture alone would not have exercised them. Every Kimi
+      transcript showed user turns only; the fixture's own session surfaced **13 of its 57**
+      events, and the Kimi Analytics message counts counted just those 13.
+    - Fix: parse `context.append_loop_event` (mapping above). `tool.call.args` is serialised with
+      `.sortedKeys`; `think` parts stay reasoning-only.
+    - Lesson, same as the `protocol_version` 1.4-vs-1.5 finding: **verify against emitted data,
+      not source types.** The wrong "`context.append_message` carries `toolCalls`" note came from
+      the `Message` type at source HEAD.
+    - Baseline: the new fixture adds seven op families `small.jsonl` never had — `usage.record`,
+      `permission.record_approval_result`, `plan_mode.enter`/`exit`, `full_compaction.begin`/
+      `complete`, `context.apply_compaction` — so the weekly scan will not flag them as drift.
+    - **Monitoring blind spot:** `_jsonl_schema_fingerprint` keys only on the top-level `type`, so
+      it never descends into `event.*`. A new `content.part` part type or `tool.result` key would
+      not be flagged as drift. Loop-event internals are covered by `KimiSessionParserTests`, not
+      by the weekly scan.
 - Deliberately not read: `packages/minidb` (bespoke binary Bitcask-style KV store) is gated behind
   `persistence_minidb_readmodel` (`default:false`) and is only a derived read model.
 - Monitoring caveat: no prebump driver yet. `kimi -p` is a real headless mode so one is buildable,
@@ -270,17 +289,26 @@ Record every upstream check, even if no changes are needed.
   - `AgentSessions/Services/KimiSessionParser.swift`
   - `AgentSessions/Services/KimiSessionDiscovery.swift`
   - `AgentSessions/KimiResume/KimiResumeCommandBuilder.swift`
-- Fixtures (`Resources/Fixtures/stage0/agents/kimi/`):
-  - `small.jsonl` — 200-line authentic session at 0.31.1: 13 user turns, 6 assistant parts,
-    19 tool calls across 7 tools (Bash/Agent/Glob/Write/ExitPlanMode/Read/Grep), 1 failing tool
-    (`.error`), plan mode, full compaction, `usage.record`. Larger than sibling fixtures (~67KB) on
-    purpose: it is the only defence against the loop-event class of bug described above.
-  - `state.json` — the sidecar.
-  - `subagent_agent-0.jsonl` — a real subagent journal. Same schema as the main one; discovery
-    excludes it by design, and the parser derives the *parent* session id from the directory layout.
-  - Long strings are truncated to 160 chars and `$HOME` is rewritten to `/Users/fixture`; every op
-    line is otherwise real.
-  - Remaining uncovered: image/audio/video content parts, and `turn.steer`.
+- Fixtures:
+  - `Resources/Fixtures/stage0/agents/kimi/{small.jsonl,state.json}` — short session, user turns
+    plus `turn.steer`/`turn.cancel`/`permission.set_mode`. Its only loop events are `step.begin`.
+  - `Resources/Fixtures/stage0/agents/kimi/{assistant_tools.jsonl,assistant_tools.state.json}` —
+    200-line redacted authentic capture covering the model's own output: 6 assistant replies,
+    19 tool calls (`Bash`/`Agent`/`Glob`/`Write`/`ExitPlanMode`/`Read`/`Grep`), one `isError`
+    result, two `note` results, multi-call steps, plan mode, and a full compaction.
+  - Redaction for both matches the same rules: system prompt and `llm.tools_snapshot` replaced
+    with `[trimmed for fixture]`, home/working directory rewritten to
+    `/private/tmp/as-agent-lab/kimi/project`, long tool payloads clipped. Every op line is
+    otherwise the real emitted JSON.
+  - Redacting **paths is not enough** for captures containing tool output. The session's `ls`
+    printed bare directory names, so no path rewrite touched it and the fixture showed the real
+    repo root beneath a sandbox `workDir` — internally contradictory. Tool *output* has to be
+    scrubbed on its own terms. The `assistant_tools` listing is replaced wholesale with a
+    sandbox-consistent inventory (`AgentSessions` retained; a test asserts on it).
+  - Leak-checking by grepping a few known strings passes for every term nobody thought of. The
+    generator now fails the build on 8 patterns: `/Users/<name>`, the real repo name, the real
+    workdir bucket, local-only directory names, `$PWD`, emails, `sk-`/`ghp_` credentials, and
+    bearer tokens. Extend that list rather than spot-grepping when adding a fixture.
 
 ## Support Matrix Link
 - `docs/agent-support/agent-support-matrix.yml`

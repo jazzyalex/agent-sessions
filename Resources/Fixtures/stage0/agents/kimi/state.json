@@ -1,21 +1,16 @@
 {
-  "createdAt": "2026-08-01T19:33:23.256Z",
-  "updatedAt": "2026-08-01T21:16:08.967Z",
+  "createdAt": "2026-07-25T03:35:09.904Z",
+  "updatedAt": "2026-07-25T03:37:59.618Z",
   "title": "hi",
   "isCustomTitle": false,
   "agents": {
     "main": {
-      "homedir": "/Users/fixture/.kimi-code/sessions/wd_codex-history_205016864bd1/session_1bcbe023-4f7e-4971-9dc9-43b8756045b0/agents/main",
+      "homedir": "/Users/alexm/.kimi-code/sessions/wd_project_ac3bb318f98e/session_9eb1bf57-c1af-48a5-b658-0e8d9fe794f5/agents/main",
       "type": "main",
       "parentAgentId": null
-    },
-    "agent-0": {
-      "homedir": "/Users/fixture/.kimi-code/sessions/wd_codex-history_205016864bd1/session_1bcbe023-4f7e-4971-9dc9-43b8756045b0/agents/agent-0",
-      "type": "sub",
-      "parentAgentId": "main"
     }
   },
   "custom": {},
-  "workDir": "/Users/fixture/Repository/Codex-History",
-  "lastPrompt": "read README.md then grep for \"Kimi\""
+  "workDir": "/private/tmp/as-agent-lab/kimi/project",
+  "lastPrompt": "hi"
 }

@@ -3,8 +3,17 @@ import Foundation
 /// Parses Kimi Code `wire.jsonl` op-journals into `Session` values.
 ///
 /// Line 1 is the journal envelope (`type: "metadata"`). Every later line is a
-/// flattened op: `{type, ...payload, time}`. Conversation content arrives as
-/// `context.append_message` ops carrying a nested `Message`.
+/// flattened op: `{type, ...payload, time}`.
+///
+/// Conversation content is split across *two* op families, and only carrying
+/// both yields a complete transcript:
+/// - `context.append_message` holds **user turns only**. Real journals never
+///   put an assistant or tool message here — across seven captures every one of
+///   these ops was `role: "user"` with no `toolCalls`.
+/// - `context.append_loop_event` holds everything the model produced:
+///   `content.part` (assistant `text`, plus `think` reasoning), `tool.call`,
+///   and `tool.result`. Ignoring it renders Kimi sessions as user turns only
+///   and undercounts every message statistic.
 enum KimiSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
     private static let previewLineLimit = 200
@@ -156,16 +165,17 @@ enum KimiSessionParser {
                                    time: Date?,
                                    line: String,
                                    index: Int) -> [SessionEvent] {
-        if type == "context.append_loop_event", let event = object["event"] as? [String: Any] {
-            return loopEvents(event, time: time, line: line, index: index)
+        if type == "context.append_loop_event",
+           let event = object["event"] as? [String: Any],
+           let eventType = event["type"] as? String {
+            return makeLoopEvents(eventType: eventType, event: event,
+                                  time: time, line: line, index: index)
         }
 
         guard type == "context.append_message",
               let message = object["message"] as? [String: Any],
               let role = message["role"] as? String else {
-            return [SessionEvent(id: "\(index)", timestamp: time, kind: .meta, role: nil, text: nil,
-                                 toolName: nil, toolInput: nil, toolOutput: nil,
-                                 messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
+            return [meta(index: index, suffix: "", time: time, line: line)]
         }
 
         var out: [SessionEvent] = []
@@ -176,6 +186,10 @@ enum KimiSessionParser {
             out.append(SessionEvent(id: "\(index)-u", timestamp: time, kind: .user, role: role, text: text,
                                     toolName: nil, toolInput: nil, toolOutput: nil,
                                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
+        // No observed Kimi journal emits an assistant or tool *message* — that
+        // content arrives as loop events instead. These two branches are a
+        // defensive fallback for a future format that materialises them; do not
+        // read them as the live assistant path.
         case "assistant":
             if let text, !text.isEmpty {
                 out.append(SessionEvent(id: "\(index)-a", timestamp: time, kind: .assistant, role: role, text: text,
@@ -209,69 +223,74 @@ enum KimiSessionParser {
         return out
     }
 
-    /// The agent loop streams its own output as `context.append_loop_event`, NOT
-    /// as `context.append_message`. Confirmed against real 0.29.2 journals:
-    /// `context.append_message` carries only *user* turns, while the assistant's
-    /// answer, its reasoning, and every tool call/result arrive as nested loop
-    /// events. Treating this whole family as `.meta` renders a session with the
-    /// user's prompts and nothing else.
+    /// Builds events from `context.append_loop_event`, the op family that
+    /// carries every assistant reply and every tool call Kimi makes.
     ///
-    /// Shapes (`event.type`):
-    ///   content.part -> {part: {type: "text"|"think", ...}}
-    ///   tool.call    -> {toolCallId, name, args, description}
-    ///   tool.result  -> {toolCallId, result: {output, isError?}}
-    ///   step.begin / step.end -> loop bookkeeping (usage, finishReason)
-    private static func loopEvents(_ event: [String: Any],
-                                   time: Date?,
-                                   line: String,
-                                   index: Int) -> [SessionEvent] {
-        func meta(_ suffix: String) -> [SessionEvent] {
-            [SessionEvent(id: "\(index)-\(suffix)", timestamp: time, kind: .meta, role: nil, text: nil,
-                          toolName: nil, toolInput: nil, toolOutput: nil,
-                          messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
-        }
-
-        switch event["type"] as? String {
+    /// One loop event yields at most one `SessionEvent`; `step.begin`/`step.end`
+    /// and any future event type fall through to `.meta` so nothing is dropped.
+    private static func makeLoopEvents(eventType: String,
+                                       event: [String: Any],
+                                       time: Date?,
+                                       line: String,
+                                       index: Int) -> [SessionEvent] {
+        switch eventType {
         case "content.part":
-            guard let part = event["part"] as? [String: Any] else { return meta("lp") }
-            // `think` is reasoning, not the answer; keep it out of the rendered
-            // body for the same reason textContent(from:) drops think parts.
-            guard part["type"] as? String == "text",
-                  let text = part["text"] as? String, !text.isEmpty else { return meta("lp") }
-            return [SessionEvent(id: "\(index)-la", timestamp: time, kind: .assistant, role: "assistant",
-                                 text: text, toolName: nil, toolInput: nil, toolOutput: nil,
-                                 messageID: event["stepUuid"] as? String, parentID: nil,
-                                 isDelta: true, rawJSON: line)]
+            // `think` parts are reasoning, not answer text — same rule the
+            // message-content path applies in `textContent`.
+            guard let part = event["part"] as? [String: Any],
+                  part["type"] as? String == "text",
+                  let text = part["text"] as? String,
+                  !text.isEmpty else {
+                return [meta(index: index, suffix: "-m", time: time, line: line)]
+            }
+            return [SessionEvent(id: "\(index)-a", timestamp: time, kind: .assistant, role: "assistant", text: text,
+                                 toolName: nil, toolInput: nil, toolOutput: nil,
+                                 messageID: event["stepUuid"] as? String, parentID: nil, isDelta: false, rawJSON: line)]
 
         case "tool.call":
-            let args = event["args"].flatMap { value -> String? in
-                guard JSONSerialization.isValidJSONObject(value),
-                      let data = try? JSONSerialization.data(withJSONObject: value,
-                                                             options: [.sortedKeys]) else { return nil }
-                return String(data: data, encoding: .utf8)
-            }
-            return [SessionEvent(id: "\(index)-tc", timestamp: time, kind: .tool_call, role: "assistant",
-                                 text: event["description"] as? String,
+            return [SessionEvent(id: "\(index)-t", timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                  toolName: event["name"] as? String,
-                                 toolInput: args,
+                                 toolInput: jsonString(event["args"]),
                                  toolOutput: nil,
-                                 messageID: event["toolCallId"] as? String, parentID: nil,
-                                 isDelta: false, rawJSON: line)]
+                                 messageID: event["toolCallId"] as? String,
+                                 parentID: event["stepUuid"] as? String, isDelta: false, rawJSON: line)]
 
         case "tool.result":
+            // `result` is an object: `{output}`, `{output, isError}`, or
+            // `{output, note}`. Failures are flagged by a nested `isError`,
+            // never at the event's top level.
             let result = event["result"] as? [String: Any]
+            // Every observed result is an object; the bare-string branch is
+            // speculative forward-compat, not a shape seen in the wild.
+            let output = (result?["output"] as? String) ?? (event["result"] as? String)
             let isError = (result?["isError"] as? Bool) == true
-            return [SessionEvent(id: "\(index)-tr", timestamp: time,
-                                 kind: isError ? .error : .tool_result, role: "tool", text: nil,
-                                 toolName: nil, toolInput: nil,
-                                 toolOutput: result?["output"] as? String,
+            return [SessionEvent(id: "\(index)-r", timestamp: time, kind: isError ? .error : .tool_result, role: "tool", text: nil,
+                                 toolName: nil, toolInput: nil, toolOutput: output,
                                  messageID: event["toolCallId"] as? String,
-                                 parentID: event["parentUuid"] as? String,
-                                 isDelta: false, rawJSON: line)]
+                                 parentID: event["parentUuid"] as? String, isDelta: false, rawJSON: line)]
 
         default:
-            return meta("lp")
+            return [meta(index: index, suffix: "-m", time: time, line: line)]
         }
+    }
+
+    private static func meta(index: Int, suffix: String, time: Date?, line: String) -> SessionEvent {
+        SessionEvent(id: "\(index)\(suffix)", timestamp: time, kind: .meta, role: nil, text: nil,
+                     toolName: nil, toolInput: nil, toolOutput: nil,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line)
+    }
+
+    /// Serialises `tool.call` arguments, which arrive as a JSON object.
+    /// Mirrors `PiSessionParser.jsonString`, including its large-payload guard.
+    private static func jsonString(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let string = value as? String { return string }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
+        if data.count > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Flattens nested ContentParts. `think` parts are reasoning, not answer

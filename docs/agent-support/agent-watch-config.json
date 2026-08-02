@@ -525,7 +525,7 @@
       },
       "weekly": {
         "local_schema": {
-          "kind": "jsonl_newest",
+          "kind": "kimi_wire_newest",
           "roots": ["$KIMI_CODE_HOME", "~/.kimi-code"],
           "glob": "sessions/**/agents/main/wire.jsonl",
           "required_types": ["metadata", "context.append_message"],
