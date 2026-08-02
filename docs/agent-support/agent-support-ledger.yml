@@ -10,6 +10,16 @@
 #
 entries:
   - agent_sessions_version: "4.6.4"
+    as_of_date_utc: "2026-08-01"
+    as_of_commit: "2d698b3f"
+    verified:
+      kimi:
+        sessions:
+          max_verified_version: "0.31.1"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, and weekly session-format monitoring"
+          evidence: ["Resources/Fixtures/stage0/agents/kimi/assistant_tools.jsonl", "Resources/Fixtures/stage0/agents/kimi/assistant_tools.state.json", "Resources/Fixtures/stage0/agents/kimi/small.jsonl", "Resources/Fixtures/stage0/agents/kimi/state.json", "AgentSessionsTests/KimiSessionParserTests.swift", "scripts/tests/test_kimi_wire_fingerprint.py", "Resources/Fixtures/stage0/agents/kimi/subagent_agent-0.jsonl"]
+          notes: "SUPERSEDES the 2026-07-25 entry below on two points. (1) The fixture gap is CLOSED - assistant_tools.jsonl is a 200-line redacted authentic capture with 6 assistant replies, 19 tool calls (Bash/Agent/Glob/Write/ExitPlanMode/Read/Grep), an isError result, note results, plan mode, and a full compaction. No funded account was needed: the 'account suspended, cannot capture' blocker was a false negative from inspecting only context.append_message. (2) That 2026-07-25 note's claim that conversation content is 'context.append_message carrying role/content-parts/toolCalls' is WRONG and should not be trusted - it describes Kimi's internal Message type, not the emitted journal. Real journals put USER TURNS ONLY in context.append_message (23/23 ops across seven captures were role:user, none with toolCalls) and put all model output in context.append_loop_event (content.part text/think, tool.call, tool.result). Because KimiSessionParser read only context.append_message, its .assistant/.tool_call/.tool_result branches were unreachable against real data - the defect the missing fixture had been hiding. Every Kimi transcript rendered user turns alone (this capture: 13 of 57 events) and Analytics counted only those. Parser now maps loop events; think parts stay reasoning-only. Same lesson as the protocol_version 1.4-vs-1.5 finding: verify against emitted data, never against source types. Verified 0.31.1 (not 0.29.2): the CLI auto-updated mid-capture and the live journal still fingerprinted clean (unknown_types [], unknown_keys {}); missing_types for permission.set_mode/turn.cancel/turn.steer are baseline families absent from the newest session, which does not raise severity. Monitoring now uses a Kimi-specific nested fingerprint (kimi_wire_newest): a top-level-only fingerprint sees one opaque context.append_loop_event bucket and is blind to the entire renderable surface - the same blind spot that let the parser defect hide. Adds a real subagent journal (subagent_agent-0.jsonl) confirming subagents use the identical schema."
+  - agent_sessions_version: "4.6.4"
     as_of_date_utc: "2026-07-25"
     as_of_commit: "47a50106"
     verified:

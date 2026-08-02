@@ -3,8 +3,17 @@ import Foundation
 /// Parses Kimi Code `wire.jsonl` op-journals into `Session` values.
 ///
 /// Line 1 is the journal envelope (`type: "metadata"`). Every later line is a
-/// flattened op: `{type, ...payload, time}`. Conversation content arrives as
-/// `context.append_message` ops carrying a nested `Message`.
+/// flattened op: `{type, ...payload, time}`.
+///
+/// Conversation content is split across *two* op families, and only carrying
+/// both yields a complete transcript:
+/// - `context.append_message` holds **user turns only**. Real journals never
+///   put an assistant or tool message here — across seven captures every one of
+///   these ops was `role: "user"` with no `toolCalls`.
+/// - `context.append_loop_event` holds everything the model produced:
+///   `content.part` (assistant `text`, plus `think` reasoning), `tool.call`,
+///   and `tool.result`. Ignoring it renders Kimi sessions as user turns only
+///   and undercounts every message statistic.
 enum KimiSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
     private static let previewLineLimit = 200
@@ -156,12 +165,17 @@ enum KimiSessionParser {
                                    time: Date?,
                                    line: String,
                                    index: Int) -> [SessionEvent] {
+        if type == "context.append_loop_event",
+           let event = object["event"] as? [String: Any],
+           let eventType = event["type"] as? String {
+            return makeLoopEvents(eventType: eventType, event: event,
+                                  time: time, line: line, index: index)
+        }
+
         guard type == "context.append_message",
               let message = object["message"] as? [String: Any],
               let role = message["role"] as? String else {
-            return [SessionEvent(id: "\(index)", timestamp: time, kind: .meta, role: nil, text: nil,
-                                 toolName: nil, toolInput: nil, toolOutput: nil,
-                                 messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
+            return [meta(index: index, suffix: "", time: time, line: line)]
         }
 
         var out: [SessionEvent] = []
@@ -172,6 +186,10 @@ enum KimiSessionParser {
             out.append(SessionEvent(id: "\(index)-u", timestamp: time, kind: .user, role: role, text: text,
                                     toolName: nil, toolInput: nil, toolOutput: nil,
                                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
+        // No observed Kimi journal emits an assistant or tool *message* — that
+        // content arrives as loop events instead. These two branches are a
+        // defensive fallback for a future format that materialises them; do not
+        // read them as the live assistant path.
         case "assistant":
             if let text, !text.isEmpty {
                 out.append(SessionEvent(id: "\(index)-a", timestamp: time, kind: .assistant, role: role, text: text,
@@ -203,6 +221,76 @@ enum KimiSessionParser {
                                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
         }
         return out
+    }
+
+    /// Builds events from `context.append_loop_event`, the op family that
+    /// carries every assistant reply and every tool call Kimi makes.
+    ///
+    /// One loop event yields at most one `SessionEvent`; `step.begin`/`step.end`
+    /// and any future event type fall through to `.meta` so nothing is dropped.
+    private static func makeLoopEvents(eventType: String,
+                                       event: [String: Any],
+                                       time: Date?,
+                                       line: String,
+                                       index: Int) -> [SessionEvent] {
+        switch eventType {
+        case "content.part":
+            // `think` parts are reasoning, not answer text — same rule the
+            // message-content path applies in `textContent`.
+            guard let part = event["part"] as? [String: Any],
+                  part["type"] as? String == "text",
+                  let text = part["text"] as? String,
+                  !text.isEmpty else {
+                return [meta(index: index, suffix: "-m", time: time, line: line)]
+            }
+            return [SessionEvent(id: "\(index)-a", timestamp: time, kind: .assistant, role: "assistant", text: text,
+                                 toolName: nil, toolInput: nil, toolOutput: nil,
+                                 messageID: event["stepUuid"] as? String, parentID: nil, isDelta: false, rawJSON: line)]
+
+        case "tool.call":
+            return [SessionEvent(id: "\(index)-t", timestamp: time, kind: .tool_call, role: "assistant", text: nil,
+                                 toolName: event["name"] as? String,
+                                 toolInput: jsonString(event["args"]),
+                                 toolOutput: nil,
+                                 messageID: event["toolCallId"] as? String,
+                                 parentID: event["stepUuid"] as? String, isDelta: false, rawJSON: line)]
+
+        case "tool.result":
+            // `result` is an object: `{output}`, `{output, isError}`, or
+            // `{output, note}`. Failures are flagged by a nested `isError`,
+            // never at the event's top level.
+            let result = event["result"] as? [String: Any]
+            // Every observed result is an object; the bare-string branch is
+            // speculative forward-compat, not a shape seen in the wild.
+            let output = (result?["output"] as? String) ?? (event["result"] as? String)
+            let isError = (result?["isError"] as? Bool) == true
+            return [SessionEvent(id: "\(index)-r", timestamp: time, kind: isError ? .error : .tool_result, role: "tool", text: nil,
+                                 toolName: nil, toolInput: nil, toolOutput: output,
+                                 messageID: event["toolCallId"] as? String,
+                                 parentID: event["parentUuid"] as? String, isDelta: false, rawJSON: line)]
+
+        default:
+            return [meta(index: index, suffix: "-m", time: time, line: line)]
+        }
+    }
+
+    private static func meta(index: Int, suffix: String, time: Date?, line: String) -> SessionEvent {
+        SessionEvent(id: "\(index)\(suffix)", timestamp: time, kind: .meta, role: nil, text: nil,
+                     toolName: nil, toolInput: nil, toolOutput: nil,
+                     messageID: nil, parentID: nil, isDelta: false, rawJSON: line)
+    }
+
+    /// Serialises `tool.call` arguments, which arrive as a JSON object.
+    /// Mirrors `PiSessionParser.jsonString`, including its large-payload guard.
+    private static func jsonString(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        if let string = value as? String { return string }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
+        if data.count > 32_768 {
+            return "[OMITTED large JSON payload bytes=\(data.count)]"
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Flattens nested ContentParts. `think` parts are reasoning, not answer
