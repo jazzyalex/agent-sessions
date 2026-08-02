@@ -1,6 +1,6 @@
 agent_sessions_version: 4.6
-as_of_commit: 47a50106
-as_of_date: 2026-07-25
+as_of_commit: 8f2848ff
+as_of_date: 2026-08-01
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
