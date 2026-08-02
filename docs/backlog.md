@@ -5,6 +5,78 @@ decision if one was made. Newest on top.
 
 ---
 
+## Kimi Code
+
+### Fixture does not cover image / audio / video content parts
+- **Where:** `KimiSessionParser.textContent(from:)` —
+  [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift), the
+  `image_url` / `audio_url` / `video_url` arms that render `[image]` / `[audio]` /
+  `[video]` placeholders. Fixtures:
+  `Resources/Fixtures/stage0/agents/kimi/{small,assistant_tools,subagent_agent-0}.jsonl`.
+- **What:** Kimi's `ContentPart` union is `text | think | image_url | audio_url |
+  video_url` (kosong `message.ts`), but every checked-in capture contains only `text`
+  and `think`. The three media branches are written and unexercised — the same shape of
+  gap that hid the loop-event defect, where an unexercised branch looked correct for a
+  week because no fixture reached it.
+- **Why deferred:** needs a capture that actually attaches media. `ReadMediaFile` is in
+  Kimi's tool list, so an image round-trip is reachable — it just was not part of the
+  command set run on 2026-08-01.
+- **Risk if wrong:** low severity, bounded blast radius. A mis-mapped media part
+  degrades one event's text; it cannot break discovery, counting, or the other ten
+  agents. Contrast with the loop-event defect, which silently emptied whole transcripts.
+- **To close:** in a scratch dir, have Kimi read an image (e.g. `ReadMediaFile` on a PNG),
+  capture the resulting journal, add it beside the existing fixtures, and assert the
+  placeholder rendering plus `.meta`/`.assistant` classification.
+
+### No `agent_watch` prebump driver for kimi
+- **Where:** `scripts/agent_watch_prebump_drivers.py` (`DRIVERS` registry);
+  `docs/agent-support/agent-watch-config.json` → `agents.kimi` has `weekly` but no
+  `prebump` block.
+- **What:** Kimi is monitored only by the weekly `kimi_wire_newest` local-schema scan.
+  Every scan therefore reports blocker `no_real_session_driver_configured`, and the
+  verdict cannot rise above `supports_installed_only`.
+- **Feasible:** yes — `kimi -p "<prompt>" --output-format text` is a real headless mode
+  (verified at 0.29.1 and 0.31.1), so a `kimi_prompt` driver is buildable with a
+  `home_override` sandbox on `KIMI_CODE_HOME` plus a `discover_session` contract of
+  `sessions/**/agents/main/wire.jsonl`.
+- **Why deferred:** a driver is a Python class in the shared registry with its own
+  auth/sandbox handling, not a config line; it is its own task. Kimi currently sits in
+  the same posture as Hermes and Cursor, which also run weekly-evidence-only.
+- **Caveat worth keeping:** a green prebump would be necessary but not sufficient here.
+  A `-p` one-shot never emits `turn.steer`, `plan_mode.*`, `permission.*`,
+  `full_compaction.*` or a subagent journal, so the weekly real-session scan stays the
+  primary drift signal either way (same finding as the 2026-07-17 Claude `mode` event).
+
+---
+
+## Contributor PRs
+
+### Check in on PR #51 / issue #53 — Claude Desktop live presence
+- **What:** Follow up on the retarget left on PR #51. Lucas Jaeger (@Krazycatt,
+  first-time contributor) built Claude Desktop chats into live presences by walking
+  `~/.claude/projects` and classifying the transcript tail. The premise was stale —
+  the Quota Meter already surfaces Desktop chats via
+  `ClaudeRunwayRecentSessionScanner`, and the Cockpit HUD he targeted is deprecated
+  — but it exposed a real bug, filed as #53. He was asked to keep the
+  presence-synthesis skeleton and source the data from the runway identities
+  instead of a second scan plus a second turn-state classifier.
+- **Where:** [PR #51](https://github.com/jazzyalex/agent-sessions/pull/51),
+  [issue #53](https://github.com/jazzyalex/agent-sessions/issues/53). The bug:
+  `isSessionLive` means "a presence exists"
+  (`AgentSessions/Views/UnifiedSessionsView.swift:3416`) and
+  `supportsLiveSessionSource` includes `.claude`
+  (`AgentSessions/Services/CodexActiveSessionsModel.swift:645`), so **Live sessions
+  only** claims Claude yet hides every Desktop chat.
+- **Check in ~2026-08-15:** if he is engaged, review the retarget. If quiet, close
+  #51 with thanks, keep #53, and do it in-house — registering
+  `ClaudeRunwaySnapshotLoader` identities as presences is close to the whole job.
+- **Why deferred (2026-08-01):** waiting on the contributor on purpose. Growing the
+  contributor base is worth more than the two weeks, and #53 is a correctness fix
+  rather than an urgent one — severity is bounded by how much the **Live sessions
+  only** toggle is actually used.
+
+---
+
 ## Codex Usage Meter
 
 ### Codex OAuth failure cooldown has no user-initiated bypass

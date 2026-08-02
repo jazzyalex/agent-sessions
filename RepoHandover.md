@@ -1,3 +1,28 @@
+## 2026-08-01 14:16 · claude-cloud-sessions-and-codex-meter · Cloud sessions in QM + Codex "reconnecting" fixed (pushed)
+status: in-progress
+
+**State:** Claude cloud sessions now render in the Quota Meter as runway rows showing "Cloud", and the Codex meter's permanent "reconnecting…" is fixed (owner-verified: Codex row populates with the app backgrounded). 25 commits pushed to origin/main (e881b78a..2d698b3f). Suite 1776/0/3.
+
+**Decided / don't redo:**
+- Cloud sessions leave ZERO local trace — no filesystem indexer can ever reach them. They ARE reachable at `GET claude.ai/v1/code/sessions` with `anthropic-version` / `anthropic-beta: ccr-byoc-2025-07-29` / `anthropic-client-feature: ccr` / `x-organization-uuid`. `/api/organizations/.../chat_conversations_v2` is the CHAT list and contains no code sessions — wrong namespace, don't retry it.
+- Filter on `environment_kind == "anthropic_cloud"`, NOT the `cse_` prefix (all rows are `cse_`; 168 are `bridge`, which the local indexer already shows — verified).
+- Presence = `status == active` AND (worker running OR `last_event_at` within 1h). `status == active` alone means only "not archived" — two sessions were idle 14h and 116 days.
+- The pinned QM strip renders `RunwayPauseImpactRow` from the runway snapshot, NEVER raw `HUDRow`. Appending HUDRows renders nowhere — this cost ~6 rebuild cycles.
+- Codex snapshot persistence (planned Task 3) was reviewed and DROPPED, not deferred — see plan for why.
+- Tooling traps: os_log never reaches `log show` for this app; `strings` on the main binary is a 58KB stub (code is in `AgentSessions.debug.dylib`); curl is Cloudflare-403'd where URLSession gets 200. Use the DEBUG file write in `ClaudeCloudLiveModel.note()` for runtime evidence.
+- Builds must be Developer-ID signed or the app is denied the claude.ai keychain item; tests need `CODE_SIGN_IDENTITY=- ... CODE_SIGN_ENTITLEMENTS=` (no Mac Development cert on this machine).
+
+**Key files:**
+- `AgentSessions/ClaudeCloud/` — client, catalog, live model, HUDRow mapper
+- `AgentSessions/Views/AgentCockpitHUDView.swift` — `appendingClaudeCloudRows`, `cloudStatusLine`, runway slot budget
+- `docs/superpowers/plans/2026-08-01-codex-meter-and-cloud-row-fixes.md` — task outcomes + why Task 3 was dropped
+- `docs/backlog.md` — the three deferred items below
+
+**Next:**
+1. Decide the cloud-session SURFACE: presence badge on the Claude provider row vs runway rows. Owner questioned whether a rate-less row belongs in a consumption-ranked widget — likely right, since account quota already includes cloud usage. ~80 lines to switch; endpoint/filter/model unaffected.
+2. Codex OAuth failure cooldown has no user-initiated bypass (30 min, `refreshNow` hits the same gate) — largest remaining real Codex defect.
+3. Only if a Codex-side 429 is ever observed: make the `.idle` promotion reason-aware.
+
 ## 2026-07-22 13:09 · agent-format-check-2026-07-22 · Codex 0.145.0 verified; full format check + agent_watch hardening (pushed)
 status: done
 
