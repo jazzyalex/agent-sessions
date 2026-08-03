@@ -64,6 +64,23 @@ enum AgentTerminalLauncher {
                 userInfo: [NSLocalizedDescriptionKey: "Unsupported kind for Warp launch"])
         }
 
+        // Fail before writing anything if nothing can service the launch. This
+        // is the realistic "Warp never opens" case — the user picked Warp in
+        // Preferences without having it — and it is the only one the
+        // not-yet-running path below can report at all, because that path
+        // completes asynchronously long after this function returns.
+        //
+        // Resolve by URL scheme, not bundle id: the launch mechanism is
+        // `warp://tab_config/…`, which LaunchServices routes by scheme. Warp
+        // has shipped under more than one id (TerminalKind.infer still maps the
+        // legacy `dev.warp.Warp`), so checking the id would hard-fail a user
+        // whose scheme handler works perfectly well.
+        guard let schemeProbe = URL(string: "\(scheme)://"),
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: schemeProbe) else {
+            throw NSError(domain: "AgentTerminalLauncher", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "\(kind.displayName) is not installed."])
+        }
+
         try FileManager.default.createDirectory(at: tabConfigDir, withIntermediateDirectories: true)
 
         let configName = "agent-sessions-resume-\(UUID().uuidString.prefix(8).lowercased())"
@@ -75,31 +92,59 @@ enum AgentTerminalLauncher {
         try toml.write(to: configFile, atomically: true, encoding: .utf8)
 
         guard let url = URL(string: "\(scheme)://tab_config/\(configName)") else {
+            try? FileManager.default.removeItem(at: configFile)
             throw NSError(domain: "AgentTerminalLauncher", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to build tab config URL"])
         }
 
         // If Warp is already running, open the tab config URL directly.
         // If not, launch the app first and wait for it to initialize.
+        // Matched on bundle URL rather than id for the same reason as above —
+        // the id varies across Warp builds, the resolved app URL does not.
         let appRunning = NSWorkspace.shared.runningApplications.contains {
-            $0.bundleIdentifier == kind.bundleIdentifier
+            $0.bundleURL == appURL
         }
 
         if appRunning {
-            NSWorkspace.shared.open(url)
+            // Synchronous path, so a refusal is reportable: don't claim success
+            // when the tab never opened.
+            guard NSWorkspace.shared.open(url) else {
+                try? FileManager.default.removeItem(at: configFile)
+                throw NSError(domain: "AgentTerminalLauncher", code: 5,
+                    userInfo: [NSLocalizedDescriptionKey: "\(kind.displayName) refused to open the resume tab."])
+            }
         } else {
+            // KNOWN GAP: this path still reports success unconditionally. Cold
+            // start is asynchronous (Warp must initialise before it will read a
+            // tab config), and `launchInTerminal` is synchronous `throws`, so
+            // there is nowhere to report to. That is a limit of the current
+            // signature, NOT an inherent one — every resume coordinator that
+            // calls this is already `async`, so making the `*TerminalLaunching`
+            // protocols `async throws` would let both the launch and the
+            // deferred open be awaited and reported honestly. It is a ripple
+            // across nine launcher files and their mocks, deliberately not
+            // bundled here. Until then: the scheme check above rejects the
+            // common failure up front, and what remains is logged and cleaned
+            // up rather than left looking like success.
             let configURL = url
             Task.detached {
-                await MainActor.run {
-                    if let bundleID = kind.bundleIdentifier {
-                        _ = NSWorkspace.shared.launchApplication(withBundleIdentifier: bundleID,
-                            options: .default, additionalEventParamDescriptor: nil, launchIdentifier: nil)
-                    }
+                do {
+                    let configuration = NSWorkspace.OpenConfiguration()
+                    configuration.activates = true
+                    _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+                } catch {
+                    NSLog("AgentTerminalLauncher: failed to launch %@: %@",
+                          kind.displayName, error.localizedDescription)
+                    try? FileManager.default.removeItem(at: configFile)
+                    return
                 }
                 // Wait for app to initialize before opening the tab config
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                await MainActor.run {
-                    NSWorkspace.shared.open(configURL)
+                let opened = await MainActor.run { NSWorkspace.shared.open(configURL) }
+                if !opened {
+                    NSLog("AgentTerminalLauncher: %@ launched but refused the resume tab config",
+                          kind.displayName)
+                    try? FileManager.default.removeItem(at: configFile)
                 }
             }
         }

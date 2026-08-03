@@ -155,6 +155,39 @@ final class KimiSessionParserTests: XCTestCase {
         XCTAssertFalse(UnifiedSessionIndexer.passesHasCommandsFilter(session))
     }
 
+    /// The checked-in capture is exactly `previewLineLimit` lines long with its
+    /// last tool call at line 185, so the count test above passes *at* the cap
+    /// and says nothing about what happens past it. This pushes the tool calls
+    /// beyond the cap: the preview must report nil (it stopped reading before
+    /// reaching them, so "none found" is not "none"), while the full parse still
+    /// finds them. A `0` here instead of nil would be a positive claim the
+    /// preview cannot support, and would short-circuit deep scan.
+    func testPreviewTruncationReportsUnknownRatherThanZeroCommands() throws {
+        let wire = try stagedAssistantToolsFixture()
+        let original = try String(contentsOf: wire, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        let envelope = try XCTUnwrap(original.first)
+        let toolCallLines = original.filter { $0.contains("\"tool.call\"") }
+        XCTAssertFalse(toolCallLines.isEmpty, "fixture must contain tool calls to push past the cap")
+
+        // A real op family, matching the "every fixture line is a real op"
+        // convention, and comfortably past `previewLineLimit` (200).
+        let filler = (0..<250).map { i in
+            "{\"type\":\"llm.request\",\"modelAlias\":\"moonshot-ai/kimi-k2.7-code\",\"model\":\"kimi-k2.7-code\",\"seq\":\(i),\"time\":1750000000000}"
+        }
+        try ([envelope] + filler + toolCallLines).joined(separator: "\n")
+            .appending("\n")
+            .write(to: wire, atomically: true, encoding: .utf8)
+
+        let preview = try XCTUnwrap(KimiSessionParser.parseFile(at: wire))
+        XCTAssertNil(preview.lightweightCommands, "preview stopped before the tool calls; it cannot claim zero")
+        XCTAssertFalse(UnifiedSessionIndexer.passesHasCommandsFilter(preview))
+
+        let full = try XCTUnwrap(KimiSessionParser.parseFileFull(at: wire))
+        XCTAssertTrue(full.hasToolCallEvent, "the full parse reads past the cap and must find them")
+    }
+
     /// The working directory must survive a *full* parse, not just the preview:
     /// `effectiveWorkingDirectoryURL` routes Kimi through `Session.cwd`, and a
     /// nil there is what dropped the `cd` from the resume command.

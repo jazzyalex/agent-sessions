@@ -78,7 +78,9 @@ final class KimiResumeCoordinator {
             // No retry here. Nothing `launchInTerminal` throws is
             // command-dependent: Terminal/iTerm fail only when osascript exits
             // non-zero, and the command reaches it as an opaque argv item;
-            // Warp fails only on a directory-create or tab-config write.
+            // Warp fails on a missing scheme handler, a directory-create or
+            // tab-config write, or a refused open -- none of them a function of
+            // which command was requested.
             // Retrying with a *different* command cannot recover — and if it
             // did succeed it would resume an unrelated session while reporting
             // success.
