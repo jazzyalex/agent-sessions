@@ -5,6 +5,57 @@ decision if one was made. Newest on top.
 
 ---
 
+## Agent Source Plumbing
+
+### Hand-maintained per-source lists drift every time an agent is added
+- **Where:** the per-source sites that are *not* compiler-checked, all in
+  [UnifiedSessionsView.swift](../AgentSessions/Views/UnifiedSessionsView.swift) unless
+  noted —
+  - `flashAgentEnablementNoticeIfNeeded()` — an 11-term `&&` chain over
+    `<provider>AgentEnabled`
+  - the `.onChange(of: <provider>AgentEnabled)` block that drives that notice
+  - `enabledOtherAgentSpecs` — the filter-pill / overflow-menu spec array
+  - `SearchCoordinator.start(...)` — one `include<Provider>: Bool` parameter per source,
+    unpacked into an `allowed: Set<SessionSource>`
+    ([SearchCoordinator.swift](../AgentSessions/Search/SearchCoordinator.swift))
+  - the `@AppStorage(PreferencesKey.Agents.<provider>Enabled)` blocks duplicated across
+    `UnifiedSessionsView`, `UnifiedSearchFiltersView`, `PreferencesView`, and
+    `FirstRunSetupView`
+- **What:** Kimi shipped as the 11th source in `47a50106` and was missed at four of
+  these; Pi and the other late arrivals are missed at some of the same ones. The split is
+  clean and predictable: **every site the compiler forces to be exhaustive was correct**
+  (`switch` over `SessionSource`, `SessionSource.allCases` drivers such as the
+  search-ingest kick and `AgentEnablement`), and **every hand-maintained list had
+  drifted**. Nothing here is caught by a type error, and none of it is covered by tests,
+  so each omission surfaces later as "provider X is invisible in feature Y".
+- **Live instances still open** (found 2026-08-03, deliberately not bundled into the Kimi
+  fix): the enablement notice is observed for only 6 of 11 agents — `hermes`, `droid`,
+  `openClaw`, `cursor`, and `pi` have no `.onChange`, so disabling any of them alone still
+  flashes nothing; and `enabledOtherAgentSpecs` has no Kimi entry, so Kimi has no filter
+  pill, no overflow-menu item, and no contribution to `enabledAgentCount`. Shortcuts 1–9
+  are already allocated, so a Kimi pill needs `shortcut: nil` like Hermes.
+- **Direction:** make the shapes source-enumerated rather than hand-listed — derive the
+  notice predicate and the pill specs from `SessionSource.allCases` filtered by
+  `AgentEnablement.isEnabled`, and replace `start`'s parallel `Bool` parameters with the
+  `Set<SessionSource>` it already builds internally. A single shared observable for
+  enablement would also collapse the four duplicated `@AppStorage` blocks.
+- **Why deferred:** it crosses view state, search, and preferences, and each has its own
+  constraint — the pill array carries per-source colors and keyboard shortcuts, `start`'s
+  signature is load-bearing for two test call sites, and the `@AppStorage` blocks feed
+  SwiftUI invalidation, so collapsing them changes redraw behavior. That is a design pass,
+  not a mechanical rename, and it should not ride along with a one-provider bug fix.
+- **Risk if wrong:** medium blast radius, low severity per instance. A mistake here makes
+  a provider silently absent from a filter or a notice — annoying and hard to notice,
+  which is exactly the failure mode already observed, but it cannot corrupt data or break
+  parsing.
+- **To close:** convert at least the notice predicate and the pill specs to
+  `SessionSource.allCases`, add the five missing `.onChange` observers (or delete them in
+  favor of a derived value), give Kimi its pill, and add one test that asserts every
+  `SessionSource.allCases` member reaches the search allow-list — the drift class that
+  `testSearchCoordinatorIncludeKimiGatesKimiSessions` only covers for Kimi.
+
+---
+
 ## Kimi Code
 
 ### Fixture does not cover image / audio / video content parts
