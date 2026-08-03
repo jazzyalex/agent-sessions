@@ -304,7 +304,7 @@ struct StarCard: View {
                 Text("Been useful?")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text("A star on GitHub is how people find Agent Sessions. One click, nothing sent.")
+                Text("A star is the only thing this project asks for. One click, nothing sent.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
