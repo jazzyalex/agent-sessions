@@ -10,6 +10,16 @@
 #
 entries:
   - agent_sessions_version: "4.6.4"
+    as_of_date_utc: "2026-08-03"
+    as_of_commit: "747fcfaa"
+    verified:
+      kimi:
+        sessions:
+          max_verified_version: "0.31.1"
+          scope: "tier-2 local JSONL transcript discovery, browsing, search, colors, a full Preferences pane (CLI binary probe + sessions-root override), toolbar source filter, copy-resume command, launch-in-terminal resume, and weekly session-format monitoring"
+          evidence: ["AgentSessionsTests/KimiIntegrationSurfaceTests.swift", "AgentSessionsTests/KimiResumeCoordinatorTests.swift", "AgentSessionsTests/KimiResumeCommandBuilderTests.swift", "AgentSessions/Views/Preferences/PreferencesView+Kimi.swift", "AgentSessions/KimiResume/KimiResumeCoordinator.swift", "AgentSessions/Kimi/KimiCLIEnvironment.swift"]
+          notes: "SCOPE-ONLY ENTRY - no new format verification was performed. max_verified_version is carried forward unchanged from the 2026-08-01 entry below; nothing here re-reads a journal, and the weekly kimi_wire_newest fingerprint remains the drift signal. What changed is the integration surface, which the 2026-08-01 scope overstated in one direction and understated in another. SUPERSEDES that entry's scope string on two points. (1) 'Preferences controls' was never true - PreferencesTab had no .kimi case at all, so KimiSessionsRootOverride had three readers (KimiSessionIndexer, AgentEnablement.isAvailable, SessionArchiveManager) and no writer anywhere in the app; the tier-2 merge left `// Tier-2: no CLI resume/binary-probe UI for Kimi yet` stubs at three PreferencesView switch sites instead of the row its own plan required. There is now a Pi-parity pane. (2) 'copy-resume command' is now too narrow - launch-in-terminal resume works, mirroring Pi through the shared AgentTerminalLauncher across Terminal.app, iTerm2, Warp, and Warp Preview. Kimi advertises only -S/--session and -c/--continue, with no --resume, so there is no resumeByID strategy and no supportsResume capability to probe; the ladder is session-then-continue and the fallback policy is a coordinator default rather than a stored preference. Two further defects of the same class are fixed: enabledOtherAgentSpecs had no Kimi arm, so includeKimi (default true, persisted, fully plumbed through search and the indexer) was untogglable and enabledAgentCount undercounted; and the has-commands quick filter omitted .kimi from its JSONL-provider list, so every Kimi session passed that filter with zero tool calls. LESSON, and it is the same one docs/backlog.md 'Agent Source Plumbing' already predicted: every site the compiler forced to be exhaustive was correct, and every hand-maintained list had drifted. The has-commands predicate is now UnifiedSessionIndexer.passesHasCommandsFilter, an exhaustive switch, so the twelfth source cannot repeat it; the pill array and the enablement-notice chain remain hand-listed and still open in the backlog. Kimi's pill takes no keyboard shortcut because Cmd-1..9 are fully allocated, the same posture as Hermes. Regression tests were confirmed to fail against the previous behaviour before the fix landed."
+  - agent_sessions_version: "4.6.4"
     as_of_date_utc: "2026-08-01"
     as_of_commit: "2d698b3f"
     verified:

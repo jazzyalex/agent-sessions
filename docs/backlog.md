@@ -31,9 +31,16 @@ decision if one was made. Newest on top.
 - **Live instances still open** (found 2026-08-03, deliberately not bundled into the Kimi
   fix): the enablement notice is observed for only 6 of 11 agents — `hermes`, `droid`,
   `openClaw`, `cursor`, and `pi` have no `.onChange`, so disabling any of them alone still
-  flashes nothing; and `enabledOtherAgentSpecs` has no Kimi entry, so Kimi has no filter
-  pill, no overflow-menu item, and no contribution to `enabledAgentCount`. Shortcuts 1–9
-  are already allocated, so a Kimi pill needs `shortcut: nil` like Hermes.
+  flashes nothing.
+- **Closed 2026-08-03 (`747fcfaa`):** `enabledOtherAgentSpecs` now has its Kimi entry, with
+  `shortcut: nil` like Hermes exactly as predicted above, so the pill, the overflow-menu
+  item, and the `enabledAgentCount` contribution all exist. Two more instances of this same
+  class turned up while fixing it and were closed with it: `PreferencesTab` had no `.kimi`
+  case at all — leaving `KimiSessionsRootOverride` with three readers and no writer — and
+  the has-commands quick filter's provider list omitted `.kimi`, so every Kimi session
+  passed that filter with zero tool calls. That last one is now
+  `UnifiedSessionIndexer.passesHasCommandsFilter`, an exhaustive `switch`, so it has left
+  this drift class for good. The array and the notice chain below have not.
 - **Direction:** make the shapes source-enumerated rather than hand-listed — derive the
   notice predicate and the pill specs from `SessionSource.allCases` filtered by
   `AgentEnablement.isEnabled`, and replace `start`'s parallel `Bool` parameters with the
@@ -50,9 +57,11 @@ decision if one was made. Newest on top.
   parsing.
 - **To close:** convert at least the notice predicate and the pill specs to
   `SessionSource.allCases`, add the five missing `.onChange` observers (or delete them in
-  favor of a derived value), give Kimi its pill, and add one test that asserts every
-  `SessionSource.allCases` member reaches the search allow-list — the drift class that
-  `testSearchCoordinatorIncludeKimiGatesKimiSessions` only covers for Kimi.
+  favor of a derived value), and add one test that asserts every `SessionSource.allCases`
+  member reaches the search allow-list — the drift class that
+  `testSearchCoordinatorIncludeKimiGatesKimiSessions` only covers for Kimi. Kimi's own pill
+  is done, but by hand, which is the point: the array is still hand-listed and the twelfth
+  source will drift again.
 
 ---
 
