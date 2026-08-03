@@ -89,6 +89,24 @@ final class SessionParserTests: XCTestCase {
         )
     }
 
+    /// Minimal metadata-only session for exercising `SearchCoordinator`'s allowed-source
+    /// gating without depending on transcript text or a warmed FTS database.
+    private func makeRepoSession(id: String, source: SessionSource, repoName: String) -> Session {
+        Session(
+            id: id,
+            source: source,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/tmp/\(source.rawValue)/\(id).jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: repoName,
+            lightweightTitle: id
+        )
+    }
+
     private func createOpenCodeSQLiteFixture(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -402,6 +420,7 @@ final class SessionParserTests: XCTestCase {
                           includeOpenClaw: false,
                           includeCursor: false,
                           includePi: false,
+                          includeKimi: false,
                           enableDeepScan: false,
                           all: [root, sideChat])
 
@@ -439,12 +458,62 @@ final class SessionParserTests: XCTestCase {
                           includeOpenClaw: false,
                           includeCursor: false,
                           includePi: false,
+                          includeKimi: false,
                           enableDeepScan: false,
                           all: [root, sideChat])
 
         try await waitForSearchResults(coordinator, expectedIDs: ["side-chat"])
         XCTAssertFalse(coordinator.isRunning)
         XCTAssertEqual(store.parseFullCallCount, 0)
+    }
+
+    /// Regression: `SearchCoordinator.start` grew one `include<Provider>` parameter per
+    /// source by hand, and Kimi was never added when it shipped as the 11th source. `.kimi`
+    /// therefore never entered the allowed-source set, so Kimi sessions were silently absent
+    /// from every search result while still appearing in the unfiltered list.
+    func testSearchCoordinatorIncludeKimiGatesKimiSessions() async throws {
+        let kimi = makeRepoSession(id: "kimi-session", source: .kimi, repoName: "kimirepo")
+        let codex = makeRepoSession(id: "codex-session", source: .codex, repoName: "kimirepo")
+
+        let included = SearchCoordinator(store: SearchCoordinatorTestStore())
+        included.start(query: "repo:kimirepo",
+                       filters: Filters(query: "repo:kimirepo"),
+                       includeCodex: false,
+                       includeClaude: false,
+                       includeAntigravity: false,
+                       includeOpenCode: false,
+                       includeHermes: false,
+                       includeCopilot: false,
+                       includeDroid: false,
+                       includeOpenClaw: false,
+                       includeCursor: false,
+                       includePi: false,
+                       includeKimi: true,
+                       enableDeepScan: false,
+                       all: [kimi])
+
+        try await waitForSearchResults(included, expectedIDs: ["kimi-session"])
+
+        // And the gate still excludes Kimi when the caller opts out, without disturbing
+        // the sources that are opted in.
+        let excluded = SearchCoordinator(store: SearchCoordinatorTestStore())
+        excluded.start(query: "repo:kimirepo",
+                       filters: Filters(query: "repo:kimirepo"),
+                       includeCodex: true,
+                       includeClaude: false,
+                       includeAntigravity: false,
+                       includeOpenCode: false,
+                       includeHermes: false,
+                       includeCopilot: false,
+                       includeDroid: false,
+                       includeOpenClaw: false,
+                       includeCursor: false,
+                       includePi: false,
+                       includeKimi: false,
+                       enableDeepScan: false,
+                       all: [kimi, codex])
+
+        try await waitForSearchResults(excluded, expectedIDs: ["codex-session"])
     }
 
     private func waitForSearchResults(_ coordinator: SearchCoordinator,

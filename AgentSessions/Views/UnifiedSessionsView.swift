@@ -426,6 +426,7 @@ struct UnifiedSessionsView: View {
 	    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
 	    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
 	    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
+	    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
 	    @State private var autoSelectEnabled: Bool = true
 	    @State private var isDatasetChurning: Bool = false
 	    // Set by updateCachedRows() exactly when the canonical selection id was
@@ -677,7 +678,10 @@ struct UnifiedSessionsView: View {
         let afterPi = afterCursor
             .onChange(of: unified.includePi) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterPi
+        let afterKimi = afterPi
+            .onChange(of: unified.includeKimi) { _, _ in restartSearchIfRunning() }
+
+        let afterActiveOnly = afterKimi
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -729,6 +733,7 @@ struct UnifiedSessionsView: View {
 			.onChange(of: antigravityAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+			.onChange(of: kimiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 
 		let afterSessions = afterAgents
 			.onReceive(unified.$sessions) { sessions in
@@ -3380,12 +3385,13 @@ struct UnifiedSessionsView: View {
                                 includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
                                 includeCursor: unified.includeCursor && cursorAgentEnabled,
                                 includePi: unified.includePi && piAgentEnabled,
+                                includeKimi: unified.includeKimi && kimiAgentEnabled,
                                 enableDeepScan: searchCoordinator.deepScanEnabled,
                                 all: unified.allSessions)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled && kimiAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -4119,6 +4125,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
+    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -4255,6 +4262,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeOpenClaw: unified.includeOpenClaw,
                      includeCursor: unified.includeCursor,
                      includePi: unified.includePi && piAgentEnabled,
+                     includeKimi: unified.includeKimi && kimiAgentEnabled,
                      enableDeepScan: deepScan,
                      all: unified.allSessions)
     }
@@ -4291,6 +4299,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeOpenClaw: unified.includeOpenClaw,
                          includeCursor: unified.includeCursor,
                          includePi: unified.includePi && piAgentEnabled,
+                         includeKimi: unified.includeKimi && kimiAgentEnabled,
                          enableDeepScan: false,
                          all: unified.allSessions)
         }
