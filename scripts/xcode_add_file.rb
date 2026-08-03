@@ -1,4 +1,15 @@
 #!/usr/bin/env ruby
+
+# The pbxproj contains non-ASCII characters, and xcodeproj reads it with the
+# process's default external encoding. Under a bare environment — a login shell
+# with no LANG, a launchd job, most CI runners — that default is US-ASCII, and
+# `Xcodeproj::Project.open` dies deep in the gem with
+# `invalid byte sequence in US-ASCII (ArgumentError)` at plist.rb's conflict
+# check. The error names the gem's internals and reads like a broken toolchain,
+# so pin the encoding here rather than making every caller remember LANG.
+Encoding.default_external = Encoding::UTF_8
+Encoding.default_internal = Encoding::UTF_8
+
 require 'xcodeproj'
 
 proj_path, target_name, file_path, group_path = ARGV

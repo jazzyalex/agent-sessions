@@ -21,6 +21,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,14 +49,57 @@ def _expand_path(p: str) -> Path:
     return Path(expanded).expanduser()
 
 
+# Credentials that must never reach a monitored agent CLI. This tool shells out
+# to every agent binary on the machine; a GitHub token in their environment is
+# ambient authority none of them need.
+_TOKEN_ENV_KEYS = ("GITHUB_TOKEN", "GH_TOKEN")
+
+
+def _child_env() -> dict[str, str]:
+    """The environment for spawned commands, minus any GitHub credential."""
+    env = dict(os.environ)
+    for key in _TOKEN_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def _github_token() -> str | None:
+    for key in _TOKEN_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            return value
+    return None
+
+
 def _http_get_text(url: str, timeout: int) -> str:
     # Prefer curl to avoid Python SSL trust-store drift on some macOS setups.
     curl_argv = ["curl", "-fsSL", "-H", "User-Agent: AgentSessions-AgentWatch/1.0"]
-    github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if github_token and urllib.parse.urlparse(url).netloc == "api.github.com":
-        curl_argv.extend(["-H", f"Authorization: Bearer {github_token}"])
-    curl_argv.append(url)
-    rc, out, err = _run_cmd(curl_argv, timeout=timeout)
+    github_token = _github_token()
+    use_token = bool(github_token) and urllib.parse.urlparse(url).netloc == "api.github.com"
+
+    # The Authorization header goes through a 0600 curl config file, never argv:
+    # process arguments are world-readable in the process table, so `-H "Authorization:
+    # Bearer …"` would publish the token to every user on the machine for the life of
+    # the request.
+    config_path: str | None = None
+    # Seeded so a failure while writing the config file falls through to the
+    # urllib path below instead of raising UnboundLocalError on `rc`.
+    rc, out = 1, ""
+    try:
+        if use_token:
+            fd, config_path = tempfile.mkstemp(prefix="agent-watch-curl-", suffix=".conf")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(f'header = "Authorization: Bearer {github_token}"\n')
+            os.chmod(config_path, 0o600)
+            curl_argv.extend(["--config", config_path])
+        curl_argv.append(url)
+        rc, out, err = _run_cmd(curl_argv, timeout=timeout)
+    finally:
+        if config_path:
+            try:
+                os.unlink(config_path)
+            except OSError:
+                pass
     if rc == 0 and out:
         return out
     # Fallback to urllib for environments without curl.
@@ -63,7 +107,7 @@ def _http_get_text(url: str, timeout: int) -> str:
         "User-Agent": "AgentSessions-AgentWatch/1.0",
         "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
     }
-    if github_token and urllib.parse.urlparse(url).netloc == "api.github.com":
+    if use_token:
         headers["Authorization"] = f"Bearer {github_token}"
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -113,6 +157,12 @@ def _run_cmd(argv: list[str], timeout: int) -> tuple[int, str, str]:
             text=True,
             check=False,
             timeout=timeout,
+            # Single choke point for every spawned process, including the agent
+            # CLIs this tool probes. Any GitHub credential is stripped here so it
+            # cannot leak into a third-party binary's environment; the one caller
+            # that needs it (`_http_get_text`) passes it through a 0600 config
+            # file instead.
+            env=_child_env(),
         )
         return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
     except FileNotFoundError:

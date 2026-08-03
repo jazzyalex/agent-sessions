@@ -114,13 +114,30 @@ Configuration:
 - `docs/agent-support/agent-watch-config.json`
 - Update sources/commands in config if a vendor changes distribution URLs or version strings.
 
-## Scheduling (suggested)
-- Daily (quiet): run once per day via launchd/cron.
-- Weekly (review): run once per week and review the report output.
+## Scheduling
+
+The weekly run has a tracked LaunchAgent — `tools/agent-watch/`. Install it with:
+
+    bash tools/agent-watch/install.sh
+
+That schedules `--mode weekly` for Mondays at 09:00 local and logs to
+`tools/agent-watch/out/launchd.log`; `tools/agent-watch/uninstall.sh` removes it.
+Read `tools/agent-watch/README.md` before relying on it — in particular, PATH is
+baked into the plist at install time, so **re-run the installer after installing a
+new agent CLI** or the scan will report that agent as unavailable.
+
+Until this existed the weekly cadence was aspirational: the run dates under
+`scripts/probe_scan_output/agent_watch/` are hand-run bursts with gaps of up to
+three weeks.
+
+The daily run is still unscheduled — run `--mode daily` by hand when you want it.
 
 Implementation detail:
 - Because daily runs are quiet on success, schedule them to write logs to a file only when you
   want auditing. Weekly runs always print a short summary plus the report path.
+- Neither mode signals findings through its exit status — `daily` and `weekly` both exit 0
+  regardless of severity. A scheduler can only tell you the run happened; the report is what
+  says whether anything drifted.
 
 ## How this feeds “support updates” (human-in-the-loop)
 When the report recommends `prepare_hotfix`:

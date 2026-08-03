@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 - Analytics: Added Pi and Kimi Code session statistics, including Pi-only and Kimi-only filtering, project discovery, agent breakdowns, and indexed session/message/duration rollups.
+- The session list can now ask you, once, to star the project on GitHub. It waits until you have opened 25 sessions or kept the app for 30 days, never appears on a first run, and offers "Maybe later" (one retry two weeks on) alongside a permanent dismiss. Starring or dismissing retires it for good, and ignoring it does too — three launches without an answer end a round the same way "Maybe later" would, so it can appear at most six times whatever you do. No network call and nothing recorded beyond the local choice.
 
 ## [4.6.4] - 2026-07-21
 

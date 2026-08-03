@@ -11,6 +11,32 @@ enum OnboardingPresentation: Equatable {
 
 @MainActor
 final class OnboardingCoordinator: ObservableObject {
+    /// The public repository the star ask points at. Held here so the card, the
+    /// menu item, and the tests can never drift onto different URLs.
+    static let githubRepositoryURL = URL(string: "https://github.com/jazzyalex/agent-sessions")!
+
+    /// How long "Maybe later" silences the star ask before its single retry.
+    static let starAskSnoozeInterval: TimeInterval = 14 * 86_400
+
+    /// Sessions opened before the star ask is due. Deliberately well above the
+    /// feedback card's 10: this asks a favour of people who stayed, not of
+    /// someone still deciding whether the app is for them.
+    static let starAskSessionsThreshold = 25
+
+    /// Days since first launch that make the star ask due on their own, for
+    /// someone who keeps the app around without opening many sessions.
+    static let starAskDaysThreshold: Double = 30
+
+    /// Launches a round of the star ask may go unanswered before it spends
+    /// itself. Ignoring a card is an answer; without this the ask would repeat
+    /// on every eligible launch forever, which is exactly the nagging the
+    /// "Maybe later" / dismiss pair exists to prevent.
+    static let starAskMaxImpressionsPerRound = 3
+
+    /// Days the star ask may wait behind the Quota Meter card before it takes
+    /// the slot for itself.
+    static let starAskPriorityAfterDays: Double = 14
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -40,6 +66,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// Hides the Quota Meter card for the rest of this launch.
     @Published var quotaMeterCardSuppressedThisLaunch: Bool = false
 
+    /// Hides the star card for the rest of this launch. In-memory only; the
+    /// persistent decision lives in `UserDefaults.onboardingStarAskState`.
+    @Published var starCardSuppressedThisLaunch: Bool = false
+
     /// Set once the user resolves any top-slot card. The slot shows one card at
     /// a time, but that alone only orders the queue — without this, dismissing
     /// the winner hands the slot straight to the runner-up on the same render,
@@ -53,6 +83,9 @@ final class OnboardingCoordinator: ObservableObject {
     private let whatsNewAvailableProvider: (String) -> Bool
     private let now: () -> Date
     private var hasChecked: Bool = false
+    /// One impression per launch, not per render: `.onAppear` fires again every
+    /// time the list rebuilds the card.
+    private var didCountStarImpressionThisLaunch: Bool = false
     /// True for the duration of a launch that showed the first-run setup — feedback
     /// must never appear in the same session as first run.
     private(set) var didPresentFreshInstallThisLaunch: Bool = false
@@ -84,6 +117,13 @@ final class OnboardingCoordinator: ObservableObject {
 
         let previousMajorMinor = defaults.onboardingLastSeenAppMajorMinor ?? defaults.onboardingLastActionMajorMinor
         defaults.onboardingLastSeenAppMajorMinor = majorMinor
+
+        // Stamped once, the first launch on which the star ask qualifies. The
+        // aging rule needs to know how long it has been waiting, and the card
+        // itself may never render while another card holds the slot.
+        if defaults.onboardingStarAskDueSince == nil, starAskTriggerMet() {
+            defaults.onboardingStarAskDueSince = now()
+        }
 
         if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
             didPresentFreshInstallThisLaunch = true
@@ -227,6 +267,7 @@ final class OnboardingCoordinator: ObservableObject {
     ///     least once. Tracking alone is not "using it" — that is precisely the
     ///     audience that has the data flowing but has never seen the window.
     func shouldShowQuotaMeterCard(hasCodexOrClaudeSessions: Bool, isQuotaMeterActive: Bool) -> Bool {
+        guard !starAskOutranksQuotaMeterCard() else { return false }
         guard whatsNewMajorMinor == nil else { return false }
         guard !didConsumeTopSlotAskThisLaunch else { return false }
         guard !quotaMeterCardSuppressedThisLaunch else { return false }
@@ -285,6 +326,126 @@ final class OnboardingCoordinator: ObservableObject {
     }
 
     var hasEverOpenedCockpit: Bool { defaults.onboardingCockpitEverOpened }
+
+    // MARK: - GitHub star ask
+
+    /// Whether the star card should occupy the session-list top slot.
+    ///
+    /// Slot order is What's New > Quota Meter > star > feedback. The star sits
+    /// above feedback because it terminates: every path out of it — starred,
+    /// dismissed, or a second "Maybe later" — is permanent, so it can occupy the
+    /// slot at most twice. The feedback card's ✕ is soft and returns every
+    /// launch, so putting it first would starve the star ask indefinitely. Its
+    /// higher retention bar also means feedback (10 sessions or 14 days) has
+    /// normally had its turn long before this comes due.
+    ///
+    /// Never fires on a fresh-install launch, and never asks again once the user
+    /// has opened the repository.
+    func shouldShowStarCard() -> Bool {
+        guard whatsNewMajorMinor == nil else { return false }
+        guard !didConsumeTopSlotAskThisLaunch else { return false }
+        guard !starCardSuppressedThisLaunch else { return false }
+        guard !didPresentFreshInstallThisLaunch else { return false }
+
+        switch defaults.onboardingStarAskState {
+        case .starred, .dismissedForever:
+            return false
+        case .notAsked:
+            break
+        case .snoozed:
+            // One retry, and only once the snooze has actually elapsed. A missing
+            // date would mean a snooze that never expires, so treat it as due.
+            if let until = defaults.onboardingStarAskSnoozedUntil, now() < until {
+                return false
+            }
+        }
+
+        return starAskTriggerMet()
+    }
+
+    /// The user opened the repository — never ask again.
+    func recordStarOpened() {
+        defaults.onboardingStarAskState = .starred
+        starCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+    }
+
+    /// "Maybe later" — silent for two weeks, then exactly one retry. A second
+    /// "Maybe later" is a no.
+    func snoozeStarAsk() {
+        starCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endStarAskRound()
+    }
+
+    /// Records that this launch put the star card on screen.
+    ///
+    /// `shouldShowStarCard()` is a pure query the view runs while rendering, so
+    /// nothing about being *seen* advances the state — a user who quits without
+    /// touching the card would get it again on every eligible launch, forever,
+    /// and the feedback card behind it would never surface. Three unanswered
+    /// launches end the round exactly as "Maybe later" would.
+    func noteStarCardShown() {
+        guard !didCountStarImpressionThisLaunch else { return }
+        didCountStarImpressionThisLaunch = true
+
+        let seen = defaults.onboardingStarAskImpressions + 1
+        defaults.onboardingStarAskImpressions = seen
+        guard seen >= Self.starAskMaxImpressionsPerRound else { return }
+        endStarAskRound()
+    }
+
+    /// The one transition both "Maybe later" and silence take: first round buys
+    /// two weeks and a retry, second round is a no.
+    private func endStarAskRound() {
+        switch defaults.onboardingStarAskState {
+        case .notAsked:
+            defaults.onboardingStarAskState = .snoozed
+            defaults.onboardingStarAskSnoozedUntil = now().addingTimeInterval(Self.starAskSnoozeInterval)
+            // The retry gets its own budget of launches.
+            defaults.onboardingStarAskImpressions = 0
+        case .snoozed:
+            defaults.onboardingStarAskState = .dismissedForever
+        case .starred, .dismissedForever:
+            break
+        }
+    }
+
+    /// The card's ✕ — an explicit no. Unlike the feedback card there is no second
+    /// surface where a real decline is recorded, and "Maybe later" is right there
+    /// for anyone who only wants it gone for now, so this is permanent.
+    func dismissStarAskForever() {
+        starCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+
+        guard defaults.onboardingStarAskState != .starred else { return }
+        defaults.onboardingStarAskState = .dismissedForever
+    }
+
+    /// Whether the star ask has waited long enough to take the slot from the
+    /// Quota Meter card.
+    ///
+    /// Fixed priority alone is not enough. The Quota Meter card only leaves the
+    /// slot when the user activates it or dismisses it — someone who does
+    /// neither, and simply ignores it, holds the slot on every launch
+    /// indefinitely. The star ask sits below it and would never be seen. After
+    /// two weeks of waiting it goes first; it then spends itself within two
+    /// rounds and hands the slot straight back, so this cannot deadlock the
+    /// other direction.
+    func starAskOutranksQuotaMeterCard() -> Bool {
+        guard let dueSince = defaults.onboardingStarAskDueSince else { return false }
+        guard now().timeIntervalSince(dueSince) / 86_400 >= Self.starAskPriorityAfterDays else { return false }
+        return shouldShowStarCard()
+    }
+
+    /// Retention test for the star ask: earliest of 25 sessions opened or 30 days
+    /// since first launch. Same shape as `usageTriggerMet()`, higher bars.
+    private func starAskTriggerMet() -> Bool {
+        if defaults.onboardingSessionsOpenedCount >= Self.starAskSessionsThreshold { return true }
+        guard let first = defaults.onboardingFirstLaunchDate else { return false }
+        let days = now().timeIntervalSince(first) / 86_400
+        return days >= Self.starAskDaysThreshold
+    }
 
     private func usageTriggerMet() -> Bool {
         if defaults.onboardingSessionsOpenedCount >= 10 { return true }
