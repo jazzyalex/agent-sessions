@@ -82,6 +82,9 @@ def _http_get_text(url: str, timeout: int) -> str:
     # Bearer …"` would publish the token to every user on the machine for the life of
     # the request.
     config_path: str | None = None
+    # Seeded so a failure while writing the config file falls through to the
+    # urllib path below instead of raising UnboundLocalError on `rc`.
+    rc, out = 1, ""
     try:
         if use_token:
             fd, config_path = tempfile.mkstemp(prefix="agent-watch-curl-", suffix=".conf")
@@ -104,7 +107,7 @@ def _http_get_text(url: str, timeout: int) -> str:
         "User-Agent": "AgentSessions-AgentWatch/1.0",
         "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
     }
-    if github_token and urllib.parse.urlparse(url).netloc == "api.github.com":
+    if use_token:
         headers["Authorization"] = f"Bearer {github_token}"
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
