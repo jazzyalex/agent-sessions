@@ -1,3 +1,25 @@
+## 2026-08-03 11:03 · kimi-sessions-list-plumbing · Kimi made searchable; enablement notice fixed (committed, unpushed)
+status: done
+
+**State:** Three commits on `main`, unpushed: `f23c4cf7` (fix), `3e44b673` (backlog), `1ac08fb0` (two parallel-session handover entries). Suite 1786/0/3 green.
+
+**Decided / don't redo:**
+- The reported bug (`kimiAgentEnabled` missing from the notice's `&&` chain) was **not the whole fix** — nothing observed the flag either, so the corrected predicate never ran. Both the chain and a `.onChange` were needed.
+- Bigger find in the same region: `SearchCoordinator.start` had **no `includeKimi` parameter at all**, so `.kimi` never entered the allowed source set and Kimi was absent from every search result since it shipped. Fixed + regression-tested.
+- Kimi **is** FTS-ingested (`SearchIngestService.parseFileFull` has a `.kimi` arm; the ingest driver is source-generic), so unlike Cursor it needs **no** exclusion from the FTS allow-list. Checked — don't re-litigate.
+- Regression test verified non-vacuous: removing `set.insert(.kimi)` makes it fail with `Got []`.
+- Deliberately left out of scope: the notice is still unobserved for `hermes`, `droid`, `openClaw`, `cursor`, `pi`, and Kimi still has no filter pill in `enabledOtherAgentSpecs`. Both recorded in the backlog, not bugs to rediscover.
+
+**Key files:**
+- `AgentSessions/Views/UnifiedSessionsView.swift` — notice chain + `onChange` block + the two `@AppStorage` enablement blocks
+- `AgentSessions/Search/SearchCoordinator.swift` — `start()`'s per-source `Bool` list → `allowed: Set<SessionSource>`
+- `docs/backlog.md` → "Agent Source Plumbing" — the refactor that stops this recurring
+
+**Next:**
+1. Push the three commits.
+2. Optional, pre-approved shape: add the five missing `.onChange` observers and Kimi's filter pill (`shortcut: nil`, 1–9 are taken).
+3. The Apple Development cert was renewed at 10:39, so the `CODE_SIGN_IDENTITY="-"` override is no longer needed.
+
 ## 2026-08-03 10:39 · signing-identity-expiry · Apple Development cert expiry diagnosed + renewed; derived data purged
 status: done
 
