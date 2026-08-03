@@ -1,3 +1,25 @@
+## 2026-08-03 12:41 · star-ask-agent-watch · Two stale branches reviewed, salvaged, and retired
+status: done
+
+**State:** 13 commits on `main`, pushed (`1998dbf9..9a36dcd7`). Full suite green. Branches `star-ask` and `auto/launch-kit` deleted — both fully absorbed or dead, nothing left to recover. This also pushed the three unpushed Kimi commits from the 11:03 entry.
+
+**Decided / don't redo:**
+- **`auto/launch-kit`'s transcript commits were already in main** — `InlineImageThumbnailGridView.swift` on the branch was byte-identical to main's copy (landed as `b392f48b` the same day). Its "conflicts" in `TranscriptBlockListView`/`TranscriptPlainView`/`MarkdownBodyRenderer` were pure staleness; merging would have *deleted* 600+/241/237 lines. Only `launch-kit/` was worth taking.
+- **The star-ask README rewrite was dropped on purpose.** It repositions the product back to session-history-first; main leads with the Quota Meter. Both "unbacked claim" fixes in it were moot — those sentences were introduced *and* fixed inside the branch's own rewrite and never existed in main. Only the star CTA carried over.
+- **`starAskOutranksQuotaMeterCard()` is NOT dead code** — it looks unreferenced from the view but is wired via a guard at the top of `shouldShowQuotaMeterCard()`. Checked; don't "fix" it.
+- **`run-weekly.sh`'s `[ -n "$token" ] && export ...` does not abort under `set -e`** — the failing test isn't the last command of the AND-list, so `-e` exempts it. Verified empirically; don't re-flag.
+- Launch-kit numbers re-pulled from the GitHub API (674→750 stars, 9,240→11,431 downloads, 9→10 sources). Growth-cadence claim *survived* verification (133 Mar / 100 Apr / 78 May / 80 Jun / 76 Jul), so "~80/mo since" stands. `~700 WAU` still unverifiable, flagged in `launch-kit/REPORT.md`.
+
+**Key files:**
+- `scripts/agent_watch.py` — token now via 0600 curl config, never argv; `_run_cmd` strips `GITHUB_TOKEN`/`GH_TOKEN` from every spawned agent CLI
+- `tools/agent-watch/` — weekly launchd job + `tests/test_token_hygiene.sh` (9/9), `tests/test_install.sh` (10/10)
+- `AgentSessions/Onboarding/Models/OnboardingCoordinator.swift` — star-ask state machine; ceiling is 6 impressions total whatever the user does
+- `scripts/xcode_add_file.rb` — now self-pins UTF-8; a correct run adds exactly 4 pbxproj lines (good sanity check)
+
+**Next:**
+1. Nothing outstanding. The weekly agent-watch LaunchAgent is committed but **not installed** — run `tools/agent-watch/install.sh` if you want it actually scheduled.
+2. Optional, carried over from 11:03: the five missing `.onChange` observers + Kimi filter pill (`docs/backlog.md` → "Agent Source Plumbing").
+
 ## 2026-08-03 11:03 · kimi-sessions-list-plumbing · Kimi made searchable; enablement notice fixed (committed, unpushed)
 status: done
 
