@@ -2,7 +2,8 @@ import Foundation
 
 /// Builds the shell command that reopens a Kimi Code session.
 ///
-/// Verified against `kimi --help` at CLI 0.29.1:
+/// Verified against `kimi --help` at CLI 0.29.1 and re-confirmed unchanged at
+/// 0.31.1:
 ///
 ///     -S, --session [id]   Resume a session. With ID: resume that session.
 ///                          Without ID: interactively pick.

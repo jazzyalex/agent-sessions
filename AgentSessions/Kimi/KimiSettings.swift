@@ -3,10 +3,17 @@ import SwiftUI
 
 /// Preferences backing the Kimi Code pane.
 ///
-/// Mirrors `PiSettings`, minus the terminal-launch fields (`preferITerm`,
-/// `fallbackPolicy`, `defaultWorkingDirectory`): Kimi is tier-2, so
-/// launch-in-terminal resume is unsupported and only the copy-resume command
-/// consumes the resolved binary.
+/// Mirrors `PiSettings` minus `preferITerm` and `fallbackPolicy`, which Pi
+/// persists but never exposes in its own pane -- stored preferences with no
+/// writer are the defect class this file exists to avoid. The terminal kind
+/// comes from the shared `ResumePreferenceHelpers.resolveTerminalKind()`, and
+/// the fallback policy is a `KimiResumeCoordinator` default.
+///
+/// `defaultWorkingDirectory` is deliberately absent for a different reason:
+/// Kimi's working directory is authoritative in the `state.json` sidecar, and
+/// a user-supplied default would be a *guess* that silently redirects
+/// `--continue` at an unrelated session. `KimiResumeCoordinator` refuses that
+/// strategy without a known directory instead.
 @MainActor
 final class KimiSettings: ObservableObject {
     static let shared = KimiSettings()
@@ -71,9 +78,11 @@ final class KimiSettings: ObservableObject {
     /// when nothing has been probed yet.
     func copyCommandPlan(sessionID: String) -> (binary: String, strategy: KimiResumeCommandBuilder.Strategy)? {
         let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        // One source of truth for the id-present/id-absent branch.
+        let preferredStrategy = KimiResumeCommandBuilder().strategy(forSessionID: trimmedSessionID)
         let custom = binaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         if !custom.isEmpty {
-            return (custom, trimmedSessionID.isEmpty ? .continueMostRecent : .sessionByID(id: trimmedSessionID))
+            return (custom, preferredStrategy)
         }
 
         if let cached = validatedCachedResolvedBinaryPath() {
@@ -86,8 +95,7 @@ final class KimiSettings: ObservableObject {
             return nil
         }
 
-        return (KimiCLIEnvironment.binaryName,
-                trimmedSessionID.isEmpty ? .continueMostRecent : .sessionByID(id: trimmedSessionID))
+        return (KimiCLIEnvironment.binaryName, preferredStrategy)
     }
 
     private func warmResolvedBinaryPathIfNeeded() {

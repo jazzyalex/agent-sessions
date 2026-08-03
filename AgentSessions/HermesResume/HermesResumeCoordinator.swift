@@ -17,7 +17,11 @@ final class HermesResumeCoordinator {
     func resumeInTerminal(input: HermesResumeInput,
                           policy: HermesFallbackPolicy = .resumeThenContinue,
                           dryRun: Bool = false) async -> HermesResumeResult {
-        let probe = env.probe(customPath: input.binaryOverride)
+        // Probing spawns a login shell plus per-candidate --help with no
+        // timeout, so it must never run on the MainActor.
+        let env = self.env
+        let binaryOverride = input.binaryOverride
+        let probe = await Task.detached { env.probe(customPath: binaryOverride) }.value
         guard case .success(let info) = probe else {
             let message = probe.failureValue?.localizedDescription ?? "Hermes CLI not found."
             return HermesResumeResult(launched: false, strategy: .none, error: message, command: nil)

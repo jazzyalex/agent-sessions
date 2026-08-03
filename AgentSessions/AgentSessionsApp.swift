@@ -217,12 +217,13 @@ struct AgentSessionsApp: App {
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) private var liveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
+    // Only Codex and Claude are read directly here; the rest of the per-agent
+    // enablement keys are watched via `agentEnablementObserver`, which covers
+    // all of SessionSource.allCases. Re-declaring them as @AppStorage would
+    // invalidate the App body on every toggle for nothing.
     @AppStorage(PreferencesKey.Advanced.hideDockIcon) private var hideDockIcon: Bool = false
     @AppStorage("UnifiedLegacyNoticeShown") private var unifiedNoticeShown: Bool = false
+    @State private var agentEnablementObserver = FilteredDefaultsObserver(keys: AgentEnablement.allEnablementKeys)
     @State private var selectedSessionID: String?
     @State private var selectedEventID: String?
     @State private var focusSearchToggle: Bool = false
@@ -352,11 +353,11 @@ struct AgentSessionsApp: App {
             applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: newValue, menuBarEnabled: menuBarEnabled)
             updateUsageModels()
         }
-        .onChange(of: codexAgentEnabled) { _, _ in handleAgentEnablementChange() }
-        .onChange(of: claudeAgentEnabled) { _, _ in handleAgentEnablementChange() }
-        .onChange(of: antigravityAgentEnabled) { _, _ in handleAgentEnablementChange() }
-        .onChange(of: openCodeAgentEnabled) { _, _ in handleAgentEnablementChange() }
-        .onChange(of: piAgentEnabled) { _, _ in handleAgentEnablementChange() }
+        // Derived from SessionSource.allCases rather than one .onChange per
+        // agent: that list only ever covered 5 of the 11 providers, so toggling
+        // any of the other 6 left analytics readiness and the usage models
+        // stale until some unrelated event happened to refresh them.
+        .onReceive(agentEnablementObserver.mainPublisher) { handleAgentEnablementChange() }
         .onAppear {
             guard !AppRuntime.isRunningTests else { return }
             applyActivationPolicyAndCleanupIfNeeded(hideDockIcon: hideDockIcon, menuBarEnabled: menuBarEnabled)

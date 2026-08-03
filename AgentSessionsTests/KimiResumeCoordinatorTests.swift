@@ -43,16 +43,19 @@ final class KimiResumeCoordinatorTests: XCTestCase {
                        "cd '/tmp/my project' && '/usr/local/bin/kimi' --session 'session_1'")
     }
 
+    /// `--continue` resumes "the previous session for the working directory",
+    /// so the `cd` prefix is what makes it resolve to the right one. Dropping it
+    /// here would silently attach to an unrelated session.
     func testResumeFallsBackToContinueWithoutSessionID() async {
         let launcher = MockLauncher()
         let result = await coordinator(MockEnvironment(result: .success(probe())), launcher)
             .resumeInTerminal(input: KimiResumeInput(sessionID: nil,
-                                                     workingDirectory: nil,
+                                                     workingDirectory: URL(fileURLWithPath: "/tmp/project"),
                                                      binaryOverride: nil))
 
         XCTAssertTrue(result.launched)
         XCTAssertEqual(result.strategy, .continueMostRecent)
-        XCTAssertEqual(launcher.commands.first, "'/usr/local/bin/kimi' --continue")
+        XCTAssertEqual(launcher.commands.first, "cd '/tmp/project' && '/usr/local/bin/kimi' --continue")
     }
 
     /// An older CLI that does not advertise `--session` still resumes, just
@@ -61,12 +64,42 @@ final class KimiResumeCoordinatorTests: XCTestCase {
         let launcher = MockLauncher()
         let result = await coordinator(MockEnvironment(result: .success(probe(supportsSession: false))), launcher)
             .resumeInTerminal(input: KimiResumeInput(sessionID: "session_1",
-                                                     workingDirectory: nil,
+                                                     workingDirectory: URL(fileURLWithPath: "/tmp/project"),
                                                      binaryOverride: nil))
 
         XCTAssertTrue(result.launched)
         XCTAssertEqual(result.strategy, .continueMostRecent)
-        XCTAssertEqual(launcher.commands.first, "'/usr/local/bin/kimi' --continue")
+        XCTAssertEqual(launcher.commands.first, "cd '/tmp/project' && '/usr/local/bin/kimi' --continue")
+    }
+
+    /// Without a working directory `--continue` cannot be correct, so it must
+    /// refuse rather than resume whatever session the terminal's default
+    /// directory happens to own.
+    func testRefusesContinueWhenWorkingDirectoryIsUnknown() async {
+        let launcher = MockLauncher()
+        let result = await coordinator(MockEnvironment(result: .success(probe(supportsSession: false))), launcher)
+            .resumeInTerminal(input: KimiResumeInput(sessionID: "session_1",
+                                                     workingDirectory: nil,
+                                                     binaryOverride: nil))
+
+        XCTAssertFalse(result.launched)
+        XCTAssertEqual(result.strategy, .none)
+        XCTAssertEqual(result.error, "No working directory for this session, so --continue would resume an unrelated one.")
+        XCTAssertTrue(launcher.commands.isEmpty)
+    }
+
+    /// Resuming by id does not need the directory to be correct, so a missing
+    /// one must not block the precise strategy.
+    func testSessionByIDStillWorksWithoutAWorkingDirectory() async {
+        let launcher = MockLauncher()
+        let result = await coordinator(MockEnvironment(result: .success(probe())), launcher)
+            .resumeInTerminal(input: KimiResumeInput(sessionID: "session_1",
+                                                     workingDirectory: nil,
+                                                     binaryOverride: nil))
+
+        XCTAssertTrue(result.launched)
+        XCTAssertEqual(result.strategy, .sessionByID)
+        XCTAssertEqual(launcher.commands.first, "'/usr/local/bin/kimi' --session 'session_1'")
     }
 
     func testSessionOnlyPolicyReturnsFailureWithoutSessionID() async {
@@ -107,18 +140,22 @@ final class KimiResumeCoordinatorTests: XCTestCase {
         XCTAssertTrue(launcher.commands.isEmpty)
     }
 
-    /// When the terminal itself refuses the `--session` launch, retry with
-    /// `--continue` rather than leaving the user with nothing.
-    func testLaunchFailureFallsBackToContinue() async {
+    /// A launch failure means the terminal app refused, which a different
+    /// command cannot fix — the command reaches osascript as an opaque argv
+    /// item. Retrying with `--continue` would, on the rare success, resume an
+    /// unrelated session while reporting success, so it must report the failure
+    /// instead.
+    func testLaunchFailureReportsTheErrorInsteadOfResumingSomethingElse() async {
         let launcher = MockLauncher(failFirstLaunch: true)
         let result = await coordinator(MockEnvironment(result: .success(probe())), launcher)
             .resumeInTerminal(input: KimiResumeInput(sessionID: "session_1",
-                                                     workingDirectory: nil,
+                                                     workingDirectory: URL(fileURLWithPath: "/tmp/project"),
                                                      binaryOverride: nil))
 
-        XCTAssertTrue(result.launched)
-        XCTAssertEqual(result.strategy, .continueMostRecent)
-        XCTAssertEqual(launcher.commands, ["'/usr/local/bin/kimi' --continue"])
+        XCTAssertFalse(result.launched)
+        XCTAssertEqual(result.strategy, .sessionByID)
+        XCTAssertNotNil(result.error)
+        XCTAssertTrue(launcher.commands.isEmpty, "must not have launched a second, different command")
     }
 
     private final class MockEnvironment: KimiCLIEnvironmentProviding {

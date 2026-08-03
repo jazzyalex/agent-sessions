@@ -67,6 +67,15 @@ enum AgentEnablement {
         }
     }
 
+    /// Every per-agent enablement key, derived from `SessionSource.allCases`.
+    ///
+    /// Observers must use this rather than listing keys by hand: the
+    /// hand-written lists drifted every time a provider was added, and a missed
+    /// key means toggling that agent silently leaves dependent state stale.
+    static var allEnablementKeys: [String] {
+        SessionSource.allCases.map { enablementKey(for: $0) }
+    }
+
     static func enablementKey(for source: SessionSource) -> String {
         switch source {
         case .codex:    return PreferencesKey.Agents.codexEnabled

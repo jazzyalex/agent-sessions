@@ -131,6 +131,41 @@ final class KimiSessionParserTests: XCTestCase {
         XCTAssertEqual(session.eventCount, 3, "only the 3 user messages are non-meta")
     }
 
+    /// The preview pass discards its events, so `lightweightCommands` is the only
+    /// tool-call evidence the "has commands" quick filter has for a session the
+    /// user has not opened -- which is every row in the list. When this was nil,
+    /// the filter judged every Kimi session command-free and hid the provider
+    /// wholesale.
+    func testPreviewParseCountsToolCallsForTheHasCommandsFilter() throws {
+        let session = try XCTUnwrap(KimiSessionParser.parseFile(at: stagedAssistantToolsFixture()))
+
+        XCTAssertTrue(session.events.isEmpty, "preview parse must not materialise events")
+        XCTAssertEqual(session.lightweightCommands, 19, "the capture makes 19 tool calls")
+        XCTAssertTrue(UnifiedSessionIndexer.passesHasCommandsFilter(session))
+    }
+
+    /// The counterpart: a capture with no tool calls must still read as
+    /// command-free, or the filter becomes a no-op for Kimi. The count stays
+    /// nil rather than 0 because the preview only reads the first
+    /// `previewLineLimit` lines — "none found so far" is not "none".
+    func testPreviewParseReportsNoCommandsForAToolFreeCapture() throws {
+        let session = try XCTUnwrap(KimiSessionParser.parseFile(at: stagedFixture()))
+
+        XCTAssertNil(session.lightweightCommands)
+        XCTAssertFalse(UnifiedSessionIndexer.passesHasCommandsFilter(session))
+    }
+
+    /// The working directory must survive a *full* parse, not just the preview:
+    /// `effectiveWorkingDirectoryURL` routes Kimi through `Session.cwd`, and a
+    /// nil there is what dropped the `cd` from the resume command.
+    func testFullParseKeepsTheSidecarWorkingDirectory() throws {
+        let session = try XCTUnwrap(KimiSessionParser.parseFileFull(at: stagedAssistantToolsFixture()))
+
+        XCTAssertFalse(session.events.isEmpty, "must be exercising the parsed path")
+        XCTAssertEqual(session.cwd, session.lightweightCwd)
+        XCTAssertNotNil(session.cwd)
+    }
+
     /// The preview path streams and stops at its line cap, so it must succeed on
     /// a journal far larger than the full-parse ceiling without materialising it.
     /// A regression here (slurping the file) would show up as a stall on every

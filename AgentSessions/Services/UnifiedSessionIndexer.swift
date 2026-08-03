@@ -777,19 +777,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         // enablement keys via AgentEnablement.enablementKey(for:)).
         let enablementSyncObserver = FilteredDefaultsObserver(keys: [
             "UnifiedHasCommandsOnly",
-            PreferencesKey.Unified.showArchivedCodexDesktopOnly,
-            PreferencesKey.Agents.codexEnabled,
-            PreferencesKey.Agents.claudeEnabled,
-            PreferencesKey.Agents.antigravityEnabled,
-            PreferencesKey.Agents.openCodeEnabled,
-            PreferencesKey.Agents.hermesEnabled,
-            PreferencesKey.Agents.copilotEnabled,
-            PreferencesKey.Agents.droidEnabled,
-            PreferencesKey.Agents.openClawEnabled,
-            PreferencesKey.Agents.cursorEnabled,
-            PreferencesKey.Agents.piEnabled,
-            PreferencesKey.Agents.kimiEnabled
-        ])
+            PreferencesKey.Unified.showArchivedCodexDesktopOnly
+        ] + AgentEnablement.allEnablementKeys)
         self.enablementSyncDefaultsObserver = enablementSyncObserver
         enablementSyncObserver.publisher
             .receive(on: DispatchQueue.main)

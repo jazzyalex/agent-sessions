@@ -1637,6 +1637,10 @@ struct UnifiedSessionsView: View {
             let settings = KimiSettings.shared
             let wd = effectiveWorkingDirectoryURL(for: session)
             guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            // Same refusal as KimiResumeCoordinator: `--continue` resolves
+            // against the working directory, so without a `cd` it would hand the
+            // user a command that reopens an unrelated session.
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
             let builder = KimiResumeCommandBuilder()
             guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
                                                           binaryCommand: plan.binary) else { return }

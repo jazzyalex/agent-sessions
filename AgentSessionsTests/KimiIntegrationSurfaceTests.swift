@@ -66,6 +66,79 @@ final class KimiIntegrationSurfaceTests: XCTestCase {
         }
     }
 
+    // MARK: - Working directory
+
+    /// `Session.cwd` keeps a hand-maintained list of providers whose working
+    /// directory is authoritative lightweight metadata. Kimi reads `workDir`
+    /// from its `state.json` sidecar, so it belongs there — but it was missing,
+    /// which meant a *parsed* Kimi session (events non-empty, so the
+    /// `events.isEmpty` fallback never fires) fell through to Codex's
+    /// `<cwd>` transcript scraping and returned nil. Resume then built its
+    /// command with no `cd` prefix and Kimi refused: "Session was created under
+    /// a different directory."
+    func testParsedKimiSessionKeepsItsSidecarWorkingDirectory() {
+        let parsed = session(source: .kimi, events: [event(kind: .user), event(kind: .assistant)])
+
+        XCTAssertEqual(parsed.lightweightCwd, "/tmp/project")
+        XCTAssertEqual(parsed.cwd, "/tmp/project")
+    }
+
+    /// Pi stores its cwd in the same lightweight slot and was missing from the
+    /// same list.
+    func testParsedPiSessionKeepsItsHeaderWorkingDirectory() {
+        let parsed = session(source: .pi, events: [event(kind: .user), event(kind: .assistant)])
+
+        XCTAssertEqual(parsed.cwd, "/tmp/project")
+    }
+
+    /// The drift guard. Codex is the only provider that scrapes its cwd out of
+    /// transcript events; every other one persists it as lightweight metadata
+    /// and must keep it after a full parse. Kimi, Pi, and Cursor were each
+    /// missing from the hand-written list at different times, and the symptom
+    /// was always silent: a resume command with no `cd`, and a NULL cwd in the
+    /// search index. A new provider that forgets this fails here.
+    func testEveryNonCodexSourceKeepsItsLightweightCwdAfterParsing() {
+        let parsedEvents = [event(kind: .user), event(kind: .assistant)]
+
+        for source in SessionSource.allCases where source != .codex {
+            XCTAssertEqual(session(source: source, events: parsedEvents).cwd,
+                           "/tmp/project",
+                           "\(source.rawValue) lost its working directory after a full parse")
+        }
+    }
+
+    /// The other half of that guard, and the invariant the whole split rests on:
+    /// Codex is the one provider whose lightweight cwd is NOT authoritative,
+    /// because it scrapes the live value out of transcript events. Without this,
+    /// "simplifying" the switch to always return true would keep every other
+    /// test green while silently letting a stale stored cwd beat the transcript.
+    func testCodexPrefersTheTranscriptCwdOverStaleLightweightMetadata() {
+        let scraped = SessionEvent(id: "e-env", timestamp: nil, kind: .meta, role: nil,
+                                   text: "<cwd>/real/project</cwd>",
+                                   toolName: nil, toolInput: nil, toolOutput: nil,
+                                   messageID: nil, parentID: nil, isDelta: false, rawJSON: "{}")
+        let parsed = Session(id: "codex-1",
+                             source: .codex,
+                             startTime: nil,
+                             endTime: nil,
+                             model: nil,
+                             filePath: "/tmp/codex/rollout.jsonl",
+                             eventCount: 1,
+                             events: [scraped],
+                             cwd: "/stale/project",
+                             repoName: nil,
+                             lightweightTitle: nil)
+
+        XCTAssertEqual(parsed.lightweightCwd, "/stale/project")
+        XCTAssertEqual(parsed.cwd, "/real/project")
+    }
+
+    /// The unparsed case already worked via the `events.isEmpty` fallback;
+    /// it must keep working.
+    func testUnparsedKimiSessionStillResolvesWorkingDirectory() {
+        XCTAssertEqual(session(source: .kimi, events: []).cwd, "/tmp/project")
+    }
+
     // MARK: - Copy-resume binary
 
     @MainActor

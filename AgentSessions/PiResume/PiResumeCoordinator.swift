@@ -17,7 +17,11 @@ final class PiResumeCoordinator {
     func resumeInTerminal(input: PiResumeInput,
                           policy: PiFallbackPolicy = .resumeThenContinue,
                           dryRun: Bool = false) async -> PiResumeResult {
-        let probe = env.probe(customPath: input.binaryOverride)
+        // Probing spawns a login shell plus per-candidate --help with no
+        // timeout, so it must never run on the MainActor.
+        let env = self.env
+        let binaryOverride = input.binaryOverride
+        let probe = await Task.detached { env.probe(customPath: binaryOverride) }.value
         guard case let .success(info) = probe else {
             let message = probe.failureValue?.localizedDescription ?? "Pi CLI not found."
             return PiResumeResult(launched: false, strategy: .none, error: message, command: nil)
@@ -70,18 +74,13 @@ final class PiResumeCoordinator {
             try launcher.launchInTerminal(package)
             return PiResumeResult(launched: true, strategy: used, error: nil, command: package.shellCommand)
         } catch {
-            if policy == .resumeThenContinue, (used == .sessionByID || used == .resumeByID), info.supportsContinue {
-                do {
-                    let fallback = try builder.makeCommand(strategy: .continueMostRecent,
-                                                           binaryURL: info.binaryURL,
-                                                           workingDirectory: input.workingDirectory,
-                                                           sessionDirectory: input.sessionDirectory)
-                    try launcher.launchInTerminal(fallback)
-                    return PiResumeResult(launched: true, strategy: .continueMostRecent, error: nil, command: fallback.shellCommand)
-                } catch {
-                    return PiResumeResult(launched: false, strategy: .continueMostRecent, error: error.localizedDescription, command: nil)
-                }
-            }
+            // No retry here. Nothing `launchInTerminal` throws is
+            // command-dependent: Terminal/iTerm fail only when osascript exits
+            // non-zero, and the command reaches it as an opaque argv item;
+            // Warp fails only on a directory-create or tab-config write.
+            // Retrying with a *different* command cannot recover — and if it
+            // did succeed it would resume an unrelated session while reporting
+            // success.
             return PiResumeResult(launched: false, strategy: used, error: error.localizedDescription, command: nil)
         }
     }

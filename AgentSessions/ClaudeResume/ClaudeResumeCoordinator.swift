@@ -30,7 +30,11 @@ final class ClaudeResumeCoordinator {
                           policy: ClaudeFallbackPolicy = .resumeThenContinue,
                           dryRun: Bool = false) async -> ClaudeResumeResult {
         // Probe CLI
-        let probe = env.probe(customPath: input.binaryOverride)
+        // Probing spawns a login shell plus per-candidate --help with no
+        // timeout, so it must never run on the MainActor.
+        let env = self.env
+        let binaryOverride = input.binaryOverride
+        let probe = await Task.detached { env.probe(customPath: binaryOverride) }.value
         guard case let .success(info) = probe else {
             let message = (try? probe.get()) == nil ? (probe.failureValue?.localizedDescription ?? "Claude CLI not found.") : "Claude CLI not found."
             return ClaudeResumeResult(launched: false, strategy: .none, error: message, command: nil)

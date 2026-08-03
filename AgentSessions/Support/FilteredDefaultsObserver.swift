@@ -35,14 +35,29 @@ final class FilteredDefaultsObserver {
 
     /// Emits `Void` only when one of the tracked keys' values actually changed
     /// since the last emission (including the initial snapshot taken at init).
-    var publisher: AnyPublisher<Void, Never> {
-        subject.eraseToAnyPublisher()
-    }
+    ///
+    /// Delivered on whichever thread performed the defaults write — the
+    /// notification is not main-queue-confined. Sinks that touch `@Published`
+    /// state or UI must use `mainPublisher`.
+    var publisher: AnyPublisher<Void, Never> { storedPublisher }
+
+    /// `publisher`, hopped to the main queue. Prefer this from SwiftUI
+    /// `.onReceive`, which offers no thread guarantee of its own.
+    var mainPublisher: AnyPublisher<Void, Never> { storedMainPublisher }
+
+    // Erased once, not per access: SwiftUI compares publisher values to decide
+    // whether to resubscribe, so a freshly-boxed `AnyPublisher` on every body
+    // evaluation would tear down and rebuild the subscription each time.
+    private let storedPublisher: AnyPublisher<Void, Never>
+    private let storedMainPublisher: AnyPublisher<Void, Never>
 
     init(keys: [String], defaults: UserDefaults = .standard) {
         self.keys = keys
         self.defaults = defaults
         self.lastValues = Self.snapshot(keys: keys, defaults: defaults)
+        let erased = subject.eraseToAnyPublisher()
+        self.storedPublisher = erased
+        self.storedMainPublisher = erased.receive(on: DispatchQueue.main).eraseToAnyPublisher()
 
         cancellable = NotificationCenter.default
             .publisher(for: UserDefaults.didChangeNotification, object: defaults)

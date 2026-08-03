@@ -17,7 +17,11 @@ final class CopilotResumeCoordinator {
     func resumeInTerminal(input: CopilotResumeInput,
                           policy: CopilotFallbackPolicy = .resumeThenContinue,
                           dryRun: Bool = false) async -> CopilotResumeResult {
-        let probe = env.probe(customPath: input.binaryOverride)
+        // Probing spawns a login shell plus per-candidate --help with no
+        // timeout, so it must never run on the MainActor.
+        let env = self.env
+        let binaryOverride = input.binaryOverride
+        let probe = await Task.detached { env.probe(customPath: binaryOverride) }.value
         guard case let .success(info) = probe else {
             let message = probe.failureValue?.localizedDescription ?? "Copilot CLI not found."
             return CopilotResumeResult(launched: false, strategy: .none, error: message, command: nil)

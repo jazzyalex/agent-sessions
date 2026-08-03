@@ -49,6 +49,7 @@ enum KimiSessionParser {
         var model: String?
         var firstUserText: String?
         var nonMetaCount = 0
+        var commandCount = 0
 
         for (index, line) in lines.enumerated() {
             guard let data = line.data(using: .utf8),
@@ -68,6 +69,11 @@ enum KimiSessionParser {
 
             let built = makeEvents(type: type, object: object, time: time, line: line, index: index)
             nonMetaCount += built.filter { $0.kind != .meta }.count
+            // The preview pass discards `built`, but the "has commands" filter
+            // falls back to this count for any session the user has not opened
+            // yet -- which is every row in the list. Without it Kimi reads as
+            // command-free and the filter hides the whole provider.
+            commandCount += built.filter { $0.kind == .tool_call }.count
             if firstUserText == nil {
                 firstUserText = built.first(where: { $0.kind == .user })?.text
             }
@@ -91,6 +97,12 @@ enum KimiSessionParser {
                        cwd: cwd,
                        repoName: cwd.map { URL(fileURLWithPath: $0).lastPathComponent },
                        lightweightTitle: title,
+                       // nil, not 0, when nothing was found: the preview stops at
+                       // `previewLineLimit`, so a zero here is "none in the first
+                       // N lines", not "none". A stored 0 short-circuits
+                       // SearchCoordinator.shouldDeepScan ahead of its event
+                       // count; nil lets that fallback run. Matches OpenCode.
+                       lightweightCommands: commandCount > 0 ? commandCount : nil,
                        customTitle: customTitle,
                        surface: .cli)
     }

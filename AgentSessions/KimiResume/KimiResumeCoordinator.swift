@@ -17,7 +17,11 @@ final class KimiResumeCoordinator {
     func resumeInTerminal(input: KimiResumeInput,
                           policy: KimiFallbackPolicy = .sessionThenContinue,
                           dryRun: Bool = false) async -> KimiResumeResult {
-        let probe = env.probe(customPath: input.binaryOverride)
+        // Probing spawns a login shell plus per-candidate --help with no
+        // timeout, so it must never run on the MainActor.
+        let env = self.env
+        let binaryOverride = input.binaryOverride
+        let probe = await Task.detached { env.probe(customPath: binaryOverride) }.value
         guard case let .success(info) = probe else {
             let message = probe.failureValue?.localizedDescription ?? "Kimi Code CLI not found."
             return KimiResumeResult(launched: false, strategy: .none, error: message, command: nil)
@@ -25,7 +29,11 @@ final class KimiResumeCoordinator {
 
         let hasID = (input.sessionID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
         let canSession = info.supportsSession && hasID
-        let canContinue = info.supportsContinue
+        // `--continue` resumes "the previous session for the working
+        // directory", so without a known directory it resolves against
+        // whatever the terminal happens to open in and silently attaches to an
+        // unrelated session while reporting success. Refuse instead.
+        let canContinue = info.supportsContinue && input.workingDirectory != nil
 
         let strategy: KimiResumeCommandBuilder.Strategy
         let used: KimiStrategyUsed
@@ -42,6 +50,8 @@ final class KimiResumeCoordinator {
                 reason = "No session ID available, and fallback is disabled."
             } else if hasID && !info.supportsSession && policy == .sessionOnly {
                 reason = "Installed Kimi Code CLI does not support --session."
+            } else if info.supportsContinue && input.workingDirectory == nil {
+                reason = "No working directory for this session, so --continue would resume an unrelated one."
             } else {
                 reason = "Kimi Code CLI does not advertise required flags (--session/--continue)."
             }
@@ -65,17 +75,13 @@ final class KimiResumeCoordinator {
             try launcher.launchInTerminal(package)
             return KimiResumeResult(launched: true, strategy: used, error: nil, command: package.shellCommand)
         } catch {
-            if policy == .sessionThenContinue, used == .sessionByID, info.supportsContinue {
-                do {
-                    let fallback = try builder.makeCommand(strategy: .continueMostRecent,
-                                                           binaryURL: info.binaryURL,
-                                                           workingDirectory: input.workingDirectory)
-                    try launcher.launchInTerminal(fallback)
-                    return KimiResumeResult(launched: true, strategy: .continueMostRecent, error: nil, command: fallback.shellCommand)
-                } catch {
-                    return KimiResumeResult(launched: false, strategy: .continueMostRecent, error: error.localizedDescription, command: nil)
-                }
-            }
+            // No retry here. Nothing `launchInTerminal` throws is
+            // command-dependent: Terminal/iTerm fail only when osascript exits
+            // non-zero, and the command reaches it as an opaque argv item;
+            // Warp fails only on a directory-create or tab-config write.
+            // Retrying with a *different* command cannot recover — and if it
+            // did succeed it would resume an unrelated session while reporting
+            // success.
             return KimiResumeResult(launched: false, strategy: used, error: error.localizedDescription, command: nil)
         }
     }

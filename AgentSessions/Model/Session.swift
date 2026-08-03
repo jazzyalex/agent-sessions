@@ -751,22 +751,28 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     public var codexDisplayTitle: String { codexPreviewTitle ?? title }
 
     // MARK: - Repo/CWD helpers
+    /// Whether this provider persists an authoritative working directory as
+    /// lightweight metadata, which stays correct after a full parse — transcript
+    /// event scraping does not.
+    ///
+    /// Only Codex scrapes; every other provider reads its cwd from a sidecar,
+    /// header, or path. Exhaustive on purpose: this was a hand-maintained list,
+    /// and each provider missing from it resolved *parsed* sessions to nil —
+    /// which dropped the `cd` from resume commands and wrote NULL cwd into the
+    /// search index, breaking the path filter for that provider.
+    private var storesAuthoritativeLightweightCwd: Bool {
+        switch source {
+        case .antigravity, .opencode, .copilot, .openclaw, .hermes,
+             .pi, .kimi, .cursor, .claude, .droid:
+            return true
+        case .codex:
+            return false
+        }
+    }
+
     public var cwd: String? {
-        // Providers that persist cwd as lightweight metadata should keep using it
-        // after full parse as well; transcript event scraping is not authoritative.
-        if (source == .antigravity || source == .opencode || source == .copilot || source == .openclaw || source == .hermes),
+        if storesAuthoritativeLightweightCwd || isSideChat,
            let lightCwd = lightweightCwd, !lightCwd.isEmpty {
-            return lightCwd
-        }
-        if isSideChat, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
-            return lightCwd
-        }
-        // 0) Claude sessions: use cwd extracted during parsing
-        if source == .claude, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
-            return lightCwd
-        }
-        // 0b) Droid sessions: use cwd extracted during parsing
-        if source == .droid, let lightCwd = lightweightCwd, !lightCwd.isEmpty {
             return lightCwd
         }
 
