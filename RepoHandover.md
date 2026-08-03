@@ -1,3 +1,45 @@
+## 2026-08-03 10:39 · signing-identity-expiry · Apple Development cert expiry diagnosed + renewed; derived data purged
+status: done
+
+**State:** Signing is fully restored on `main`. Renewed Apple Development cert `EE5E303C…` verified through the standard no-override test command (1786 tests, 3 skipped, 0 failures), binary signed `Authority=Apple Development: Alexander Malakhov (H8VKVRRMC3)`, `TeamIdentifier=24NDRU35WD`, satisfies its Designated Requirement. Two expired identities purged; all twelve `.deriveddata-*` dirs deleted (7.3 GB).
+
+**Decided / don't redo:**
+- **"Certs present but no private keys" was a misdiagnosis.** `security find-identity` only ever lists cert+key *pairs* — if an expired cert appears at all, its key is intact. Run without `-v` and read the reason (`CSSMERR_TP_CERT_EXPIRED`). Fix is renew, never hunt for a lost `.p12`.
+- **Expired dev cert never blocks a release.** Only Debug uses Apple Development. Release is committed as `CODE_SIGN_IDENTITY = "-"` / Manual (since `e927fef0`), built ad-hoc then deep-re-signed with Developer ID by `tools/release/build_sign_notarize_release.sh:142`. Developer ID valid to 2027-02-01.
+- Root cause of "Failed to retrieve development teams" was simply **not being signed in to Xcode** — `com.apple.dt.Xcode` listed `alex@combil.com` with no portal token in any keychain. Not keychain damage; network was clean (200s across Apple endpoints).
+- No provisioning profile is needed anywhere — `AgentSessions.entitlements` is an empty dict.
+- Verified fallback if the dev cert lapses again: Debug builds clean under `CODE_SIGN_IDENTITY="Developer ID Application: Alex M (24NDRU35WD)" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=24NDRU35WD`, keeping a real TeamIdentifier and `get-task-allow`. Better than ad-hoc, whose unstable DR makes TCC re-key FDA every rebuild.
+
+**Next:**
+1. Next build is cold (all caches gone) and needs an **FDA re-grant** — the rebuilt `.deriveddata-manual` app will be Apple Development-signed, not the Developer ID signature the old grant was attached to.
+2. Cert expires again ~2027-08-01. Captured in memory as `project_signing_identity_expiry`.
+3. Optional tidy: `.gitignore:91-94` lists four paths already covered by the `.deriveddata-*/` glob on line 89, one of which (`.deriveddata-audit/`) no longer exists.
+4. Uncommitted parallel work left untouched: `SearchCoordinator.swift`, `UnifiedSessionsView.swift`.
+
+## 2026-08-03 10:34 · kimi-code-tier2 · Kimi Code shipped as 11th agent; loop-event defect fixed (pushed)
+status: done
+
+**State:** Kimi Code tier-2 support is on `origin/main` at `cea8cc0e` — discovery, parser, indexer, UI, copy-resume, weekly monitoring. Tree clean, 0 unpushed. Swift 1785/0/3, python 128/0, weekly scan `verified = installed = upstream = 0.31.1`, severity low.
+
+**Decided / don't redo:**
+- **Assistant output is NOT in `context.append_message`** — that carries user turns only. Everything the model produces (`content.part` text/think, `tool.call`, `tool.result`) arrives as `context.append_loop_event`. Reading only append_message rendered transcripts with user turns and nothing else. This is the single most important fact about the format.
+- Two more source-vs-reality gaps: emitted `protocol_version` is **1.4** (source HEAD says 1.5), and `config.update` carries **`modelAlias`**, never a bare `model`. Verify against emitted journals, never against Kimi's TS types.
+- Adding a JSONL agent to `agent_watch.py` is **not config-only** — four hardcoded maps need the name (`verified_map`, two `matrix_key` maps, the tuple in `_baseline_type_keys_for_agent`), or the scan silently degrades to "no baseline compared".
+- **Do not replace `small.jsonl`** — it is the only fixture carrying `turn.cancel`, `turn.steer`, `permission.set_mode`; dropping them re-arms a resolved drift alert. The funded capture lives beside it as `assistant_tools.jsonl`.
+- `minidb` is a derived read model behind a default-false flag — read `wire.jsonl`, never write a minidb reader. Kimi Desktop shares `~/.kimi-code/`, so it's a surface label, not a source.
+- Three parallel worktrees were merged and deleted; their branches are gone. Nothing outstanding there.
+
+**Key files:**
+- `AgentSessions/Services/KimiSessionParser.swift` — loop-event mapping lives here
+- `scripts/agent_watch.py` → `_kimi_wire_schema_fingerprint` — walks *into* loop events; a top-level fingerprint is blind to the whole renderable surface
+- `docs/agent-json-tracking.md` → "Kimi Code" — the format memory bank
+- `docs/backlog.md` → "Kimi Code" — the two deferred items
+
+**Next:**
+1. **Host blocker, not code:** no valid "Mac Development" signing identity (certs present, private keys missing). All verification used ad-hoc signing; a release/notarized build fails until it's restored in Xcode → Settings → Accounts.
+2. Backlog: capture a media round-trip (`ReadMediaFile`) so the `image_url`/`audio_url`/`video_url` branches stop being unexercised.
+3. Backlog: build a `kimi_prompt` prebump driver (`kimi -p` works) — but weekly real-session scanning stays the primary drift signal regardless.
+
 ## 2026-08-01 14:16 · claude-cloud-sessions-and-codex-meter · Cloud sessions in QM + Codex "reconnecting" fixed (pushed)
 status: in-progress
 
