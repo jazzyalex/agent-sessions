@@ -105,10 +105,33 @@ enum WhatsNewCatalog {
     private static let githubSponsorsURL = URL(string: "https://github.com/sponsors/jazzyalex")
 
     private static let teasers: [String: String] = [
-        "4.3": "A calmer first run, and a What's New you open on your own terms."
+        "4.3": "A calmer first run, and a What's New you open on your own terms.",
+        "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "4.7": [
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "cloud",
+                title: "Cloud sessions in the Quota Meter",
+                body: "Claude sessions running on Anthropic's infrastructure now appear in the pinned Quota Meter beside your local agents, marked Cloud. Switch them on under Settings → Usage Tracking once you have saved a claude.ai cookie."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "dot.radiowaves.left.and.right",
+                title: "Headless runs show up too",
+                body: "An agent run started by launchd, a shell script, or another app has no terminal, and Live Sessions used to miss it entirely. Those runs now appear like any other session."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "4.3": [
             WhatsNewItem(
                 kind: .highlight,

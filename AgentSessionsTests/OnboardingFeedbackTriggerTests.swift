@@ -174,4 +174,22 @@ final class WhatsNewCatalogTests: XCTestCase {
         XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.3"))
         XCTAssertNil(WhatsNewCatalog.teaser(for: "99.9"))
     }
+
+    /// 4.7 is the first release where an authored bundle and an auto-generated
+    /// provider row meet, so it pins the assembly order the panel depends on:
+    /// authored highlights, then new-provider rows, then call-to-action rows.
+    func testAuthoredHighlightsLeadProviderAndSupportRowsIn47() {
+        let items = WhatsNewCatalog.assemble(for: "4.7")
+        XCTAssertEqual(items.map(\.title), [
+            "Cloud sessions in the Quota Meter",
+            "Headless runs show up too",
+            "New: Kimi Code",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.last?.kind, .support)
+    }
+
+    func testTeaserPresentFor47() {
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.7"))
+    }
 }
