@@ -7,9 +7,9 @@ Constraint: @jazzyalex is not X Premium, so **every post is ≤280 characters** 
 
 **1/** *(~256)*
 
-Nine months ago I started Agent Sessions: a Mac app that reads the session history your coding agents leave on disk and makes it searchable.
+Ten months ago I started Agent Sessions: a Mac app that reads the session history your coding agents leave on disk and makes it searchable.
 
-Codex, Claude Code, Cursor + 6 more, in one local view.
+Codex, Claude Code, Cursor + 7 more, in one local view.
 
 ~700 weekly users. Zero marketing. Here's what I learned.
 
@@ -21,7 +21,7 @@ Every agent writes history to disk — but nowhere near the same way.
 
 Some use append-only JSONL. Some a SQLite DB. Some a bespoke state store. They disagree on how a tool call, a project, even a timestamp is stored.
 
-I now read 9 of these formats. There's no standard.
+I now read 10 of these formats. There's no standard.
 
 ---
 
@@ -68,11 +68,11 @@ People have sent real features I didn't write: Warp terminal support, CodeBuddy,
 
 The numbers, plainly:
 
-674 stars, 44 forks, 0 open issues
+750 stars, 49 forks
 ~700 weekly active users
-9,240 downloads
+11,431 downloads
 
-And growth accelerated over time: ~55 stars/mo early, then 133 in March, 101 in April. It built as the category matured.
+And growth accelerated over time: ~55 stars/mo early, then 133 in March, 100 in April, and ~80/mo every month since. It built as the category matured.
 
 ---
 

@@ -18,7 +18,7 @@
 - [x] Branch `auto/launch-kit` created (per explicit instruction). Working tree carries the uncommitted `feature/transcript-redesign-v5` changes that rode along — **not** mine, and I will **never** stage them. Commits will include **only** `launch-kit/`.
 - [x] `launch-kit/` folder created.
 - [x] Ground truth gathered from `README.md`, `agents.md`, `Marketing/` (screenshots only — no conflicting positioning text).
-- [x] Verified the fact sheet against the repo: 9 sources match the README exactly; Warp confirmed as a *launch target* (Terminal.app / iTerm2 / Warp), not a source; no emoji rule confirmed in `agents.md`; owner-sole-author + no Claude co-author/footer confirmed in `CLAUDE.md`.
+- [x] Verified the fact sheet against the repo: 10 sources match the README exactly; Warp confirmed as a *launch target* (Terminal.app / iTerm2 / Warp), not a source; no emoji rule confirmed in `agents.md`; owner-sole-author + no Claude co-author/footer confirmed in `CLAUDE.md`.
 
 ## Deliverables (all written)
 - [x] `launch-kit/case-study.md` — ~1,050 word first-person essay
@@ -30,12 +30,15 @@
 ---
 
 ## Verified facts (locked — use exactly, do NOT inflate)
-- **674** GitHub stars, **44** forks, **0** open issues. Created **2025-09-19**.
-- Star growth **accelerated**: ~55/mo first four months → **133 in Mar 2026**, **101 in Apr**, ~80/mo since. Momentum grew; it did not decay.
-- **~700 weekly active users**. **9,240** total release downloads.
-- **v4.0** shipped **2026-06-28**, **294** downloads in first 3 days. (README is now at v4.1 — "the Instant release," a performance pass. Use v4.0's numbers as the verified data point; v4.1 exists and can be referenced generically.)
+
+**Numbers re-verified 2026-08-03 against the GitHub API.** They drift; re-check before publishing.
+
+- **750** GitHub stars, **49** forks, **3** open issues. Created **2025-09-19**.
+- Star growth **accelerated**: ~55/mo first four months → **133 in Mar 2026**, **100 in Apr**, ~80/mo since (78 May, 80 Jun, 76 Jul). Momentum grew; it did not decay.
+- **~700 weekly active users** (unverified — see REPORT.md). **11,431** total release downloads.
+- **v4.0** shipped **2026-06-28**, **294** downloads in first 3 days. (Shipping version is now v4.6.4. Use v4.0's numbers as the verified data point; later versions can be referenced generically.)
 - All growth with **ZERO marketing**.
-- **9 session sources:** Codex, Claude Code, Cursor, OpenCode, GitHub Copilot CLI, Hermes, OpenClaw, Antigravity, Pi. **Do NOT** claim Gemini CLI as a source. **Warp** = terminal *launch* target (contributor PR #39), not a source.
+- **10 session sources:** Codex, Claude Code, Cursor, OpenCode, GitHub Copilot CLI, Hermes, OpenClaw, Antigravity, Pi, Kimi Code. **Do NOT** claim Gemini CLI as a source. **Warp** = terminal *launch* target (contributor PR #39), not a source.
 - **External contributor PRs** are real: Warp terminal support, CodeBuddy support, OpenCode, Copilot CLI discovery fixes.
 - **Local-first, no backend, no telemetry.** Only network activity is optional Sparkle update checks.
 - **Thesis:** the category narrowed (first-party agents added their own session/resume features) but the *surviving* job got stronger — nobody runs one agent CLI anymore, and cross-agent history/search/analytics is what a single vendor's first-party tool structurally cannot do. Codex won't index your Claude sessions.
@@ -50,7 +53,7 @@
 
 ## Resume plan (when Alex says "go")
 Write, in order, committing incrementally (`git add launch-kit/` only):
-1. `case-study.md` — arc: 0→~700 WAU with zero marketing → the local-first cross-agent thesis → the genuinely rare expertise (session-data formats across 9 ecosystems: JSONL, SQLite, state.db, per-vendor quirks) → honest "maintenance-mode vs. undervalued-asset" tension. First person, no hype.
+1. `case-study.md` — arc: 0→~700 WAU with zero marketing → the local-first cross-agent thesis → the genuinely rare expertise (session-data formats across 10 ecosystems: JSONL, SQLite, state.db, per-vendor quirks) → honest "maintenance-mode vs. undervalued-asset" tension. First person, no hype.
 2. `show-hn.md` — "Show HN: Agent Sessions — one searchable view of your local AI-coding sessions (Codex, Claude, Cursor, +6)". Body: what it is, why built, the local-first angle, honest limitations, link. Plain HN register.
 3. `x-thread.md` — 6–10 posts. Hook = the counterintuitive thesis (category narrowed, job got stronger). Include the real numbers as proof, contributor PRs as social proof, close on the Claude-for-OSS note softly.
 4. `readme-hero-draft.md` — badges (stars/downloads/build/license/macOS), one-liner, the real numbers, download CTA. Draft only; Alex merges.

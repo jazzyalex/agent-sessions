@@ -13,16 +13,32 @@
 | `STATUS.md` | Progress tracker + verified fact sheet + timeline. | — |
 | `REPORT.md` | This file. | — |
 
-All copy uses the verified numbers exactly (674 stars / 44 forks / 0 issues / ~700 WAU / 9,240 downloads / 9 sources) and honors the repo rules: no emoji, no hype, owner sole author.
+All copy uses the verified numbers exactly (750 stars / 49 forks / 3 issues / ~700 WAU / 11,431 downloads / 10 sources) and honors the repo rules: no emoji, no hype, owner sole author.
+
+## Numbers refresh, 2026-08-03
+
+The kit was written 2026-07-06 and every hardcoded figure had drifted. All of them were re-pulled from the GitHub API and updated across the five docs:
+
+| Figure | Was (2026-07-06) | Now (2026-08-03) |
+|---|---|---|
+| Stars | 674 | **750** |
+| Forks | 44 | **49** |
+| Open issues | 0 | **3** |
+| Total release downloads | 9,240 | **11,431** |
+| Session sources | 9 | **10** (Kimi Code added) |
+| Age | nine months | **ten months** |
+
+Two consequences worth knowing:
+
+- **"0 open issues" is gone from the copy.** It is 3 now, and "3 open issues" is not a selling point — the line was dropped rather than restated. It survives only in this report.
+- **The star-growth cadence claim held up.** Pulled per-month from the stargazers API: 133 Mar, 100 Apr (the kit said 101), 78 May, 80 Jun, 76 Jul. "~80/mo since" is accurate, so the case study's acceleration argument stands as written.
 
 ## Facts I used as given (could not independently verify from the repo)
 
-The repo confirms the *product* facts — the 9 sources match the README exactly, Warp is a launch target not a source, local-first/no-telemetry is accurate. But these **metrics came from your brief and are not derivable from the working tree**, so I took them on trust and you should sanity-check before publishing:
+The repo confirms the *product* facts — the 10 sources match the README exactly, Warp is a launch target not a source, local-first/no-telemetry is accurate. These remain unverified:
 
-- **674 stars, 44 forks, 0 open issues** — live on GitHub; the README-hero badges are dynamic so they'll self-correct, but the prose "674" in `case-study.md`, `x-thread.md` (post 7), and the hero "by the numbers" line is **hardcoded** and will drift. Update or soften before posting if the count has moved.
-- **~700 weekly active users** — no GitHub metric backs this; it's a stated figure. Appears in all four docs. If you're not comfortable committing to it publicly, the easiest cut is the hero (keep stars + downloads, both live).
-- **9,240 downloads** and **v4.0 = 294 in first 3 days** — the 294 figure I used only in the case study; the 9,240 total appears across the kit.
-- **Star-growth cadence** (~55/mo early → 133 Mar → 101 Apr → ~80/mo) — used verbatim in the case study and X post 7.
+- **~700 weekly active users** — no GitHub metric backs this; it's a stated figure. Appears in all four docs and could not be re-verified in the 2026-08-03 refresh either. If you're not comfortable committing to it publicly, the easiest cut is the hero (keep stars + downloads, both live).
+- **v4.0 = 294 downloads in first 3 days** — used only in the case study.
 - **Contributor PRs** (Warp #39, CodeBuddy, OpenCode, Copilot CLI discovery) — named as given; I did not open the PR list to confirm authorship/titles.
 
 ## Judgment calls I made (flagging so you can override)

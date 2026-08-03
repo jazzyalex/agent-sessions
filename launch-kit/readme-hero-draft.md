@@ -3,7 +3,9 @@
 **This is a draft for Alex to merge by hand.** It does not touch `README.md`.
 No emoji (per `agents.md`). Star/download badges are **dynamic** (shields.io reads GitHub live, so they never go stale). The weekly-active-users figure has no GitHub badge — it's shown as prose and should be updated by hand when it moves.
 
-Numbers current as of 2026-07-06: 674 stars, 44 forks, 0 open issues, 9,240 downloads, ~700 weekly active users. The stars/downloads badges below will render the live values automatically once merged.
+Numbers current as of 2026-08-03: 750 stars, 49 forks, 3 open issues, 11,431 downloads, ~700 weekly active users. The stars/downloads badges below will render the live values automatically once merged.
+
+**Note (2026-08-03):** this hero was drafted against the old session-history-first positioning. The shipping README now leads with the Quota Meter, so treat the layout here as a component library — badges, "by the numbers" line, CTA — not a drop-in replacement.
 
 ---
 
@@ -35,8 +37,8 @@ Agent Sessions reads the sessions your AI coding tools already write to disk —
 
 > **Why it exists:** a single vendor's tool can only show you its own history — Codex won't index your Claude sessions, and no first-party tool will unify a competitor's data. Cross-agent history, search, and analytics is the one job only a neutral, local tool can do. It gets more useful with every agent you add.
 
-**By the numbers** — nine months in, entirely word of mouth, zero marketing:
-674 GitHub stars · ~700 weekly active users · 9,240 downloads · 9 supported agent sources · 0 open issues · MIT · macOS 14+
+**By the numbers** — ten months in, entirely word of mouth, zero marketing:
+750 GitHub stars · ~700 weekly active users · 11,431 downloads · 10 supported agent sources · MIT · macOS 14+
 
 <p align="center">
   <a href="https://github.com/jazzyalex/agent-sessions/releases/latest"><b>Download Agent Sessions (DMG)</b></a>

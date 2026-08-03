@@ -16,6 +16,8 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
 </tr>
 </table>
 
+> If Agent Sessions hands you back something you thought you'd lost, **[star the repo](https://github.com/jazzyalex/agent-sessions)**. It is the only thing this project asks for.
+
 - Requires: macOS 14+
 - License: MIT
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
