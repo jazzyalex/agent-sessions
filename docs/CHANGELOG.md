@@ -4,8 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Highlights
+- **Kimi Code is the eleventh agent Agent Sessions reads.** Its sessions land in the session list, in search and in Analytics, with tool calls and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Kimi Code on your Mac, and Settings → Agents gains a Kimi Code pane for the binary path and storage root.
+- **Active Claude cloud sessions appear in the Quota Meter.** Sessions running on Anthropic's infrastructure were invisible outside Claude Desktop; they now sit in the pinned Quota Meter beside your local agents, marked **Cloud** and ordered above them. They carry no burn rate — there is no local transcript to measure — so they report status instead of a runway. Off by default, and offered only once you have saved a claude.ai cookie under Settings → Usage Tracking, since the fetch depends on it.
+
 ### Features
-- Analytics: Added Pi and Kimi Code session statistics, including Pi-only and Kimi-only filtering, project discovery, agent breakdowns, and indexed session/message/duration rollups.
+- **Agent runs with no terminal now reach the Quota Meter.** A `claude -p` run started by launchd, a shell script, or another app has no controlling terminal, and presence discovery required one — so those sessions never appeared in Live Sessions even though the main window indexed their transcripts normally. They are picked up now.
+- **Analytics counts Pi sessions.** Pi has been a supported source since 3.8 but was missing from the analytics rollups. Its sessions, messages, durations and projects are now included, with a Pi-only filter alongside the others.
+
+### Bug Fixes
+- **The Codex meter no longer sits on "reconnecting…" forever.** With no Codex CLI run in the previous two days, the background refresh returned before ever making its live usage call — so whenever Agent Sessions was not the frontmost app the meter stayed on "reconnecting…" indefinitely, and only recovered if you focused the window. The live fetch no longer depends on a recent local session file. And when a fetch genuinely comes back empty, the meter now says **no active session** rather than implying a connection it is still waiting on.
+
+<!-- Headings the release-note generator does not recognise are dropped from the
+     Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py).
+     Entries below are shipped but deliberately unannounced. Do not rename this
+     heading to Features/Improvements without intending to publish them. -->
+### Not in Release Notes
 - The session list can now ask you, once, to star the project on GitHub. It waits until you have opened 25 sessions or kept the app for 30 days, never appears on a first run, and offers "Maybe later" (one retry two weeks on) alongside a permanent dismiss. Starring or dismissing retires it for good, and ignoring it does too — three launches without an answer end a round the same way "Maybe later" would, so it can appear at most six times whatever you do. No network call and nothing recorded beyond the local choice.
 
 ## [4.6.4] - 2026-07-21
