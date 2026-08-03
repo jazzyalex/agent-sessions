@@ -18,6 +18,7 @@ struct PreferencesView: View {
     @ObservedObject var copilotSettings = CopilotSettings.shared
     @ObservedObject var cursorSettings = CursorSettings.shared
     @ObservedObject var piSettings = PiSettings.shared
+    @ObservedObject var kimiSettings = KimiSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -63,6 +64,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.droidCLIAvailable) var droidCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.cursorCLIAvailable) var cursorCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.piCLIAvailable) var piCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.kimiCLIAvailable) var kimiCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -229,6 +231,10 @@ struct PreferencesView: View {
     @State var piVersionString: String? = nil
     @State var piResolvedPath: String? = nil
     @State var piProbeDebounce: DispatchWorkItem? = nil
+    @State var kimiProbeState: ProbeState = .idle
+    @State var kimiVersionString: String? = nil
+    @State var kimiResolvedPath: String? = nil
+    @State var kimiProbeDebounce: DispatchWorkItem? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -262,6 +268,10 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Paths.piSessionsRootOverride) var piSessionsPath: String = ""
     @State var piSessionsPathValid: Bool = true
     @State var piSessionsPathDebounce: DispatchWorkItem? = nil
+    // Kimi Code sessions root
+    @AppStorage(PreferencesKey.Paths.kimiSessionsRootOverride) var kimiSessionsPath: String = ""
+    @State var kimiSessionsPathValid: Bool = true
+    @State var kimiSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -269,7 +279,7 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi && $0 != .kimi }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -281,7 +291,7 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                ForEach([PreferencesTab.cursor, .pi, .hermesCLI, .openClawCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.cursor, .pi, .kimi, .hermesCLI, .openClawCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -406,6 +416,8 @@ struct PreferencesView: View {
                 cursorTab
             case .pi:
                 piTab
+            case .kimi:
+                kimiTab
             case .about:
                 aboutTab
             }
@@ -721,6 +733,8 @@ struct PreferencesView: View {
         cursorSettings.setResolvedBinaryPath(nil)
         piSettings.setBinaryPath("")
         piSettings.setResolvedBinaryPath(nil)
+        kimiSettings.setBinaryPath("")
+        kimiSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -731,10 +745,12 @@ struct PreferencesView: View {
         droidProjectsPath = ""
         openClawSessionsPath = ""
         piSessionsPath = ""
+        kimiSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
         validatePiSessionsPath()
+        validateKimiSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -877,7 +893,7 @@ struct PreferencesView: View {
         case .openclaw: scheduleOpenClawProbe()
         case .cursor: scheduleCursorProbe()
         case .pi: schedulePiProbe()
-        case .kimi: break // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
+        case .kimi: scheduleKimiProbe()
         }
     }
 
@@ -904,7 +920,7 @@ struct PreferencesView: View {
         case .pi:
             return piResolvedPath
         case .kimi:
-            return nil // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
+            return kimiResolvedPath
         }
     }
 
@@ -941,7 +957,8 @@ struct PreferencesView: View {
             let value = piSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .kimi:
-            return nil // Tier-2: no CLI resume/binary-probe UI for Kimi yet.
+            let value = kimiSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
 
@@ -1076,6 +1093,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case openClawCLI
     case cursor
     case pi
+    case kimi
     case about
 
     var id: String { rawValue }
@@ -1100,6 +1118,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .openClawCLI: return "OpenClaw"
         case .cursor: return "Cursor"
         case .pi: return "Pi"
+        case .kimi: return "Kimi Code"
         case .about: return "About"
         }
     }
@@ -1124,6 +1143,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .openClawCLI: return "o.circle"
         case .cursor: return "cursorarrow.rays"
         case .pi: return "p.circle"
+        case .kimi: return "k.circle"
         case .about: return "info.circle"
         }
     }
@@ -1131,7 +1151,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .hermesCLI, .openClawCLI] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .kimi, .hermesCLI, .openClawCLI] }
 }
 
 // MARK: - Probe helpers
@@ -1313,6 +1333,40 @@ extension PreferencesView {
         }
     }
 
+    func probeKimi() {
+        if kimiProbeState == .probing { return }
+        kimiProbeState = .probing
+        kimiVersionString = nil
+        kimiResolvedPath = nil
+        let override = kimiSettings.binaryPath.isEmpty ? nil : kimiSettings.binaryPath
+        let isAutoProbe = override == nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = KimiCLIEnvironment().probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.kimiVersionString = res.versionString
+                    self.kimiResolvedPath = res.binaryURL.path
+                    if isAutoProbe {
+                        self.kimiSettings.setResolvedBinary(res.binaryURL.path,
+                                                            supportsSession: res.supportsSession,
+                                                            supportsContinue: res.supportsContinue)
+                    }
+                    self.kimiProbeState = .success
+                    self.kimiCLIAvailable = true
+                case .failure:
+                    self.kimiVersionString = nil
+                    self.kimiResolvedPath = nil
+                    if isAutoProbe {
+                        self.kimiSettings.setResolvedBinaryPath(nil)
+                    }
+                    self.kimiProbeState = .failure
+                    self.kimiCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1359,6 +1413,8 @@ extension PreferencesView {
             if cursorVersionString == nil && cursorProbeState != .probing { probeCursor() }
         case .pi:
             if piVersionString == nil && piProbeState != .probing { probePi() }
+        case .kimi:
+            if kimiVersionString == nil && kimiProbeState != .probing { probeKimi() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1410,6 +1466,13 @@ extension PreferencesView {
         piProbeDebounce?.cancel()
         let work = DispatchWorkItem { probePi() }
         piProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleKimiProbe() {
+        kimiProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeKimi() }
+        kimiProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

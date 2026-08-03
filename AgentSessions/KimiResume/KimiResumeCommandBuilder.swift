@@ -13,6 +13,12 @@ import Foundation
 /// CLI to resolve that id, so the prefix is passed through verbatim rather than
 /// stripped.
 struct KimiResumeCommandBuilder {
+    struct CommandPackage {
+        let shellCommand: String
+        let displayCommand: String
+        let workingDirectory: URL?
+    }
+
     enum BuildError: Error {
         case missingSessionID
     }
@@ -22,13 +28,44 @@ struct KimiResumeCommandBuilder {
         case continueMostRecent
     }
 
+    /// Builds the launchable package for a terminal resume. The binary is a
+    /// resolved absolute path here, so it is always quoted; `makeCoreCommand`
+    /// quotes only when needed because its output is shown to the user.
+    func makeCommand(strategy: Strategy,
+                     binaryURL: URL,
+                     workingDirectory: URL?) throws -> CommandPackage {
+        let command = try makeCoreCommand(strategy: strategy,
+                                          binaryCommand: binaryURL.path,
+                                          quoteBinary: shellQuote,
+                                          quoteArgument: shellQuote)
+
+        let shell: String
+        if let wd = workingDirectory?.path, !wd.isEmpty {
+            shell = "cd \(shellQuote(wd)) && \(command)"
+        } else {
+            shell = command
+        }
+
+        return CommandPackage(shellCommand: shell, displayCommand: command, workingDirectory: workingDirectory)
+    }
+
     func makeCoreCommand(strategy: Strategy, binaryCommand: String) throws -> String {
-        let invocation = shellQuoteIfNeeded(binaryCommand)
+        try makeCoreCommand(strategy: strategy,
+                            binaryCommand: binaryCommand,
+                            quoteBinary: shellQuoteIfNeeded,
+                            quoteArgument: shellQuoteIfNeeded)
+    }
+
+    private func makeCoreCommand(strategy: Strategy,
+                                 binaryCommand: String,
+                                 quoteBinary: (String) -> String,
+                                 quoteArgument: (String) -> String) throws -> String {
+        let invocation = quoteBinary(binaryCommand)
         switch strategy {
         case .sessionByID(let id):
             let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw BuildError.missingSessionID }
-            return "\(invocation) --session \(shellQuoteIfNeeded(trimmed))"
+            return "\(invocation) --session \(quoteArgument(trimmed))"
         case .continueMostRecent:
             return "\(invocation) --continue"
         }
@@ -43,5 +80,6 @@ struct KimiResumeCommandBuilder {
             : .sessionByID(id: sessionID)
     }
 
+    func shellQuote(_ string: String) -> String { ShellQuoting.quote(string) }
     func shellQuoteIfNeeded(_ string: String) -> String { ShellQuoting.quoteIfNeeded(string) }
 }

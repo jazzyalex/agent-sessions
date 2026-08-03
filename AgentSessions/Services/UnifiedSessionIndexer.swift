@@ -2727,6 +2727,27 @@ final class UnifiedSessionIndexer: ObservableObject {
         result.favoritesVersion == currentFavoritesVersion
     }
 
+    /// Backs the "has commands" quick filter.
+    ///
+    /// Every JSONL provider is judged on real tool-call evidence. Claude and
+    /// Antigravity are stricter: an unparsed session counts as command-free
+    /// because their lightweight pass does not populate `lightweightCommands`.
+    static func passesHasCommandsFilter(_ session: Session) -> Bool {
+        switch session.source {
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi:
+            // hasToolCallEvent is precomputed once at Session construction from
+            // `events` (Session.swift), so this no longer rescans the full
+            // events array per session per recompute.
+            if !session.events.isEmpty {
+                return session.hasToolCallEvent
+            }
+            return (session.lightweightCommands ?? 0) > 0
+        case .claude, .antigravity:
+            if session.events.isEmpty { return false }
+            return session.hasToolCallEvent
+        }
+    }
+
     static func passesLowMessageVisibilityFilter(_ session: Session) -> Bool {
         if session.source == .opencode { return true }
         if session.source == .antigravity { return true }
@@ -2776,25 +2797,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         // Optional quick filter: sessions with commands (tool calls)
         if hasCommandsOnly {
-            results = results.filter { s in
-                // For command-capable JSONL providers, require evidence of commands/tool calls (or lightweightCommands>0).
-                // hasToolCallEvent is precomputed once at Session construction from `events`
-                // (Session.swift), so this no longer rescans the full events array per session
-                // per recompute.
-                if s.source == .codex || s.source == .opencode || s.source == .hermes || s.source == .copilot || s.source == .droid || s.source == .openclaw || s.source == .cursor || s.source == .pi {
-                    if !s.events.isEmpty {
-                        return s.hasToolCallEvent
-                    } else {
-                        return (s.lightweightCommands ?? 0) > 0
-                    }
-                }
-                // For Claude and Antigravity, treat sessions as command-bearing only when we see tool_call events.
-                if s.source == .claude || s.source == .antigravity {
-                    if s.events.isEmpty { return false }
-                    return s.hasToolCallEvent
-                }
-                return true
-            }
+            results = results.filter { Self.passesHasCommandsFilter($0) }
         }
 
 

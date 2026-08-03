@@ -1634,12 +1634,12 @@ struct UnifiedSessionsView: View {
             pb.setString(command, forType: .string)
 
         case .kimi:
-            // Tier-2: no Kimi settings surface, so the binary is always the
-            // bare `kimi` on PATH.
+            let settings = KimiSettings.shared
             let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
             let builder = KimiResumeCommandBuilder()
-            guard let core = try? builder.makeCoreCommand(strategy: builder.strategy(forSessionID: session.id),
-                                                          binaryCommand: "kimi") else { return }
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             pb.setString(command, forType: .string)
 
@@ -1964,6 +1964,11 @@ struct UnifiedSessionsView: View {
         }
         if piAgentEnabled {
             specs.append(.init(id: "pi", title: "Pi", color: Color.agentPi, isOn: $unified.includePi, shortcut: "9"))
+        }
+        if kimiAgentEnabled {
+            // ⌘1–⌘9 are fully allocated (Codex=1, Claude=2, … Pi=9), so Kimi
+            // takes no shortcut — same as Hermes.
+            specs.append(.init(id: "kimi", title: "Kimi Code", color: Color.agentKimi, isOn: $unified.includeKimi, shortcut: nil))
         }
         return specs
     }
@@ -3153,6 +3158,7 @@ struct UnifiedSessionsView: View {
         case .copilot: return "Copilot CLI"
         case .cursor: return "Cursor CLI"
         case .pi: return "Pi CLI"
+        case .kimi: return "Kimi Code"
         case .antigravity: return "Antigravity CLI"
         default: return "CLI"
         }
@@ -3164,7 +3170,7 @@ struct UnifiedSessionsView: View {
             return canResumeCodexInCLI(s)
         case .claude:
             return !s.isClaudeWorkflowSubagent
-        case .opencode, .hermes, .copilot, .cursor, .pi:
+        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi:
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
@@ -3274,6 +3280,24 @@ struct UnifiedSessionsView: View {
                 }()
                 let coord = PiResumeCoordinator(env: PiCLIEnvironment(), builder: PiResumeCommandBuilder(), launcher: launcher)
                 _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+            }
+        case .kimi:
+            let settings = KimiSettings.shared
+            let sid = s.id
+            let wd = effectiveWorkingDirectoryURL(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = KimiResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: KimiTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return KimiITermLauncher()
+                    case .warp:                    return KimiWarpLauncher()
+                    case .warpPreview:             return KimiWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return KimiTerminalLauncher()
+                    }
+                }()
+                let coord = KimiResumeCoordinator(env: KimiCLIEnvironment(), builder: KimiResumeCommandBuilder(), launcher: launcher)
+                _ = await coord.resumeInTerminal(input: input, dryRun: false)
             }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
