@@ -182,8 +182,8 @@ final class RunwayPriceTable: @unchecked Sendable {
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-07-14",
-      "_note": "USD per million tokens. Verified 2026-07-14 from platform.claude.com and developers.openai.com. Keyed by tier so longest-prefix covers every generation; legacy keys are kept so an older model is priced rather than dropped from the $ view. cachedInputPerMTok=cache read (0.1x input); cacheWritePerMTok=5m cache write (1.25x) — only ever consumed for Claude, since Codex logs carry no cache-creation tokens. Sonnet 5 shown at stable $3/$15 (intro $2/$10 runs through 2026-08-31). Correct here anytime — no app rebuild.",
+      "updated": "2026-08-03",
+      "_note": "USD per million tokens. Rates verified 2026-07-14 from platform.claude.com and developers.openai.com. Keyed by tier so longest-prefix covers every generation; legacy keys are kept so an older model is priced rather than dropped from the $ view. cachedInputPerMTok=cache read (0.1x input); cacheWritePerMTok=5m cache write (1.25x) — only ever consumed for Claude, since Codex logs carry no cache-creation tokens. codex-auto-review is a Codex-internal label that bills real tokens; priced at the gpt-5.6/sol default like gpt-5.6-codex, because an unpriced contributing slice drops the whole session from $. Sonnet 5 shown at stable $3/$15 (intro $2/$10 runs through 2026-08-31). Correct here anytime — no app rebuild.",
       "models": {
         "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25 },
         "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
@@ -201,7 +201,8 @@ final class RunwayPriceTable: @unchecked Sendable {
         "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null },
         "gpt-5.4-mini":    { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 4.5,  "cacheWritePerMTok": null },
         "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null },
-        "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null }
+        "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
+        "codex-auto-review": { "inputPerMTok": 5.0, "cachedInputPerMTok": 0.5,  "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 }
       }
     }
     """
