@@ -1,0 +1,202 @@
+# Session Bench scores. Rendered by /bench/. Agents listed in rank order.
+# Every fail cites evidence: the 2026-08-04 same-task run, corpus measurement,
+# repo fixtures/parsers, or the agent-support drift ledger.
+version: 1
+data_date: "2026-08-04"
+methodology_url: "https://github.com/jazzyalex/agent-sessions/tree/main/docs/agent-support"
+
+gates:
+  - id: S1
+    area: Signal
+    name: Lean session
+    desc: "The identical one-line task writes ≤ 10 KB to disk."
+  - id: S2
+    area: Signal
+    name: Majority signal
+    desc: "Conversation content is ≥ 25% of stored bytes (corpus measurement)."
+  - id: S3
+    area: Signal
+    name: No fixed-cost dumps
+    desc: "No single per-session bookkeeping record over 25 KB (system-prompt dumps, tool-catalog snapshots, context snapshots)."
+  - id: C1
+    area: Completeness
+    name: Per-event timestamps
+    desc: "Every event carries a timestamp."
+  - id: C2
+    area: Completeness
+    name: Model attributable
+    desc: "The model behind every assistant message is recoverable from the record."
+  - id: C3
+    area: Completeness
+    name: Token usage recorded
+    desc: "Token counts are written locally."
+  - id: C4
+    area: Completeness
+    name: Dollar cost recorded
+    desc: "A dollar cost figure is written locally (premium-request counters do not pass)."
+  - id: C5
+    area: Completeness
+    name: Tool calls and outputs
+    desc: "Both the tool invocation and its output are in the record."
+  - id: C6
+    area: Completeness
+    name: Readable reasoning
+    desc: "Model reasoning is stored as readable text (sealed, encrypted, or absent fails)."
+  - id: C7
+    area: Completeness
+    name: Thread structure
+    desc: "Threads, branches, or subagent runs are recoverable via links or artifacts."
+  - id: T1
+    area: Stability
+    name: No schema break
+    desc: "No breaking schema change in the observation window (2026-03-31 → 2026-08-04)."
+  - id: T2
+    area: Stability
+    name: Declares a version
+    desc: "The artifact itself declares a format/schema version."
+  - id: T3
+    area: Stability
+    name: Honest version signal
+    desc: "Any declared version matches the shipped reality."
+  - id: O1
+    area: Openness
+    name: Standard-tools readable
+    desc: "Readable at rest with a text editor or sqlite3; protobuf or hex-encoded payloads fail."
+  - id: O2
+    area: Openness
+    name: Live-tailable
+    desc: "One artifact you can tail -f holds the full running record."
+  - id: O3
+    area: Openness
+    name: Documented schema
+    desc: "The vendor publishes documentation for the session format."
+  - id: O4
+    area: Openness
+    name: Stable location
+    desc: "No wholesale storage-layout migration in the observation window."
+  - id: P1
+    area: Tooling
+    name: Naive-reader safe
+    desc: "A reader following the obvious structure gets every message exactly once."
+  - id: P2
+    area: Tooling
+    name: Crash tolerant
+    desc: "A truncated final write costs at most one record."
+  - id: P3
+    area: Tooling
+    name: Self-contained
+    desc: "No sidecar file join is needed for title, cwd, or model."
+
+agents:
+  - name: Pi
+    short: Pi
+    format: "Flat parent-linked JSONL"
+    results: {S1: pass, S2: pass, S3: pass, C1: pass, C2: pass, C3: pass, C4: pass, C5: pass, C6: pass, C7: pass, T1: pass, T2: pass, T3: pass, O1: pass, O2: pass, O3: fail, O4: pass, P1: fail, P2: pass, P3: pass}
+    notes:
+      S1: "1.5 KB for the identical task — leanest measured"
+      C4: "per-turn usage.cost with dollar totals"
+      C7: "id→parentId DAG; branch/rewind supported"
+      O3: "no published schema documentation"
+      P1: "files retain abandoned branches; a naive reader replays them — active branch must be walked via parent links"
+  - name: OpenClaw
+    short: OClaw
+    format: "Flat parent-linked JSONL"
+    results: {S1: fail, S2: pass, S3: pass, C1: pass, C2: pass, C3: pass, C4: pass, C5: pass, C6: fail, C7: pass, T1: pass, T2: pass, T3: pass, O1: pass, O2: pass, O3: fail, O4: pass, P1: pass, P2: pass, P3: pass}
+    notes:
+      S1: "headless probe could not run (OAuth refresh_token_reused); an unrunnable probe fails the gate"
+      C4: "usage object includes nested cost with dollar totals"
+      C6: "no reasoning/thinking records at all in recent sessions"
+      O3: "no published schema documentation"
+  - name: Claude Code
+    short: Claude
+    format: "Nested-envelope JSONL"
+    results: {S1: fail, S2: fail, S3: pass, C1: pass, C2: pass, C3: pass, C4: fail, C5: pass, C6: fail, C7: pass, T1: pass, T2: pass, T3: pass, O1: pass, O2: pass, O3: fail, O4: pass, P1: pass, P2: pass, P3: pass}
+    notes:
+      S1: "40 KB for the identical task; 68% of it attachment records"
+      S2: "conversation is 23.9% of corpus bytes"
+      C4: "tokens yes, dollars no"
+      C6: "~97.5% of recent thinking blocks are signature-only, text empty"
+      O3: "no published schema documentation"
+      T1: "15+ additive changes in window, none breaking"
+  - name: OpenCode
+    short: OCode
+    format: "SQLite (session/message/part rows)"
+    results: {S1: fail, S2: pass, S3: pass, C1: pass, C2: pass, C3: pass, C4: pass, C5: pass, C6: pass, C7: fail, T1: fail, T2: pass, T3: pass, O1: pass, O2: fail, O3: fail, O4: fail, P1: pass, P2: pass, P3: pass}
+    notes:
+      S1: "fresh DB is 274 KB for ~5 KB of rows; amortizes, but session #1 pays it"
+      C6: "62% of reasoning rows carry plaintext"
+      C7: "subagent identity only via a title-string regex"
+      T1: "migrated JSON tree → SQLite in window"
+      O2: "database rows, nothing to tail"
+      O4: "storage backend replaced wholesale in window"
+  - name: Codex
+    short: Codex
+    format: "Nested-envelope JSONL"
+    results: {S1: fail, S2: pass, S3: fail, C1: pass, C2: pass, C3: pass, C4: fail, C5: pass, C6: fail, C7: fail, T1: pass, T2: pass, T3: pass, O1: pass, O2: pass, O3: fail, O4: pass, P1: fail, P2: pass, P3: pass}
+    notes:
+      S1: "78 KB for the identical task"
+      S3: "world_state context snapshots reach 41.6 KB in recent real sessions"
+      C4: "cumulative token_count events, no dollars"
+      C6: "reasoning items are encrypted_content blobs"
+      C7: "no thread/branch links"
+      O3: "no published schema documentation"
+      P1: "every turn is logged twice (UI event + wire item); a naive reader double-counts"
+  - name: Copilot CLI
+    short: Copilot
+    format: "Nested-envelope JSONL (event-sourced)"
+    results: {S1: fail, S2: pass, S3: fail, C1: pass, C2: pass, C3: pass, C4: fail, C5: pass, C6: pass, C7: fail, T1: fail, T2: pass, T3: pass, O1: pass, O2: pass, O3: fail, O4: fail, P1: pass, P2: pass, P3: fail}
+    notes:
+      S1: "67 KB for the identical task"
+      S3: "writes its full system prompt into every session (52 KB line)"
+      C4: "premium-request counts, not dollars"
+      C7: "linear parentId chain, no branches"
+      T1: "storage layout replaced at v1.0 (flat files → per-session dirs)"
+      O3: "open GitHub issue asks to formalize events.jsonl; undocumented"
+      O4: "same v1.0 layout migration"
+      P3: "session title lives in a sidecar workspace.yaml"
+  - name: Hermes
+    short: Hermes
+    format: "SQLite ledger + FTS"
+    results: {S1: fail, S2: pass, S3: pass, C1: pass, C2: fail, C3: pass, C4: pass, C5: pass, C6: pass, C7: fail, T1: fail, T2: fail, T3: pass, O1: pass, O2: fail, O3: fail, O4: fail, P1: pass, P2: pass, P3: pass}
+    notes:
+      S1: "headless probe fails ('no final response') since late June; an unrunnable probe fails the gate"
+      C2: "model recorded per session, not per message"
+      C4: "estimated and actual dollar cost columns"
+      T1: "migrated JSON files → state.db in window"
+      O2: "database rows, nothing to tail"
+      O3: "no published schema documentation"
+  - name: Kimi Code
+    short: Kimi
+    format: "Wire-op journal (JSONL)"
+    results: {S1: fail, S2: fail, S3: fail, C1: pass, C2: pass, C3: pass, C4: fail, C5: pass, C6: pass, C7: pass, T1: pass, T2: pass, T3: fail, O1: pass, O2: pass, O3: fail, O4: pass, P1: fail, P2: pass, P3: fail}
+    notes:
+      S1: "101 KB for the identical task"
+      S2: "conversation is 0.9% of the same-task log; 7% of corpus bytes"
+      S3: "70 KB tool-catalog snapshot per session"
+      C4: "usage.record carries tokens only, no dollar figure"
+      T3: "declares protocol_version 1.4; the constant at source HEAD is 1.5"
+      P1: "user and model content live in two disjoint op families; a naive reader sees user turns only"
+      P3: "title and cwd live in a state.json sidecar"
+  - name: Antigravity
+    short: AntiG
+    format: "Step-typed JSONL"
+    results: {S1: pass, S2: pass, S3: pass, C1: pass, C2: fail, C3: fail, C4: fail, C5: pass, C6: pass, C7: fail, T1: fail, T2: fail, T3: pass, O1: pass, O2: pass, O3: fail, O4: fail, P1: fail, P2: pass, P3: fail}
+    notes:
+      S1: "6.8 KB for the identical task"
+      C2: "no model field; recoverable only by regexing model-change text out of user input"
+      C3: "zero token or usage keys in the format"
+      T1: "migrated markdown brain artifacts → JSONL transcripts in window (largest migration observed)"
+      P1: "user content is XML-tag-wrapped strings inside JSON; naive JSON traversal is not enough"
+      P3: "cwd must be inferred from file paths in content"
+  - name: Cursor Agent
+    short: Cursor
+    format: "Flat JSONL + binary metadata DB"
+    results: {S1: pass, S2: pass, S3: pass, C1: fail, C2: fail, C3: fail, C4: fail, C5: fail, C6: fail, C7: pass, T1: pass, T2: fail, T3: pass, O1: fail, O2: fail, O3: fail, O4: pass, P1: pass, P2: pass, P3: fail}
+    notes:
+      S1: "1.9 KB for the identical task — lean by omission"
+      C1: "no timestamps anywhere in the transcript; session times come from file mtimes"
+      C2: "no model field in the transcript"
+      C5: "tool_use calls now recorded (new since July); tool outputs still absent"
+      O1: "metadata DB stores protobuf blobs and hex-encoded JSON"
+      O2: "the full record spans a transcript plus a binary database"
+      P3: "model and metadata live in store.db, not the transcript"

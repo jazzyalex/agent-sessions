@@ -1,0 +1,140 @@
+# Session Bench — design (v1)
+
+Date: 2026-08-04. Status: gates drafted, provisional matrix below, awaiting
+owner review of gates + ranking before site page and launch post.
+
+**Session Bench** — ranking agent harnesses by what they write to disk.
+SWE-bench-flavored: binary pass/fail gates, no partial credit, rank = gates
+cleared. Every gate is either script-computed or a checklist item with a
+cited evidence source. Rubric + scripts versioned in this repo so grades are
+reproducible and disputable. Refresh path: weekly agent_watch monitoring can
+flip Stability/Openness gates; the same-task runner re-computes Signal gates.
+
+Supersedes the essay-post plan in
+2026-08-04-agent-format-comparison-post-design.md (owner pivot 2026-08-04:
+"hard, very critical evaluation… local session bench… rank harnesses…
+start own bench on site"). The measured data carries over.
+
+## The 20 gates
+
+### Signal (does the log carry work, or bookkeeping?)
+- **S1 Lean session**: identical one-line task writes ≤ 10 KB. (Measured
+  2026-08-04 same-task run.)
+- **S2 Majority signal**: conversation content ≥ 25% of stored bytes
+  (corpus measurement).
+- **S3 No fixed-cost dumps**: no single per-session bookkeeping record
+  > 25 KB (system-prompt dumps, tool-catalog snapshots).
+
+### Completeness (can you reconstruct the session?)
+- **C1 Per-event timestamps.**
+- **C2 Model attributable** to every assistant message (per-message field or
+  unambiguous model_change/turn events).
+- **C3 Token usage recorded** locally.
+- **C4 Dollar cost recorded** locally (premium-request counters don't pass).
+- **C5 Tool calls AND outputs** in the record.
+- **C6 Readable reasoning** (plaintext thinking; sealed/encrypted fails).
+- **C7 Thread/subagent structure** recoverable (parent links or subagent
+  artifacts).
+
+### Stability (4-month observation window, 2026-03-31 → 2026-08-04)
+- **T1 No schema break** in window.
+- **T2 Declares a format version** in the artifact itself.
+- **T3 No misleading version signal** (a declared version must match
+  reality; Kimi emits 1.4 while its source at HEAD says 1.5).
+
+### Openness (is your own history yours to read?)
+- **O1 Standard-tools readable** at rest (text editor or sqlite3; protobuf/
+  hex-encoded JSON fails).
+- **O2 Live-tailable**: one artifact you can `tail -f` holds the full
+  running record.
+- **O3 Documented schema** (public vendor documentation).
+- **O4 No storage-layout migration** in window (files moved/renamed
+  wholesale).
+
+### Tooling cost (what a reader has to survive)
+- **P1 Naive-reader safe**: a reader following the obvious structure gets
+  every message exactly once (duplication, disjoint op families, abandoned
+  branches, XML-inside-JSON all fail).
+- **P2 Crash tolerant**: a truncated final write costs at most one record.
+- **P3 Self-contained**: no sidecar join needed for title/cwd/model.
+
+## Provisional matrix (P = pass, F = fail, ? = verify before publishing)
+
+| Gate | Codex | Claude | Copilot | Cursor | OpenCode | Hermes | Antigravity | OpenClaw | Pi | Kimi |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S1 | F | F | F | P | F | ?ᵃ | P | ?ᵃ | P | F |
+| S2 | P | F | P | P | P | P | P | P | P | F |
+| S3 | P | P | F | P | P | P | P | P | P | F |
+| C1 | P | P | P | F | P | P | ? | P | P | P |
+| C2 | P | P | P | F | P | F | ? | P | P | P |
+| C3 | P | P | P | F | P | P | ? | ? | P | P |
+| C4 | F | F | F | F | P | P | F | F | P | F |
+| C5 | P | P | P | ? | P | P | P | P | P | P |
+| C6 | F | F | P | F | ? | P | P | ? | ? | P |
+| C7 | F | P | F | P | F | F | F | P | P | P |
+| T1 | P | P | F | P | F | F | F | P | P | P |
+| T2 | P | P | P | F | P | F | F | P | P | P |
+| T3 | P | P | P | P | P | P | P | P | P | F |
+| O1 | P | P | P | F | P | P | P | P | P | P |
+| O2 | P | P | P | F | F | F | P | P | P | P |
+| O3 | F | F | F | F | F | F | F | F | F | F |
+| O4 | P | P | F | P | F | F | F | P | P | P |
+| P1 | F | P | P | P | P | P | F | P | F | F |
+| P2 | P | P | P | P | P | P | P | P | P | P |
+| P3 | P | P | F | F | P | P | F | P | P | F |
+
+ᵃ Hermes/OpenClaw could not run the same-task probe (broken oneshot runtime;
+auth failure). v1 policy: un-runnable probe = gate failed, stated openly —
+a headless path that doesn't work is a result, not missing data.
+
+## Provisional leaderboard (pending ? verification)
+
+| Rank | Harness | Gates cleared /20 |
+|---|---|---|
+| 1 | Pi | ~17 |
+| 2 | Claude Code | ~15 |
+| 2 | OpenCode | ~15 |
+| 4 | OpenClaw | ~14–16 (several ?) |
+| 5 | Codex | 14 |
+| 6 | Hermes | ~13 |
+| 7 | Copilot CLI | 12 |
+| 7 | Kimi | 12 |
+| 9 | Antigravity | ~11 |
+| 10 | Cursor | ~9 |
+
+Notable stories the ranking produces: the smallest newcomer (Pi) has the
+cleanest format; Cursor ranks last with the leanest file because leanness
+came from not recording anything; O3 is a universal fail — ten harnesses,
+zero documented schemas; Codex fails P1 for double-logging every turn.
+
+## Verification queue before publishing (the ? cells)
+
+1. Antigravity C1–C3: does transcript.jsonl carry timestamps/model/tokens?
+   (Fixture excerpt showed step_index without timestamp.)
+2. Cursor C5: same-task log contained tool_use blocks — contradicts July
+   corpus (zero tool events). Determine whether 2026.7 added tool recording
+   (would also be a T1 consideration) and whether outputs are included.
+3. C6 sweep: readable-thinking check per format on recent real sessions
+   (Claude ~97.5% sealed = F; verify OpenCode/OpenClaw/Pi).
+4. OpenClaw C3: usage/tokens presence in real sessions.
+5. Re-verify S3 borderlines (Codex world_state 19.9 KB is under the bar;
+   Claude largest attachment line 15 KB — confirm no larger in corpus).
+
+## Deliverables
+
+1. `docs/bench/` site page (Jekyll) rendered from `docs/bench/scores.yml`;
+   per-gate tooltips citing evidence; version-stamped "bench v1,
+   2026-08-04 data".
+2. `scripts/session_bench/` — same-task runner config + gate evaluator that
+   reads measurements and emits scores.yml (v1 may hand-fill checklist gates
+   with evidence links; automation can grow).
+3. Launch post on The Rollout: critical, grade-driven, chart = gates-cleared
+   leaderboard; names every failure with the measurement behind it.
+4. STATUS.md content-pipeline update.
+
+## Rules
+
+- Every F must cite a measurement, a fixture, or a ledger entry.
+- Gates can flip on re-run; the page states the bench version and data date.
+- Tone: hard but factual; failures are named, never mocked. No invented
+  numbers.
