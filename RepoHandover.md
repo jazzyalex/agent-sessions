@@ -1,3 +1,28 @@
+## 2026-08-04 10:35 · agent-session-formats-check · Full format check: parser + pricing fixes, and a rebuilt monitor
+
+status: in-progress
+
+**State:** Full 10-agent session-format check done and merged to `main` (`b5bd45d2` merge + `fcc446f8`). Weekly reports no drift on any agent; 1837 Swift + 135 python tests green. Verified: Codex 0.146.0, Claude 2.1.220, OpenCode 1.18.11, Pi 0.83.0, Copilot 1.0.77. *(Pushed since this was written, and shipped in 4.7 — the parser and pricing fixes from this check are in that release.)*
+
+**Decided / don't redo:**
+- **`attachment:date_change` and the `queued_command` keys were NEVER upstream drift.** They predate the verified versions (2026-07-09 / 2026-07-06); the fixture was just incomplete. Don't re-open as a Claude regression.
+- **Never build a fixture from ~5 recent sessions** — rare families are missed by construction (Claude covered 11/24 attachment subtypes). Use `scripts/rebuild_stage0_baseline.py`, and **read its report before `--emit`**: that step caught `collab_waiting_end.statuses` (keyed by thread UUID) and `system.error.headers` (keyed by HTTP header, carries `set-cookie`) before they reached committed fixtures.
+- **OpenClaw prebump needs a fresh sign-in, not a retry** — it shares the Codex OAuth token store; sandbox gives `missing-provider-auth`, real HOME gives `refresh_token_reused` 401.
+- Copilot's driver was broken by a deprecated `--config-dir` *and* a credential file (`~/.copilot/hosts.json`) that no longer exists; it now uses `COPILOT_HOME` + a `gh auth token` fallback.
+- Prebump passing is a floor, not a ceiling — its one-line prompt yields ~4 event types. A `--allow-real-home` prebump session once masked real antigravity drift by becoming the newest sample.
+
+**Key files:**
+- `scripts/rebuild_stage0_baseline.py` — full-sweep baseline rebuilder (report → review → `--emit`)
+- `scripts/agent_watch.py` — nested fingerprinting, `_NESTED_OPAQUE_KEYS`, 5-session union, `blocked_thin_sample`
+- `skills/agent-session-format-check/SKILL.md` §5a — what the fingerprint can and cannot see
+
+**Next:**
+1. ~~Push `main`~~ — done, and shipped in 4.7.
+2. OpenClaw: fresh sign-in, then prebump → bump 2026.6.11 → 2026.7.1.
+3. Antigravity: generate one tool-using session under 1.1.10, then bump 1.1.1 → 1.1.10.
+4. Re-price check due ~2026-08-14 (rates last verified 2026-07-14; `codex-auto-review` was a missing-key fix, not a re-pricing).
+5. Untracked `docs/superpowers/specs/2026-08-04-agent-format-comparison-post-design.md` is **not mine** — left untouched.
+
 ## 2026-08-03 12:41 · star-ask-agent-watch · Two stale branches reviewed, salvaged, and retired
 status: done
 
