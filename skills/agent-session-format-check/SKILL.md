@@ -411,6 +411,24 @@ and tiny (<25 events). Coverage alone is not enough: baselines deliberately cont
 interactive-only families (`ai-title`, `pr-link`, `permission-mode`) that a perfectly healthy
 1000-event session will never contain.
 
+**Never build a fixture from a handful of recent sessions.** Rare families are rare, so a
+5-session sample misses them by construction and the weekly then reports "drift" every time
+one surfaces — alerts that mean *our baseline was incomplete*, not *upstream changed*. On
+2026-08-04 that gap was 13 of 24 Claude attachment subtypes and 9 of 18 Codex `event_msg`
+families. Rebuild from every session on disk instead:
+
+```
+./scripts/rebuild_stage0_baseline.py --agent claude          # report the gap
+./scripts/rebuild_stage0_baseline.py --agent claude --emit   # append redacted coverage
+```
+
+It sweeps all discoverable sessions, greedily harvests the fewest real records that close
+the gap, and redacts every scalar (only `type`/`role`/`subtype`/`model` survive, because
+those *are* the schema). **Read its report before `--emit`**: a bucket keyed by a UUID, path
+or header name is a free-form map that belongs in `_NESTED_OPAQUE_KEYS`, not in the fixture.
+That is how `collab_waiting_end.statuses` (keyed by thread id) and `system.error.headers`
+(keyed by HTTP header, carrying `set-cookie`) were caught.
+
 **Baseline semantics.** `_baseline_type_keys_for_agent()` excludes `*schema_drift*` fixtures.
 So once a drifted type is verified and handled, it belongs in the **normal** baseline fixture
 — otherwise it re-reports as drift every week forever (Copilot's `session.auto_mode_resolved`

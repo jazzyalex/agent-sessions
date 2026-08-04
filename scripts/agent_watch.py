@@ -733,14 +733,18 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # per edited file (permanent phantom drift) and writes the user's real paths into
     # report artifacts. `arguments`/`parameters`/`inputSchema`/`_meta` are free-form
     # tool payloads with the same problem minus the leak.
-    "codex": {"changes", "arguments", "parameters", "inputSchema", "_meta"},
+    # `changes` is keyed by absolute file path and `statuses` by thread UUID.
+    "codex": {"changes", "statuses", "arguments", "parameters", "inputSchema", "_meta"},
     # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
     # but `.message` was opaque — hiding content-block types and the whole `usage`
     # struct (cache_creation, server_tool_use, iterations). Nesting exposes those. The
     # two exclusions are TOOL-defined, not Claude-format: `input` is a tool's parameter
     # object (every new tool parameter would read as schema drift) and `toolUseResult`
     # is a tool's output payload.
-    "claude": {"input", "toolUseResult"},
+    # `headers` is an HTTP response header map — open-ended, CDN-dependent, and it
+    # carries set-cookie; its KEY NAMES would land in fixtures and reports. `mcpMeta`
+    # is whatever an MCP server chose to return.
+    "claude": {"input", "toolUseResult", "headers", "mcpMeta"},
 }
 
 
