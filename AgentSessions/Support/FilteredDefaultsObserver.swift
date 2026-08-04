@@ -18,11 +18,13 @@ import Combine
 /// Usage:
 /// ```swift
 /// let observer = FilteredDefaultsObserver(keys: ["ShowSystemProbeSessions"])
-/// observer.publisher
-///     .receive(on: DispatchQueue.main)
+/// observer.mainPublisher
 ///     .sink { [weak self] in self?.recomputeNow() }
 ///     .store(in: &cancellables)
 /// ```
+///
+/// Use `mainPublisher` for anything touching UI or `@Published` state; the raw
+/// `publisher` delivers on whichever thread wrote the defaults.
 ///
 /// Keep any existing per-site debounce downstream — this utility only
 /// decides *whether* to emit, not when/how often.

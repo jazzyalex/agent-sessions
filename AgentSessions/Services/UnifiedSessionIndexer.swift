@@ -773,8 +773,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         syncAgentEnablementFromDefaults()
         // Observe UserDefaults changes to sync external toggles (Preferences) to this model.
         // Tracked keys: only the ones this closure actually reads/passes to
-        // syncAgentEnablementFromDefaults() (which reads all 10 per-agent
-        // enablement keys via AgentEnablement.enablementKey(for:)).
+        // syncAgentEnablementFromDefaults(), which reads every per-agent
+        // enablement key via AgentEnablement.enablementKey(for:).
         let enablementSyncObserver = FilteredDefaultsObserver(keys: [
             "UnifiedHasCommandsOnly",
             PreferencesKey.Unified.showArchivedCodexDesktopOnly

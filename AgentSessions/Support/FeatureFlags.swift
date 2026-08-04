@@ -49,7 +49,13 @@ enum FeatureFlags {
     static let enableFTSSearch = true
     static let ftsSearchLimit: Int = 2_000
     static let instantToolOutputIndexMaxChars: Int = 12_000
-    static let sessionSearchFormatVersion: Int = 4
+    // Bumped to 5 when Session.cwd started resolving for Pi/Kimi/Cursor after a
+    // full parse. Search ingest writes `cwd: session.cwd`, and it skips any file
+    // whose mtime+size are unchanged and whose path is already search-ready at
+    // this version -- so finished sessions indexed before the fix would keep
+    // their NULL cwd forever and stay invisible to the path filter. The bump is
+    // what forces them to be re-ingested.
+    static let sessionSearchFormatVersion: Int = 5
     static let sessionToolIOFormatVersion: Int = 1
     static let transcriptPrewarmMaxSessionsPerRefresh: Int = 96
     static let transcriptPrewarmMaxSessionBytes: Int = 50 * 1024 * 1024

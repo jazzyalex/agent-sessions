@@ -101,17 +101,24 @@ enum AgentTerminalLauncher {
         // If not, launch the app first and wait for it to initialize.
         // Matched on bundle URL rather than id for the same reason as above —
         // the id varies across Warp builds, the resolved app URL does not.
+        // Normalised: raw URL equality compares absolute strings, so a symlink,
+        // a `/private` prefix, or Gatekeeper app translocation would report a
+        // running Warp as not-running and take the 3-second cold-start path for
+        // nothing.
+        let resolvedAppURL = appURL.resolvingSymlinksInPath().standardizedFileURL
         let appRunning = NSWorkspace.shared.runningApplications.contains {
-            $0.bundleURL == appURL
+            $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == resolvedAppURL
         }
 
         if appRunning {
-            // Synchronous path, so a refusal is reportable: don't claim success
-            // when the tab never opened.
+            // Synchronous path, so a refusal is reportable. Note `open` reports
+            // only that LaunchServices routed the URL, not that Warp read the
+            // config and opened a tab -- so a `true` here is weaker than "the
+            // tab exists".
             guard NSWorkspace.shared.open(url) else {
                 try? FileManager.default.removeItem(at: configFile)
                 throw NSError(domain: "AgentTerminalLauncher", code: 5,
-                    userInfo: [NSLocalizedDescriptionKey: "\(kind.displayName) refused to open the resume tab."])
+                    userInfo: [NSLocalizedDescriptionKey: "\(kind.displayName) refused to route the resume URL."])
             }
         } else {
             // KNOWN GAP: this path still reports success unconditionally. Cold

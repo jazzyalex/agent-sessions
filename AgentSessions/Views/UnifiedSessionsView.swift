@@ -1531,7 +1531,10 @@ struct UnifiedSessionsView: View {
         case .pi:
             return true // session file path or id; falls back to --continue
         case .kimi:
-            return true // session.id is the on-disk session dir; falls back to --continue
+            // session.id is the on-disk session dir. `--continue` is only a
+            // valid fallback when the working directory is known, so
+            // copyResumeCommand may still decline; see its .kimi arm.
+            return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         default:
@@ -1540,8 +1543,15 @@ struct UnifiedSessionsView: View {
     }
 
     private func copyResumeCommand(_ session: Session, antigravityCLISessionID: String? = nil) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
+        // Clear only when there is something to write. Several arms below bail
+        // out on a `guard` -- an unresolvable session id, a Kimi session with no
+        // working directory -- and clearing up front meant those refusals wiped
+        // whatever the user already had on the clipboard and put nothing back.
+        let write: (String) -> Void = { command in
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(command, forType: .string)
+        }
 
         switch session.source {
         case .claude:
@@ -1557,7 +1567,7 @@ struct UnifiedSessionsView: View {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .codex:
             let settings = CodexResumeSettings.shared
@@ -1567,7 +1577,7 @@ struct UnifiedSessionsView: View {
             let builder = CodexResumeCommandBuilder()
             let core = "\(builder.shellQuoteIfNeeded(binary)) resume \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .opencode:
             let settings = OpenCodeSettings.shared
@@ -1582,7 +1592,7 @@ struct UnifiedSessionsView: View {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .hermes:
             let settings = HermesSettings.shared
@@ -1594,7 +1604,7 @@ struct UnifiedSessionsView: View {
                 ? "\(builder.shellQuoteIfNeeded(binary)) --resume \(builder.shellQuoteIfNeeded(sid))"
                 : "\(builder.shellQuoteIfNeeded(binary)) --continue"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .copilot:
             let settings = CopilotSettings.shared
@@ -1609,7 +1619,7 @@ struct UnifiedSessionsView: View {
                 core = "\(builder.shellQuoteIfNeeded(binary)) --continue"
             }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .cursor:
             let settings = CursorSettings.shared
@@ -1619,7 +1629,7 @@ struct UnifiedSessionsView: View {
             let builder = CursorResumeCommandBuilder()
             guard let core = try? builder.makeCoreCommand(strategy: plan.strategy, binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .pi:
             let settings = PiSettings.shared
@@ -1631,7 +1641,7 @@ struct UnifiedSessionsView: View {
                                                           binaryCommand: plan.binary,
                                                           sessionDirectory: plan.sessionDirectory?.path) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .kimi:
             let settings = KimiSettings.shared
@@ -1645,7 +1655,7 @@ struct UnifiedSessionsView: View {
             guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
                                                           binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         case .antigravity:
             let settings = AntigravityCLISettings.shared
@@ -1655,7 +1665,7 @@ struct UnifiedSessionsView: View {
             let builder = AntigravityResumeCommandBuilder()
             let core = "\(builder.shellQuoteIfNeeded(binary)) --conversation \(builder.shellQuoteIfNeeded(sid))"
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
-            pb.setString(command, forType: .string)
+            write(command)
 
         default:
             break
