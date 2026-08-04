@@ -23,7 +23,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg"><b>Download Agent Sessions 4.6.4 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg"><b>Download Agent Sessions 4.7 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -34,7 +34,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.6.4** — Compact and Full Agent Cockpit are retired. The Quota Meter is the only mode, the View menu is a single toggle, and stale settings from the old modes are cleared for you. [See what's new ↓](#whats-new-in-464)
+> **New in 4.7** — Kimi Code joins as the eleventh agent, active Claude cloud sessions appear in the Quota Meter, and Pi and Cursor sessions get back the working directory their resume commands and project filters depend on. [See what's new ↓](#whats-new-in-47)
 
 ## Overview
 
@@ -76,18 +76,18 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.6.4
+## What's New in 4.7
 
-**TL;DR** - Compact and Full Agent Cockpit are gone. The Quota Meter is the only mode now, the View menu is one toggle instead of a submenu, and if you last quit in Compact or Full you land on the Quota Meter with nothing to reconfigure.
+**TL;DR** - Kimi Code is the eleventh agent Agent Sessions reads, active Claude cloud sessions now show up in the Quota Meter, and a working-directory bug that quietly broke resume commands and project filtering for Pi and Cursor is fixed.
 
-New in 4.6.4:
-- **One mode, not three** — the Quota Meter absorbed what people actually used. Compact and Full carried a session list, search, By Project grouping and filter pills that duplicated the main window; those go with them.
-- **The View menu is a show/hide toggle** — ⌘⌥⇧C now hides the Quota Meter when it is already on screen, matching how every other macOS window toggle behaves. ⇧⌘M ("Cycle Cockpit View") is removed; cycling means nothing with one mode.
-- **Settings → Agent Cockpit is now Settings → Quota Meter** — the Compact Mode and Full Mode sections go with the modes they configured.
-- **Old settings clear themselves** — stale preferences and the saved Compact and Full window positions are swept on launch. Where you put the Quota Meter is untouched.
-- **The text-size button stops vanishing** — switching to Standard made the window narrower and the toolbar dropped that button first, hiding the only control that switched back to Enlarged. The toolbar now narrows the Session Runway control before dropping anything.
+New in 4.7:
+- **Kimi Code, the eleventh agent** — sessions in the list, in search and in Analytics, with tool calls and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. It switches itself on when Kimi Code is on your Mac.
+- **Claude cloud sessions in the Quota Meter** — sessions running on Anthropic's infrastructure were invisible outside Claude Desktop; they now sit beside your local agents, marked Cloud. Off by default, offered once you have saved a claude.ai cookie.
+- **Pi and Cursor get their working directory back** — resume commands came back without the `cd`, and the search index stored no path at all, so filtering by project silently missed those sessions. History you already have is repaired in the background after you update.
+- **A resume that fails now says so** — every failure reason produced an error nothing displayed, so a refused launch looked exactly like no launch. Warp in particular used to report success when it never opened.
+- **Checking an agent's CLI no longer freezes the window** — eight of the agent coordinators probed binaries on the main thread with no timeout, so a slow shell profile hung the whole app.
 
-**Recent releases** — 4.6.3: the footer usage meters can finally be switched off. 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. 4.5: dollar burn per session, priced per model. Full history in the [changelog](docs/CHANGELOG.md).
+**Recent releases** — 4.6.4: Compact and Full Agent Cockpit retired, leaving the Quota Meter as the only mode. 4.6.3: the footer usage meters can finally be switched off. 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -143,7 +143,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.6.4.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg)
+1. [Download AgentSessions-4.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
