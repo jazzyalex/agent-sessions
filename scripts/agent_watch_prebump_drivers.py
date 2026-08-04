@@ -569,6 +569,31 @@ class CopilotPromptDriver:
                 leaks.append(path_str)
         return leaks
 
+    @staticmethod
+    def _gh_auth_token() -> str | None:
+        """Token from the locally authenticated gh CLI, or None.
+
+        Never logged or written to the report — it is only placed in the child env.
+        """
+        try:
+            proc = subprocess.run(
+                ["gh", "auth", "token"],
+                # Explicit env, matching every other subprocess call in this module.
+                # gh reads its own config/keyring, so the real environment is required.
+                env=os.environ.copy(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            return None
+        token = (proc.stdout or "").strip()
+        return token or None
+
     def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
         session_home = Path(env.get("AGENT_WATCH_SESSION_HOME", str(sandbox)))
         using_real_session_home = session_home != sandbox
@@ -576,6 +601,20 @@ class CopilotPromptDriver:
         copilot_home.mkdir(parents=True, exist_ok=True)
         env = dict(env)
         env["COPILOT_ALLOW_ALL"] = "1"
+        if not using_real_session_home:
+            # `--config-dir` is deprecated in favour of COPILOT_HOME (copilot warns on
+            # every invocation and the flag is slated to go away).
+            env["COPILOT_HOME"] = str(copilot_home)
+        # Env-var-first auth per the prebump policy. When none of the declared vars is
+        # set, fall back to the locally authenticated gh CLI — that is one of the three
+        # methods copilot's own "No authentication information found" error lists, and
+        # the previously declared credential file (~/.copilot/hosts.json) no longer
+        # exists, so without this the driver could never authenticate on a machine that
+        # signs in through gh.
+        if not any(env.get(v) for v in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
+            token = self._gh_auth_token()
+            if token:
+                env["COPILOT_GITHUB_TOKEN"] = token
         real_home = Path(os.environ.get("HOME", str(Path.home())))
         pre = {} if using_real_session_home else self._snapshot_real_home_copilot(real_home)
 
@@ -587,8 +626,6 @@ class CopilotPromptDriver:
         model = env.get("AGENT_WATCH_MODEL")
         if model:
             cmd.extend(["--model", model])
-        if not using_real_session_home:
-            cmd.extend(["--config-dir", str(copilot_home)])
         run_started = time.time()
         try:
             proc = subprocess.run(

@@ -32,16 +32,24 @@ def test_upstream_fetch_rate_limit_is_degraded_not_monitoring_failure():
 
 
 def test_http_get_text_uses_github_token_for_api(monkeypatch):
+    # The token is deliberately NOT an argv element — it goes into a mode-0600 curl
+    # config file so it never shows up in `ps`. Assert that contract, and read the
+    # file inside the fake because the caller unlinks it in a finally block.
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
     seen = {}
 
     def fake_run(argv, timeout):
         seen["argv"] = argv
+        cfg = argv[argv.index("--config") + 1] if "--config" in argv else None
+        seen["config"] = _Path(cfg).read_text(encoding="utf-8") if cfg else None
+        seen["config_mode"] = oct(os.stat(cfg).st_mode & 0o777) if cfg else None
         return 0, "{}", ""
 
     monkeypatch.setattr(agent_watch, "_run_cmd", fake_run)
     assert agent_watch._http_get_text("https://api.github.com/repos/o/r/releases/latest", timeout=5) == "{}"
-    assert "Authorization: Bearer ghp_test" in seen["argv"]
+    assert not any("ghp_test" in str(a) for a in seen["argv"]), "token must not be in argv"
+    assert seen["config"] == 'header = "Authorization: Bearer ghp_test"\n'
+    assert seen["config_mode"] == "0o600"
 
 
 def test_cached_upstream_evidence_uses_prior_successful_report(tmp_path):
