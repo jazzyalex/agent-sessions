@@ -530,6 +530,38 @@ def _newest_file(roots: list[str], glob: str, exclude_globs: list[str] | None = 
     return newest
 
 
+# How many recent sessions the weekly scan fingerprints together. One is not enough:
+# whichever session happens to be newest decides the whole verdict, so a single thin
+# session — including the one a prebump run leaves in the real store — can hide drift
+# that a rich session two files back plainly shows.
+_LOCAL_SCHEMA_SAMPLE_COUNT = 5
+
+
+def _newest_files(
+    roots: list[str], glob: str, count: int, exclude_globs: list[str] | None = None
+) -> list[Path]:
+    """The `count` most recently modified matches, newest first."""
+    candidates: list[Path] = []
+    for r in roots:
+        root = _expand_path(r)
+        if not root.exists():
+            continue
+        candidates.extend(root.glob(glob) if "*" in glob and "/" not in glob else root.rglob(glob))
+    scored: list[tuple[float, Path]] = []
+    for p in candidates:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        if _path_matches_any_exclude(p, exclude_globs):
+            continue
+        scored.append((st.st_mtime, p))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [p for _, p in scored[:count]]
+
+
 def _jsonl_contains_any_type(path: Path, required_types: set[str], max_lines: int) -> bool:
     try:
         lines_seen = 0
@@ -576,6 +608,31 @@ def _newest_file_with_types(
     return None
 
 
+def _newest_files_with_types(
+    roots: list[str],
+    glob: str,
+    required_types: list[str],
+    count: int,
+    max_lines: int,
+    exclude_globs: list[str] | None = None,
+) -> list[Path]:
+    """The `count` most recent files that actually contain one of `required_types`.
+
+    Sibling sampling MUST apply this filter, not just recency. OpenClaw's glob is
+    `**/*.jsonl` over `~/.openclaw`, which also sweeps up audit logs and an embedded
+    codex-home — sampling those unfiltered reported codex's own event types as OpenClaw
+    schema drift.
+    """
+    wanted = {t for t in required_types if isinstance(t, str) and t}
+    out: list[Path] = []
+    for p in _newest_files(roots, glob, count * 20, exclude_globs=exclude_globs):
+        if _jsonl_contains_any_type(p, wanted, max_lines=max_lines):
+            out.append(p)
+            if len(out) >= count:
+                break
+    return out
+
+
 def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[str, Any]) -> dict[str, Any]:
     patterns_raw = contract_cfg.get("patterns")
     patterns = [p for p in (patterns_raw if isinstance(patterns_raw, list) else []) if isinstance(p, str) and p]
@@ -597,12 +654,7 @@ def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[st
     }
 
 
-def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
-    type_keys: dict[str, set[str]] = {}
-    type_counts: dict[str, int] = {}
-    parse_errors: int = 0
-    total_lines: int = 0
-
+def _tail_lines(path: Path, max_lines: int) -> list[str]:
     # Read tail-ish by keeping only last max_lines lines (simple but OK for monitoring).
     lines: list[str] = []
     with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -612,6 +664,16 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
             lines.append(line)
             if len(lines) > max_lines:
                 lines.pop(0)
+    return lines
+
+
+def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    total_lines: int = 0
+
+    lines = _tail_lines(path, max_lines)
 
     for raw in lines:
         total_lines += 1
@@ -637,6 +699,175 @@ def _jsonl_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
         "parsed_lines": total_lines,
         "parse_errors": parse_errors,
     }
+
+
+_NESTED_FINGERPRINT_MAX_DEPTH = 3
+
+# Cap on list elements walked per key. Guards against a pathologically long array
+# while still unioning far more than the one element the first implementation saw.
+_NESTED_LIST_SAMPLE_LIMIT = 50
+
+# A sample counts as evidence unless it is BOTH narrow (exercised under this fraction
+# of baseline types) and tiny (fewer than this many events). Either alone is normal:
+# rare event families keep coverage low on healthy sessions, and a short session can
+# still be a legitimate sample of a narrow format.
+_MIN_SAMPLE_COVERAGE_RATIO = 0.5
+_MIN_SAMPLE_EVENT_COUNT = 25
+
+# Agents whose renderable/usage surface sits under a nested payload wrapper, where a
+# flat fingerprint proves only that the envelope is intact while everything inside it
+# drifts unseen. Codex fingerprints flat as {payload,timestamp,type} and Copilot as
+# {data,id,parentId,timestamp,type} — almost nothing. Claude's envelope is genuinely
+# informative (18 keys), but `.message` hid its content-block types and the entire
+# `usage` struct, so it belongs here too.
+_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude"}
+
+# Keys whose values are open-ended maps rather than fixed structs. Descending into
+# these turns ordinary content into permanent phantom drift — a new model name, tool
+# name, or edited file would each read as a new schema bucket — so the key itself is
+# recorded and the walk stops there.
+_NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
+    # `modelMetrics` is keyed by model id; the rest are whatever a tool happened to send.
+    "copilot": {"modelMetrics", "arguments", "toolArgs", "properties", "metrics"},
+    # `changes` is keyed by ABSOLUTE FILE PATH — walking it both invents a new bucket
+    # per edited file (permanent phantom drift) and writes the user's real paths into
+    # report artifacts. `arguments`/`parameters`/`inputSchema`/`_meta` are free-form
+    # tool payloads with the same problem minus the leak.
+    "codex": {"changes", "arguments", "parameters", "inputSchema", "_meta"},
+    # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
+    # but `.message` was opaque — hiding content-block types and the whole `usage`
+    # struct (cache_creation, server_tool_use, iterations). Nesting exposes those. The
+    # two exclusions are TOOL-defined, not Claude-format: `input` is a tool's parameter
+    # object (every new tool parameter would read as schema drift) and `toolUseResult`
+    # is a tool's output payload.
+    "claude": {"input", "toolUseResult"},
+}
+
+
+def _nested_bucket_walk(
+    bucket: str,
+    obj: dict[str, Any],
+    out: dict[str, set[str]],
+    depth: int,
+    max_depth: int,
+    opaque_keys: frozenset[str] = frozenset(),
+) -> None:
+    """Record `obj`'s keys under `bucket`, then recurse into dict-valued children.
+
+    Child buckets are `<bucket>.<key>`, with `:<type>` appended when the child carries
+    its own string `type` (codex's `event_msg`/`response_item` wrappers put the real
+    event name there). Keeping the key in the name means two different wrappers can
+    never collapse into one bucket.
+    """
+    ks = out.setdefault(bucket, set())
+    for k in obj.keys():
+        ks.add(k)
+    if depth >= max_depth:
+        return
+    for k, v in obj.items():
+        if k in opaque_keys:
+            continue
+        # Union EVERY dict in a list, not just the first. Lists here are heterogeneous
+        # — Claude's message.content mixes text/thinking/tool_use blocks — so taking the
+        # first element as representative hid every later block type, which is precisely
+        # the drift this is meant to catch. Only keys are collected, so this stays cheap.
+        children = (
+            [e for e in v[:_NESTED_LIST_SAMPLE_LIMIT] if isinstance(e, dict)]
+            if isinstance(v, list)
+            else ([v] if isinstance(v, dict) else [])
+        )
+        for child in children:
+            sub = f"{bucket}.{k}"
+            # Split by `type` ONLY at the payload wrapper (depth 0 -> 1). That is where
+            # the real event union lives (event_msg.payload:token_count). Deeper down,
+            # `type` tags enum-like config variants — sandbox_policy:read-only vs
+            # :danger-full-access, permission_profile:managed vs :disabled — and
+            # splitting on those makes an ordinary settings change look like a new
+            # schema bucket.
+            if depth == 0:
+                child_type = child.get("type")
+                if isinstance(child_type, str) and child_type:
+                    sub = f"{sub}:{child_type}"
+            _nested_bucket_walk(sub, child, out, depth + 1, max_depth, opaque_keys)
+
+
+def _nested_jsonl_schema_fingerprint(
+    path: Path,
+    max_lines: int,
+    max_depth: int = _NESTED_FINGERPRINT_MAX_DEPTH,
+    opaque_keys: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Like `_jsonl_schema_fingerprint`, but walks into nested payload wrappers.
+
+    A flat fingerprint reported `unknown_keys: {}` for codex while ten new
+    `turn_context.payload` keys had appeared, and — more seriously — it could never
+    see the `token_count`/`rate_limits` usage channel that
+    docs/agent-support/monitoring.md relies on this fingerprint to watch, because
+    those live under `event_msg.payload`.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors: int = 0
+    total_lines: int = 0
+
+    for raw in _tail_lines(path, max_lines):
+        total_lines += 1
+        try:
+            obj = json.loads(raw.strip())
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if not isinstance(obj, dict):
+            continue
+        t = obj.get("type")
+        event_type = t if isinstance(t, str) and t else "<missing-type>"
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        _nested_bucket_walk(event_type, obj, type_keys, 0, max_depth, opaque_keys)
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parsed_lines": total_lines,
+        "parse_errors": parse_errors,
+        "nested_depth": max_depth,
+        "nested_opaque_keys": sorted(opaque_keys),
+    }
+
+
+def _observed_event_count(fingerprint: dict[str, Any] | None) -> int | None:
+    """Total events a fingerprint actually saw, across every record kind."""
+    if not isinstance(fingerprint, dict):
+        return None
+    counts = fingerprint.get("type_counts")
+    if isinstance(counts, dict) and counts:
+        total = 0
+        for n in counts.values():
+            if isinstance(n, int):
+                total += n
+        return total
+    for key in ("parsed_lines", "parsed_messages"):
+        v = fingerprint.get(key)
+        if isinstance(v, int):
+            return v
+    return None
+
+
+def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -> dict[str, Any]:
+    """Single place that decides how deep an agent's JSONL is fingerprinted.
+
+    Baseline and observed samples MUST go through this together — fingerprinting one
+    side flat and the other nested would diff two different alphabets.
+    """
+    if agent_name == "kimi":
+        return _kimi_wire_schema_fingerprint(path, max_lines=max_lines)
+    if agent_name in _NESTED_PAYLOAD_AGENTS:
+        return _nested_jsonl_schema_fingerprint(
+            path,
+            max_lines=max_lines,
+            opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get(agent_name, ())),
+        )
+    return _jsonl_schema_fingerprint(path, max_lines=max_lines)
 
 
 _KIMI_LOOP_EVENT_TYPE = "context.append_loop_event"
@@ -1491,7 +1722,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
                 continue
             bp = Path(p)
             if bp.exists():
-                fps.append(_jsonl_schema_fingerprint(bp, max_lines=5000))
+                fps.append(_schema_fingerprint_for_agent(agent_name, bp, max_lines=5000))
     elif agent_name == "kimi":
         # Kimi needs the nested loop-event fingerprint: the fixtures' renderable
         # content lives under `context.append_loop_event` -> `event`, so a plain
@@ -1565,7 +1796,10 @@ def _merge_type_keys(fingerprints: list[dict[str, Any]]) -> dict[str, list[str]]
 
 
 def _schema_diff(
-    *, observed_type_keys: dict[str, list[str]], baseline_type_keys: dict[str, list[str]]
+    *,
+    observed_type_keys: dict[str, list[str]],
+    baseline_type_keys: dict[str, list[str]],
+    observed_event_count: int | None = None,
 ) -> dict[str, Any]:
     observed_types = set(observed_type_keys.keys())
     baseline_types = set(baseline_type_keys.keys())
@@ -1585,12 +1819,23 @@ def _schema_diff(
             missing_keys[t] = miss
 
     unknown_only_is_empty = (not unknown_types and not unknown_keys)
+    # How much of the known format this sample actually exercised. A session too thin
+    # to contain most baseline types cannot evidence "no drift" — it just had nothing
+    # to drift. Without this, a 4-line hello session reports a clean bill of health
+    # and silently outranks a rich session that showed real unknown types.
+    coverage_ratio = (
+        len(observed_types & baseline_types) / len(baseline_types) if baseline_types else None
+    )
     return {
         "unknown_types": unknown_types,
         "missing_types": missing_types,
         "unknown_keys": unknown_keys,
         "missing_keys": missing_keys,
         "unknown_only_is_empty": unknown_only_is_empty,
+        "baseline_type_count": len(baseline_types),
+        "observed_baseline_type_count": len(observed_types & baseline_types),
+        "coverage_ratio": coverage_ratio,
+        "observed_event_count": observed_event_count,
         "is_empty": (not unknown_types and not missing_types and not unknown_keys and not missing_keys),
     }
 
@@ -1996,6 +2241,23 @@ def _build_compatibility_assessment(
         and isinstance(schema_diff, dict)
         and schema_diff.get("unknown_only_is_empty") is False
     )
+    # A sample that exercised almost none of the known format proves nothing. This
+    # is not hypothetical: a "Say hello" prebump session landed in the real store,
+    # became the newest sample, and flipped antigravity from format_drift_detected
+    # to clean without a single parser change.
+    coverage_ratio = schema_diff.get("coverage_ratio") if isinstance(schema_diff, dict) else None
+    observed_events = schema_diff.get("observed_event_count") if isinstance(schema_diff, dict) else None
+    # Low coverage alone is NOT thin: a baseline deliberately contains rare
+    # interactive-only families (claude's ai-title, pr-link, permission-mode) that a
+    # perfectly good 1000-event session will never contain. Only a sample that is both
+    # narrow AND tiny has genuinely shown nothing.
+    thin_sample = (
+        isinstance(coverage_ratio, (int, float))
+        and coverage_ratio < _MIN_SAMPLE_COVERAGE_RATIO
+        and isinstance(observed_events, int)
+        and observed_events < _MIN_SAMPLE_EVENT_COUNT
+        and not unknown_schema_drift
+    )
 
     if monitoring_failed:
         blockers.append("latest_source_failed")
@@ -2011,6 +2273,8 @@ def _build_compatibility_assessment(
         blockers.append(str(sample_freshness.get("stale_reason") or "stale_sample"))
     elif cli_binary_unresolved:
         blockers.append("cli_binary_unresolved")
+    if thin_sample:
+        blockers.append("sample_coverage_too_thin")
     if latest_status.startswith("unknown"):
         blockers.append(latest_status)
     if not real_session_driver_configured:
@@ -2021,7 +2285,7 @@ def _build_compatibility_assessment(
         failed_prebump_class = value if isinstance(value, str) and value else "driver_failed"
         blockers.append(f"real_session_{failed_prebump_class}")
 
-    if installed and fresh_schema_evidence and not probe_failed and not unknown_schema_drift:
+    if installed and fresh_schema_evidence and not probe_failed and not unknown_schema_drift and not thin_sample:
         supports_installed = True
     elif installed:
         supports_installed = False
@@ -2045,6 +2309,16 @@ def _build_compatibility_assessment(
         next_action = "run prebump validator for the affected agent"
         supports_latest = False if upstream else None
         supports_installed = False if installed_newer_than_verified else supports_installed
+        confidence = "high"
+    elif thin_sample:
+        verdict = "blocked_thin_sample"
+        scope = "none"
+        next_action = (
+            "sample exercised too little of the known format to evidence anything; "
+            "generate a richer real session (tool calls, not a one-line prompt) and rerun"
+        )
+        supports_latest = False if upstream else None
+        supports_installed = False if installed else None
         confidence = "high"
     elif (installed_newer_than_verified or upstream_newer_than_verified) and not fresh_schema_evidence:
         verdict = "blocked_no_fresh_evidence"
@@ -2633,14 +2907,13 @@ def _run_prebump(
                     )
             elif agent_name == "cursor":
                 fp = _cursor_transcript_schema_fingerprint(result.session_path, max_lines=5000)
-            elif agent_name == "kimi":
-                fp = _kimi_wire_schema_fingerprint(result.session_path, max_lines=5000)
             else:
-                fp = _jsonl_schema_fingerprint(result.session_path, max_lines=5000)
+                fp = _schema_fingerprint_for_agent(agent_name, result.session_path, max_lines=5000)
             if baseline_type_keys:
                 schema_diff = _schema_diff(
                     observed_type_keys=fp.get("type_keys") or {},
                     baseline_type_keys=baseline_type_keys,
+                    observed_event_count=_observed_event_count(fp),
                 )
                 fresh_matches = bool(schema_diff.get("unknown_only_is_empty"))
             else:
@@ -2916,10 +3189,38 @@ def main(argv: list[str]) -> int:
                     else:
                         newest = _newest_file(roots, glob, exclude_globs=exclude_globs)
                     if newest:
-                        if kind == "kimi_wire_newest":
-                            local_fp = _kimi_wire_schema_fingerprint(newest, max_lines=max_lines)
+                        def _fp(p: Path) -> dict[str, Any]:
+                            if kind == "kimi_wire_newest":
+                                return _kimi_wire_schema_fingerprint(p, max_lines=max_lines)
+                            return _schema_fingerprint_for_agent(agent_name, p, max_lines=max_lines)
+
+                        local_fp = _fp(newest)
+                        # Union the next few recent sessions into the same fingerprint so
+                        # one thin session cannot decide the verdict on its own.
+                        if required_types:
+                            recent = _newest_files_with_types(
+                                roots, glob, required_types, _LOCAL_SCHEMA_SAMPLE_COUNT,
+                                max_lines=400, exclude_globs=exclude_globs,
+                            )
                         else:
-                            local_fp = _jsonl_schema_fingerprint(newest, max_lines=max_lines)
+                            recent = _newest_files(
+                                roots, glob, _LOCAL_SCHEMA_SAMPLE_COUNT, exclude_globs=exclude_globs
+                            )
+                        siblings = [p for p in recent if p != newest]
+                        sampled_fps = [local_fp]
+                        for sib in siblings:
+                            try:
+                                sampled_fps.append(_fp(sib))
+                            except OSError:
+                                continue
+                        if len(sampled_fps) > 1:
+                            local_fp["type_keys"] = _merge_type_keys(sampled_fps)
+                            merged_counts: dict[str, int] = {}
+                            for fp in sampled_fps:
+                                for t, n in (fp.get("type_counts") or {}).items():
+                                    merged_counts[t] = merged_counts.get(t, 0) + int(n)
+                            local_fp["type_counts"] = dict(sorted(merged_counts.items()))
+                        local_fp["sampled_files"] = [str(fp.get("file")) for fp in sampled_fps]
                 elif kind == "antigravity_markdown_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)
@@ -2980,6 +3281,7 @@ def main(argv: list[str]) -> int:
                         schema_diff = _schema_diff(
                             observed_type_keys=local_fp.get("type_keys") or {},
                             baseline_type_keys=baseline_type_keys,
+                            observed_event_count=_observed_event_count(local_fp),
                         )
                         schema_matches_baseline = bool(schema_diff.get("unknown_only_is_empty"))
                         weekly_details["baseline_schema"] = {
