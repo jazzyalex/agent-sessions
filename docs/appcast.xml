@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.6.4</title>
-            <pubDate>Tue, 21 Jul 2026 11:02:51 -0700</pubDate>
+            <title>4.7</title>
+            <pubDate>Tue, 04 Aug 2026 15:36:15 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,32 +27,38 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.6.4</h2>
+<h2>What&#x27;s New in 4.7</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Compact and Full Agent Cockpit are retired; the Quota Meter is the only mode.</strong> The two larger cockpit modes carried a session list, search, By Project grouping and filter pills that duplicated what the main window already does better, so they are gone and the Quota Meter absorbs what people actually used it for. If you last quit in Compact or Full, you land on the Quota Meter — no setting to restore, nothing to reconfigure, and the old modes&#x27; leftover preferences and window positions are cleared for you on launch. Where you put the Quota Meter is untouched.</li>
-<li><strong>Two keyboard shortcuts change.</strong> <strong>⇧⌘M</strong> (&quot;Cycle Cockpit View&quot;) is gone — cycling means nothing with one mode. <strong>⌘⌥⇧C</strong> now shows and hides the Quota Meter, where it used to select the mode and bring the window forward; pressing it while the Quota Meter is on screen hides it.</li>
-<li><strong>The View menu is a single Quota Meter toggle</strong>, replacing the three-mode submenu, and <strong>Settings → Agent Cockpit is now Settings → Quota Meter</strong> — its Compact Mode and Full Mode sections go with the modes they configured.</li>
-<li><strong>Gone with the modes:</strong> the session search field and ⌘K, By Project grouping, the All/Active/Idle filter pills, ⌘1–9 and ⌘0 row focus, the row context menu, the full-mode toolbar row, and the Full/Compact quota footer with its hover drawer. The Quota Meter keeps its provider limit rows, Session Runway drawer, chrome modes, pin, enlarged text, the runway and probe popovers, the open-app and settings buttons, and ⌘W.</li>
+<li><strong>Kimi Code is the eleventh agent Agent Sessions reads.</strong> Its sessions land in the session list, in search and in Analytics, with tool calls and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Kimi Code on your Mac, and Settings → Agents gains a Kimi Code pane for the binary path and storage root.</li>
+<li><strong>Active Claude cloud sessions appear in the Quota Meter.</strong> Sessions running on Anthropic&#x27;s infrastructure were invisible outside Claude Desktop; they now sit in the pinned Quota Meter beside your local agents, marked <strong>Cloud</strong> and ordered above them. They carry no burn rate — there is no local transcript to measure — so they report status instead of a runway. Off by default, and offered only once you have saved a claude.ai cookie under Settings → Usage Tracking, since the fetch depends on it.</li>
+</ul>
+<h3>Features</h3>
+<ul>
+<li><strong>Agent runs with no terminal now reach the Quota Meter.</strong> A <code>claude -p</code> run started by launchd, a shell script, or another app has no controlling terminal, and presence discovery required one — so those sessions never appeared in Live Sessions even though the main window indexed their transcripts normally. They are picked up now.</li>
+<li><strong>Analytics counts Pi sessions.</strong> Pi has been a supported source since 3.8 but was missing from the analytics rollups. Its sessions, messages, durations and projects are now included, with a Pi-only filter alongside the others.</li>
+</ul>
+<h3>Improvements</h3>
+<ul>
+<li><strong>Turning an agent on or off updates the rest of the app.</strong> Agent Sessions only watched five of the eleven agent switches, so toggling any of the other six left Analytics and the usage meters running on the previous set until relaunch.</li>
+<li><strong>A refused Copy Resume Command leaves your clipboard alone.</strong> It cleared the pasteboard before working out whether it had anything to write, so the cases where it declines — a Codex session whose id cannot be resolved, a session with no known working directory — wiped whatever you were holding and replaced it with nothing.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>The Quota Meter&#x27;s text-size button no longer disappears when you switch to Standard.</strong> Standard text makes the window about 30pt narrower, and the toolbar used to shed that button first — hiding the only control that switches back to Enlarged, so the setting was one-way from inside the window. The toolbar now narrows before it drops anything: the Session Runway control gives up its presentation half first, and every button stays put.</li>
+<li><strong>Pi and Cursor sessions get their working directory back.</strong> After a full parse, a Pi or Cursor session lost the directory it ran in. Two things broke as a result: its resume command came back without the <code>cd</code>, so the resumed agent started wherever your terminal happened to point, and the search index stored no path for it at all, so filtering by project silently stopped matching those sessions. Both are fixed, and sessions indexed before the fix are re-read once in the background after you update, so the repair reaches the history you already have rather than only new sessions.</li>
+<li><strong>A resume that fails now tells you.</strong> Every reason a resume could fail — a CLI that could not be found, a Warp that refused to launch, a session whose working directory is unknown — produced an error nothing ever displayed, so all of them looked identical on screen: nothing happened. Failures now come back as an alert. Warp in particular used to report success even when it never opened, and a failed launch would quietly retry a different command that could resume an entirely different session while reporting the one you clicked.</li>
+<li><strong>Checking an agent&#x27;s CLI no longer freezes the window.</strong> Probing a binary spawns a login shell and a <code>--help</code> for each candidate path, and eight of the agent coordinators ran that on the main thread with no timeout — so a slow shell profile or an unresponsive binary hung the whole app until it finished. Probes now run off the main thread.</li>
+<li><strong>The Codex meter no longer sits on &quot;reconnecting…&quot; forever.</strong> With no Codex CLI run in the previous two days, the background refresh returned before ever making its live usage call — so whenever Agent Sessions was not the frontmost app the meter stayed on &quot;reconnecting…&quot; indefinitely, and only recovered if you focused the window. The live fetch no longer depends on a recent local session file. And when a fetch genuinely comes back empty, the meter now says <strong>no active session</strong> rather than implying a connection it is still waiting on.</li>
+<li><strong>Codex sessions containing an auto-review turn reappear in the dollar view.</strong> Codex bills real tokens for its <code>codex-auto-review</code> model, but no price key matched it — and an unpriceable slice makes the whole session unpriceable, so the runway dropped those sessions from the $ view entirely and fell back to tokens per hour without saying why. The model is priced now.</li>
+<li><strong>Antigravity code edits and web searches read as tool work again.</strong> <code>CODE_ACTION</code> and <code>SEARCH_WEB</code> carry the same result envelope as the file and command events, but fell through to the parser&#x27;s default branch and rendered as system noise — a code edit was indistinguishable from a checkpoint. Transcripts the CLI truncated upstream are also marked as such now, instead of rendering as though they were complete.</li>
 </ul>
-<h3>Reminder: What You Got in 4.6</h3>
-<ul>
-<li><strong>Read your Claude subscription usage without the CLI — paste a session cookie.</strong> If you don&#x27;t run the Claude CLI, Agent Sessions reads usage over the web instead. On macOS 14+ Safari stopped handing the claude.ai session to other apps, so that path had quietly become a dead end. Now you paste your claude.ai session cookie once in Settings → Usage Tracking: it&#x27;s kept in your Keychain, needs no Full Disk Access, and sign-in never leaves your browser. A <strong>Test now</strong> button confirms it works on the spot.</li>
-<li><strong>Paste-a-cookie web usage for Claude.</strong> Settings → Usage Tracking accepts your claude.ai <code>sessionKey</code> (or the whole cookie header) and uses it directly for usage lookups — no Full Disk Access, no scraping. The app only holds the token you hand it, stored in the Keychain. Reading the cookie from Safari is kept as a legacy fallback for anyone it still works for.</li>
-<li><strong>The Web API path stops telling signed-in users to &quot;sign in&quot;.</strong> When it couldn&#x27;t find a claude.ai session it advised signing in &quot;at claude.ai (default profile)&quot; — impossible to satisfy on macOS 14/15, where Safari keeps the live cookie in a store apps can&#x27;t read. The messages are now honest and cause-aware, and point to the fix that actually works: paste your session cookie.</li>
-<li><strong>The Quota Meter&#x27;s right-click hint stays findable.</strong> In On-Demand mode the &quot;Right-click for controls&quot; hint used to show once and never again — but right-click is the only way back to the toolbar, so it now reappears on every hover.</li>
-</ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.4">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.6.4</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.7">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.7</a></p>
 </div>
             ]]></description>
-            <sparkle:version>65</sparkle:version>
-            <sparkle:shortVersionString>4.6.4</sparkle:shortVersionString>
+            <sparkle:version>66</sparkle:version>
+            <sparkle:shortVersionString>4.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.6.4/AgentSessions-4.6.4.dmg" length="21477841" type="application/octet-stream" sparkle:edSignature="i9U6stG9W3sS22HopHFVvNs6k8zKNT/0Exf1ZDJIbwS/BWbhaUDJUbVJch4uvlQQhYz1RCsU3guQn1qfvYrBCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg" length="21968620" type="application/octet-stream" sparkle:edSignature="Sa1Jn7Gex72EvGahmnZ0o/0NPOJLL27cuKoJNz6JIeIDuwIWCwoV/Y7UVELp6dsH5TkSZbOxHagVYJ7V0NecCw=="/>
         </item>
     </channel>
 </rss>
