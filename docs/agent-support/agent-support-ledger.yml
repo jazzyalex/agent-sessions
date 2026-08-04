@@ -11,6 +11,47 @@
 entries:
   - agent_sessions_version: "4.6.4"
     as_of_date_utc: "2026-08-03"
+    as_of_commit: "71371567"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.146.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "scripts/probe_scan_output/agent_watch/20260803-210726Z-prebump/report.json"]
+          notes: "Bumped from fresh sandboxed prebump (fresh_matches_baseline=True). The fixture was rebuilt at the 0.146.x shape and is now verified under NESTED fingerprinting to depth 3, which the flat fingerprint could never check."
+        usage_limits:
+          max_verified_version: "0.146.0"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl"]
+          notes: "FIRST TIME the passive usage channel is actually covered. monitoring.md claimed the schema fingerprint watched token_count/rate_limits, but those live under event_msg.payload and the flat fingerprint stopped at {payload,timestamp,type}. Nested fingerprinting now pins event_msg.payload:token_count.info{,.total_token_usage,.last_token_usage} and .rate_limits{,.primary,.credits} - the rate_limits.credits struct {has_credits,unlimited,balance} had never been seen by monitoring at all."
+      claude:
+        sessions:
+          max_verified_version: "2.1.220"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "scripts/probe_scan_output/agent_watch/20260803-204616Z-prebump/report.json"]
+          notes: "Bumped from fresh --allow-real-home prebump (sandbox cannot reach Keychain/OAuth: 'Not logged in - Please run /login'). Fixture gained two additive top-level types found by multi-session sampling: relocated {sessionId,relocatedCwd} and worktree-state {sessionId,worktreeSession}."
+      opencode:
+        sessions:
+          max_verified_version: "1.18.11"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260803-205847Z-prebump/report.json"]
+          notes: "Bumped from fresh sandboxed prebump; cleared a blocked_stale_sample (sample_older_than_cli). No parser or fixture change."
+      pi:
+        sessions:
+          max_verified_version: "0.83.0"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260803-205847Z-prebump/report.json"]
+          notes: "Bumped from fresh sandboxed prebump; cleared a blocked_stale_sample (sample was from 2026-05-12, older than both the CLI and the freshness window). No parser or fixture change."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.77"
+          evidence: ["Resources/Fixtures/stage0/agents/copilot/small.jsonl", "scripts/probe_scan_output/agent_watch/20260803-213316Z-prebump/report.json"]
+          notes: "Bumped 1.0.65->1.0.77 after FIXING the copilot_prompt driver, which had been failing rc=1 with 'No authentication information found'. Two driver defects: it passed the deprecated --config-dir (copilot warns and points at COPILOT_HOME), and its declared credential_file ~/.copilot/hosts.json NO LONGER EXISTS, so with none of COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN exported there was no auth path at all. Driver now sets COPILOT_HOME and falls back to the locally authenticated `gh auth token` - one of the three methods copilot's own error message lists. The working driver immediately paid for itself by finding real 1.0.77 drift: assistant.message.data gained encryptedContent+rte, tool.execution_start/complete gained rte, system.message gained interactionId, and session.auto_mode_resolved gained eight router-telemetry keys (routingMethod, availableModels, fallback, stickyOverride, routerLatencyMs, endToEndLatencyMs, chosenShortfall, hasImage). All additive keys, no new types, non-breaking. Fixture also moved session.auto_mode_resolved / session.usage_checkpoint into the BASELINE rather than schema_drift.jsonl, which is why those stopped re-reporting as drift every week, and now covers session.shutdown.data.tokenDetails{input,output,cache_read,cache_write} + totalNanoAiu - a usage surface nested fingerprinting exposed."
+      antigravity:
+        sessions:
+          max_verified_version: "1.1.1"
+          notes: "HELD at 1.1.1 despite installed 1.1.10. FORMAT DRIFT FOUND AND FIXED (see agent-json-tracking.md), but the only rich session on disk predates the 1.1.10 upgrade; both 1.1.10-era sessions are trivial. A tool-using session under 1.1.10 is needed before bumping. antigravity has no configured upstream source, so its verdict is latest_unknown regardless."
+      openclaw:
+        sessions:
+          max_verified_version: "2026.6.11"
+          notes: "HELD at 2026.6.11 despite installed 2026.7.1 - prebump fails 'missing-provider-auth' in the sandbox, and the known real-HOME path returns refresh_token_reused 401 because OpenClaw shares the Codex OAuth token store. Needs a fresh sign-in, not a retry."
+  - agent_sessions_version: "4.6.4"
+    as_of_date_utc: "2026-08-03"
     as_of_commit: "747fcfaa"
     verified:
       kimi:

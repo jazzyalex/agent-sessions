@@ -77,6 +77,8 @@ Interpretation:
 - `blocked_stale_sample`: evidence predates the installed CLI; run prebump before claiming support.
 - `blocked_no_fresh_evidence`: a version changed but no fresh matching sample proves support.
 - `format_drift_detected`: unknown schema/storage/usage fields appeared; update fixtures/parsers.
+- `blocked_thin_sample`: the sample was both narrow and tiny, so it evidenced nothing either
+  way (§5a). Generate a session that actually uses tools — not a one-line prompt.
 - `monitoring_broken`: latest source, usage probe, or discovery contract failed.
 - `real_session_auth_failed` in blockers: the real-session driver ran but the
   sandboxed agent was not authenticated; re-auth or provide the configured env
@@ -125,6 +127,14 @@ Flags:
 - `--allow-real-home` — copilot/real-HOME opt-in after a sandbox-breach
   diagnostic; never persistent.
 
+**A passing prebump is a floor, not a ceiling.** Drivers use one-line prompts, so a fresh
+session may contain only the four most basic event types and still report
+`fresh_matches_baseline=True` — it proves the CLI still writes parseable output, not that
+rich event families are unchanged. For `real_home_session: true` agents that session also
+lands in the real store and becomes the newest sample; §5a's multi-session union is what
+stops it from masking drift. Check the fresh session's type count before treating a pass as
+broad evidence.
+
 Configured real-session drivers today are `codex`, `claude`, `antigravity`,
 `copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, and `pi`. Droid is
 legacy-only and excluded from active checks.
@@ -149,7 +159,11 @@ sandbox.
 Usage and limits tracking can drift **independently** of session schema. Monitor both.
 
 ### Codex
-- **Passive channel:** session JSONL `token_count` / `rate_limits` event structure.
+- **Passive channel:** session JSONL `token_count` / `rate_limits` event structure. This is
+  covered by the schema fingerprint **only because codex is fingerprinted nested** (§5a) —
+  these events live under `event_msg.payload`, and the flat fingerprint that ran until
+  2026-08-03 stopped at `{payload,timestamp,type}` and could never see them. If codex is
+  ever moved back to the flat fingerprint, this channel goes unwatched again.
 - **Active channel (weekly):** `codex_status_capture.sh` output schema — parsed as
   `codex_status_json` by `agent_watch.py`.
 - Check: in `results.codex.weekly.probes` (a list), the entry with
@@ -222,6 +236,12 @@ broken probe, **stale prices fail silently**: the number still renders, just wro
      key; the zero-rate exemption is what keeps it from dropping the whole session.
      If Claude ever gives `<synthetic>` real tokens, that exemption stops applying
      and every Claude session would vanish from `$` — re-check this if it changes.
+   - `codex-auto-review` (Codex) — Codex's internal auto-review label, on `turn_context`.
+     It bills **real** tokens, and because an unpriced *contributing* slice makes
+     `dollarsPerHour` return nil for the whole session, a missing key here didn't
+     understate the cost — it deleted the session from `$` entirely. Priced at the
+     gpt-5.6/sol default since 2026-08-03. This is the failure mode to look for whenever
+     a session is missing from `$`: check for a slug with no key before anything else.
    - `gpt-5.6-codex` (Codex) — no key of its own; resolves to the `gpt-5.6` fallback
      (sol pricing). OpenAI publishes no separate `-codex` rate, so that is the best
      available assumption. The bare `gpt-5.6` key exists for exactly this.
@@ -345,6 +365,60 @@ Key contracts (simplified from regexes in `agent-watch-config.json`):
 
 ---
 
+## 5a  How the Fingerprint Works (and what it cannot see)
+
+Read this before trusting a clean `unknown_types=[]`.
+
+**Nested vs flat.** `_schema_fingerprint_for_agent()` in `scripts/agent_watch.py` is the one
+place that decides depth. Codex, Copilot and Claude use `_nested_jsonl_schema_fingerprint`
+(depth 3); Kimi uses its own loop-event walker; everyone else is flat. Baseline and observed
+sample always go through this same function — fingerprinting one side flat and the other
+nested diffs two different alphabets.
+
+Lists are **unioned across every element** (capped at `_NESTED_LIST_SAMPLE_LIMIT`), not
+sampled by their first item. Claude's `message.content` mixes text/thinking/tool_use blocks,
+so first-item-only made later block types invisible — the exact drift the nesting exists to
+catch.
+
+Two rules keep nesting from manufacturing drift:
+- **`_NESTED_OPAQUE_KEYS`** — keys whose values are open-ended maps. Codex's
+  `patch_apply_end.changes` is keyed by absolute file path; descending into it invents a
+  bucket per edited file *and writes real user paths into report artifacts*. Copilot keys
+  `modelMetrics` by model id. Add a key here rather than accepting the noise.
+- **The `:type` discriminator applies only at the payload wrapper** (depth 0→1), where the
+  real event union lives (`event_msg.payload:token_count`). Deeper, `type` tags enum-like
+  config variants (`sandbox_policy:read-only`), and splitting on those makes an ordinary
+  settings change look like schema drift.
+
+Claude's opaque keys are `input` and `toolUseResult` — both are TOOL-defined payloads, not
+Claude format, so walking them would make every new tool read as schema drift.
+
+**Still flat:** OpenClaw, Pi, Droid, plus the bespoke Hermes/OpenCode/Cursor/Kimi
+fingerprinters. Their payload interiors are unwatched; nothing has been lost to that yet,
+but the same blind spot applies in principle.
+
+**Multi-session sampling.** Weekly fingerprints the newest `_LOCAL_SCHEMA_SAMPLE_COUNT` (5)
+sessions and unions them. This exists because sampling one session let whichever session was
+newest decide the verdict — a 4-line "Say hello" prebump session, left in the real store by
+`--allow-real-home`, once flipped antigravity from `format_drift_detected` to clean with the
+drift still sitting in a 92KB session two files back. When `required_types` is configured,
+sibling sampling **must** honour it (`_newest_files_with_types`): OpenClaw's `**/*.jsonl`
+glob otherwise sweeps in audit logs and an embedded codex-home and reports codex's event
+types as OpenClaw drift.
+
+**`blocked_thin_sample`** fires only when a sample is *both* narrow (<50% of baseline types)
+and tiny (<25 events). Coverage alone is not enough: baselines deliberately contain rare
+interactive-only families (`ai-title`, `pr-link`, `permission-mode`) that a perfectly healthy
+1000-event session will never contain.
+
+**Baseline semantics.** `_baseline_type_keys_for_agent()` excludes `*schema_drift*` fixtures.
+So once a drifted type is verified and handled, it belongs in the **normal** baseline fixture
+— otherwise it re-reports as drift every week forever (Copilot's `session.auto_mode_resolved`
+and `session.usage_checkpoint` did exactly that from 2026-07-22 until 2026-08-03).
+`schema_drift.jsonl` is for adversarial/speculative shapes only.
+
+---
+
 ## 5  What to Collect as Evidence
 
 From the weekly report (all agents):
@@ -363,6 +437,8 @@ Optional (recommended when a bump is needed):
 ## 6  Verification Update Checklist (after approval)
 
 1. **Refresh fixtures** for the affected agent under `Resources/Fixtures/stage0/agents/<agent>/`.
+   Put verified-and-handled types in the **normal** fixture, not `schema_drift.jsonl` — see §5a.
+   Make the fixture a **superset** of the old key sets; silently dropping keys shrinks the baseline.
 2. Ensure fixtures include the "important" event families when present:
    - Session metadata / `session_meta` payload keys.
    - Tool call / tool result events.

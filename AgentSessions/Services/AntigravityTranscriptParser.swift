@@ -37,6 +37,11 @@ enum AntigravityTranscriptParser {
             let ts = (obj["created_at"] as? String).flatMap { iso.date(from: $0) }
             if let ts { if firstDate == nil { firstDate = ts }; lastDate = ts }
             let content = obj["content"] as? String
+            // The CLI clips long payloads upstream and names the clipped fields in
+            // `truncated_fields`. Without surfacing it the transcript looks complete
+            // when it is not, so mark the text we hand on.
+            let contentTruncated = (obj["truncated_fields"] as? [Any])?
+                .contains { ($0 as? String) == "content" } ?? false
             let raw = line
 
             switch type {
@@ -52,8 +57,13 @@ enum AntigravityTranscriptParser {
                     // A PLANNER_RESPONSE may carry the model's actual answer in `content`
                     // and/or internal reasoning in `thinking`. Prefer the answer.
                     let thinking = obj["thinking"] as? String
-                    let assistantText = (obj["content"] as? String) ?? thinking ?? ""
-                    events.append(makeEvent(sid, eventID(idx), ts, .assistant, "assistant", assistantText, nil, nil, nil, raw))
+                    let assistantText = content ?? thinking ?? ""
+                    // `truncated_fields` names `content` specifically, so only mark when
+                    // that is what we rendered — falling back to `thinking` must not
+                    // inherit a truncation flag that was never about it.
+                    events.append(makeEvent(sid, eventID(idx), ts, .assistant, "assistant",
+                                            markTruncated(assistantText, contentTruncated && content != nil),
+                                            nil, nil, nil, raw))
                     if let calls = obj["tool_calls"] as? [[String: Any]] {
                         for (ci, call) in calls.enumerated() {
                             let name = call["name"] as? String
@@ -65,13 +75,19 @@ enum AntigravityTranscriptParser {
                         }
                     }
                 }
-            case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY":
+            // Every one of these carries the same MODEL-sourced result envelope
+            // (`source`/`status`/`step_index`/`content`), so they all render as tool
+            // results. CODE_ACTION and SEARCH_WEB were previously left to `default:`
+            // and showed up as system meta noise instead of the tool work they are.
+            case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY", "CODE_ACTION", "SEARCH_WEB":
                 if includeEvents {
-                    events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, lastToolName, nil, content, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .tool_result, "tool", nil, lastToolName, nil,
+                                            markTruncated(content, contentTruncated), raw))
                 }
-            default: // CHECKPOINT, CONVERSATION_HISTORY, unknown
+            default: // CHECKPOINT, CONVERSATION_HISTORY, SYSTEM_MESSAGE, unknown
                 if includeEvents {
-                    events.append(makeEvent(sid, eventID(idx), ts, .meta, "system", content, nil, nil, nil, raw))
+                    events.append(makeEvent(sid, eventID(idx), ts, .meta, "system",
+                                            markTruncated(content, contentTruncated), nil, nil, nil, raw))
                 }
             }
         }
@@ -153,6 +169,16 @@ enum AntigravityTranscriptParser {
     /// directly; tool-call events append a `-t<ci>` suffix so their ids never collide
     /// with a later line's stem (e.g. line 1's first tool call must not equal line 100).
     private static func eventID(_ idx: Int) -> String { String(format: "%04d", idx) }
+
+    /// Appends a marker when the CLI reported `content` in `truncated_fields`. The
+    /// clipping happens upstream, so this is the only signal that what we show is
+    /// partial; silently rendering it would misrepresent the transcript.
+    static let truncationMarker = "\n\n[content truncated by Antigravity CLI]"
+
+    private static func markTruncated(_ text: String?, _ truncated: Bool) -> String? {
+        guard truncated, let text, !text.isEmpty else { return text }
+        return text + truncationMarker
+    }
 
     private static func makeEvent(_ sid: String, _ idSuffix: String, _ ts: Date?, _ kind: SessionEventKind,
                                   _ role: String, _ text: String?, _ tool: String?, _ input: String?,

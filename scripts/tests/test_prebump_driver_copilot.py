@@ -12,6 +12,17 @@ sys.path.insert(0, str(REPO / "scripts"))
 import agent_watch_prebump_drivers as drv_mod
 
 
+def _gh_stub(argv):
+    """The driver now falls back to `gh auth token` when no token env var is set.
+    Every fake_run below must let that call through untouched — it is not the
+    copilot invocation and carries none of copilot's argv shape."""
+    if argv[:1] == ["gh"]:
+        import subprocess as _sp
+        return _sp.CompletedProcess(argv, 0, stdout="gho_stub_token\n", stderr="")
+    return None
+
+
+
 def test_copilot_driver_succeeds_without_leak(tmp_path, monkeypatch):
     real_home = tmp_path / "realhome"
     (real_home / ".copilot").mkdir(parents=True)
@@ -23,6 +34,9 @@ def test_copilot_driver_succeeds_without_leak(tmp_path, monkeypatch):
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        _stub = _gh_stub(argv)
+        if _stub is not None:
+            return _stub
         assert env is not None
         sandbox_home = Path(env["HOME"])
         assert sandbox_home == sb
@@ -50,6 +64,9 @@ def test_copilot_driver_rejects_real_home_session_without_probe_marker(tmp_path,
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        _stub = _gh_stub(argv)
+        if _stub is not None:
+            return _stub
         assert env is not None
         sess = real_home / ".copilot" / "session-state" / "uuid-old"
         sess.mkdir(parents=True, exist_ok=True)
@@ -78,6 +95,9 @@ def test_copilot_driver_fails_on_real_home_leak(tmp_path, monkeypatch):
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        _stub = _gh_stub(argv)
+        if _stub is not None:
+            return _stub
         assert env is not None
         leaked = real_home / ".copilot" / "leaked.txt"
         leaked.write_text("oops")
@@ -113,6 +133,9 @@ def test_copilot_driver_detects_deleted_file_as_leak(tmp_path, monkeypatch):
     sb.mkdir()
 
     def fake_run(argv, *, env=None, **kwargs):
+        _stub = _gh_stub(argv)
+        if _stub is not None:
+            return _stub
         assert env is not None
         # Delete the file from real ~/.copilot during the run
         victim.unlink()
