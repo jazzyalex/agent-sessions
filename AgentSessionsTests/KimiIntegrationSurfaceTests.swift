@@ -139,6 +139,38 @@ final class KimiIntegrationSurfaceTests: XCTestCase {
         XCTAssertEqual(session(source: .kimi, events: []).cwd, "/tmp/project")
     }
 
+    // MARK: - nil vs zero commands
+
+    /// The consequence of `lightweightCommands` being nil rather than 0 when a
+    /// truncated preview found none. `passesHasCommandsFilter` collapses the two
+    /// with `?? 0`, so only `shouldDeepScan` can tell them apart — and this is
+    /// the shape that reaches it: `KimiSessionIndexer` merges the *preview's*
+    /// command count with the *full parse's* events, so a session can carry a
+    /// stale count alongside real tool-call events.
+    ///
+    /// A stored 0 short-circuits before the event fallback and skips deep scan
+    /// despite the session plainly having commands. nil lets the fallback run.
+    func testNilCommandCountDefersToEventsWhileZeroSuppressesDeepScan() {
+        let withToolCalls = [event(kind: .user), event(kind: .tool_call)]
+
+        XCTAssertTrue(SearchCoordinator.shouldDeepScan(
+            session: session(source: .kimi, events: withToolCalls, lightweightCommands: nil)),
+            "nil means unknown, so the event count must decide")
+
+        XCTAssertFalse(SearchCoordinator.shouldDeepScan(
+            session: session(source: .kimi, events: withToolCalls, lightweightCommands: 0)),
+            "a stored 0 is a positive claim and short-circuits the event count")
+    }
+
+    /// And the ordinary cases still behave.
+    func testDeepScanUsesTheStoredCountWhenItIsPositive() {
+        XCTAssertTrue(SearchCoordinator.shouldDeepScan(
+            session: session(source: .kimi, events: [], lightweightCommands: 4)))
+        XCTAssertFalse(SearchCoordinator.shouldDeepScan(
+            session: session(source: .kimi, events: [], lightweightCommands: nil)),
+            "no count and no events means nothing to scan for")
+    }
+
     // MARK: - Copy-resume binary
 
     @MainActor

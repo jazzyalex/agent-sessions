@@ -944,7 +944,14 @@ extension AgentSessionsApp {
 
     private func handleAgentEnablementChange() {
         guard !AppRuntime.isRunningTests else { return }
-        unifiedIndexerHolder.unified?.recomputeNow()
+        // No recomputeNow() here. UnifiedSessionIndexer watches the same
+        // enablement keys, and syncAgentEnablementFromDefaults() updates the
+        // @Published flags that feed its own filter pipeline — so it recomputes
+        // itself. Worse, this observer registers at App init, i.e. before the
+        // indexer's, so calling it here ran a full recompute against flags that
+        // had not been synced yet: wasted work whose correctness rested on the
+        // second, correct recompute arriving afterwards. These two are the part
+        // nothing else covers.
         analyticsService?.refreshReadiness()
         updateUsageModels()
     }

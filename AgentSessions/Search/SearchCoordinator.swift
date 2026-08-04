@@ -623,7 +623,12 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         await currentTask?.value
     }
 
-    private static func shouldDeepScan(session: Session) -> Bool {
+    /// Internal, not private, so tests can pin the nil-vs-zero distinction in
+    /// `lightweightCommands`. This is the only consumer that treats the two
+    /// differently — `passesHasCommandsFilter` collapses them with `?? 0` — so
+    /// without reaching it, a parser emitting `0` where it means "unknown" is
+    /// unfalsifiable by the suite.
+    static func shouldDeepScan(session: Session) -> Bool {
         let estimatedCommands: Int = {
             if let c = session.lightweightCommands { return c }
             if session.events.isEmpty { return 0 }
