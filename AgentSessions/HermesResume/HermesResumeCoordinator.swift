@@ -63,13 +63,13 @@ final class HermesResumeCoordinator {
         }
 
         do {
-            try launcher.launchInTerminal(pkg)
+            try await launcher.launchInTerminal(pkg)
             return HermesResumeResult(launched: true, strategy: used, error: nil, command: pkg.shellCommand)
         } catch {
             if policy == .resumeThenContinue, used == .resumeByID, info.supportsContinue {
                 do {
                     let pkg2 = try builder.makeCommand(strategy: .continueMostRecent, binaryURL: info.binaryURL, workingDirectory: input.workingDirectory)
-                    try launcher.launchInTerminal(pkg2)
+                    try await launcher.launchInTerminal(pkg2)
                     return HermesResumeResult(launched: true, strategy: .continueMostRecent, error: nil, command: pkg2.shellCommand)
                 } catch {
                     return HermesResumeResult(launched: false, strategy: .continueMostRecent, error: error.localizedDescription, command: nil)

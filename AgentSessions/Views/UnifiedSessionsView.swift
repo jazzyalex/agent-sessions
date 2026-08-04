@@ -2228,10 +2228,26 @@ struct UnifiedSessionsView: View {
         CodexImagesWindowController.shared.show(session: session, allSessions: unified.allSessions)
     }
 
-    private func showActionAlert(message: String) {
+    /// Every resume coordinator returns a result carrying a user-facing error
+    /// string, and every call site used to discard it — so a CLI that could not
+    /// be found, a Warp that refused the launch, or a session with no working
+    /// directory all produced the same thing on screen: nothing at all. Removing
+    /// the launch-failure retry made that worse, since users previously got at
+    /// least *a* terminal.
+    private func reportResumeFailure(launched: Bool, error: String?, source: SessionSource, in window: NSWindow?) {
+        guard !launched else { return }
+        showActionAlert(message: error ?? "\(resumeAgentLabel(source)) could not resume this session.",
+                        in: window)
+    }
+
+    /// `preferredWindow` is the window the action started from. Attaching the
+    /// sheet there keeps a late failure tied to its origin, and lets it wait
+    /// politely if the user has since switched apps, rather than throwing an
+    /// app-modal panel over whatever they are now looking at.
+    private func showActionAlert(message: String, in preferredWindow: NSWindow? = nil) {
         let alert = NSAlert()
         alert.messageText = message
-        if let window = NSApp.keyWindow {
+        if let window = preferredWindow ?? NSApp.keyWindow, window.isVisible {
             alert.beginSheetModal(for: window)
         } else {
             alert.runModal()
@@ -3199,10 +3215,21 @@ struct UnifiedSessionsView: View {
 
     private func resume(_ s: Session) {
         guard !s.isClaudeWorkflowSubagent else { return }
+        // Captured at click time, not at report time. A Warp cold start
+        // activates Warp and deactivates us, so by the time a failure comes back
+        // (3s later, more if Gatekeeper is verifying) `NSApp.keyWindow` is nil
+        // and the alert would go app-modal on top of Warp — or attach itself to
+        // whatever unrelated window of ours happened to become key.
+        let presentingWindow = NSApp.keyWindow ?? NSApp.mainWindow
         switch s.source {
         case .codex:
             Task { @MainActor in
-                _ = await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s)
+                switch await CodexResumeCoordinator.shared.quickLaunchInTerminal(session: s) {
+                case .launched:
+                    break
+                case .needsConfiguration(let message), .failure(let message):
+                    reportResumeFailure(launched: false, error: message, source: s.source, in: presentingWindow)
+                }
             }
         case .opencode:
             let settings = OpenCodeSettings.shared
@@ -3220,7 +3247,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = OpenCodeResumeCoordinator(env: OpenCodeCLIEnvironment(), builder: OpenCodeResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .hermes:
             let settings = HermesSettings.shared
@@ -3238,7 +3266,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = HermesResumeCoordinator(env: HermesCLIEnvironment(), builder: HermesResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .copilot:
             let settings = CopilotSettings.shared
@@ -3256,7 +3285,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = CopilotResumeCoordinator(env: CopilotCLIEnvironment(), builder: CopilotResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .cursor:
             let settings = CursorSettings.shared
@@ -3274,7 +3304,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = CursorResumeCoordinator(env: CursorCLIEnvironment(), builder: CursorResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .pi:
             let settings = PiSettings.shared
@@ -3293,7 +3324,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = PiResumeCoordinator(env: PiCLIEnvironment(), builder: PiResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .kimi:
             let settings = KimiSettings.shared
@@ -3311,7 +3343,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = KimiResumeCoordinator(env: KimiCLIEnvironment(), builder: KimiResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
@@ -3329,7 +3362,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = AntigravityResumeCoordinator(env: AntigravityCLIEnvironment(), builder: AntigravityResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .claude:
             let settings = ClaudeResumeSettings.shared
@@ -3347,7 +3381,8 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = ClaudeResumeCoordinator(env: ClaudeCLIEnvironment(), builder: ClaudeResumeCommandBuilder(), launcher: launcher)
-                _ = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         default:
             return

@@ -62,7 +62,7 @@ final class AntigravityResumeCoordinator {
         }
 
         do {
-            try launcher.launchInTerminal(pkg)
+            try await launcher.launchInTerminal(pkg)
             return AntigravityResumeResult(launched: true, strategy: resultStrategy, error: nil, command: pkg.shellCommand)
         } catch {
             return AntigravityResumeResult(launched: false, strategy: resultStrategy, error: error.localizedDescription, command: nil)

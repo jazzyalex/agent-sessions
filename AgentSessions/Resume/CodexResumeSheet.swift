@@ -367,14 +367,17 @@ struct CodexResumeSheet: View {
         return [.terminal, .iterm, .warp, .warpPreview]
     }
 
+    /// NOTE: currently unreferenced — a project-wide search finds no callers.
+    /// Kept (and carried through the async launcher change) rather than deleted
+    /// in a commit about launcher signatures; worth removing or re-wiring.
     @MainActor
-    private func launch(session: Session) {
+    private func launch(session: Session) async {
         guard let package = buildCommand(session: session) else { return }
 
         switch settings.launchMode {
         case .embedded, .terminal:
             do {
-                try launcher.launchInTerminal(package)
+                try await launcher.launchInTerminal(package)
             } catch {
                 launcher.lastError = error.localizedDescription
             }
@@ -386,13 +389,13 @@ struct CodexResumeSheet: View {
             }
         case .warp:
             do {
-                try launcher.launchInWarp(package)
+                try await launcher.launchInWarp(package)
             } catch {
                 launcher.lastError = error.localizedDescription
             }
         case .warpPreview:
             do {
-                try launcher.launchInWarpPreview(package)
+                try await launcher.launchInWarpPreview(package)
             } catch {
                 launcher.lastError = error.localizedDescription
             }

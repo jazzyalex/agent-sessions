@@ -9,7 +9,7 @@ extension CodexCLIEnvironment: CodexCLIEnvironmentProviding {}
 
 @MainActor
 protocol CodexTerminalLaunching {
-    func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) throws
+    func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) async throws
 }
 
 extension CodexResumeLauncher: CodexTerminalLaunching {}
@@ -74,19 +74,19 @@ final class CodexResumeCoordinator {
                     let iterm = CodexResumeLauncher()
                     try iterm.launchInITerm(package)
                 case .warp:
-                    try AgentTerminalLauncher.launchInWarp(
+                    try await AgentTerminalLauncher.launchInWarp(
                         shellCommand: package.displayCommand,
                         cwd: package.workingDirectory?.path,
                         kind: .warp
                     )
                 case .warpPreview:
-                    try AgentTerminalLauncher.launchInWarp(
+                    try await AgentTerminalLauncher.launchInWarp(
                         shellCommand: package.displayCommand,
                         cwd: package.workingDirectory?.path,
                         kind: .warpPreview
                     )
                 default:
-                    try terminalLauncher.launchInTerminal(package)
+                    try await terminalLauncher.launchInTerminal(package)
                 }
                 return .launched
             } catch {

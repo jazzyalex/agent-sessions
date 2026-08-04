@@ -71,7 +71,7 @@ final class PiResumeCoordinator {
         }
 
         do {
-            try launcher.launchInTerminal(package)
+            try await launcher.launchInTerminal(package)
             return PiResumeResult(launched: true, strategy: used, error: nil, command: package.shellCommand)
         } catch {
             // No retry here. Nothing `launchInTerminal` throws is

@@ -92,7 +92,7 @@ final class CodexResumeLauncher: ObservableObject {
         }
     }
 
-    func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
+    func launchInTerminal(_ package: CodexResumeCommandBuilder.CommandPackage) async throws {
         try AgentTerminalLauncher.launchInTerminal(shellCommand: package.shellCommand, domain: "CodexResumeLauncher")
     }
 
@@ -100,14 +100,14 @@ final class CodexResumeLauncher: ObservableObject {
         try AgentTerminalLauncher.launchInITerm(shellCommand: package.shellCommand, domain: "CodexResumeLauncher")
     }
 
-    func launchInWarp(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
+    func launchInWarp(_ package: CodexResumeCommandBuilder.CommandPackage) async throws {
         let cwd = package.workingDirectory?.path
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warp)
+        try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warp)
     }
 
-    func launchInWarpPreview(_ package: CodexResumeCommandBuilder.CommandPackage) throws {
+    func launchInWarpPreview(_ package: CodexResumeCommandBuilder.CommandPackage) async throws {
         let cwd = package.workingDirectory?.path
-        try AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warpPreview)
+        try await AgentTerminalLauncher.launchInWarp(shellCommand: package.displayCommand, cwd: cwd, kind: .warpPreview)
     }
 
     private func appendConsole(text: String, kind: ConsoleLine.Kind) {

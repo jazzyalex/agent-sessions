@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 protocol ClaudeTerminalLaunching {
-    func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws
+    func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) async throws
 }
 
 @MainActor
@@ -11,7 +11,7 @@ final class ClaudeResumeCoordinator {
     private let builder: ClaudeResumeCommandBuilder
     private let launcher: ClaudeTerminalLaunching
 
-    struct NoopLauncher: ClaudeTerminalLaunching { func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) throws {} }
+    struct NoopLauncher: ClaudeTerminalLaunching { func launchInTerminal(_ package: ClaudeResumeCommandBuilder.CommandPackage) async throws {} }
 
     init(env: ClaudeCLIEnvironment,
          builder: ClaudeResumeCommandBuilder,
@@ -85,14 +85,14 @@ final class ClaudeResumeCoordinator {
 
         // Launch Terminal
         do {
-            try launcher.launchInTerminal(pkg)
+            try await launcher.launchInTerminal(pkg)
             return ClaudeResumeResult(launched: true, strategy: used, error: nil, command: pkg.shellCommand)
         } catch {
             // Fallback if allowed and not already continue
             if policy == .resumeThenContinue, used == .resumeByID, info.supportsContinue {
                 do {
                     let pkg2 = try builder.makeCommand(strategy: .continueMostRecent, binaryURL: info.binaryURL, workingDirectory: input.workingDirectory)
-                    try launcher.launchInTerminal(pkg2)
+                    try await launcher.launchInTerminal(pkg2)
                     return ClaudeResumeResult(launched: true, strategy: .continueMostRecent, error: nil, command: pkg2.shellCommand)
                 } catch {
                     return ClaudeResumeResult(launched: false, strategy: .continueMostRecent, error: error.localizedDescription, command: nil)

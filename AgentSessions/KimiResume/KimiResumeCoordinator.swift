@@ -72,7 +72,7 @@ final class KimiResumeCoordinator {
         }
 
         do {
-            try launcher.launchInTerminal(package)
+            try await launcher.launchInTerminal(package)
             return KimiResumeResult(launched: true, strategy: used, error: nil, command: package.shellCommand)
         } catch {
             // No retry here. Nothing `launchInTerminal` throws is
