@@ -89,6 +89,46 @@ final class AntigravityTranscriptParserTests: XCTestCase {
         XCTAssertEqual(ids.count, Set(ids).count, "event IDs must be unique across line events and tool calls")
     }
 
+    func testCodeActionAndSearchWebRenderAsToolResultsNotMeta() throws {
+        // Both carry the same MODEL result envelope as RUN_COMMAND/VIEW_FILE, so they
+        // must render as tool work. They previously fell through to `default:` and
+        // showed up as system meta noise.
+        let url = writeTranscript([
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-26T21:16:16Z","content":"<USER_REQUEST>\ngo\n</USER_REQUEST>"}"#,
+            #"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-06-26T21:16:17Z","thinking":"t","tool_calls":[{"name":"write_file","args":{"TargetFile":"\"/tmp/repo/notes.md\""}}]}"#,
+            #"{"step_index":2,"source":"MODEL","type":"CODE_ACTION","status":"DONE","created_at":"2026-06-26T21:16:18Z","content":"Created file file:///tmp/repo/notes.md with requested content."}"#,
+            #"{"step_index":3,"source":"MODEL","type":"SEARCH_WEB","status":"DONE","created_at":"2026-06-26T21:16:19Z","content":"The search returned a summary."}"#,
+            #"{"step_index":4,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-06-26T21:16:20Z","content":"system note"}"#,
+        ])
+        guard let s = AntigravityTranscriptParser.parse(at: url, forcedID: "conv-1", includeEvents: true) else {
+            return XCTFail("parse returned nil")
+        }
+        XCTAssertTrue(s.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("Created file") },
+                      "CODE_ACTION must be a tool_result")
+        XCTAssertTrue(s.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("search returned") },
+                      "SEARCH_WEB must be a tool_result")
+        // SYSTEM_MESSAGE is genuinely system-sourced, so it stays meta.
+        XCTAssertTrue(s.events.contains { $0.kind == .meta && ($0.text ?? "").contains("system note") })
+        XCTAssertFalse(s.events.contains { $0.kind == .meta && ($0.text ?? "").contains("Created file") })
+    }
+
+    func testTruncatedFieldsIsSurfacedRatherThanSilentlyDropped() throws {
+        // The CLI clips content upstream; without a marker a partial transcript reads
+        // as complete.
+        let url = writeTranscript([
+            #"{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-26T21:16:16Z","content":"<USER_REQUEST>\ngo\n</USER_REQUEST>"}"#,
+            #"{"step_index":1,"source":"MODEL","type":"SEARCH_WEB","status":"DONE","created_at":"2026-06-26T21:16:17Z","content":"partial summary","truncated_fields":["content"]}"#,
+            #"{"step_index":2,"source":"MODEL","type":"VIEW_FILE","status":"DONE","created_at":"2026-06-26T21:16:18Z","content":"whole file"}"#,
+        ])
+        guard let s = AntigravityTranscriptParser.parse(at: url, forcedID: "conv-1", includeEvents: true) else {
+            return XCTFail("parse returned nil")
+        }
+        XCTAssertTrue(s.events.contains { ($0.toolOutput ?? "").contains("partial summary")
+            && ($0.toolOutput ?? "").contains(AntigravityTranscriptParser.truncationMarker) })
+        // An untruncated event must not be marked.
+        XCTAssertTrue(s.events.contains { ($0.toolOutput ?? "") == "whole file" })
+    }
+
     func testModelNameCapturesChangeNotJustInitialSelection() throws {
         let content = "<USER_REQUEST>\nhi\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 3.5 Flash to Gemini 4.0 Pro.\n</USER_SETTINGS_CHANGE>"
         XCTAssertEqual(AntigravityTranscriptParser.modelName(fromUserInput: content), "Gemini 4.0 Pro")
