@@ -310,3 +310,66 @@ decision if one was made. Newest on top.
   `normalizedRate` (already used by the after-reset branch) and delete
   deadline/gainedSeconds/`RunwayDeadline`/`minimumDisplayedGain`; (c) leave as-is.
 - **Decision:** open — pending product call on whether the impact number is worth showing.
+
+---
+
+## Resume / Terminal Launch
+
+### `runAppleScript` blocks the main thread for the Terminal / iTerm path
+- **Where:** [AgentTerminalLauncher.swift:189](../AgentSessions/Resume/AgentTerminalLauncher.swift:189)
+  (`process.waitForExit()`) → [BoundedProcessWait.swift:9](../AgentSessions/Utilities/BoundedProcessWait.swift:9).
+- **What:** `waitForExit` is a busy-poll — `while isRunning { Thread.sleep(0.1) }` on the
+  *calling* thread, up to a 10 s deadline, then SIGTERM + 0.5 s grace + SIGKILL +
+  `waitUntilExit()`. `runAppleScript` is `private static` inside the `@MainActor enum
+  AgentTerminalLauncher`, so it inherits `@MainActor` and every Terminal.app / iTerm2
+  resume runs that poll on the main thread. Typical osascript round-trip is under a
+  second, so it is invisible in normal use; the visible case is the **first-ever
+  Automation consent prompt** for Terminal.app, where osascript sits waiting on the user
+  and the UI is pinned for up to the full 10.5 s.
+- **Verified 2026-08-04:** read both functions; the `@MainActor` inheritance and the
+  `Thread.sleep` loop are both real. Confirmed **pre-existing** — untouched by the async
+  launcher change, which only altered the Warp path.
+- **Secondary hazard in the same function:** `standardOutput`/`standardError` are set to
+  `Pipe()`s that are only drained *after* `waitForExit` returns (stderr) or never at all
+  (stdout). An osascript that wrote more than the ~64 KB pipe buffer would block on write
+  while we block on exit — a deadlock that only breaks when the 10 s timeout kills it.
+  Not reachable with the current fixed scripts, which emit nothing; it becomes reachable
+  the moment someone adds a script that prints.
+- **Why it is newly cheap:** the `*TerminalLaunching` chain became `async throws` in
+  `d4280354` (so the Warp cold start could be awaited and reported). The Terminal/iTerm
+  wrappers are now `async` functions that happen to contain no suspension point, so
+  hopping the osascript run off the main actor is a local change — no signature churn.
+- **To close:** wrap the `Process` run in `await Task.detached { … }.value` the way
+  `CodexResumeCoordinator` already does for CLI probes, and drain both pipes concurrently
+  with the wait (or set them to `FileHandle.nullDevice` if the output is genuinely
+  unwanted).
+- **Risk if wrong:** low blast radius, and the failure mode is the current one — a stalled
+  UI, not incorrect behavior. The one thing to preserve is that the throw still carries
+  osascript's stderr, which is what surfaces "Terminal got an error…" to the user.
+
+### Dead code: `CodexResumeSheet.launch(session:)`
+- **Where:** [CodexResumeSheet.swift:374](../AgentSessions/Resume/CodexResumeSheet.swift:374).
+- **What:** A ~30-line `@MainActor private func launch(session:)` that switches over
+  `settings.launchMode` and calls the four Codex launcher entry points. A project-wide
+  search across the app and test targets finds **no callers**.
+- **Verified 2026-08-04:** grepped `launch(session` across `AgentSessions/` and
+  `AgentSessionsTests/`; the only hit is the declaration. Swift is statically dispatched
+  here, so there is no dynamic-reference escape hatch.
+- **Why it is still there:** it was carried through the `async throws` launcher change in
+  `d4280354` (annotated in place) rather than deleted, to keep a commit about launcher
+  signatures from also containing an unrelated deletion.
+- **To close:** delete it, or re-wire it if the resume sheet is meant to have its own
+  launch action distinct from `UnifiedSessionsView.resume(_:)`. Deleting it also strands
+  two more methods — checked each one:
+  - `CodexResumeLauncher.launchInWarp` / `.launchInWarpPreview` — **would become dead.**
+    The sheet is their only caller; `CodexResumeCoordinator` reaches Warp through the
+    static `AgentTerminalLauncher.launchInWarp` instead
+    ([CodexResumeCoordinator.swift:77](../AgentSessions/Resume/CodexResumeCoordinator.swift:77)),
+    not through the launcher instance. Delete all three together.
+  - `CodexResumeLauncher.launchInITerm` — **survives.** Live caller at
+    [CodexResumeCoordinator.swift:75](../AgentSessions/Resume/CodexResumeCoordinator.swift:75),
+    on the real `quickLaunchInTerminal` path.
+  - `CodexResumeLauncher.launchInTerminal` — **survives.** It is the
+    `CodexTerminalLaunching` protocol requirement.
+- **Risk if wrong:** none to runtime behavior; the only cost of getting it wrong is
+  deleting a hook someone intended to wire up later.
