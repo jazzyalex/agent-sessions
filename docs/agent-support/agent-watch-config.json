@@ -303,7 +303,8 @@
         "real_home_session": true,
         "timeout_seconds": 180,
         "env_vars": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
-        "credential_files": ["~/.copilot/hosts.json"],
+        "_credential_note": "Copilot no longer writes ~/.copilot/hosts.json, so there is no credential file to copy. Auth is env-var-first (env_vars above); when none is set the copilot_prompt driver falls back to `gh auth token`.",
+        "credential_files": [],
         "discover_session": {
           "kind": "jsonl_newest",
           "roots": [".copilot/session-state"],
