@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Bug Fixes
-- **The Session Runway switches units immediately.** Selecting Wk could leave the previous tokens-per-hour values visible while the asynchronous runway scan recalculated, making the control look ignored until the weekly snapshot arrived. The row now changes to the selected unit at once and shows a waiting value until recalculation finishes.
+- **The Session Runway switches units immediately.** Selecting Wk could leave the previous tokens-per-hour values visible while the asynchronous runway scan recalculated, and an automatic fallback after a quota window appeared or disappeared had the same problem. Rows now change to the effective unit at once and show a waiting value until recalculation finishes.
 - **Codex plan upgrades recover without a relaunch or unnecessary sign-in.** If you hit the weekly limit and then upgrade your plan, the running app can still hold its old failed-fetch cooldown and claim the saved login needs attention even though it remains valid. Agent Sessions now clears that process-local state and retries silently before showing **Fix…**; it only recommends `codex login` when the clean retry also rejects the saved credentials.
 
 ## [4.7] - 2026-08-04

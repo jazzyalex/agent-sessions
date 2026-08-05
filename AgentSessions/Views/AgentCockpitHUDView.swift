@@ -3421,7 +3421,6 @@ private struct HUDLimitsRowsPanel: View {
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
     @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
-    @State private var stagedRunwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
@@ -3728,31 +3727,23 @@ private struct HUDLimitsRowsPanel: View {
     private func refreshRunwaySnapshot() async {
         let nextCodexRequest = codexRunwayRequest
         let nextClaudeRequest = claudeRunwayRequest
-        let presentationChanged = stagedRunwayPresentationRaw != runwayPresentationRaw
-        if presentationChanged {
-            stagedRunwayPresentationRaw = runwayPresentationRaw
-        }
 
-        // Change both visible units before either provider performs its async log
-        // scan. Otherwise the second provider can retain the old unit for the full
-        // duration of the first provider's refresh.
+        // Stage both providers before either async log scan. Compare the effective
+        // request unit, not just the raw picker value: a selected 5h or Wk lens can
+        // fall back to tk/h automatically when that quota window disappears.
         if let request = nextCodexRequest {
-            if presentationChanged {
-                codexRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
-                    current: codexRunwaySnapshot,
-                    request: request
-                )
-            }
+            codexRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
+                current: codexRunwaySnapshot,
+                request: request
+            )
         } else {
             codexRunwaySnapshot = nil
         }
         if let request = nextClaudeRequest {
-            if presentationChanged {
-                claudeRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
-                    current: claudeRunwaySnapshot,
-                    request: request
-                )
-            }
+            claudeRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
+                current: claudeRunwaySnapshot,
+                request: request
+            )
         } else {
             claudeRunwaySnapshot = nil
         }

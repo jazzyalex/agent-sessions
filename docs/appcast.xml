@@ -30,7 +30,7 @@
 <h2>What&#x27;s New in 4.7</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Kimi Code is the eleventh agent Agent Sessions reads.</strong> Its sessions land in the session list, in search and in Analytics, with tool calls and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Kimi Code on your Mac, and Settings → Agents gains a Kimi Code pane for the binary path and storage root.</li>
+<li><strong>Kimi Code is the tenth current agent source Agent Sessions reads.</strong> Its sessions land in the session list, in search and in Analytics, with tool calls and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Kimi Code on your Mac, and Settings → Agents gains a Kimi Code pane for the binary path and storage root.</li>
 <li><strong>Active Claude cloud sessions appear in the Quota Meter.</strong> Sessions running on Anthropic&#x27;s infrastructure were invisible outside Claude Desktop; they now sit in the pinned Quota Meter beside your local agents, marked <strong>Cloud</strong> and ordered above them. They carry no burn rate — there is no local transcript to measure — so they report status instead of a runway. Off by default, and offered only once you have saved a claude.ai cookie under Settings → Usage Tracking, since the fetch depends on it.</li>
 </ul>
 <h3>Features</h3>
