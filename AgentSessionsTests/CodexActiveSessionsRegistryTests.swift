@@ -2419,6 +2419,40 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertNotEqual(mk(.tokensPerHour).id, mk(.weeklyPercentPerHour).id)
     }
 
+    func testRunwayRefreshReplacesStaleTokenRowsWhileWeeklySnapshotLoads() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(3 * 60 * 60)
+        let identity = RunwaySessionIdentity(
+            id: "session", displayName: "Session", isGoal: false, logPaths: ["/tmp/session.jsonl"])
+        let tokenBaseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: reset, observedAt: now,
+            rateUnit: .tokensPerHour)
+        let current = CodexRunwaySnapshot(
+            baseline: tokenBaseline,
+            rows: [RunwayPauseImpactRow(
+                id: identity.id, displayName: identity.displayName, isGoal: false,
+                deadline: .unavailable, gainedSeconds: 0, displayRate: 2_000_000,
+                confidence: .direct)],
+            burstSummary: nil)
+        let weeklyBaseline = RunwayProviderBaseline(
+            source: .codex, remainingPercent: 70, resetAt: reset,
+            currentRunoutAt: now.addingTimeInterval(2 * 60 * 60), observedAt: now,
+            windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+        let request = CodexRunwaySnapshotRequest(
+            baseline: weeklyBaseline, identities: [identity], now: now, maxRows: 4)
+
+        let placeholder = try XCTUnwrap(RunwaySnapshotAssembly.placeholderForUnitTransition(
+            current: current,
+            request: request
+        ))
+
+        XCTAssertEqual(placeholder.baseline.rateUnit, .weeklyPercentPerHour)
+        XCTAssertEqual(placeholder.rows.first?.id, identity.id)
+        XCTAssertEqual(placeholder.rows.first?.displayRate, 0)
+        XCTAssertEqual(placeholder.rows.first?.confidence, .waiting)
+    }
+
     func testWeeklyPresentationBuildsWeeklyBaseline() {
         // Preferred .weekly with a measurable weekly window → weekly baseline
         // (10080-min window, weeklyPercentPerHour), even while the 5h window is present.

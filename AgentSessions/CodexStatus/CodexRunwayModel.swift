@@ -620,6 +620,23 @@ enum CodexRunwaySnapshotLoader {
 /// active sessions whose burn rate hasn't been measured yet. Used by both the
 /// Codex and Claude snapshot loaders.
 enum RunwaySnapshotAssembly {
+    /// Keeps an already-rendered snapshot during ordinary refreshes, but replaces
+    /// it with pending rows as soon as the selected rate unit changes. The async
+    /// loaders can take long enough for the old tk/h values to remain visibly under
+    /// a newly-selected Wk control; this makes the transition honest immediately.
+    static func placeholderForUnitTransition(
+        current: CodexRunwaySnapshot?,
+        request: CodexRunwaySnapshotRequest
+    ) -> CodexRunwaySnapshot? {
+        guard current?.baseline.rateUnit != request.baseline.rateUnit else { return current }
+        return withPendingRows(
+            baseline: request.baseline,
+            snapshot: nil,
+            activeIdentities: request.identities,
+            maxRows: request.maxRows
+        )
+    }
+
     static func uniqueIdentities(_ identities: [RunwaySessionIdentity]) -> [RunwaySessionIdentity] {
         var byID: [String: RunwaySessionIdentity] = [:]
         var order: [String] = []

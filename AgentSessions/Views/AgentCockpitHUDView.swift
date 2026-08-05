@@ -3421,6 +3421,7 @@ private struct HUDLimitsRowsPanel: View {
     @State private var clockNow = Date()
     @State private var codexRunwaySnapshot: CodexRunwaySnapshot?
     @State private var claudeRunwaySnapshot: CodexRunwaySnapshot?
+    @State private var stagedRunwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
     @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
 
     private var mode: UsageDisplayMode { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left }
@@ -3725,17 +3726,45 @@ private struct HUDLimitsRowsPanel: View {
     }
 
     private func refreshRunwaySnapshot() async {
-        if let request = codexRunwayRequest {
-            let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
-            if !Task.isCancelled { codexRunwaySnapshot = snapshot }
+        let nextCodexRequest = codexRunwayRequest
+        let nextClaudeRequest = claudeRunwayRequest
+        let presentationChanged = stagedRunwayPresentationRaw != runwayPresentationRaw
+        if presentationChanged {
+            stagedRunwayPresentationRaw = runwayPresentationRaw
+        }
+
+        // Change both visible units before either provider performs its async log
+        // scan. Otherwise the second provider can retain the old unit for the full
+        // duration of the first provider's refresh.
+        if let request = nextCodexRequest {
+            if presentationChanged {
+                codexRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
+                    current: codexRunwaySnapshot,
+                    request: request
+                )
+            }
         } else {
             codexRunwaySnapshot = nil
         }
-        if let request = claudeRunwayRequest {
-            let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
-            if !Task.isCancelled { claudeRunwaySnapshot = snapshot }
+        if let request = nextClaudeRequest {
+            if presentationChanged {
+                claudeRunwaySnapshot = RunwaySnapshotAssembly.placeholderForUnitTransition(
+                    current: claudeRunwaySnapshot,
+                    request: request
+                )
+            }
         } else {
             claudeRunwaySnapshot = nil
+        }
+
+        if let request = nextCodexRequest {
+            let snapshot = await CodexRunwaySnapshotLoader.snapshot(for: request)
+            guard !Task.isCancelled else { return }
+            codexRunwaySnapshot = snapshot
+        }
+        if let request = nextClaudeRequest {
+            let snapshot = await ClaudeRunwaySnapshotLoader.snapshot(for: request)
+            if !Task.isCancelled { claudeRunwaySnapshot = snapshot }
         }
     }
 }

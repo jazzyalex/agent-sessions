@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **The Session Runway switches units immediately.** Selecting Wk could leave the previous tokens-per-hour values visible while the asynchronous runway scan recalculated, making the control look ignored until the weekly snapshot arrived. The row now changes to the selected unit at once and shows a waiting value until recalculation finishes.
+
 ## [4.7] - 2026-08-04
 
 ### Highlights
