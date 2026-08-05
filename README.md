@@ -34,7 +34,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.7** — Kimi Code joins as the eleventh agent, active Claude cloud sessions appear in the Quota Meter, and Pi and Cursor sessions get back the working directory their resume commands and project filters depend on. [See what's new ↓](#whats-new-in-47)
+> **New in 4.7** — Kimi Code joins as the tenth current agent source, active Claude cloud sessions appear in the Quota Meter, and Pi and Cursor sessions get back the working directory their resume commands and project filters depend on. [See what's new ↓](#whats-new-in-47)
 
 ## Overview
 
@@ -78,10 +78,10 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 4.7
 
-**TL;DR** - Kimi Code is the eleventh agent Agent Sessions reads, active Claude cloud sessions now show up in the Quota Meter, and a working-directory bug that quietly broke resume commands and project filtering for Pi and Cursor is fixed.
+**TL;DR** - Kimi Code is the tenth current agent source Agent Sessions reads, active Claude cloud sessions now show up in the Quota Meter, and a working-directory bug that quietly broke resume commands and project filtering for Pi and Cursor is fixed.
 
 New in 4.7:
-- **Kimi Code, the eleventh agent** — sessions in the list, in search and in Analytics, with tool calls and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. It switches itself on when Kimi Code is on your Mac.
+- **Kimi Code, the tenth current agent source** — sessions in the list, in search and in Analytics, with tool calls and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. It switches itself on when Kimi Code is on your Mac.
 - **Claude cloud sessions in the Quota Meter** — sessions running on Anthropic's infrastructure were invisible outside Claude Desktop; they now sit beside your local agents, marked Cloud. Off by default, offered once you have saved a claude.ai cookie.
 - **Pi and Cursor get their working directory back** — resume commands came back without the `cd`, and the search index stored no path at all, so filtering by project silently missed those sessions. History you already have is repaired in the background after you update.
 - **A resume that fails now says so** — every failure reason produced an error nothing displayed, so a refused launch looked exactly like no launch. Warp in particular used to report success when it never opened.

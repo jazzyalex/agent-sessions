@@ -29,7 +29,7 @@ Numbers current as of 2026-08-03: 750 stars, 49 forks, 3 open issues, 11,431 dow
 <td>
 
 **One local, searchable home for every coding agent's session history.**
-Agent Sessions reads the sessions your AI coding tools already write to disk — Codex, Claude Code, Cursor, OpenCode, GitHub Copilot CLI, Hermes, OpenClaw, Antigravity, and Pi — and brings them into a single view you can search, read, and resume. Local-first: no account, no backend, no telemetry.
+Agent Sessions reads the sessions your AI coding tools already write to disk — Codex, Claude Code, Cursor, OpenCode, GitHub Copilot CLI, Hermes, OpenClaw, Antigravity, Pi, and Kimi Code — and brings them into a single view you can search, read, and resume. Local-first: no account, no backend, no telemetry.
 
 </td>
 </tr>

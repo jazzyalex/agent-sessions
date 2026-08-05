@@ -6,20 +6,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Sessions - Live Per-Session Quota Burn for Codex and Claude on macOS</title>
   <meta name="description"
-    content="See which agent session is eating your Codex and Claude 5-hour and weekly limits. Agent Sessions shows live per-session burn rate, priced per model, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended. Plus searchable local history across Codex, Claude, Cursor Agent, OpenCode, Hermes, OpenClaw, Antigravity, Copilot, Droid, Pi, and Kimi Code. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the eleventh agent and shows active Claude cloud sessions in the Quota Meter." />
+    content="See which agent session is eating your Codex and Claude 5-hour and weekly limits. Agent Sessions shows live per-session burn rate, priced per model, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended. Plus searchable local history across Codex, Claude, Cursor Agent, OpenCode, Hermes, OpenClaw, Antigravity, Copilot, Pi, and Kimi Code. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the tenth current agent source and shows active Claude cloud sessions in the Quota Meter." />
   <meta name="keywords"
     content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Cursor Agent history, Cursor agent transcripts, Hermes state.db, Hermes Agent sessions, OpenClaw sessions, OpenClaw JSONL, AI coding agent history, local session browser, Claude Desktop, OpenCode SQLite, Antigravity CLI, GitHub Copilot CLI, macOS agent history" />
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/">
   <meta property="og:title" content="Three agents running. One is eating your week.">
   <meta property="og:description"
-    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the eleventh agent and shows active Claude cloud sessions in the Quota Meter.">
+    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the tenth current agent source and shows active Claude cloud sessions in the Quota Meter.">
   <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@jazzyalex">
   <meta name="twitter:title" content="Three agents running. One is eating your week.">
   <meta name="twitter:description"
-    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the eleventh agent and shows active Claude cloud sessions in the Quota Meter.">
+    content="Live burn rate per session against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs. Plus searchable local history across every agent you run. macOS, local-only, no telemetry. Version 4.7 adds Kimi Code as the tenth current agent source and shows active Claude cloud sessions in the Quota Meter.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/quota-meter-light.png">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/">
   <link rel="icon" href="assets/app-icon-32.png" />
@@ -446,6 +446,7 @@
     <div class="band-head">
       <h2>One window for every agent's memory.</h2>
       <p>Desktop apps and CLI tools side by side — surfaced with source-specific labels and clear project context.</p>
+      <p><b>New in 4.7:</b> Kimi Code joins the ten current agent sources, with searchable local history and supported resume workflows.</p>
     </div>
     <div class="agents">
       <div class="agents-row leads">
@@ -462,6 +463,7 @@
       <div class="agents-row">
         <span class="chip plain"><b>Hermes</b></span>
         <span class="chip plain"><b>OpenClaw</b></span>
+        <span class="chip"><b>Kimi Code</b><span>CLI</span></span>
       </div>
     </div>
 
@@ -513,17 +515,12 @@
             <li><b>Run-out predictions</b> — freshness-aware ETAs showing the runway left before you hit the wall.</li>
             <li><b>Quota Meter alerts</b> — separate controls for predicted exhaustion vs. low-threshold warnings.</li>
           </ul>
-          <p style="margin-top:18px;">The same markers carry into <b style="color:var(--ink)">Agent Cockpit</b>, where active and waiting sessions show their runway alongside quick focus jumps.</p>
         </div>
         <div class="shots">
           <img src="assets/quota-meter-light.png" alt="Quota Meter with Session Runway per-session burn-rate bars for Codex and Claude">
           <video src="assets/quota-meter-runway-rate.mp4" autoplay loop muted playsinline
                  poster="assets/quota-meter-light.png"
                  aria-label="Animated Session Runway showing live Codex and Claude per-session burn rates"></video>
-          <div class="pair">
-            <img src="assets/screenshot-cockpit-light.png" alt="Compact cockpit, light mode">
-            <img src="assets/screenshot-cockpit-dark.png" alt="Compact cockpit, dark mode">
-          </div>
         </div>
       </div>
     </div>

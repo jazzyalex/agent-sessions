@@ -36,7 +36,7 @@
 - **750** GitHub stars, **49** forks, **3** open issues. Created **2025-09-19**.
 - Star growth **accelerated**: ~55/mo first four months → **133 in Mar 2026**, **100 in Apr**, ~80/mo since (78 May, 80 Jun, 76 Jul). Momentum grew; it did not decay.
 - **~700 weekly active users** (unverified — see REPORT.md). **11,431** total release downloads.
-- **v4.0** shipped **2026-06-28**, **294** downloads in first 3 days. (Shipping version is now v4.6.4. Use v4.0's numbers as the verified data point; later versions can be referenced generically.)
+- **v4.0** shipped **2026-06-28**, **294** downloads in first 3 days. (Shipping version is now v4.7. Use v4.0's numbers as the verified data point; later versions can be referenced generically.)
 - All growth with **ZERO marketing**.
 - **10 session sources:** Codex, Claude Code, Cursor, OpenCode, GitHub Copilot CLI, Hermes, OpenClaw, Antigravity, Pi, Kimi Code. **Do NOT** claim Gemini CLI as a source. **Warp** = terminal *launch* target (contributor PR #39), not a source.
 - **External contributor PRs** are real: Warp terminal support, CodeBuddy support, OpenCode, Copilot CLI discovery fixes.
