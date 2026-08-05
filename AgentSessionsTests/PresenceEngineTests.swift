@@ -107,6 +107,23 @@ final class PresenceEngineTests: XCTestCase {
         return FakeProbeRunner(responders: [responder])
     }
 
+    private func claudeAssistantLine(id: String,
+                                     sessionID: String,
+                                     at date: Date,
+                                     stopReason: String) -> String {
+        "{\"type\":\"assistant\",\"sessionId\":\"\(sessionID)\",\"timestamp\":\"\(iso(date))\",\"message\":{\"id\":\"\(id)\",\"role\":\"assistant\",\"stop_reason\":\"\(stopReason)\",\"usage\":{\"input_tokens\":1000,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}"
+    }
+
+    private func claudeUserLine(sessionID: String, cwd: String, text: String, at date: Date) -> String {
+        "{\"type\":\"user\",\"sessionId\":\"\(sessionID)\",\"cwd\":\"\(cwd)\",\"timestamp\":\"\(iso(date))\",\"message\":{\"role\":\"user\",\"content\":\"\(text)\"}}"
+    }
+
+    private func iso(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
     /// Thread-safe mutable box so a `FakeProbeRunner.Responder` (a synchronous
     /// `@Sendable` closure) can serve a DIFFERENT `cwd` on each call — used to
     /// drive a "freshness-only" publish (stable-metadata churn with the same
@@ -213,6 +230,56 @@ final class PresenceEngineTests: XCTestCase {
 
         XCTAssertEqual(emissions.count, 1)
         XCTAssertTrue(emissions[0].isMembershipChange)
+    }
+
+    func testRefreshOnce_discoversClaudeDesktopPresenceViaRunwayIdentity() async throws {
+        let claudeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-presence-engine-\(UUID().uuidString)", isDirectory: true)
+        let projectDir = claudeRoot
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: claudeRoot) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("desktop.jsonl")
+        try """
+        \(claudeUserLine(sessionID: "sess-desktop", cwd: "/tmp/proj", text: "desktop task", at: now.addingTimeInterval(-20)))
+        \(claudeAssistantLine(id: "a1", sessionID: "sess-desktop", at: now.addingTimeInterval(-5), stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let defaults = UserDefaults.standard
+        let oldOverride = defaults.object(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+        defaults.set(claudeRoot.path, forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+        defer {
+            if let oldOverride {
+                defaults.set(oldOverride, forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            } else {
+                defaults.removeObject(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            }
+        }
+
+        let engine = PresenceEngine(probeRunner: FakeProbeRunner())
+        await engine.debugSetEnvironment(PresenceEnvironment())
+
+        let snapshot = await engine.debugRefreshOnce()
+        let presence = try XCTUnwrap(snapshot.presences.first { $0.source == .claude && $0.sessionId == "sess-desktop" })
+        XCTAssertEqual(presence.publisher, "agent-sessions-runway")
+        XCTAssertEqual(presence.kind, "desktop")
+        XCTAssertEqual(
+            presence.sessionLogPath.map(CodexActiveSessionsModel.normalizePath),
+            CodexActiveSessionsModel.normalizePath(log.path)
+        )
+
+        let key = CodexActiveSessionsModel.logLookupKey(
+            source: .claude,
+            normalizedPath: CodexActiveSessionsModel.normalizePath(log.path)
+        )
+        XCTAssertEqual(snapshot.liveStateByPresenceKey[key], .activeWorking)
+    }
+
+    func testClaudeRunwayRootsDoNotFallbackWhenInputIsEmpty() {
+        XCTAssertEqual(PresenceEngine.claudeRunwayRoots(from: []), [])
     }
 
     func testRefreshOnce_secondIdenticalCycleDoesNotRepublish() async {

@@ -481,6 +481,165 @@ final class ClaudeRunwayParserTests: XCTestCase {
         XCTAssertTrue(ids.contains("sess-working"), "working (tool_use) session within 75s should remain")
     }
 
+    func testPresenceSynthesizerPublishesRunwayIdentitiesWithStateHints() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-presence-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let workingLog = projectDir.appendingPathComponent("working.jsonl")
+        try """
+        \(userLine(sessionID: "sess-working", cwd: "/tmp/proj", text: "working task", at: now.addingTimeInterval(-30)))
+        \(assistantLine(id: "w1", at: now.addingTimeInterval(-20), inputTokens: 800, sessionID: "sess-working", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: workingLog, atomically: true, encoding: .utf8)
+
+        let idleLog = projectDir.appendingPathComponent("idle.jsonl")
+        try """
+        \(userLine(sessionID: "sess-idle", cwd: "/tmp/proj", text: "idle task", at: now.addingTimeInterval(-35)))
+        \(assistantLine(id: "i1", at: now.addingTimeInterval(-25), inputTokens: 800, sessionID: "sess-idle", cwd: "/tmp/proj", stopReason: "end_turn"))
+        """.write(to: idleLog, atomically: true, encoding: .utf8)
+
+        let presences = ClaudeRunwayPresenceSynthesizer.presences(
+            root: root,
+            now: now,
+            claimedLogPaths: []
+        )
+
+        let byID = Dictionary(uniqueKeysWithValues: presences.compactMap { p -> (String, CodexActivePresence)? in
+            guard let id = p.sessionId else { return nil }
+            return (id, p)
+        })
+        XCTAssertEqual(byID["sess-working"]?.publisher, "agent-sessions-runway")
+        XCTAssertEqual(byID["sess-working"]?.kind, "desktop")
+        XCTAssertEqual(byID["sess-working"]?.source, .claude)
+        XCTAssertEqual(
+            byID["sess-working"]?.sessionLogPath.map(CodexActiveSessionsModel.normalizePath),
+            CodexActiveSessionsModel.normalizePath(workingLog.path)
+        )
+        XCTAssertEqual(byID["sess-working"]?.liveStateHint, .activeWorking)
+        XCTAssertEqual(byID["sess-idle"]?.liveStateHint, .openIdle)
+    }
+
+    func testPresenceSynthesizerSkipsIdentityWhenAnyLogPathIsClaimed() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-presence-claimed-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let claimedLog = projectDir.appendingPathComponent("claimed.jsonl")
+        try """
+        \(userLine(sessionID: "sess-claimed", cwd: "/tmp/proj", text: "claimed task", at: now.addingTimeInterval(-20)))
+        \(assistantLine(id: "c1", at: now.addingTimeInterval(-5), inputTokens: 800, sessionID: "sess-claimed", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: claimedLog, atomically: true, encoding: .utf8)
+
+        let unclaimedLog = projectDir.appendingPathComponent("unclaimed.jsonl")
+        try """
+        \(userLine(sessionID: "sess-unclaimed", cwd: "/tmp/proj", text: "unclaimed task", at: now.addingTimeInterval(-20)))
+        \(assistantLine(id: "u1", at: now.addingTimeInterval(-5), inputTokens: 800, sessionID: "sess-unclaimed", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: unclaimedLog, atomically: true, encoding: .utf8)
+
+        let presences = ClaudeRunwayPresenceSynthesizer.presences(
+            root: root,
+            now: now,
+            claimedLogPaths: [claimedLog.path]
+        )
+
+        XCTAssertFalse(presences.contains { $0.sessionId == "sess-claimed" })
+        XCTAssertTrue(presences.contains { $0.sessionId == "sess-unclaimed" })
+    }
+
+    func testPresenceSynthesizerKeepsSilentWorkingSessionsThroughRecentFileWindow() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-presence-silent-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("silent.jsonl")
+        try """
+        \(userLine(sessionID: "sess-silent", cwd: "/tmp/proj", text: "long tool", at: now.addingTimeInterval(-180)))
+        \(assistantLine(id: "s1", at: now.addingTimeInterval(-120), inputTokens: 800, sessionID: "sess-silent", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+
+        let runwayIDs = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now).map(\.id)
+        XCTAssertFalse(runwayIDs.contains("sess-silent"), "the runway UI keeps its short display window")
+
+        let presences = ClaudeRunwayPresenceSynthesizer.presences(
+            root: root,
+            now: now,
+            claimedLogPaths: []
+        )
+        let presence = try XCTUnwrap(presences.first { $0.sessionId == "sess-silent" })
+        XCTAssertEqual(presence.liveStateHint, .activeWorking)
+    }
+
+    func testPresenceSynthesizerDoesNotApplyRunwayRowCap() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-presence-cap-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = Date()
+        for index in 0..<15 {
+            let id = "sess-\(index)"
+            let log = projectDir.appendingPathComponent("\(id).jsonl")
+            try """
+            \(userLine(sessionID: id, cwd: "/tmp/proj", text: "task \(index)", at: now.addingTimeInterval(Double(-30 - index))))
+            \(assistantLine(id: "a\(index)", at: now.addingTimeInterval(Double(-index)), inputTokens: 800, sessionID: id, cwd: "/tmp/proj", stopReason: "tool_use"))
+            """.write(to: log, atomically: true, encoding: .utf8)
+        }
+
+        let runwayIDs = ClaudeRunwayRecentSessionScanner.identities(root: root, now: now).map(\.id)
+        XCTAssertEqual(runwayIDs.count, ClaudeRunwayRecentSessionScanner.maximumFiles)
+
+        let presenceIDs = Set(ClaudeRunwayPresenceSynthesizer.presences(
+            root: root,
+            now: now,
+            claimedLogPaths: []
+        ).compactMap(\.sessionId))
+        XCTAssertEqual(presenceIDs.count, 15)
+    }
+
+    func testPresenceSynthesizerExcludesArchivedCoworkSession() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-presence-cowork-archive-\(UUID().uuidString)")
+        let projectDir = root.appendingPathComponent("-tmp-proj", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let coworkRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-cowork-archive-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: coworkRoot) }
+
+        let now = Date()
+        let log = projectDir.appendingPathComponent("archived.jsonl")
+        try """
+        \(userLine(sessionID: "sess-cowork-archived", cwd: "/tmp/proj", text: "archived cowork", at: now.addingTimeInterval(-15)))
+        \(assistantLine(id: "ca1", at: now.addingTimeInterval(-5), inputTokens: 800, sessionID: "sess-cowork-archived", cwd: "/tmp/proj", stopReason: "tool_use"))
+        """.write(to: log, atomically: true, encoding: .utf8)
+        try writeDesktopSidecar(
+            root: coworkRoot,
+            cliSessionID: "sess-cowork-archived",
+            title: "Archived Cowork",
+            isArchived: true
+        )
+
+        let presences = ClaudeRunwayPresenceSynthesizer.presences(
+            root: root,
+            now: now,
+            claimedLogPaths: [],
+            desktopTitlesRoots: [coworkRoot]
+        )
+
+        XCTAssertFalse(presences.contains { $0.sessionId == "sess-cowork-archived" })
+    }
+
     func testLoaderMarksIdleSessionRow() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("claude-runway-idlerow-\(UUID().uuidString)")

@@ -432,6 +432,10 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
         return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude")
     }
 
+    func sessionScanRoots() -> [URL] {
+        candidateRoots().map(\.scanRoot)
+    }
+
     func discoverSessionFiles() -> [URL] {
         var found: [URL] = []
         for root in candidateRoots() {

@@ -5,37 +5,56 @@ import Foundation
 /// limits), then hands the burns to the shared, provider-agnostic
 /// `CodexRunwayCalculator` and `RunwaySnapshotAssembly`.
 enum ClaudeRunwaySnapshotLoader {
+    static func effectiveIdentities(requestIdentities: [RunwaySessionIdentity],
+                                    recentSessionsRoot: URL?,
+                                    now: Date,
+                                    desktopTitlesRoot: URL? = nil,
+                                    desktopTitlesRoots: [URL]? = nil,
+                                    scannerOptions: ClaudeRunwayRecentSessionScanner.ScanOptions = .runway) -> [RunwaySessionIdentity] {
+        let scannerIdentities = ClaudeRunwayRecentSessionScanner.identities(
+            root: recentSessionsRoot,
+            now: now,
+            options: scannerOptions
+        )
+        let merged = RunwaySnapshotAssembly.uniqueIdentities(requestIdentities + scannerIdentities)
+        // The Claude Desktop sidecar carries both the user-facing title and the
+        // archived flag (keyed by transcript session id). Prefer that title over
+        // any transcript-derived name and drop sessions the user archived in
+        // Desktop.
+        let desktopRecords: [String: ClaudeDesktopSidecarRecord]
+        if let desktopTitlesRoots {
+            desktopRecords = ClaudeDesktopSessionTitles.records(roots: desktopTitlesRoots)
+        } else if let desktopTitlesRoot {
+            desktopRecords = ClaudeDesktopSessionTitles.records(root: desktopTitlesRoot)
+        } else {
+            desktopRecords = ClaudeDesktopSessionTitles.records(roots: ClaudeDesktopSessionTitles.defaultRoots())
+        }
+        return merged.compactMap { identity -> RunwaySessionIdentity? in
+            let record = desktopRecords[identity.id]
+            if record?.isArchived == true { return nil }
+            guard let title = record?.title, !title.isEmpty else { return identity }
+            return RunwaySessionIdentity(
+                id: identity.id,
+                displayName: ClaudeRunwayLog.compact(title),
+                isGoal: identity.isGoal,
+                logPaths: identity.logPaths,
+                // Preserve the scanner's idle classification; without it a
+                // finished, Desktop-titled session would render as working.
+                isIdle: identity.isIdle
+            )
+        }
+    }
+
     static func snapshot(for request: CodexRunwaySnapshotRequest,
                          desktopTitlesRoot: URL? = nil) async -> CodexRunwaySnapshot? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                let scannerIdentities = ClaudeRunwayRecentSessionScanner.identities(
-                    root: request.recentSessionsRoot,
-                    now: request.now
+                let identities = effectiveIdentities(
+                    requestIdentities: request.identities,
+                    recentSessionsRoot: request.recentSessionsRoot,
+                    now: request.now,
+                    desktopTitlesRoot: desktopTitlesRoot
                 )
-                let merged = RunwaySnapshotAssembly.uniqueIdentities(request.identities + scannerIdentities)
-                // The Claude Desktop sidecar carries both the user-facing title
-                // and the archived flag (keyed by transcript session id). Prefer
-                // that title over any transcript-derived name — regardless of
-                // whether the name came from a HUD row or the recent-session
-                // scanner — and drop sessions the user has archived in Desktop:
-                // an archived conversation should not burn a runway row.
-                let desktopRecords = ClaudeDesktopSessionTitles.records(root: desktopTitlesRoot)
-                let identities = merged.compactMap { identity -> RunwaySessionIdentity? in
-                    let record = desktopRecords[identity.id]
-                    if record?.isArchived == true { return nil }
-                    guard let title = record?.title, !title.isEmpty else { return identity }
-                    return RunwaySessionIdentity(
-                        id: identity.id,
-                        displayName: ClaudeRunwayLog.compact(title),
-                        isGoal: identity.isGoal,
-                        logPaths: identity.logPaths,
-                        // Preserve the scanner's idle classification — without it a
-                        // finished, Desktop-titled session would render as working
-                        // ("0m/h") instead of the calm idle "—".
-                        isIdle: identity.isIdle
-                    )
-                }
                 // Token attribution is Claude's only burn signal, so — unlike
                 // Codex, which has an always-on direct rate-limit path — we do
                 // NOT gate it on a fresh projection. Otherwise burn/EQ only
@@ -106,6 +125,47 @@ enum ClaudeRunwaySnapshotLoader {
                 )
                 continuation.resume(returning: snapshot)
             }
+        }
+    }
+}
+
+enum ClaudeRunwayPresenceSynthesizer {
+    static func presences(root: URL?,
+                          now: Date,
+                          claimedLogPaths: Set<String>,
+                          desktopTitlesRoots: [URL]? = nil) -> [CodexActivePresence] {
+        let normalizedClaimed = Set(
+            claimedLogPaths
+                .map(CodexActiveSessionsModel.normalizePath)
+                .filter { !$0.isEmpty }
+        )
+        let identities = ClaudeRunwaySnapshotLoader.effectiveIdentities(
+            requestIdentities: [],
+            recentSessionsRoot: root,
+            now: now,
+            desktopTitlesRoots: desktopTitlesRoots,
+            scannerOptions: .presence
+        )
+
+        return identities.compactMap { identity in
+            let logPaths = identity.logPaths
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard !logPaths.isEmpty else { return nil }
+            let normalizedLogPaths = Set(logPaths.map(CodexActiveSessionsModel.normalizePath).filter { !$0.isEmpty })
+            guard normalizedLogPaths.isDisjoint(with: normalizedClaimed) else { return nil }
+
+            var presence = CodexActivePresence()
+            presence.schemaVersion = 1
+            presence.publisher = "agent-sessions-runway"
+            presence.kind = "desktop"
+            presence.source = .claude
+            presence.sessionId = identity.id
+            presence.sessionLogPath = logPaths[0]
+            presence.openSessionLogPaths = logPaths
+            presence.lastSeenAt = now
+            presence.liveStateHint = identity.isIdle ? .openIdle : .activeWorking
+            return presence
         }
     }
 }

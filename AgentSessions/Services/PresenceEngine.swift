@@ -549,6 +549,21 @@ actor PresenceEngine {
         return Self.dedupRoots([discovery.sessionsRoot()])
     }
 
+    private func claudeSessionScanRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? ""
+        let trimmedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
+        let discovery = ClaudeSessionDiscovery(customRoot: trimmedOverride.isEmpty ? nil : trimmedOverride)
+        let roots = discovery.sessionScanRoots()
+        if !roots.isEmpty { return Self.dedupRoots(roots) }
+        let fallback = trimmedOverride.isEmpty
+            ? ClaudeRunwayRecentSessionScanner.defaultRoot()
+            : discovery.sessionsRoot()
+        return Self.dedupRoots([fallback])
+    }
+
     private func opencodeSessionsRoots() -> [URL] {
         let defaults = UserDefaults.standard
         let override = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
@@ -608,6 +623,10 @@ actor PresenceEngine {
         let rootPaths = registryRoots().map(\.path)
         let codexSessionRoots = codexSessionsRoots().map(\.path)
         let claudeSessionRoots = claudeSessionsRoots().map(\.path)
+        let claudeSessionScanRoots = claudeSessionScanRoots().map(\.path)
+        let claudeDiscoveryRoots = Self.dedupRoots((claudeSessionRoots + claudeSessionScanRoots).map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }).map(\.path)
         let antigravitySessionRoots = antigravitySessionsRoots().map(\.path)
         let opencodeSessionRoots = opencodeSessionsRoots().map(\.path)
 
@@ -645,7 +664,8 @@ actor PresenceEngine {
             ttl: ttl,
             rootPaths: rootPaths,
             codexSessionRoots: codexSessionRoots,
-            claudeSessionRoots: claudeSessionRoots,
+            claudeSessionRoots: claudeDiscoveryRoots,
+            claudeRunwayRoots: claudeSessionScanRoots,
             antigravitySessionRoots: antigravitySessionRoots,
             opencodeSessionRoots: opencodeSessionRoots,
             hasVisibleConsumerSnapshot: hasVisibleConsumerSnapshot,
@@ -907,12 +927,13 @@ actor PresenceEngine {
 
     private func performRefreshDiscovery(generation: UInt64,
                                          now: Date,
-                                         ttl: TimeInterval,
-                                         rootPaths: [String],
-                                         codexSessionRoots: [String],
-                                         claudeSessionRoots: [String],
-                                         antigravitySessionRoots: [String],
-                                         opencodeSessionRoots: [String],
+                                          ttl: TimeInterval,
+                                          rootPaths: [String],
+                                          codexSessionRoots: [String],
+                                          claudeSessionRoots: [String],
+                                          claudeRunwayRoots: [String],
+                                          antigravitySessionRoots: [String],
+                                          opencodeSessionRoots: [String],
                                          hasVisibleConsumerSnapshot: Bool,
                                          appIsActiveSnapshot: Bool,
                                          isCockpitVisibleSnapshot: Bool,
@@ -1012,6 +1033,17 @@ actor PresenceEngine {
             out.append(contentsOf: itermPresences)
         }
 
+        var claimedClaudeLogPaths = Self.claimedLogPaths(in: out, source: .claude)
+        for root in Self.claudeRunwayRoots(from: claudeRunwayRoots) {
+            let synthesized = ClaudeRunwayPresenceSynthesizer.presences(
+                root: root,
+                now: now,
+                claimedLogPaths: claimedClaudeLogPaths
+            )
+            out.append(contentsOf: synthesized)
+            claimedClaudeLogPaths.formUnion(Self.claimedLogPaths(in: synthesized, source: .claude))
+        }
+
         return RefreshDiscoveryResult(
             loaded: out,
             didProbeProcesses: shouldProbeProcesses,
@@ -1024,6 +1056,41 @@ actor PresenceEngine {
     }
 
     private static let processProbeTimeout: TimeInterval = 0.75
+
+    private static func claimedLogPaths(in presences: [CodexActivePresence],
+                                        source: SessionSource) -> Set<String> {
+        var paths: Set<String> = []
+        for presence in presences where presence.source == source {
+            if let logPath = presence.sessionLogPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !logPath.isEmpty {
+                paths.insert(logPath)
+            }
+            for logPath in presence.openSessionLogPaths {
+                let trimmed = logPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { paths.insert(trimmed) }
+            }
+        }
+        return paths
+    }
+
+    nonisolated static func claudeRunwayRoots(from claudeRoots: [String]) -> [URL] {
+        let fm = FileManager.default
+        var roots: [URL] = []
+        var seen: Set<String> = []
+        for rawRoot in claudeRoots {
+            let trimmed = rawRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let configRoot = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath, isDirectory: true)
+            let projectsRoot = configRoot.appendingPathComponent("projects", isDirectory: true)
+            var isDir: ObjCBool = false
+            let scanRoot = fm.fileExists(atPath: projectsRoot.path, isDirectory: &isDir) && isDir.boolValue
+                ? projectsRoot
+                : configRoot
+            let key = scanRoot.standardizedFileURL.path
+            if seen.insert(key).inserted { roots.append(scanRoot) }
+        }
+        return roots
+    }
 
     private func discoverProcessPresences(generation: UInt64,
                                           now: Date,

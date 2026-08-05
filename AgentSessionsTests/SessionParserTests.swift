@@ -2922,6 +2922,29 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(desktopOnly.hasDiscoverableSessionsRoot())
     }
 
+    func testClaudeSessionScanRootsIncludeDesktopLocalAgentProjects() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeScanRoots-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+
+        let customConfigRoot = root.appendingPathComponent("custom/.claude", isDirectory: true)
+        let customProjectsRoot = customConfigRoot.appendingPathComponent("projects", isDirectory: true)
+        try fm.createDirectory(at: customProjectsRoot, withIntermediateDirectories: true)
+
+        let desktopRoot = root.appendingPathComponent("Application Support/Claude/local-agent-mode-sessions", isDirectory: true)
+        let desktopProjectsRoot = desktopRoot
+            .appendingPathComponent("account/workspace/local_abc/.claude/projects", isDirectory: true)
+        try fm.createDirectory(at: desktopProjectsRoot, withIntermediateDirectories: true)
+
+        let discovery = ClaudeSessionDiscovery(
+            customRoot: customConfigRoot.path,
+            desktopLocalAgentRoot: desktopRoot
+        )
+        let roots = Set(discovery.sessionScanRoots().map(canonicalPath))
+
+        XCTAssertEqual(roots, [canonicalPath(customProjectsRoot), canonicalPath(desktopProjectsRoot)])
+    }
+
     func testClaudeParserEnrichesDesktopLocalAgentTranscript() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-ClaudeDesktop-\(UUID().uuidString)", isDirectory: true)

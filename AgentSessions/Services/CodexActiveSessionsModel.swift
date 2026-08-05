@@ -53,6 +53,9 @@ struct CodexActivePresence: Codable, Equatable, Sendable {
     var sourceFilePath: String? = nil
     /// All JSONL log paths open by this process (parent + subagents).
     var openSessionLogPaths: [String] = []
+    /// Local-only state supplied by synthetic discovery sources that already
+    /// classify active vs idle. Not persisted to registry JSON.
+    var liveStateHint: CodexLiveState? = nil
 
     var itermSessionGuid: String? {
         CodexActiveSessionsModel.itermSessionGuid(from: terminal?.itermSessionId)
@@ -707,6 +710,11 @@ final class CodexActiveSessionsModel {
         merged.startedAt = merged.startedAt ?? loser.startedAt
         merged.lastSeenAt = max(ta, tb)
         merged.sourceFilePath = prefer(merged.sourceFilePath, loser.sourceFilePath)
+        if merged.liveStateHint != .activeWorking, loser.liveStateHint == .activeWorking {
+            merged.liveStateHint = .activeWorking
+        } else if merged.liveStateHint == nil {
+            merged.liveStateHint = loser.liveStateHint
+        }
 
         if merged.terminal == nil { merged.terminal = loser.terminal }
         if var t = merged.terminal {
@@ -2192,7 +2200,9 @@ final class CodexActiveSessionsModel {
             )
             let shouldProbeThisPresence = probeEligible && probedITermPresenceKeys.contains(key)
             let matchedBatchProbe = batchProbeResults[key]
-            if shouldProbeThisPresence, presence.source == .codex {
+            if let hintedState = presence.liveStateHint {
+                state = hintedState
+            } else if shouldProbeThisPresence, presence.source == .codex {
                 if let probe = matchedBatchProbe {
                     if let tail = probe.tail {
                         state = classifyITermTail(tail)

@@ -24,6 +24,28 @@ enum ClaudeRunwayRecentSessionScanner {
     /// (Track 2) instead of a misleading spinner; until then that tail is short.
     static let idleSessionGrace: TimeInterval = 45
     static let maximumFiles = 12
+
+    struct ScanOptions {
+        let maximumFileAge: TimeInterval
+        let maximumActiveSampleAge: TimeInterval
+        let idleSessionGrace: TimeInterval
+        let maximumFiles: Int?
+
+        static let runway = ScanOptions(
+            maximumFileAge: ClaudeRunwayRecentSessionScanner.maximumFileAge,
+            maximumActiveSampleAge: ClaudeRunwayRecentSessionScanner.maximumActiveSampleAge,
+            idleSessionGrace: ClaudeRunwayRecentSessionScanner.idleSessionGrace,
+            maximumFiles: ClaudeRunwayRecentSessionScanner.maximumFiles
+        )
+
+        static let presence = ScanOptions(
+            maximumFileAge: ClaudeRunwayRecentSessionScanner.maximumFileAge,
+            maximumActiveSampleAge: ClaudeRunwayRecentSessionScanner.maximumFileAge,
+            idleSessionGrace: ClaudeRunwayRecentSessionScanner.idleSessionGrace,
+            maximumFiles: nil
+        )
+    }
+
     static func defaultRoot() -> URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".claude/projects", isDirectory: true)
@@ -31,9 +53,10 @@ enum ClaudeRunwayRecentSessionScanner {
 
     static func identities(root: URL? = nil,
                            now: Date = Date(),
-                           fileManager: FileManager = .default) -> [RunwaySessionIdentity] {
+                           fileManager: FileManager = .default,
+                           options: ScanOptions = .runway) -> [RunwaySessionIdentity] {
         let rootURL = root ?? defaultRoot()
-        let cutoff = now.addingTimeInterval(-maximumFileAge)
+        let cutoff = now.addingTimeInterval(-options.maximumFileAge)
         var candidates: [(url: URL, modifiedAt: Date, signature: RunwayFileSignature)] = []
 
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -71,7 +94,7 @@ enum ClaudeRunwayRecentSessionScanner {
         // applied to distinct sessions, not raw files, so subagents can't crowd
         // out other sessions.
         for entry in candidates.sorted(by: { $0.modifiedAt > $1.modifiedAt }) {
-            guard let candidate = candidate(for: entry.url, now: now, signature: entry.signature) else { continue }
+            guard let candidate = candidate(for: entry.url, now: now, signature: entry.signature, options: options) else { continue }
             if var existing = byID[candidate.id] {
                 existing.logPaths.append(candidate.logPath)
                 // A non-subagent (parent) transcript's name beats a subagent's
@@ -85,13 +108,14 @@ enum ClaudeRunwayRecentSessionScanner {
                 existing.isIdle = existing.isIdle && candidate.isIdle
                 byID[candidate.id] = existing
             } else {
-                guard order.count < maximumFiles else { continue }
+                if let maximumFiles = options.maximumFiles, order.count >= maximumFiles { continue }
                 order.append(candidate.id)
                 byID[candidate.id] = (candidate.displayName, [candidate.logPath], !candidate.isSubagent, candidate.isIdle)
             }
         }
 
-        return order.prefix(maximumFiles).compactMap { id in
+        let selectedIDs = options.maximumFiles.map { Array(order.prefix($0)) } ?? order
+        return selectedIDs.compactMap { id in
             guard let group = byID[id] else { return nil }
             return RunwaySessionIdentity(
                 id: id,
@@ -113,7 +137,10 @@ enum ClaudeRunwayRecentSessionScanner {
     static func resetFileCacheForTesting() { fileCache.removeAllForTesting() }
     #endif
 
-    private static func candidate(for url: URL, now: Date, signature: RunwayFileSignature) -> ScannedCandidate? {
+    private static func candidate(for url: URL,
+                                  now: Date,
+                                  signature: RunwayFileSignature,
+                                  options: ScanOptions) -> ScannedCandidate? {
         let parse = fileCache.value(path: url.path, signature: signature) {
             // Self-qualified: the unqualified name would bind to the local
             // `metadata` below and cycle the type checker.
@@ -126,7 +153,7 @@ enum ClaudeRunwayRecentSessionScanner {
         if ClaudeProbeConfig.isProbeWorkingDirectory(metadata.cwd) {
             return nil
         }
-        let state = activeState(from: parse.activeStateLines, now: now)
+        let state = activeState(from: parse.activeStateLines, now: now, options: options)
         guard state.active else { return nil }
         let fallbackID = url.deletingPathExtension().lastPathComponent
         let isSubagent = url.pathComponents.contains("subagents")
@@ -189,14 +216,16 @@ enum ClaudeRunwayRecentSessionScanner {
     /// Recomputed every cycle from the cached `lines`: the future-timestamp skip
     /// and the presence-window thresholds are the only `now`-dependencies, so
     /// state advances (active→idle→gone) as time passes with the disk unchanged.
-    private static func activeState(from lines: [ClaudeScannerActiveStateLine], now: Date) -> (active: Bool, isIdle: Bool) {
+    private static func activeState(from lines: [ClaudeScannerActiveStateLine],
+                                    now: Date,
+                                    options: ScanOptions) -> (active: Bool, isIdle: Bool) {
         for line in lines.reversed() {
             // Skip lines with implausible future timestamps (clock skew / bad
             // data) rather than treating them as live activity.
             guard line.capturedAt <= now.addingTimeInterval(5) else { continue }
             // An idle session (finished its turn) drops sooner than a working
             // one so it doesn't linger as a stale row.
-            let threshold = line.idle ? idleSessionGrace : maximumActiveSampleAge
+            let threshold = line.idle ? options.idleSessionGrace : options.maximumActiveSampleAge
             return (now.timeIntervalSince(line.capturedAt) <= threshold, line.idle)
         }
         return (false, false)
