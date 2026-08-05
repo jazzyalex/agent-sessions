@@ -161,22 +161,26 @@ final class AuthFixWindowController {
 
 // MARK: - Fix dialog
 
-/// Guided remediation: explains what's wrong and walks through the fixes in
-/// order (re-authenticate → Web API fallback → CLI probe → recheck). Adapts to
-/// the provider and auth state.
+/// Guided remediation: Codex first clears process-local retry state and performs
+/// a fresh check, while Claude keeps its re-authentication/fallback ladder. The
+/// Codex login command appears only after that fresh request rejects the token.
 struct AuthFixView: View {
     let status: UsageAuthStatus
     var onClose: () -> Void
 
     @ObservedObject private var claude = ClaudeUsageModel.shared
+    @ObservedObject private var codex = CodexUsageModel.shared
     @AppStorage(PreferencesKey.claudeWebApiEnabled) private var webApiEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeTmuxAutoFallbackOptIn) private var cliProbeEnabled: Bool = false
     @State private var copied = false
     @State private var refreshStatus: String?
+    @State private var isRechecking = false
+    @State private var codexRecheckOutcome: CodexAuthRecheckOutcome?
 
     private var isClaude: Bool { status.providerName != "Codex" }
     private var loginCommand: String? {
-        if case .showCommand(let c) = status.remediation { return c }
+        let liveStatus = isClaude ? (claude.authStatus ?? status) : (codex.authStatus ?? status)
+        if case .showCommand(let c) = liveStatus.remediation { return c }
         return nil
     }
 
@@ -208,8 +212,25 @@ struct AuthFixView: View {
                     Text("Try these, in order")
                         .font(.subheadline).fontWeight(.semibold)
 
-                    if let cmd = loginCommand {
-                        stepRow("A", "Re-authenticate", "Run this in Terminal — usage returns automatically once you're signed in. This is almost always all that's needed.") {
+                    if !isClaude {
+                        stepRow("A", "Refresh Agent Sessions", "A plan change can leave an old quota failure cached in the running app even though your existing Codex login is valid. Check that first — no new sign-in required.") {
+                            HStack(spacing: 10) {
+                                Button(isRechecking ? "Checking…" : "Refresh now") { recheck() }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isRechecking)
+                                if let s = refreshStatus {
+                                    Text(s).font(.caption)
+                                        .foregroundStyle(codexRecheckOutcome == .recovered ? Color.green : Color.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    if let cmd = loginCommand,
+                       isClaude || codexRecheckOutcome == .authenticationRequired {
+                        stepRow(isClaude ? "A" : "B", "Re-authenticate", isClaude
+                            ? "Run this in Terminal — usage returns automatically once you're signed in."
+                            : "The fresh check was rejected by Codex. Run this in Terminal, then refresh again.") {
                             HStack(spacing: 8) {
                                 Text(cmd)
                                     .font(.system(.callout, design: .monospaced))
@@ -247,12 +268,14 @@ struct AuthFixView: View {
                         }
                     }
 
-                    stepRow(isClaude ? "D" : "B", "Recheck now", "After trying the above, re-run the usage fetch to confirm.") {
-                        HStack(spacing: 10) {
-                            Button("Refresh now") { recheck() }
-                                .buttonStyle(.bordered)
-                            if let s = refreshStatus {
-                                Text(s).font(.caption).foregroundStyle(.secondary)
+                    if isClaude {
+                        stepRow("D", "Recheck now", "After trying the above, re-run the usage fetch to confirm.") {
+                            HStack(spacing: 10) {
+                                Button("Refresh now") { recheck() }
+                                    .buttonStyle(.bordered)
+                                if let s = refreshStatus {
+                                    Text(s).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -276,6 +299,11 @@ struct AuthFixView: View {
         }
         .padding(20)
         .frame(width: 500, height: 500)
+        .task {
+            if !isClaude, codexRecheckOutcome == nil {
+                recheck()
+            }
+        }
     }
 
     // MARK: - Step row
@@ -303,10 +331,29 @@ struct AuthFixView: View {
     private func recheck() {
         refreshStatus = "Checking…"
         let claudeCtx = isClaude
-        if claudeCtx { ClaudeUsageModel.shared.refreshNow() } else { CodexUsageModel.shared.refreshNow() }
+        if !claudeCtx {
+            guard !isRechecking else { return }
+            isRechecking = true
+            Task { @MainActor in
+                let outcome = await CodexUsageModel.shared.recheckAuthNow()
+                codexRecheckOutcome = outcome
+                isRechecking = false
+                switch outcome {
+                case .recovered:
+                    refreshStatus = "Updated — your existing login works."
+                case .authenticationRequired:
+                    refreshStatus = "Codex rejected the saved login."
+                case .unavailable:
+                    refreshStatus = "Couldn't refresh yet. Try again."
+                }
+            }
+            return
+        }
+
+        ClaudeUsageModel.shared.refreshNow()
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_500_000_000)
-            let verdict = claudeCtx ? ClaudeUsageModel.shared.authStatus : CodexUsageModel.shared.authStatus
+            let verdict = ClaudeUsageModel.shared.authStatus
             refreshStatus = (verdict?.state.isAlarming ?? false) ? "Still unavailable — try step A." : "Updated ✓"
         }
     }
@@ -330,6 +377,12 @@ struct AuthFixView: View {
     private var providerName: String { status.providerName.isEmpty ? "Claude" : status.providerName }
 
     private var explanation: String {
+        if !isClaude, codexRecheckOutcome == .recovered {
+            return "Agent Sessions refreshed the Codex quota successfully. Your existing login is valid; no re-authentication is needed."
+        }
+        if !isClaude, codexRecheckOutcome != .authenticationRequired {
+            return "Agent Sessions may be holding an old Codex quota failure in memory. This can happen after you upgrade your plan: the account is ready, but the running app has not retried it yet."
+        }
         switch status.state {
         case .expired:
             return "Agent Sessions reads your \(providerName) usage using the \(providerName) CLI's saved login. That login has expired, so your account is now rejecting usage requests — retrying on its own won't recover it. Re-authenticate to restore it."
@@ -343,6 +396,9 @@ struct AuthFixView: View {
     }
 
     private var severityIcon: (name: String, color: Color) {
+        if !isClaude, codexRecheckOutcome == .recovered {
+            return ("checkmark.circle.fill", .green)
+        }
         switch status.state {
         case .signedOut: return ("exclamationmark.triangle.fill", .red)
         case .expired: return ("clock.badge.exclamationmark", .orange)

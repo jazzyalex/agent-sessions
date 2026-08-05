@@ -12,6 +12,30 @@ import XCTest
 @MainActor
 final class CodexUsageModelAuthWiringTests: XCTestCase {
 
+    func testExplicitRecheckClearsProcessLocalOAuthRetryState() async {
+        let fetcher = CodexOAuthUsageFetcher(credentials: CodexOAuthCredentials())
+        let now = Date()
+        await fetcher.seedRetryStateForTesting(
+            lastFetchAt: now,
+            failed: true,
+            rateLimitedUntil: now.addingTimeInterval(1_800)
+        )
+
+        await fetcher.resetForUserRecheck()
+
+        let state = await fetcher.retryStateForTesting()
+        XCTAssertNil(state.lastFetchAt)
+        XCTAssertFalse(state.failed)
+        XCTAssertNil(state.rateLimitedUntil)
+    }
+
+    func testOnlyAuthoritativeRejectionTriggersSilentCleanRecheck() {
+        XCTAssertTrue(CodexUsageModel.shouldSilentlyRecheckAuth(.unauthorized))
+        XCTAssertFalse(CodexUsageModel.shouldSilentlyRecheckAuth(.transient))
+        XCTAssertFalse(CodexUsageModel.shouldSilentlyRecheckAuth(.skippedCooldown))
+        XCTAssertFalse(CodexUsageModel.shouldSilentlyRecheckAuth(.ok(CodexUsageSnapshot())))
+    }
+
     func testApplyAuthStateSignedOutRaisesBanner() {
         let model = CodexUsageModel()
         model.applyAuthState(.signedOut)

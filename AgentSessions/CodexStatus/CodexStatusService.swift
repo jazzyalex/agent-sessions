@@ -230,6 +230,10 @@ final class CodexUsageModel: ObservableObject {
     /// invalidates `cliStatusCache` so a stale `.signedOut` can't linger up to
     /// `cliStatusReprobeInterval` (120s) after a re-login (F5).
     private var previousAuthFetchWasOK: Bool = false
+    /// One silent clean retry is allowed before an OAuth rejection reaches the
+    /// UI. Duplicate overlapping 401 callbacks are dropped while that retry is
+    /// running so they cannot flash the Fix banner first.
+    private var silentAuthRecoveryInFlight = false
 
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
@@ -348,6 +352,40 @@ final class CodexUsageModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 65 * 1_000_000_000)
                 if self.isUpdating { self.isUpdating = false }
             }
+        }
+    }
+
+    /// Performs the Fix dialog's authoritative recovery attempt. Unlike the
+    /// ordinary refresh action, this deliberately clears process-local auth and
+    /// failure caches first, matching the recovery previously achieved only by
+    /// relaunching Agent Sessions.
+    func recheckAuthNow() async -> CodexAuthRecheckOutcome {
+        guard isEnabled else { return .unavailable }
+        cliStatusCache = nil
+        refreshResetCredits()
+
+        let result: CodexUsageFetchResult
+        if let service {
+            result = await service.recheckAuthNow()
+        } else {
+            let handler: @Sendable (CodexUsageSnapshot) -> Void = { [weak self] snapshot in
+                Task { @MainActor in self?.apply(snapshot) }
+            }
+            let availability: @Sendable (Bool) -> Void = { [weak self] unavailable in
+                Task { @MainActor in self?.cliUnavailable = unavailable }
+            }
+            let oneShot = CodexStatusService(updateHandler: handler, availabilityHandler: availability)
+            result = await oneShot.recheckAuthNow()
+        }
+
+        await handleAuthFetchResult(result, allowSilentRecovery: false)
+        switch result {
+        case .ok:
+            return .recovered
+        case .unauthorized:
+            return .authenticationRequired
+        case .skippedCooldown, .transient:
+            return .unavailable
         }
     }
 
@@ -621,7 +659,21 @@ final class CodexUsageModel: ObservableObject {
     /// publishing both run here on the main actor; then the verdict is pushed to
     /// the service so it can short-circuit the /status tmux probe when signed
     /// out. Invoked once per poll by the service's `authFetchResultHandler`.
-    func handleAuthFetchResult(_ fetchResult: CodexUsageFetchResult) async {
+    func handleAuthFetchResult(_ fetchResult: CodexUsageFetchResult,
+                               allowSilentRecovery: Bool = true) async {
+        if allowSilentRecovery, Self.shouldSilentlyRecheckAuth(fetchResult) {
+            // A relaunch fixing the same saved login proves a process-local cache
+            // can make the first rejection stale. Retry once before publishing an
+            // alarming verdict; only the clean retry may reach the Fix surface.
+            guard !silentAuthRecoveryInFlight else { return }
+            guard let service else { return }
+            silentAuthRecoveryInFlight = true
+            let recoveredResult = await service.recheckAuthNow()
+            silentAuthRecoveryInFlight = false
+            await handleAuthFetchResult(recoveredResult, allowSilentRecovery: false)
+            return
+        }
+
         // Reentrancy guard (I2): overlapping polls (periodic + manual /
         // hidden→visible) can finish out of order across the `await`s below, and a
         // stale verdict could clobber a newer one. Capture a monotonic generation
@@ -698,6 +750,11 @@ final class CodexUsageModel: ObservableObject {
         guard generation == authGeneration else { return }
         applyAuthState(state)
         await service?.updateAuthState(state, generation: generation)
+    }
+
+    nonisolated static func shouldSilentlyRecheckAuth(_ result: CodexUsageFetchResult) -> Bool {
+        if case .unauthorized = result { return true }
+        return false
     }
 
     /// Throttled authoritative `codex login status` probe for the SUCCESS path.
@@ -2070,6 +2127,27 @@ actor CodexStatusService {
             await self.ensureOrphanCleanupIfNeeded()
             await self.refreshTick(userInitiated: true)
         }
+    }
+
+    /// Rechecks Codex after clearing the same process-local OAuth retry state
+    /// that an app relaunch discards. This is reserved for the explicit Fix flow;
+    /// normal refreshes continue to respect endpoint cooldowns.
+    func recheckAuthNow() async -> CodexUsageFetchResult {
+        cliLoginStatusCache = nil
+        await codexOAuthFetcher.resetForUserRecheck()
+        availabilityHandler(false)
+
+        let result = await codexOAuthFetcher.fetchUsageResult()
+        if case .ok(let preferredSnap) = result {
+            var merged = snapshot
+            mergeRateLimitSnapshot(preferredSnap, into: &merged, replacesMissingWindows: true)
+            return result
+        } else if let rpcSnap = await codexRPCProbe.fetchRateLimits(cooldownSuccess: 0) {
+            var merged = snapshot
+            mergeRateLimitSnapshot(rpcSnap, into: &merged, replacesMissingWindows: true)
+            return .ok(rpcSnap)
+        }
+        return result
     }
 
     private func beginTmuxProbe() -> Bool {

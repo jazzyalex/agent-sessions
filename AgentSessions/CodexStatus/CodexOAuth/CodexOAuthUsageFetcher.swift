@@ -62,6 +62,12 @@ enum CodexUsageFetchResult {
     case transient
 }
 
+enum CodexAuthRecheckOutcome: Equatable {
+    case recovered
+    case authenticationRequired
+    case unavailable
+}
+
 // MARK: - Fetcher
 
 actor CodexOAuthUsageFetcher {
@@ -81,6 +87,29 @@ actor CodexOAuthUsageFetcher {
         config.timeoutIntervalForResource = 12
         self.session = URLSession(configuration: config)
     }
+
+    /// Clears only in-memory retry state before an explicit user-initiated
+    /// recovery check. A plan change can make the same saved login usable while
+    /// this actor is still holding a failure/rate-limit cooldown; relaunching the
+    /// app used to be the only way to clear that stale state.
+    func resetForUserRecheck() async {
+        lastFetchAt = nil
+        lastFetchFailed = false
+        rateLimitedUntil = nil
+        await credentials.invalidateCache()
+    }
+
+#if DEBUG
+    func seedRetryStateForTesting(lastFetchAt: Date, failed: Bool, rateLimitedUntil: Date?) {
+        self.lastFetchAt = lastFetchAt
+        self.lastFetchFailed = failed
+        self.rateLimitedUntil = rateLimitedUntil
+    }
+
+    func retryStateForTesting() -> (lastFetchAt: Date?, failed: Bool, rateLimitedUntil: Date?) {
+        (lastFetchAt, lastFetchFailed, rateLimitedUntil)
+    }
+#endif
 
     /// Returns a snapshot on success, nil on any failure (caller falls through).
     func fetchUsage(cooldownSuccess: TimeInterval = 5 * 60,
