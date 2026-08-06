@@ -220,3 +220,6 @@ Contributing:
 ## License
 
 MIT. See `LICENSE`.
+
+<!-- osai-verify: 26511b92c73adb364af7 -->
+
