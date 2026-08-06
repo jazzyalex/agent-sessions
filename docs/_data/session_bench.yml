@@ -139,7 +139,7 @@ agents:
     P3: pass
   notes:
     S1: probe wrote 1,463 bytes (limit 10,240)
-    S2: work-product text is 35.5% of corpus bytes (floor 25.0%)
+    S2: content-key text is 35.5% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 763 bytes (limit 25,600)
     C1: timestamp on records
     C2: model_change events + responseId
@@ -199,7 +199,7 @@ agents:
     P3: pass
   notes:
     S1: 'probe not run: OAuth refresh_token_reused; headless auth requires fresh sign-in'
-    S2: work-product text is 79.1% of corpus bytes (floor 25.0%)
+    S2: content-key text is 79.1% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 23,447 bytes (limit 25,600) — largest single line
       across all real sessions, 23,447 B (measured 2026-08-05); under the 25,600 B
       bar
@@ -263,7 +263,7 @@ agents:
     P3: pass
   notes:
     S1: probe wrote 40,481 bytes (limit 10,240)
-    S2: work-product text is 23.9% of corpus bytes (floor 25.0%)
+    S2: content-key text is 23.9% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 19,695 bytes (limit 25,600) — largest attachment
       line across 5 newest real sessions
     C1: timestamp per line (fixture claude/small.jsonl)
@@ -325,7 +325,7 @@ agents:
     S1: probe ran, but only logical row bytes (4,982) are known; a physical before/after
       store diff (db+WAL) comparable to the JSONL harnesses is not yet measured. Cold-start
       db creation was 274,432 bytes.
-    S2: work-product text is 28.1% of corpus bytes (floor 25.0%)
+    S2: content-key text is 28.1% of corpus bytes (floor 25.0%)
     S3: 'no fixed-cost dump records found: largest rows are tool outputs (max 730,941
       B) and user-message diff summaries (max 1,051,302 B) — variable work-derived
       data, not system-prompt/tool-catalog dumps (queried 2026-08-05)'
@@ -389,7 +389,7 @@ agents:
     P3: pass
   notes:
     S1: probe wrote 78,244 bytes (limit 10,240)
-    S2: work-product text is 30.8% of corpus bytes (floor 25.0%) — inflated by world_state
+    S2: content-key text is 30.8% of corpus bytes (floor 25.0%) — inflated by world_state
       context snapshots whose text falls under content-like keys; per-event classification
       is v2
     S3: largest bookkeeping record 41,601 bytes (limit 25,600) — largest world_state
@@ -452,7 +452,7 @@ agents:
     P3: fail
   notes:
     S1: probe wrote 101,351 bytes (limit 10,240)
-    S2: work-product text is 7.0% of corpus bytes (floor 25.0%)
+    S2: content-key text is 7.0% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 70,233 bytes (limit 25,600) — llm.tools_snapshot
       line (full tool catalog)
     C1: epoch-ms time on every op
@@ -519,7 +519,7 @@ agents:
     P3: fail
   notes:
     S1: probe wrote 66,910 bytes (limit 10,240)
-    S2: work-product text is 69.0% of corpus bytes (floor 25.0%) — inflated by the
+    S2: content-key text is 69.0% of corpus bytes (floor 25.0%) — inflated by the
       per-session system.message prompt whose text falls under the content key; per-event
       classification is v2
     S3: largest bookkeeping record 52,236 bytes (limit 25,600) — system.message line
@@ -582,7 +582,7 @@ agents:
   notes:
     S1: 'probe not run: hermes -z one-shot returns ''no final response'' for every
       provider since late June'
-    S2: work-product text is 78.8% of corpus bytes (floor 25.0%)
+    S2: content-key text is 78.8% of corpus bytes (floor 25.0%)
     S3: 'largest bookkeeping record 35,985 bytes (limit 25,600) — sessions.system_prompt
       column: up to a 35,985-byte system prompt stored in 116 of 118 session rows
       (queried 2026-08-05)'
@@ -646,7 +646,7 @@ agents:
     P3: fail
   notes:
     S1: probe wrote 6,820 bytes (limit 10,240)
-    S2: work-product text is 79.4% of corpus bytes (floor 25.0%)
+    S2: content-key text is 79.4% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 3,957 bytes (limit 25,600)
     C1: created_at on every record (verified 2026-08-04, 3 files)
     C2: no model field; parser regexes 'Model Selection' text out of USER_INPUT
@@ -706,7 +706,7 @@ agents:
     P3: fail
   notes:
     S1: probe wrote 1,915 bytes (limit 10,240)
-    S2: work-product text is 51.0% of corpus bytes (floor 25.0%)
+    S2: content-key text is 51.0% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 367 bytes (limit 25,600)
     C1: no timestamps in transcript; session times from file mtimes (parser falls
       back to ctime/mtime)

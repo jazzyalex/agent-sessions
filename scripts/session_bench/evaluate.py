@@ -61,7 +61,7 @@ def compute_signal(agent: str, m: dict) -> dict:
             ev += f"; {notes['probe_bytes']}"
         out["S1"] = {"state": state, "evidence": ev}
     share = m["corpus_content_share"]
-    ev = f"work-product text is {share}% of corpus bytes (floor {S2_MIN_CONTENT_SHARE}%)"
+    ev = f"content-key text is {share}% of corpus bytes (floor {S2_MIN_CONTENT_SHARE}%)"
     if "corpus_content_share" in notes:
         ev += f" — {notes['corpus_content_share']}"
     out["S2"] = {"state": "pass" if share >= S2_MIN_CONTENT_SHARE else "fail", "evidence": ev}
