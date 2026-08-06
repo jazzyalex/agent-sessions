@@ -1,0 +1,111 @@
+{
+  "bench_version": 1,
+  "data_date": "2026-08-04",
+  "probe": {
+    "prompt": "List the files in the current directory, then say hello in one sentence.",
+    "surface": "CLI, headless/one-shot mode",
+    "runner": "scripts/agent_watch.py --mode prebump (scratch config, common prompt) + manual kimi -p",
+    "report": "prebump report 20260804-173402Z (local scratchpad; archived in Marketing/formats-post-2026-08/RESEARCH_DIGEST.md)",
+    "artifacts_note": "raw probe artifacts (session files) were measured locally and are not yet archived in-repo; reproducing the observations end-to-end is the v2 milestone. scripts/session_bench/measure.py recomputes the per-artifact numbers from a session file path."
+  },
+  "agents": {
+    "codex": {
+      "version": "0.146.0",
+      "probe_bytes": 78244,
+      "probe_records": 25,
+      "corpus_content_share": 30.8,
+      "max_fixed_record_bytes": 41601,
+      "notes": {
+        "max_fixed_record_bytes": "largest world_state line across 5 newest real rollouts",
+        "corpus_content_share": "inflated by world_state context snapshots whose text falls under content-like keys; per-event classification is v2"
+      }
+    },
+    "claude": {
+      "version": "2.1.220",
+      "probe_bytes": 40481,
+      "probe_records": 14,
+      "corpus_content_share": 23.9,
+      "max_fixed_record_bytes": 19695,
+      "notes": {
+        "max_fixed_record_bytes": "largest attachment line across 5 newest real sessions"
+      }
+    },
+    "copilot": {
+      "version": "1.0.77",
+      "probe_bytes": 66910,
+      "probe_records": 15,
+      "corpus_content_share": 69.0,
+      "max_fixed_record_bytes": 52236,
+      "notes": {
+        "max_fixed_record_bytes": "system.message line carrying the full system prompt",
+        "corpus_content_share": "inflated by the per-session system.message prompt whose text falls under the content key; per-event classification is v2"
+      }
+    },
+    "cursor": {
+      "version": "2026.7.20",
+      "probe_bytes": 1915,
+      "probe_records": 8,
+      "corpus_content_share": 51.0,
+      "max_fixed_record_bytes": 367
+    },
+    "opencode": {
+      "version": "1.18.11",
+      "probe_bytes": null,
+      "probe_records": 12,
+      "corpus_content_share": 28.1,
+      "max_fixed_record_bytes": null,
+      "notes": {
+        "probe_bytes": "probe ran, but only logical row bytes (4,982) are known; a physical before/after store diff (db+WAL) comparable to the JSONL harnesses is not yet measured. Cold-start db creation was 274,432 bytes.",
+        "cold_start_bytes": "274432",
+        "max_fixed_record_bytes": "no fixed-cost dump records found: largest rows are tool outputs (max 730,941 B) and user-message diff summaries (max 1,051,302 B) \u2014 variable work-derived data, not system-prompt/tool-catalog dumps (queried 2026-08-05)"
+      },
+      "fixed_dump_found": false
+    },
+    "hermes": {
+      "version": "0.17.0",
+      "probe_bytes": null,
+      "probe_records": null,
+      "corpus_content_share": 78.8,
+      "max_fixed_record_bytes": 35985,
+      "notes": {
+        "probe_bytes": "probe not run: hermes -z one-shot returns 'no final response' for every provider since late June",
+        "max_fixed_record_bytes": "sessions.system_prompt column: up to a 35,985-byte system prompt stored in 116 of 118 session rows (queried 2026-08-05)"
+      }
+    },
+    "antigravity": {
+      "version": "1.1.1",
+      "probe_bytes": 6820,
+      "probe_records": 8,
+      "corpus_content_share": 79.4,
+      "max_fixed_record_bytes": 3957
+    },
+    "openclaw": {
+      "version": "2026.6.11",
+      "probe_bytes": null,
+      "probe_records": null,
+      "corpus_content_share": 79.1,
+      "max_fixed_record_bytes": 23447,
+      "notes": {
+        "probe_bytes": "probe not run: OAuth refresh_token_reused; headless auth requires fresh sign-in",
+        "max_fixed_record_bytes": "largest single line across all real sessions, 23,447 B (measured 2026-08-05); under the 25,600 B bar"
+      }
+    },
+    "pi": {
+      "version": "0.83.0",
+      "probe_bytes": 1463,
+      "probe_records": 5,
+      "corpus_content_share": 35.5,
+      "max_fixed_record_bytes": 763
+    },
+    "kimi": {
+      "version": "0.31.1",
+      "probe_bytes": 101351,
+      "probe_records": 22,
+      "corpus_content_share": 7.0,
+      "max_fixed_record_bytes": 70233,
+      "notes": {
+        "max_fixed_record_bytes": "llm.tools_snapshot line (full tool catalog)"
+      }
+    }
+  }
+}

@@ -1,0 +1,222 @@
+# Session Bench manual-gate checklist. Signal gates (S1-S3) are computed by
+# evaluate.py from measurements-*.json; every verdict here is a checklist item
+# with its evidence. P2 is globally untested (excluded from scoring) until a
+# cross-harness truncation experiment exists.
+#
+# States: pass | fail | not_run (probe impossible; excluded from that agent's
+# scored total) | untested (gate excluded from everyone's scored total).
+
+gates:
+  - {id: S1, area: Signal, name: Lean session, computed: true,
+     desc: "The identical one-line probe task adds ≤ 10 KB to the store (incremental bytes; database cold-start allocation is reported separately, not scored)."}
+  - {id: S2, area: Signal, name: Content-key share, computed: true,
+     desc: "Strings under a published list of content-like keys (text, content, message, thinking, output, result, …) are ≥ 25% of stored bytes (corpus measurement). This heuristic captures real work product — messages, reasoning, tool output — but also counts bookkeeping stored under those keys, noted per-agent where known (Codex world_state, Copilot system prompt). Format-specific per-event classifiers are v2."}
+  - {id: S3, area: Signal, name: No fixed-cost dumps, computed: true,
+     desc: "No single per-session bookkeeping record over 25 KB (system-prompt dumps, tool-catalog snapshots, context snapshots) in recent real sessions."}
+  - {id: C1, area: Completeness, name: Per-event timestamps,
+     desc: "Every event carries a timestamp."}
+  - {id: C2, area: Completeness, name: Model attributable,
+     desc: "The model behind every assistant message is recoverable from the record."}
+  - {id: C3, area: Completeness, name: Token usage recorded,
+     desc: "Token counts are written locally."}
+  - {id: C4, area: Completeness, name: Dollar cost recorded,
+     desc: "A dollar cost figure is written locally (premium-request counters do not pass)."}
+  - {id: C5, area: Completeness, name: Tool calls and outputs,
+     desc: "Both the tool invocation and its output are in the record."}
+  - {id: C6, area: Completeness, name: Readable rationale,
+     desc: "A readable account of the model's reasoning survives in the record — raw thinking or a stored summary beyond the final answer. Sealing may be deliberate vendor policy; the gate scores what the record contains, not the policy's merits."}
+  - {id: C7, area: Completeness, name: Thread structure,
+     desc: "Threads, branches, or subagent runs are recoverable via links or artifacts."}
+  - {id: T1, area: Stability, name: No schema break,
+     desc: "No breaking schema change in the observation window (2026-03-31 → 2026-08-04)."}
+  - {id: T2, area: Stability, name: Declares a version,
+     desc: "The artifact itself declares a format/schema version."}
+  - {id: T3, area: Stability, name: Honest version signal,
+     desc: "Any declared version matches the shipped reality."}
+  - {id: O1, area: Openness, name: Standard-tools readable,
+     desc: "Readable at rest with a text editor or sqlite3; protobuf or hex-encoded payloads fail."}
+  - {id: O2, area: Openness, name: Live-tailable,
+     desc: "One artifact you can tail -f holds the full running record."}
+  - {id: O3, area: Openness, name: Documented schema,
+     desc: "The vendor publishes documentation for the session format."}
+  - {id: O4, area: Openness, name: Stable location,
+     desc: "No wholesale storage-layout migration in the observation window."}
+  - {id: P1, area: Tooling, name: Naive-reader safe,
+     desc: "A reader following the obvious structure gets every message exactly once."}
+  - {id: P2, area: Tooling, name: Crash tolerant, untested: true,
+     desc: "A truncated final write costs at most one record. UNSCORED in v1: asserted by format family only; needs a cross-harness truncation experiment (v2)."}
+  - {id: P3, area: Tooling, name: Self-contained,
+     desc: "No sidecar file join is needed for title, cwd, or model."}
+
+# Manual verdicts. evidence: short cited basis (fixture, parser, ledger, probe).
+verdicts:
+  codex:
+    C1: {state: pass, evidence: "timestamp on every line (fixture codex/small.jsonl)"}
+    C2: {state: pass, evidence: "turn_context / thread_settings events per turn"}
+    C3: {state: pass, evidence: "event_msg/token_count with cumulative usage"}
+    C4: {state: fail, evidence: "tokens only, no dollar figure anywhere"}
+    C5: {state: pass, evidence: "function_call + function_call_output items"}
+    C6: {state: fail, evidence: "reasoning items are encrypted_content blobs; no stored summary (7,339/7,339 opaque in 40 recent rollouts)"}
+    C7: {state: fail, evidence: "no thread/branch links in format"}
+    T1: {state: pass, evidence: "ledger: ~6 additive drifts, envelope unchanged"}
+    T2: {state: pass, evidence: "payload.cli_version in session_meta"}
+    T3: {state: pass, evidence: "cli_version matches installed CLI"}
+    O1: {state: pass, evidence: "plain JSONL"}
+    O2: {state: pass, evidence: "single rollout file, appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "path contract unchanged all window"}
+    P1: {state: fail, evidence: "every turn logged twice (event_msg + response_item); naive reader double-counts"}
+    P3: {state: pass, evidence: "cwd/instructions in session_meta; no sidecar"}
+  claude:
+    C1: {state: pass, evidence: "timestamp per line (fixture claude/small.jsonl)"}
+    C2: {state: pass, evidence: "message.model on all 36,376 assistant events in corpus"}
+    C3: {state: pass, evidence: "message.usage per assistant event"}
+    C4: {state: fail, evidence: "usage struct has tokens/tiers, no dollars"}
+    C5: {state: pass, evidence: "tool_use blocks + tool_result with toolUseResult"}
+    C6: {state: fail, evidence: "~97.5% of recent thinking blocks signature-only, text empty; no stored summary"}
+    C7: {state: pass, evidence: "parentUuid DAG + subagents/*.jsonl artifacts"}
+    T1: {state: pass, evidence: "ledger: 15+ additive changes, zero breaking"}
+    T2: {state: pass, evidence: "top-level version field per line"}
+    T3: {state: pass, evidence: "version matches installed CLI"}
+    O1: {state: pass, evidence: "plain JSONL"}
+    O2: {state: pass, evidence: "single session file, appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "~/.claude/projects layout unchanged"}
+    P1: {state: pass, evidence: "one line per event; naive read is faithful"}
+    P3: {state: pass, evidence: "cwd/sessionId on every line"}
+  copilot:
+    C1: {state: pass, evidence: "timestamp on every event"}
+    C2: {state: pass, evidence: "model on assistant events + selectedModel"}
+    C3: {state: pass, evidence: "usage_checkpoint + shutdown tokenDetails"}
+    C4: {state: fail, evidence: "premium-request counts, not dollars"}
+    C5: {state: pass, evidence: "toolRequests + tool.execution_complete result"}
+    C6: {state: pass, evidence: "reasoningText field (alongside reasoningOpaque)"}
+    C7: {state: fail, evidence: "linear id→parentId chain, no branch structure"}
+    T1: {state: fail, evidence: "ledger: v1.0 storage-layout break (flat → subdirs), runtime patch f77040f"}
+    T2: {state: pass, evidence: "data.copilotVersion"}
+    T3: {state: pass, evidence: "copilotVersion matches installed CLI"}
+    O1: {state: pass, evidence: "plain JSONL (encryptedContent is one field, container readable)"}
+    O2: {state: pass, evidence: "events.jsonl appended live"}
+    O3: {state: fail, evidence: "undocumented; open GH issue #3551 asks to formalize events.jsonl"}
+    O4: {state: fail, evidence: "same v1.0 flat→subdir migration"}
+    P1: {state: pass, evidence: "each event once; tool join optional for content"}
+    P3: {state: fail, evidence: "session title only in sidecar workspace.yaml"}
+  cursor:
+    C1: {state: fail, evidence: "no timestamps in transcript; session times from file mtimes (parser falls back to ctime/mtime)"}
+    C2: {state: fail, evidence: "no model field in transcript; hint lives in store.db"}
+    C3: {state: fail, evidence: "no usage keys in transcript"}
+    C4: {state: fail, evidence: "no cost anywhere local"}
+    C5: {state: fail, evidence: "tool_use blocks now present (change since July) but zero tool outputs in transcripts"}
+    C6: {state: fail, evidence: "no reasoning records"}
+    C7: {state: pass, evidence: "subagents/ directory convention with parent UUID"}
+    T1: {state: pass, evidence: "only additive turn_ended line in window"}
+    T2: {state: fail, evidence: "no version marker (matrix: not_logged)"}
+    T3: {state: pass, evidence: "no version signal, none misleading"}
+    O1: {state: fail, evidence: "store.db meta is hex-encoded JSON; blobs are protobuf"}
+    O2: {state: fail, evidence: "full record spans transcript + binary store.db"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "paths unchanged all window"}
+    P1: {state: pass, evidence: "role lines read once each"}
+    P3: {state: fail, evidence: "model/metadata require store.db join; cwd inferred from encoded dir name"}
+  opencode:
+    C1: {state: pass, evidence: "time.created on session/message/part rows"}
+    C2: {state: pass, evidence: "model{providerID,modelID} on message rows"}
+    C3: {state: pass, evidence: "token fields on message rows"}
+    C4: {state: pass, evidence: "cost figure on message rows"}
+    C5: {state: pass, evidence: "part.tool rows with state.input/output"}
+    C6: {state: pass, evidence: "746/1,207 reasoning parts carry plaintext text"}
+    C7: {state: fail, evidence: "subagent identity only via title regex '(@x subagent)'"}
+    T1: {state: fail, evidence: "ledger: JSON tree → SQLite migration in window"}
+    T2: {state: pass, evidence: "session.version field"}
+    T3: {state: pass, evidence: "version tracks app version"}
+    O1: {state: pass, evidence: "standard SQLite, JSON columns readable"}
+    O2: {state: fail, evidence: "database rows; nothing to tail"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: fail, evidence: "same storage-backend replacement in window"}
+    P1: {state: pass, evidence: "v2 layout reads once per part; ordering by time.created"}
+    P3: {state: pass, evidence: "session row carries directory/title"}
+  hermes:
+    C1: {state: pass, evidence: "timestamps on messages (4 date formats, but present)"}
+    C2: {state: fail, evidence: "model at session level only"}
+    C3: {state: pass, evidence: "input/output/cache/reasoning token columns"}
+    C4: {state: pass, evidence: "estimated_cost_usd + actual_cost_usd columns"}
+    C5: {state: pass, evidence: "tool_calls + role:tool messages"}
+    C6: {state: pass, evidence: "plaintext reasoning_content column"}
+    C7: {state: fail, evidence: "no thread/branch structure"}
+    T1: {state: fail, evidence: "ledger: JSON files → state.db migration in window"}
+    T2: {state: fail, evidence: "no version marker (matrix: not_logged)"}
+    T3: {state: pass, evidence: "no version signal, none misleading"}
+    O1: {state: pass, evidence: "standard SQLite"}
+    O2: {state: fail, evidence: "database rows; nothing to tail"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: fail, evidence: "same storage migration in window"}
+    P1: {state: pass, evidence: "flat messages array reads once each"}
+    P3: {state: pass, evidence: "model/cwd at session root"}
+  antigravity:
+    C1: {state: pass, evidence: "created_at on every record (verified 2026-08-04, 3 files)"}
+    C2: {state: fail, evidence: "no model field; parser regexes 'Model Selection' text out of USER_INPUT"}
+    C3: {state: fail, evidence: "zero token/usage keys in format (verified 2026-08-04)"}
+    C4: {state: fail, evidence: "no cost fields"}
+    C5: {state: pass, evidence: "per-tool step events carry output content"}
+    C6: {state: pass, evidence: "PLANNER_RESPONSE thinking field is plaintext"}
+    C7: {state: fail, evidence: "no thread/branch links"}
+    T1: {state: fail, evidence: "ledger: markdown brain → JSONL transcript migration (largest in window)"}
+    T2: {state: fail, evidence: "no version marker"}
+    T3: {state: pass, evidence: "no version signal, none misleading"}
+    O1: {state: pass, evidence: "plain JSONL"}
+    O2: {state: pass, evidence: "transcript.jsonl appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: fail, evidence: "same storage migration in window"}
+    P1: {state: fail, evidence: "user content is XML-tag-wrapped strings inside JSON; JSON traversal alone is insufficient"}
+    P3: {state: fail, evidence: "cwd inferred from content paths + nearest .git walk"}
+  openclaw:
+    C1: {state: pass, evidence: "timestamp on session/message records"}
+    C2: {state: pass, evidence: "model_change events with modelId/provider"}
+    C3: {state: pass, evidence: "usage{input,output,cache,totalTokens} on messages (verified 2026-08-04)"}
+    C4: {state: pass, evidence: "nested cost{input,output,total} dollars (verified 2026-08-04)"}
+    C5: {state: pass, evidence: "toolCall + toolResult blocks (10/10 pairs in recent session)"}
+    C6: {state: fail, evidence: "zero thinking/reasoning records in 5 newest sessions (verified 2026-08-04)"}
+    C7: {state: pass, evidence: "id→parentId links + per-agent session dirs"}
+    T1: {state: pass, evidence: "ledger: one additive record type in window"}
+    T2: {state: pass, evidence: "session record version field (fixture: version 3)"}
+    T3: {state: pass, evidence: "version stable and accurate"}
+    O1: {state: pass, evidence: "plain JSONL"}
+    O2: {state: pass, evidence: "single session file, appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "agents/<id>/sessions layout unchanged"}
+    P1: {state: pass, evidence: "one record per message; channel prefixes are content, not structure"}
+    P3: {state: pass, evidence: "cwd in session record"}
+  pi:
+    C1: {state: pass, evidence: "timestamp on records"}
+    C2: {state: pass, evidence: "model_change events + responseId"}
+    C3: {state: pass, evidence: "usage{input,output} on assistant messages"}
+    C4: {state: pass, evidence: "usage.cost{input,output,cacheRead,cacheWrite,total} dollars"}
+    C5: {state: pass, evidence: "toolCall blocks + tool result records"}
+    C6: {state: pass, evidence: "thinking blocks plaintext when present (verified 2026-08-04)"}
+    C7: {state: pass, evidence: "id→parentId DAG; branches first-class"}
+    T1: {state: pass, evidence: "ledger: zero drift recorded in window"}
+    T2: {state: pass, evidence: "session record version field (v3)"}
+    T3: {state: pass, evidence: "version stable and accurate"}
+    O1: {state: pass, evidence: "plain JSONL"}
+    O2: {state: pass, evidence: "single session file, appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "~/.pi/agent/sessions layout unchanged"}
+    P1: {state: fail, evidence: "abandoned branches retained; naive reader replays them (parser must walk active branch)"}
+    P3: {state: pass, evidence: "cwd in session record"}
+  kimi:
+    C1: {state: pass, evidence: "epoch-ms time on every op"}
+    C2: {state: pass, evidence: "model on llm.request; modelAlias in state"}
+    C3: {state: pass, evidence: "usage.record ops with token fields (verified 2026-08-04)"}
+    C4: {state: fail, evidence: "usage.record carries tokens only, no dollar figure (verified 2026-08-04)"}
+    C5: {state: pass, evidence: "tool.call + tool.result loop events"}
+    C6: {state: pass, evidence: "content.part think events plaintext"}
+    C7: {state: pass, evidence: "sibling agents/ dirs for subagents"}
+    T1: {state: pass, evidence: "one additive op family since onboarding"}
+    T2: {state: pass, evidence: "line 1 metadata declares protocol_version"}
+    T3: {state: pass, evidence: "measured artifact (session_2371ec41…, 101,351 B) traced to the v1 agent-core writer: it persists profile binding as config.update with profileName (present) and contains zero profile.bind records — the bundle's v2 path persists profile.bind instead — and the v1 metadata initializer stamps protocol_version 1.4, which its replay treats as current. Marker is honest for the writer that produced it (traced 2026-08-05; the bundle's 1.5 constant belongs to the coexisting agent-core-v2 path)"}
+    O1: {state: pass, evidence: "plain JSONL wire log"}
+    O2: {state: pass, evidence: "wire.jsonl appended live"}
+    O3: {state: fail, evidence: "no published schema documentation"}
+    O4: {state: pass, evidence: "sessions/wd_*/ layout unchanged"}
+    P1: {state: fail, evidence: "user vs model content split across two disjoint op families; naive reader sees user turns only (bug class hit by our own parser)"}
+    P3: {state: fail, evidence: "title/cwd only in state.json sidecar"}
