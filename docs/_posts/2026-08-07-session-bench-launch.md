@@ -2,7 +2,7 @@
 layout: post
 title: "Session Bench: 19 pass/fail gates for coding-agent session formats"
 description: "We scored what ten coding agents write to disk — signal density, completeness, stability, openness, tooling cost. Pass, fail, or not run; no partial credit. Pi tops it. Cursor comes last. Nobody documents their schema."
-date: 2026-08-04
+date: 2026-08-07
 summary: >-
   Session files are the only durable record of what a coding agent did, and
   every vendor treats them as a private implementation detail. So we built a

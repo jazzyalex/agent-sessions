@@ -230,6 +230,9 @@ macOS app. It is free, local-only, and has no telemetry; it opens these files
 read-only and never writes back into them. For a measured look at what each of
 these formats actually *records* — verbosity, telemetry, how searchable it is —
 see the companion field study, [How coding agents remember]({% post_url 2026-07-14-how-coding-agents-remember %}).
+These formats now also have a standing scorecard:
+[Session Bench]({{ '/bench/' | relative_url }}) ranks ten of them on
+nineteen pass/fail gates and re-scores when they drift.
 If you would rather not memorize six
 paths and two schema quirks, [the source is on
 GitHub](https://github.com/jazzyalex/agent-sessions), and more posts like this
