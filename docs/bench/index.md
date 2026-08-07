@@ -3,6 +3,7 @@ layout: blog
 title: "Session Bench — the coding-agent session-format benchmark"
 description: "A pass/fail benchmark of the session records coding agents write to disk: signal density, completeness, stability, openness, and tooling cost, measured across ten harnesses."
 permalink: /bench/
+image: /assets/bench-social-card.png
 ---
 <p class="eyebrow">Agent Sessions</p>
 <h1>Session Bench</h1>
