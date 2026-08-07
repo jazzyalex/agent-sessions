@@ -1,12 +1,12 @@
 {
-  "bench_version": 1,
+  "bench_version": "0.1",
   "data_date": "2026-08-04",
   "probe": {
     "prompt": "List the files in the current directory, then say hello in one sentence.",
     "surface": "CLI, headless/one-shot mode",
     "runner": "scripts/agent_watch.py --mode prebump (scratch config, common prompt) + manual kimi -p",
     "report": "prebump report 20260804-173402Z (local scratchpad; archived in Marketing/formats-post-2026-08/RESEARCH_DIGEST.md)",
-    "artifacts_note": "raw probe artifacts (session files) were measured locally and are not yet archived in-repo; reproducing the observations end-to-end is the v2 milestone. scripts/session_bench/measure.py recomputes the per-artifact numbers from a session file path."
+    "artifacts_note": "raw probe artifacts (session files) were measured locally and are not yet archived in-repo; reproducing the observations end-to-end is the 1.0 milestone. scripts/session_bench/measure.py recomputes the per-artifact numbers from a session file path."
   },
   "agents": {
     "codex": {
@@ -17,7 +17,7 @@
       "max_fixed_record_bytes": 41601,
       "notes": {
         "max_fixed_record_bytes": "largest world_state line across 5 newest real rollouts",
-        "corpus_content_share": "inflated by world_state context snapshots whose text falls under content-like keys; per-event classification is v2"
+        "corpus_content_share": "inflated by world_state context snapshots whose text falls under content-like keys; per-event classification is a 1.0 milestone"
       }
     },
     "claude": {
@@ -38,7 +38,7 @@
       "max_fixed_record_bytes": 52236,
       "notes": {
         "max_fixed_record_bytes": "system.message line carrying the full system prompt",
-        "corpus_content_share": "inflated by the per-session system.message prompt whose text falls under the content key; per-event classification is v2"
+        "corpus_content_share": "inflated by the per-session system.message prompt whose text falls under the content key; per-event classification is a 1.0 milestone"
       }
     },
     "cursor": {

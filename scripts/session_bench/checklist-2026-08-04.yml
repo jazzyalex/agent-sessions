@@ -10,7 +10,7 @@ gates:
   - {id: S1, area: Signal, name: Lean session, computed: true,
      desc: "The identical one-line probe task adds ≤ 10 KB to the store (incremental bytes; database cold-start allocation is reported separately, not scored)."}
   - {id: S2, area: Signal, name: Content-key share, computed: true,
-     desc: "Strings under a published list of content-like keys (text, content, message, thinking, output, result, …) are ≥ 25% of stored bytes (corpus measurement). This heuristic captures real work product — messages, reasoning, tool output — but also counts bookkeeping stored under those keys, noted per-agent where known (Codex world_state, Copilot system prompt). Format-specific per-event classifiers are v2."}
+     desc: "Strings under a published list of content-like keys (text, content, message, thinking, output, result, …) are ≥ 25% of stored bytes (corpus measurement). This heuristic captures real work product — messages, reasoning, tool output — but also counts bookkeeping stored under those keys, noted per-agent where known (Codex world_state, Copilot system prompt). Format-specific per-event classifiers are a 1.0 milestone."}
   - {id: S3, area: Signal, name: No fixed-cost dumps, computed: true,
      desc: "No single per-session bookkeeping record over 25 KB (system-prompt dumps, tool-catalog snapshots, context snapshots) in recent real sessions."}
   - {id: C1, area: Completeness, name: Per-event timestamps,
@@ -44,7 +44,7 @@ gates:
   - {id: P1, area: Tooling, name: Naive-reader safe,
      desc: "A reader following the obvious structure gets every message exactly once."}
   - {id: P2, area: Tooling, name: Crash tolerant, untested: true,
-     desc: "A truncated final write costs at most one record. UNSCORED in v1: asserted by format family only; needs a cross-harness truncation experiment (v2)."}
+     desc: "A truncated final write costs at most one record. UNSCORED in v0.1: asserted by format family only; needs a cross-harness truncation experiment (a 1.0 milestone)."}
   - {id: P3, area: Tooling, name: Self-contained,
      desc: "No sidecar file join is needed for title, cwd, or model."}
 

@@ -73,7 +73,7 @@ authentication failure is not evidence about a format. Ranks marked †
 are provisional: hover for the best/worst range pending the missing
 measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash
-tolerance) is defined but unscored in v1 pending a real cross-harness
+tolerance) is defined but unscored in v0.1 pending a real cross-harness
 truncation experiment.</p>
 
 Each area answers one question a developer actually has:
@@ -160,7 +160,7 @@ verdicts, and emits the data file this page renders; `measure.py`
 recomputes per-artifact numbers from a session file. Re-running the
 evaluator reproduces the scoring from the versioned inputs; reproducing the
 observations end-to-end — harness execution to raw artifacts to extraction —
-is the v2 milestone, and until it lands this page does not claim to be a
+is the 1.0 milestone, and until it lands this page does not claim to be a
 push-button-reproducible benchmark. All inputs live in the
 [repo]({{ site.data.session_bench.methodology_url }}); to dispute a score,
 dispute a measurement or an evidence line and re-run the evaluator.
@@ -169,16 +169,21 @@ The probe is one identical prompt — "{{ site.data.session_bench.probe_prompt }
 attempted through each harness's {{ site.data.session_bench.surface }};
 where it produced a session, the artifact was measured byte-for-byte, and
 where it could not run, the affected gate says so. Desktop apps and IDE surfaces may use different
-stores; v1 scores the CLI session store only, and says so. Completeness,
+stores; v0.1 scores the CLI session store only, and says so. Completeness,
 Openness, and Tooling verdicts are checklist items evaluated against real
 session files, the sanitized fixtures in the Agent Sessions repo, and the
 parsers that read all ten formats in production. Stability comes from a
 ledger that has fingerprinted every format's schema roughly weekly since
 2026-03-31.
 
-Grades can change. Formats drift — four of ten had a structural break in
-the last four months — and the bench re-scores when they do. The bench
-version and data date above say exactly what was measured when. Disputes
+Grades can change, and the version scheme separates the two ways they can:
+the **bench version** (v0.1) is the rubric — gates, thresholds, scoring
+rules — and bumps only when a change breaks score comparability; the
+**data date** identifies a re-run under the same rubric. Formats drift —
+four of ten had a structural break in the last four months — and the bench
+re-scores when they do. v1.0 is reserved for end-to-end reproducibility:
+harness execution to archived artifacts to extraction, a tested crash
+gate, and per-event classifiers. Disputes
 and corrections are welcome as
 [issues](https://github.com/jazzyalex/agent-sessions/issues).
 

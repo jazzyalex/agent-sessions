@@ -29,10 +29,10 @@ fixture in our repo, or an entry in the drift ledger. Scores are emitted by
 an evaluator from a measurements manifest and an evidence checklist, both
 public — to dispute a grade, dispute an input and re-run it. The bench page
 is permanent, and grades will change when formats do. One caveat on scope,
-stated plainly: v1 measures each harness's CLI session store; desktop and
+stated plainly: v0.1 measures each harness's CLI session store; desktop and
 IDE surfaces can differ and get their own rows in a future version.
 
-## The v1 leaderboard
+## The v0.1 leaderboard
 
 | # | Harness | Format | Gates cleared |
 |---|---|---|---|
