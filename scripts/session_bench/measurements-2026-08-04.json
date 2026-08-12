@@ -1,5 +1,5 @@
 {
-  "bench_version": "0.1",
+  "bench_version": "0.2",
   "data_date": "2026-08-04",
   "probe": {
     "prompt": "List the files in the current directory, then say hello in one sentence.",
@@ -18,7 +18,8 @@
       "notes": {
         "max_fixed_record_bytes": "largest world_state line across 5 newest real rollouts",
         "corpus_content_share": "inflated by world_state context snapshots whose text falls under content-like keys; per-event classification is a 1.0 milestone"
-      }
+      },
+      "observed_since": "2026-03-31"
     },
     "claude": {
       "version": "2.1.220",
@@ -28,7 +29,8 @@
       "max_fixed_record_bytes": 19695,
       "notes": {
         "max_fixed_record_bytes": "largest attachment line across 5 newest real sessions"
-      }
+      },
+      "observed_since": "2026-03-31"
     },
     "copilot": {
       "version": "1.0.77",
@@ -39,14 +41,16 @@
       "notes": {
         "max_fixed_record_bytes": "system.message line carrying the full system prompt",
         "corpus_content_share": "inflated by the per-session system.message prompt whose text falls under the content key; per-event classification is a 1.0 milestone"
-      }
+      },
+      "observed_since": "2026-03-31"
     },
     "cursor": {
       "version": "2026.7.20",
       "probe_bytes": 1915,
       "probe_records": 8,
       "corpus_content_share": 51.0,
-      "max_fixed_record_bytes": 367
+      "max_fixed_record_bytes": 367,
+      "observed_since": "2026-04"
     },
     "opencode": {
       "version": "1.18.11",
@@ -59,7 +63,8 @@
         "cold_start_bytes": "274432",
         "max_fixed_record_bytes": "no fixed-cost dump records found: largest rows are tool outputs (max 730,941 B) and user-message diff summaries (max 1,051,302 B) \u2014 variable work-derived data, not system-prompt/tool-catalog dumps (queried 2026-08-05)"
       },
-      "fixed_dump_found": false
+      "fixed_dump_found": false,
+      "observed_since": "2026-03-31"
     },
     "hermes": {
       "version": "0.17.0",
@@ -70,14 +75,16 @@
       "notes": {
         "probe_bytes": "probe not run: hermes -z one-shot returns 'no final response' for every provider since late June",
         "max_fixed_record_bytes": "sessions.system_prompt column: up to a 35,985-byte system prompt stored in 116 of 118 session rows (queried 2026-08-05)"
-      }
+      },
+      "observed_since": "2026-03-31"
     },
     "antigravity": {
       "version": "1.1.1",
       "probe_bytes": 6820,
       "probe_records": 8,
       "corpus_content_share": 79.4,
-      "max_fixed_record_bytes": 3957
+      "max_fixed_record_bytes": 3957,
+      "observed_since": "2026-03-31"
     },
     "openclaw": {
       "version": "2026.6.11",
@@ -88,14 +95,16 @@
       "notes": {
         "probe_bytes": "probe not run: OAuth refresh_token_reused; headless auth requires fresh sign-in",
         "max_fixed_record_bytes": "largest single line across all real sessions, 23,447 B (measured 2026-08-05); under the 25,600 B bar"
-      }
+      },
+      "observed_since": "2026-04"
     },
     "pi": {
       "version": "0.83.0",
       "probe_bytes": 1463,
       "probe_records": 5,
       "corpus_content_share": 35.5,
-      "max_fixed_record_bytes": 763
+      "max_fixed_record_bytes": 763,
+      "observed_since": "2026-05"
     },
     "kimi": {
       "version": "0.31.1",
@@ -104,8 +113,16 @@
       "corpus_content_share": 7.0,
       "max_fixed_record_bytes": 70233,
       "notes": {
-        "max_fixed_record_bytes": "llm.tools_snapshot line (full tool catalog)"
-      }
+        "max_fixed_record_bytes": "llm.tools_snapshot line (full tool catalog)",
+        "probe_content_share": "probe log is 0.9% conversation by bytes; 7.0% across the corpus"
+      },
+      "observed_since": "2026-07-25"
     }
+  },
+  "dates": {
+    "probe": "2026-08-04",
+    "store_queries": "2026-08-05",
+    "docs_review": "2026-08-12",
+    "last_corrected": "2026-08-12"
   }
 }

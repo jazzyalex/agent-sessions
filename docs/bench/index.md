@@ -14,7 +14,10 @@ monitoring-ledger entry. No partial credit: a gate is pass, fail, or
 explicitly <em>not run</em> — never averaged.</p>
 
 <p class="post-meta">Bench v{{ site.data.session_bench.version }} ·
-data measured {{ site.data.session_bench.data_date }} ·
+probe {{ site.data.session_bench.dates.probe }} ·
+store queries {{ site.data.session_bench.dates.store_queries }} ·
+docs review {{ site.data.session_bench.dates.docs_review }} ·
+last corrected {{ site.data.session_bench.dates.last_corrected }} ·
 surface: {{ site.data.session_bench.surface }} ·
 <a href="{{ site.data.session_bench.methodology_url }}">measurements, checklist &amp; evaluator</a></p>
 
@@ -74,7 +77,7 @@ authentication failure is not evidence about a format. Ranks marked †
 are provisional: hover for the best/worst range pending the missing
 measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash
-tolerance) is defined but unscored in v0.1 pending a real cross-harness
+tolerance) is defined but unscored in v0.2 pending a real cross-harness
 truncation experiment.</p>
 
 Each area answers one question a developer actually has:
@@ -88,24 +91,28 @@ Each area answers one question a developer actually has:
 ## If you're choosing a harness
 
 The composite rewards all-round formats. If one property matters more to
-you, the gate data narrows it fast:
+you, the gate data narrows it fast. These rows are generated from the
+matrix by the evaluator, so they can never disagree with it:
 
-| You need | Best on the bench today | Basis |
-|---|---|---|
-| Local cost auditing, in dollars | Pi, OpenClaw, OpenCode, Hermes | gate C4 |
-| History you can grep and `tail -f` | Pi, OpenClaw, Claude Code, Codex, Kimi | gates O1+O2 |
-| Reasoning you can read later | Pi, OpenCode, Hermes, Copilot, Kimi | gate C6 |
-| A format that hasn't shifted in 4 months | Pi, OpenClaw, Claude Code, Codex, Cursor, Kimi | gates T1+O4 |
-| Search built into the store | Hermes | observed*, not a gate |
-| Bit-faithful wire replay | Codex | observed*, not a gate |
-| To avoid: history you can't read back | Cursor Agent (binary metadata DB) | gates O1, O2, P3 |
+<table class="bench-table">
+  <thead><tr><th>You need</th><th>Qualifies today</th><th>Basis</th></tr></thead>
+  <tbody>
+  {% for pick in site.data.session_bench.picks %}
+  <tr><td>{{ pick.need }}</td><td>{{ pick.who | join: ", " }}</td><td class="bench-note">{{ pick.basis }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
 
-<p class="bench-note">* Editorial observations from the measurement work,
-noted because they're decision-relevant; they carry no points.</p>
+Two editorial observations from the measurement work, decision-relevant but
+carrying no points: Hermes is the only store with built-in full-text
+search, and Codex keeps the most complete wire-replay record. And one
+caution from the gates: Cursor's transcript is readable JSONL, but full
+reconstruction — model, timestamps, metadata — requires its opaque binary
+sidecar (gates O1, O2, P3).
 
 ## The gate matrix
 
-✓ pass · ✗ fail · — not run · ◦ unscored. Hover a cell for the evidence
+✓ pass · ✗ fail · — not run · ◦ unscored · · not applicable. Hover a cell for the evidence
 behind it.
 
 <div class="bench-matrix">
@@ -133,6 +140,8 @@ behind it.
       <td class="bench-fail" title="{{ note | default: gate.desc }}">✗</td>
       {% elsif r == "not_run" %}
       <td class="bench-na" title="{{ note | default: gate.desc }}">—</td>
+      {% elsif r == "not_applicable" %}
+      <td class="bench-na" title="{{ note | default: gate.desc }}">·</td>
       {% else %}
       <td class="bench-na" title="{{ note | default: gate.desc }}">◦</td>
       {% endif %}
@@ -169,18 +178,31 @@ behind it.
   stands, as do Claude Code, Codex, Antigravity, and Cursor (nothing
   published) and OpenCode (table definitions in source, not documentation).
 
+- **2026-08-12 (second correction, same review cycle) — v0.1 → v0.2.**
+  Codex was underscored by two gates: real rollouts carry plaintext
+  `summary_text` on ~35% of reasoning items (C6 passes — the gate accepts a
+  stored summary) and `parent_thread_id` + `sub_agent_activity` records
+  (C7 passes); Codex moves 12/19 → 14/19, tying Claude Code at rank 3.
+  Antigravity's P1 flips to pass — XML-wrapped content is awkward, not
+  message loss. Two rubric fixes make this v0.2: T3 is now scored only
+  when T2 passes (v0.1 wrongly awarded "honest version" points to
+  harnesses with no version at all), and T1 states each harness's actual
+  observation window — Kimi's ~10 days is too short to establish stability
+  and is now not-run. Denominators shifted accordingly.
+
 ## Method
 
-What this is, stated precisely: a versioned, evidence-backed comparison
-with mechanically generated scores. A measurements manifest (probe results
-and corpus statistics) plus an evidence checklist feed `evaluate.py`, which
-computes the Signal gates from fixed thresholds, merges the checklist
-verdicts, and emits the data file this page renders; `measure.py`
-recomputes per-artifact numbers from a session file. Re-running the
-evaluator reproduces the scoring from the versioned inputs; reproducing the
-observations end-to-end — harness execution to raw artifacts to extraction —
-is the 1.0 milestone, and until it lands this page does not claim to be a
-push-button-reproducible benchmark. All inputs live in the
+What this is, stated precisely: scores are mechanically generated from
+published measurements and checklist verdicts; some underlying raw
+artifacts (probe session files, corpus query transcripts) are not yet
+public. A measurements manifest plus an evidence checklist feed
+`evaluate.py`, which computes the Signal gates from fixed thresholds,
+merges the checklist verdicts, and emits the data file this page renders;
+`measure.py` recomputes per-artifact numbers from a session file.
+Re-running the evaluator reproduces the scoring from the versioned inputs;
+reproducing the observations end-to-end — harness execution to archived
+raw artifacts to extraction — is the 1.0 milestone, and until it lands
+this page does not claim to be a push-button-reproducible benchmark. All inputs live in the
 [repo]({{ site.data.session_bench.methodology_url }}); to dispute a score,
 dispute a measurement or an evidence line and re-run the evaluator.
 
@@ -196,7 +218,7 @@ ledger that has fingerprinted every format's schema roughly weekly since
 2026-03-31.
 
 Grades can change, and the version scheme separates the two ways they can:
-the **bench version** (v0.1) is the rubric — gates, thresholds, scoring
+the **bench version** (currently v{{ site.data.session_bench.version }}) is the rubric — gates, thresholds, scoring
 rules — and bumps only when a change breaks score comparability; the
 **data date** identifies a re-run under the same rubric. Formats drift —
 four of ten had a structural break in the last four months — and the bench

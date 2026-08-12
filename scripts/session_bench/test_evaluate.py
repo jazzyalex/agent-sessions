@@ -76,7 +76,7 @@ def test_provisional_ranges_match_exhaustive_enumeration(tmp_path):
 def test_invalid_state_rejected(tmp_path):
     bad = tmp_path / "bad.yml"
     src = (HERE / "checklist-2026-08-04.yml").read_text()
-    bad.write_text(src.replace("{state: fail, evidence: \"no thread/branch links in format\"}",
+    bad.write_text(src.replace("{state: fail, evidence: \"tokens only, no dollar figure anywhere\"}",
                                "{state: maybe, evidence: \"x\"}", 1))
     r = subprocess.run(
         [sys.executable, str(HERE / "evaluate.py"),

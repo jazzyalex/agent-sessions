@@ -122,6 +122,15 @@ def main() -> int:
                 results[gid] = "untested"
                 notes[gid] = g["desc"]
                 continue
+            # v0.2: T3 (honest version signal) is only meaningful when T2
+            # (declares a version) passes; absence of a version is already
+            # penalized by T2 and must not earn a T3 point.
+            if gid == "T3" and cells.get("T2", {}).get("state") != "pass":
+                results[gid] = "not_applicable"
+                notes[gid] = ("not scored: T2 failed — with no version signal there is "
+                              "nothing to judge for honesty, and absence is already "
+                              "penalized once by T2")
+                continue
             cell = cells.get(gid)
             if cell is None:
                 raise SystemExit(f"missing verdict: {slug} {gid}")
@@ -183,9 +192,27 @@ def main() -> int:
     for a in agents_out:
         del a["_frac"]
 
+    # Gate-derived pick-by-need rows so the guidance can never drift from
+    # the matrix. Names in leaderboard order.
+    def qualifiers(*gids):
+        return [a["name"] for a in agents_out
+                if all(a["results"].get(g) == "pass" for g in gids)]
+    picks = [
+        {"need": "Local cost auditing, in dollars", "basis": "gate C4",
+         "who": qualifiers("C4")},
+        {"need": "History you can grep and tail -f", "basis": "gates O1+O2",
+         "who": qualifiers("O1", "O2")},
+        {"need": "Readable reasoning or a stored summary", "basis": "gate C6",
+         "who": qualifiers("C6")},
+        {"need": "No format or layout change while we watched (windows vary per harness)",
+         "basis": "gates T1+O4", "who": qualifiers("T1", "O4")},
+    ]
+
     out = {
         "version": meas["bench_version"],
         "data_date": meas["data_date"],
+        "dates": meas.get("dates", {}),
+        "picks": picks,
         "generated_by": "scripts/session_bench/evaluate.py",
         "surface": meas["probe"]["surface"],
         "probe_prompt": meas["probe"]["prompt"],
