@@ -63,7 +63,7 @@ verdicts:
     T3: {state: pass, evidence: "cli_version matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single rollout file, appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "no rollout-file format documentation found; the published schema covers the app-server protocol, a different surface (re-verified 2026-08-08)"}
     O4: {state: pass, evidence: "path contract unchanged all window"}
     P1: {state: fail, evidence: "every turn logged twice (event_msg + response_item); naive reader double-counts"}
     P3: {state: pass, evidence: "cwd/instructions in session_meta; no sidecar"}
@@ -80,7 +80,7 @@ verdicts:
     T3: {state: pass, evidence: "version matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single session file, appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "no persisted-session format documentation found (re-verified 2026-08-08)"}
     O4: {state: pass, evidence: "~/.claude/projects layout unchanged"}
     P1: {state: pass, evidence: "one line per event; naive read is faithful"}
     P3: {state: pass, evidence: "cwd/sessionId on every line"}
@@ -97,7 +97,7 @@ verdicts:
     T3: {state: pass, evidence: "copilotVersion matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL (encryptedContent is one field, container readable)"}
     O2: {state: pass, evidence: "events.jsonl appended live"}
-    O3: {state: fail, evidence: "undocumented; open GH issue #3551 asks to formalize events.jsonl"}
+    O3: {state: pass, evidence: "config-dir reference documents session-state/events.jsonl; SDK docs enumerate the persisted event types (assistant.message, tool.execution_*, marked persisted). CORRECTED 2026-08-08: originally scored fail in error"}
     O4: {state: fail, evidence: "same v1.0 flat→subdir migration"}
     P1: {state: pass, evidence: "each event once; tool join optional for content"}
     P3: {state: fail, evidence: "session title only in sidecar workspace.yaml"}
@@ -114,7 +114,7 @@ verdicts:
     T3: {state: pass, evidence: "no version signal, none misleading"}
     O1: {state: fail, evidence: "store.db meta is hex-encoded JSON; blobs are protobuf"}
     O2: {state: fail, evidence: "full record spans transcript + binary store.db"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "no on-disk session store documentation found; docs cover CLI output only (re-verified 2026-08-08)"}
     O4: {state: pass, evidence: "paths unchanged all window"}
     P1: {state: pass, evidence: "role lines read once each"}
     P3: {state: fail, evidence: "model/metadata require store.db join; cwd inferred from encoded dir name"}
@@ -131,7 +131,7 @@ verdicts:
     T3: {state: pass, evidence: "version tracks app version"}
     O1: {state: pass, evidence: "standard SQLite, JSON columns readable"}
     O2: {state: fail, evidence: "database rows; nothing to tail"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "SQLite table definitions exist in the public source but are not published as documentation or a stable contract (re-verified 2026-08-08)"}
     O4: {state: fail, evidence: "same storage-backend replacement in window"}
     P1: {state: pass, evidence: "v2 layout reads once per part; ordering by time.created"}
     P3: {state: pass, evidence: "session row carries directory/title"}
@@ -148,7 +148,7 @@ verdicts:
     T3: {state: pass, evidence: "no version signal, none misleading"}
     O1: {state: pass, evidence: "standard SQLite"}
     O2: {state: fail, evidence: "database rows; nothing to tail"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: pass, evidence: "official sessions doc describes both persistence layers, stored fields, lifecycle, and export formats: website/docs/user-guide/sessions.md. CORRECTED 2026-08-08: originally scored fail in error"}
     O4: {state: fail, evidence: "same storage migration in window"}
     P1: {state: pass, evidence: "flat messages array reads once each"}
     P3: {state: pass, evidence: "model/cwd at session root"}
@@ -165,7 +165,7 @@ verdicts:
     T3: {state: pass, evidence: "no version signal, none misleading"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "transcript.jsonl appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "no persisted-session format documentation found (re-verified 2026-08-08)"}
     O4: {state: fail, evidence: "same storage migration in window"}
     P1: {state: fail, evidence: "user content is XML-tag-wrapped strings inside JSON; JSON traversal alone is insufficient"}
     P3: {state: fail, evidence: "cwd inferred from content paths + nearest .git walk"}
@@ -182,7 +182,7 @@ verdicts:
     T3: {state: pass, evidence: "version stable and accurate"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single session file, appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: pass, evidence: "official reference doc with Session store schema and Transcript event structure sections: docs/reference/session-management-compaction.md. CORRECTED 2026-08-08: originally scored fail in error"}
     O4: {state: pass, evidence: "agents/<id>/sessions layout unchanged"}
     P1: {state: pass, evidence: "one record per message; channel prefixes are content, not structure"}
     P3: {state: pass, evidence: "cwd in session record"}
@@ -199,7 +199,7 @@ verdicts:
     T3: {state: pass, evidence: "version stable and accurate"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single session file, appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: pass, evidence: "official Session File Format spec (structure, entry types, versions 1-3): github.com/earendil-works/pi packages/coding-agent/docs/session-format.md — path history to 2026-04-28, predates the data date. CORRECTED 2026-08-08: originally scored fail in error"}
     O4: {state: pass, evidence: "~/.pi/agent/sessions layout unchanged"}
     P1: {state: fail, evidence: "abandoned branches retained; naive reader replays them (parser must walk active branch)"}
     P3: {state: pass, evidence: "cwd in session record"}
@@ -216,7 +216,7 @@ verdicts:
     T3: {state: pass, evidence: "measured artifact (session_2371ec41…, 101,351 B) traced to the v1 agent-core writer: it persists profile binding as config.update with profileName (present) and contains zero profile.bind records — the bundle's v2 path persists profile.bind instead — and the v1 metadata initializer stamps protocol_version 1.4, which its replay treats as current. Marker is honest for the writer that produced it (traced 2026-08-05; the bundle's 1.5 constant belongs to the coexisting agent-core-v2 path)"}
     O1: {state: pass, evidence: "plain JSONL wire log"}
     O2: {state: pass, evidence: "wire.jsonl appended live"}
-    O3: {state: fail, evidence: "no published schema documentation"}
+    O3: {state: fail, evidence: "data-locations doc covers session directory anatomy, index-record fields, and sidecars, but NOT the wire.jsonl record schema — the transcript format itself is undocumented (re-verified 2026-08-08)"}
     O4: {state: pass, evidence: "sessions/wd_*/ layout unchanged"}
     P1: {state: fail, evidence: "user vs model content split across two disjoint op families; naive reader sees user turns only (bug class hit by our own parser)"}
     P3: {state: fail, evidence: "title/cwd only in state.json sidecar"}

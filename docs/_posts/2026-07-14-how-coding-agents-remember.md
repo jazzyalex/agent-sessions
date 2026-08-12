@@ -281,6 +281,13 @@ schema documentation. Every parser of these files, including ours, is built
 by reverse engineering, and every one of them breaks a little when a vendor
 renames a field. For files this valuable, that is a strange industry norm.
 
+*Correction (2026-08-08): the bottom row overclaimed. Copilot documents its
+storage layout and persisted event types, and Hermes documents its
+persistence layers and stored fields — both existed when this was written
+and our search missed them. The claim holds for Claude Code, Codex, Cursor,
+and OpenCode. [Session Bench]({{ '/bench/' | relative_url }}) now tracks
+this per-harness, with links to each vendor's documentation.*
+
 ## What a session format should be
 
 Having read a million events written six different ways, here is the

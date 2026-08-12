@@ -151,6 +151,24 @@ behind it.
 - **{{ gate.id }} — {{ gate.name }}** ({{ gate.area }}): {{ gate.desc }}
 {% endfor %}
 
+## Corrections
+
+- **2026-08-08 — O3 (documented schema) was originally scored fail for all
+  ten harnesses. That was wrong.** An external re-check found real vendor
+  documentation that our search missed: Pi publishes a full
+  [session-format spec](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md)
+  (in its tree since April 2026), OpenClaw documents its
+  [session store schema and transcript event structure](https://github.com/openclaw/openclaw/blob/main/docs/reference/session-management-compaction.md),
+  Hermes documents its
+  [persistence layers and stored fields](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/sessions.md),
+  and Copilot documents its
+  [storage layout](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)
+  and persisted event types. Four cells flipped: Pi 17→18/19,
+  OpenClaw 16→17/18, Copilot 11→12/19, Hermes 10→11/18. Kimi documents its
+  session directory layout but not the wire-record schema, so its fail
+  stands, as do Claude Code, Codex, Antigravity, and Cursor (nothing
+  published) and OpenCode (table definitions in source, not documentation).
+
 ## Method
 
 What this is, stated precisely: a versioned, evidence-backed comparison

@@ -106,15 +106,15 @@ agents:
   short: Pi
   format: Flat parent-linked JSONL
   version: 0.83.0
-  cleared: 17
+  cleared: 18
   scored: 19
   not_run: 0
-  score_pct: 89.5
+  score_pct: 94.7
   area_scores:
     Signal: 3/3
     Completeness: 7/7
     Stability: 3/3
-    Openness: 3/4
+    Openness: 4/4
     Tooling: 1/2
   results:
     S1: pass
@@ -132,7 +132,7 @@ agents:
     T3: pass
     O1: pass
     O2: pass
-    O3: fail
+    O3: pass
     O4: pass
     P1: fail
     P2: untested
@@ -153,7 +153,10 @@ agents:
     T3: version stable and accurate
     O1: plain JSONL
     O2: single session file, appended live
-    O3: no published schema documentation
+    O3: 'official Session File Format spec (structure, entry types, versions 1-3):
+      github.com/earendil-works/pi packages/coding-agent/docs/session-format.md —
+      path history to 2026-04-28, predates the data date. CORRECTED 2026-08-08: originally
+      scored fail in error'
     O4: ~/.pi/agent/sessions layout unchanged
     P1: abandoned branches retained; naive reader replays them (parser must walk active
       branch)
@@ -166,15 +169,15 @@ agents:
   short: OClaw
   format: Flat parent-linked JSONL
   version: 2026.6.11
-  cleared: 16
+  cleared: 17
   scored: 18
   not_run: 1
-  score_pct: 88.9
+  score_pct: 94.4
   area_scores:
     Signal: 2/2
     Completeness: 6/7
     Stability: 3/3
-    Openness: 3/4
+    Openness: 4/4
     Tooling: 2/2
   results:
     S1: not_run
@@ -192,7 +195,7 @@ agents:
     T3: pass
     O1: pass
     O2: pass
-    O3: fail
+    O3: pass
     O4: pass
     P1: pass
     P2: untested
@@ -215,7 +218,9 @@ agents:
     T3: version stable and accurate
     O1: plain JSONL
     O2: single session file, appended live
-    O3: no published schema documentation
+    O3: 'official reference doc with Session store schema and Transcript event structure
+      sections: docs/reference/session-management-compaction.md. CORRECTED 2026-08-08:
+      originally scored fail in error'
     O4: agents/<id>/sessions layout unchanged
     P1: one record per message; channel prefixes are content, not structure
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
@@ -278,7 +283,7 @@ agents:
     T3: version matches installed CLI
     O1: plain JSONL
     O2: single session file, appended live
-    O3: no published schema documentation
+    O3: no persisted-session format documentation found (re-verified 2026-08-08)
     O4: ~/.claude/projects layout unchanged
     P1: one line per event; naive read is faithful
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
@@ -341,7 +346,8 @@ agents:
     T3: version tracks app version
     O1: standard SQLite, JSON columns readable
     O2: database rows; nothing to tail
-    O3: no published schema documentation
+    O3: SQLite table definitions exist in the public source but are not published
+      as documentation or a stable contract (re-verified 2026-08-08)
     O4: same storage-backend replacement in window
     P1: v2 layout reads once per part; ordering by time.created
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
@@ -407,12 +413,77 @@ agents:
     T3: cli_version matches installed CLI
     O1: plain JSONL
     O2: single rollout file, appended live
-    O3: no published schema documentation
+    O3: no rollout-file format documentation found; the published schema covers the
+      app-server protocol, a different surface (re-verified 2026-08-08)
     O4: path contract unchanged all window
     P1: every turn logged twice (event_msg + response_item); naive reader double-counts
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
       by format family only; needs a cross-harness truncation experiment (a 1.0 milestone).'
     P3: cwd/instructions in session_meta; no sidecar
+  rank: 5
+- slug: copilot
+  name: Copilot CLI
+  short: Copilot
+  format: Nested-envelope JSONL (event-sourced)
+  version: 1.0.77
+  cleared: 12
+  scored: 19
+  not_run: 0
+  score_pct: 63.2
+  area_scores:
+    Signal: 1/3
+    Completeness: 5/7
+    Stability: 2/3
+    Openness: 3/4
+    Tooling: 1/2
+  results:
+    S1: fail
+    S2: pass
+    S3: fail
+    C1: pass
+    C2: pass
+    C3: pass
+    C4: fail
+    C5: pass
+    C6: pass
+    C7: fail
+    T1: fail
+    T2: pass
+    T3: pass
+    O1: pass
+    O2: pass
+    O3: pass
+    O4: fail
+    P1: pass
+    P2: untested
+    P3: fail
+  notes:
+    S1: probe wrote 66,910 bytes (limit 10,240)
+    S2: content-key text is 69.0% of corpus bytes (floor 25.0%) — inflated by the
+      per-session system.message prompt whose text falls under the content key; per-event
+      classification is a 1.0 milestone
+    S3: largest bookkeeping record 52,236 bytes (limit 25,600) — system.message line
+      carrying the full system prompt
+    C1: timestamp on every event
+    C2: model on assistant events + selectedModel
+    C3: usage_checkpoint + shutdown tokenDetails
+    C4: premium-request counts, not dollars
+    C5: toolRequests + tool.execution_complete result
+    C6: reasoningText field (alongside reasoningOpaque)
+    C7: linear id→parentId chain, no branch structure
+    T1: 'ledger: v1.0 storage-layout break (flat → subdirs), runtime patch f77040f'
+    T2: data.copilotVersion
+    T3: copilotVersion matches installed CLI
+    O1: plain JSONL (encryptedContent is one field, container readable)
+    O2: events.jsonl appended live
+    O3: 'config-dir reference documents session-state/events.jsonl; SDK docs enumerate
+      the persisted event types (assistant.message, tool.execution_*, marked persisted).
+      CORRECTED 2026-08-08: originally scored fail in error'
+    O4: same v1.0 flat→subdir migration
+    P1: each event once; tool join optional for content
+    P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
+      by format family only; needs a cross-harness truncation experiment (a 1.0 milestone).'
+    P3: session title only in sidecar workspace.yaml
   rank: 5
 - slug: kimi
   name: Kimi Code
@@ -473,7 +544,9 @@ agents:
       agent-core-v2 path)'
     O1: plain JSONL wire log
     O2: wire.jsonl appended live
-    O3: no published schema documentation
+    O3: data-locations doc covers session directory anatomy, index-record fields,
+      and sidecars, but NOT the wire.jsonl record schema — the transcript format itself
+      is undocumented (re-verified 2026-08-08)
     O4: sessions/wd_*/ layout unchanged
     P1: user vs model content split across two disjoint op families; naive reader
       sees user turns only (bug class hit by our own parser)
@@ -481,82 +554,20 @@ agents:
       by format family only; needs a cross-harness truncation experiment (a 1.0 milestone).'
     P3: title/cwd only in state.json sidecar
   rank: 5
-- slug: copilot
-  name: Copilot CLI
-  short: Copilot
-  format: Nested-envelope JSONL (event-sourced)
-  version: 1.0.77
-  cleared: 11
-  scored: 19
-  not_run: 0
-  score_pct: 57.9
-  area_scores:
-    Signal: 1/3
-    Completeness: 5/7
-    Stability: 2/3
-    Openness: 2/4
-    Tooling: 1/2
-  results:
-    S1: fail
-    S2: pass
-    S3: fail
-    C1: pass
-    C2: pass
-    C3: pass
-    C4: fail
-    C5: pass
-    C6: pass
-    C7: fail
-    T1: fail
-    T2: pass
-    T3: pass
-    O1: pass
-    O2: pass
-    O3: fail
-    O4: fail
-    P1: pass
-    P2: untested
-    P3: fail
-  notes:
-    S1: probe wrote 66,910 bytes (limit 10,240)
-    S2: content-key text is 69.0% of corpus bytes (floor 25.0%) — inflated by the
-      per-session system.message prompt whose text falls under the content key; per-event
-      classification is a 1.0 milestone
-    S3: largest bookkeeping record 52,236 bytes (limit 25,600) — system.message line
-      carrying the full system prompt
-    C1: timestamp on every event
-    C2: model on assistant events + selectedModel
-    C3: usage_checkpoint + shutdown tokenDetails
-    C4: premium-request counts, not dollars
-    C5: toolRequests + tool.execution_complete result
-    C6: reasoningText field (alongside reasoningOpaque)
-    C7: linear id→parentId chain, no branch structure
-    T1: 'ledger: v1.0 storage-layout break (flat → subdirs), runtime patch f77040f'
-    T2: data.copilotVersion
-    T3: copilotVersion matches installed CLI
-    O1: plain JSONL (encryptedContent is one field, container readable)
-    O2: events.jsonl appended live
-    O3: 'undocumented; open GH issue #3551 asks to formalize events.jsonl'
-    O4: same v1.0 flat→subdir migration
-    P1: each event once; tool join optional for content
-    P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
-      by format family only; needs a cross-harness truncation experiment (a 1.0 milestone).'
-    P3: session title only in sidecar workspace.yaml
-  rank: 7
 - slug: hermes
   name: Hermes
   short: Hermes
   format: SQLite ledger + FTS
   version: 0.17.0
-  cleared: 10
+  cleared: 11
   scored: 18
   not_run: 1
-  score_pct: 55.6
+  score_pct: 61.1
   area_scores:
     Signal: 1/2
     Completeness: 5/7
     Stability: 1/3
-    Openness: 1/4
+    Openness: 2/4
     Tooling: 2/2
   results:
     S1: not_run
@@ -574,7 +585,7 @@ agents:
     T3: pass
     O1: pass
     O2: fail
-    O3: fail
+    O3: pass
     O4: fail
     P1: pass
     P2: untested
@@ -598,7 +609,9 @@ agents:
     T3: no version signal, none misleading
     O1: standard SQLite
     O2: database rows; nothing to tail
-    O3: no published schema documentation
+    O3: 'official sessions doc describes both persistence layers, stored fields, lifecycle,
+      and export formats: website/docs/user-guide/sessions.md. CORRECTED 2026-08-08:
+      originally scored fail in error'
     O4: same storage migration in window
     P1: flat messages array reads once each
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
@@ -606,7 +619,7 @@ agents:
     P3: model/cwd at session root
   rank: 8
   provisional: true
-  rank_best: 7
+  rank_best: 5
   rank_worst: 8
 - slug: antigravity
   name: Antigravity
@@ -660,7 +673,7 @@ agents:
     T3: no version signal, none misleading
     O1: plain JSONL
     O2: transcript.jsonl appended live
-    O3: no published schema documentation
+    O3: no persisted-session format documentation found (re-verified 2026-08-08)
     O4: same storage migration in window
     P1: user content is XML-tag-wrapped strings inside JSON; JSON traversal alone
       is insufficient
@@ -721,7 +734,8 @@ agents:
     T3: no version signal, none misleading
     O1: store.db meta is hex-encoded JSON; blobs are protobuf
     O2: full record spans transcript + binary store.db
-    O3: no published schema documentation
+    O3: no on-disk session store documentation found; docs cover CLI output only (re-verified
+      2026-08-08)
     O4: paths unchanged all window
     P1: role lines read once each
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.1: asserted
