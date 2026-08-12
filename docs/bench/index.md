@@ -153,7 +153,7 @@ behind it.
 
 ## Corrections
 
-- **2026-08-08 — O3 (documented schema) was originally scored fail for all
+- **2026-08-12 — O3 (documented schema) was originally scored fail for all
   ten harnesses. That was wrong.** An external re-check found real vendor
   documentation that our search missed: Pi publishes a full
   [session-format spec](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session-format.md)
