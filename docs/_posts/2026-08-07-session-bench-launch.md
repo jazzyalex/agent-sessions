@@ -23,7 +23,10 @@ without notice, three of ten carry no version marker, and Claude Code,
 Codex, Cursor, and Antigravity publish nothing about their persisted
 formats.
 
-Opinions about that are cheap, so we turned ours into a benchmark.
+Opinions about that are cheap, so we turned ours into a benchmark — of
+the layer existing benchmarks skip. SWE-bench measures whether the agent
+completed the work; Session Bench measures what the harness preserved
+after the work was done.
 **[Session Bench]({{ '/bench/' | relative_url }})** scores the session
 format of every harness we support on nineteen scored pass/fail gates
 across five areas: signal density, completeness, stability, openness, and

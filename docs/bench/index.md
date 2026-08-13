@@ -1,17 +1,20 @@
 ---
 layout: blog
 title: "Session Bench — the coding-agent session-format benchmark"
-description: "A pass/fail benchmark of the session records coding agents write to disk: signal density, completeness, stability, openness, and tooling cost, measured across ten harnesses."
+description: "Session Bench measures whether coding-agent harnesses preserve a useful, inspectable, and portable record of their work. SWE-bench measures whether the agent completed the work; Session Bench measures what the harness preserved after it was done."
 permalink: /bench/
 image: /assets/bench-social-card.png
 ---
 <p class="eyebrow">Agent Sessions</p>
 <h1>Session Bench</h1>
-<p class="lede">A benchmark of coding-agent <em>session formats</em> — the
-durable work record each harness writes to disk. Nineteen scored pass/fail
-gates across five areas, each backed by a measurement, a fixture, or a
-monitoring-ledger entry. No partial credit: a gate is pass, fail, or
-explicitly <em>not run</em> — never averaged.</p>
+<p class="lede">Session Bench measures whether coding-agent harnesses
+preserve a useful, inspectable, and portable record of their work — the
+session files they write to disk. SWE-bench measures whether the agent
+completed the work; Session Bench measures what the harness preserved
+after the work was done. Nineteen scored pass/fail gates across five
+areas, each backed by a measurement, a fixture, or a monitoring-ledger
+entry. No partial credit: a gate is pass, fail, or explicitly
+<em>not run</em> — never averaged.</p>
 
 <p class="post-meta">Bench v{{ site.data.session_bench.version }} ·
 probe {{ site.data.session_bench.dates.probe }} ·
@@ -105,6 +108,28 @@ truncation experiment.</p>
   </figure>
 </details>
 
+## The vendor report card
+
+The bench's primary output is not the ranking — it is what each harness
+would have to change to pass. Generated from the matrix:
+
+<table class="bench-table">
+  <thead><tr><th>Harness</th><th>To pass, fix</th></tr></thead>
+  <tbody>
+  {% for agent in site.data.session_bench.agents %}
+  <tr>
+    <td><strong>{{ agent.name }}</strong></td>
+    <td>{% assign first = true %}{% for gate in site.data.session_bench.gates %}{% assign r = agent.results[gate.id] %}{% if r == "fail" %}{% unless first %} · {% endunless %}{% assign first = false %}<span title="{{ agent.notes[gate.id] }}">{{ gate.name | downcase }}</span>{% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<p class="bench-note">Hover an item for the evidence behind the fail. A
+vendor that fixes a gate flips it on the next re-score, and the change is
+recorded in the corrections log — the first harness to clear every scored
+gate gets named here.</p>
+
 Each area answers one question a developer actually has:
 
 - **Signal** — is the log your work, or the harness's paperwork?
@@ -113,27 +138,6 @@ Each area answers one question a developer actually has:
 - **Openness** — can you read your own history with tools you already have?
 - **Tooling** — will scripts and history browsers survive its quirks?
 
-## If you're choosing a harness
-
-The composite rewards all-round formats. If one property matters more to
-you, the gate data narrows it fast. These rows are generated from the
-matrix by the evaluator, so they can never disagree with it:
-
-<table class="bench-table">
-  <thead><tr><th>You need</th><th>Qualifies today</th><th>Basis</th></tr></thead>
-  <tbody>
-  {% for pick in site.data.session_bench.picks %}
-  <tr><td>{{ pick.need }}</td><td>{{ pick.who | join: ", " }}</td><td class="bench-note">{{ pick.basis }}</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-Two editorial observations from the measurement work, decision-relevant but
-carrying no points: Hermes is the only store with built-in full-text
-search, and Codex keeps the most complete wire-replay record. And one
-caution from the gates: Cursor's transcript is readable JSONL, but full
-reconstruction — model, timestamps, metadata — requires its opaque binary
-sidecar (gates O1, O2, P3).
 
 ## The gate matrix
 
@@ -178,6 +182,27 @@ behind it.
   </tbody>
 </table>
 </div>
+## If you're building on session files
+
+For tool builders, auditors, and teams with retention or cost-analysis
+requirements — the properties that matter to a consumer of these records, These rows are generated from the
+matrix by the evaluator, so they can never disagree with it:
+
+<table class="bench-table">
+  <thead><tr><th>You need</th><th>Qualifies today</th><th>Basis</th></tr></thead>
+  <tbody>
+  {% for pick in site.data.session_bench.picks %}
+  <tr><td>{{ pick.need }}</td><td>{{ pick.who | join: ", " }}</td><td class="bench-note">{{ pick.basis }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+Two editorial observations from the measurement work, decision-relevant but
+carrying no points: Hermes is the only store with built-in full-text
+search, and Codex keeps the most complete wire-replay record. And one
+caution from the gates: Cursor's transcript is readable JSONL, but full
+reconstruction — model, timestamps, metadata — requires its opaque binary
+sidecar (gates O1, O2, P3).
 
 ## The gates
 
