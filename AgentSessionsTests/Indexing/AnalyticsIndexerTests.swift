@@ -15,6 +15,30 @@ final class AnalyticsIndexerTests: XCTestCase {
         XCTAssertFalse(AnalyticsAgentFilter.kimiOnly.matches(.pi))
     }
 
+    /// Every source must be an explicit decision: either analytics rolls it up, or it
+    /// appears in `nonAnalyticsSources` below.
+    ///
+    /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter` only checks the forward
+    /// direction, so a source left out of `AnalyticsSourceSupport.sources` entirely was
+    /// invisible to it. Grok shipped that way: it was wired into `AnalyticsService`,
+    /// `AnalyticsColors` and `AnalyticsView`, but never added to the one `Set` that gates
+    /// `enabledAnalyticsSources()`, so its sessions never entered an analytics build and
+    /// nothing failed. This test closes that direction — a new source now has to say which
+    /// side it is on.
+    func testEverySourceIsEitherAnalyticsSupportedOrExplicitlyExcluded() {
+        // Deliberately not rolled up. OpenClaw is long-standing and documented on
+        // `AnalyticsAgentFilter`; Cursor predates Grok and is unverified — revisit whether
+        // its DB-backed sessions should roll up rather than treating this as settled.
+        let nonAnalyticsSources: Set<SessionSource> = [.openclaw, .cursor]
+
+        for source in SessionSource.allCases {
+            let supported = AnalyticsSourceSupport.sources.contains(source)
+            let excluded = nonAnalyticsSources.contains(source)
+            XCTAssertTrue(supported != excluded,
+                          "\(source.rawValue) must either be in AnalyticsSourceSupport.sources or be listed as a deliberate exclusion — not neither, and not both")
+        }
+    }
+
     /// Every analytics-supported source needs exactly one dedicated `AnalyticsAgentFilter`
     /// case, otherwise the Analytics agent picker has no way to isolate it and the source
     /// only ever appears folded into "All Agents". The converse is deliberately not

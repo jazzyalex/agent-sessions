@@ -13,7 +13,7 @@ import Foundation
 /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter` enforces that pairing.
 enum AnalyticsSourceSupport {
     static let sources: Set<SessionSource> = [
-        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid, .pi, .kimi
+        .codex, .claude, .antigravity, .opencode, .hermes, .copilot, .droid, .pi, .kimi, .grok
     ]
 
     static let rawValues: Set<String> = Set(sources.map(\.rawValue))

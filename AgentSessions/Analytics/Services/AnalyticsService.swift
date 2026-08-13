@@ -413,6 +413,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.pi.rawValue]
         case .kimiOnly:
             raw = [SessionSource.kimi.rawValue]
+        case .grokOnly:
+            raw = [SessionSource.grok.rawValue]
         }
         return raw.filter { enabled.contains($0) }
     }

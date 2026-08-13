@@ -60,6 +60,7 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
     case openclawOnly = "OpenClaw Only"
     case piOnly = "Pi Only"
     case kimiOnly = "Kimi Only"
+    case grokOnly = "Grok Only"
 
     var id: String { rawValue }
 
@@ -88,6 +89,8 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
             return source == .pi
         case .kimiOnly:
             return source == .kimi
+        case .grokOnly:
+            return source == .grok
         }
     }
 }
