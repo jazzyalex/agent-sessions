@@ -4034,7 +4034,7 @@ private struct LayoutToggleButton: View {
 }
 
 // Stable transcript host that preserves layout identity across provider switches
-private struct TranscriptHostView: View {
+struct TranscriptHostView: View {
     let kind: SessionSource
     let selection: String?
     let codexIndexer: SessionIndexer
@@ -4087,10 +4087,30 @@ private struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .kimi ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: grokIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "Grok CLI",
+                enableCaching: false
+            )
+            .opacity(kind == .grok ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
     }
+
+    /// Every source that has a layer in the `ZStack` above.
+    ///
+    /// The layers are selected by `opacity`, not by a `switch`, so a source with no
+    /// layer is not a compile error — it silently renders an empty transcript with
+    /// every layer at zero opacity. Grok shipped exactly that way: its indexer was
+    /// declared, passed in, and never used. `testTranscriptHostCoversEverySource`
+    /// compares this set against `SessionSource.allCases`.
+    static let coveredSources: Set<SessionSource> = [
+        .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok
+    ]
 }
 
 // Session title cell with inline Antigravity refresh affordance (hover-only)

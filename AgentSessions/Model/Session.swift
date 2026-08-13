@@ -492,8 +492,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             ? true
             : defaults.bool(forKey: "SkipAgentsPreamble")
 
-        // 0) Lightweight session: use extracted title (but avoid preamble-only garbage)
-        if events.isEmpty, let lightTitle = lightweightTitle, !lightTitle.isEmpty {
+        // 0) Use the extracted title (but avoid preamble-only garbage) when the session
+        //    is still lightweight, or when the provider's sidecar owns the title outright.
+        if events.isEmpty || storesAuthoritativeLightweightTitle,
+           let lightTitle = lightweightTitle, !lightTitle.isEmpty {
             let trimmed = lightTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if skipPreamble {
                 if source == .claude, let tail = Self.claudeLocalCommandPromptTail(from: trimmed) {
@@ -766,6 +768,29 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
              .pi, .kimi, .grok, .cursor, .claude, .droid:
             return true
         case .codex:
+            return false
+        }
+    }
+
+    /// Whether the provider's sidecar owns the session title, so a loaded transcript
+    /// must not override it.
+    ///
+    /// Exhaustive on purpose, mirroring `storesAuthoritativeLightweightCwd`. Grok writes
+    /// a `generated_title` in `summary.json` ("Triada Architecture Coupling and Module
+    /// Map"), but its first `user` record is an injected `<user_info>`/`<user_query>`
+    /// context preamble rather than a real prompt — so once events loaded, title
+    /// derivation fell through to the transcript and produced literal
+    /// `<user_query> hi </user_query>`, or the opening line of an assistant reply.
+    ///
+    /// Every other provider stays `false`, preserving the previous behaviour exactly.
+    /// That is a deliberate no-change rather than a judgement that their sidecars are
+    /// not authoritative — several were never examined for this.
+    private var storesAuthoritativeLightweightTitle: Bool {
+        switch source {
+        case .grok:
+            return true
+        case .codex, .claude, .antigravity, .opencode, .hermes,
+             .copilot, .droid, .openclaw, .cursor, .pi, .kimi:
             return false
         }
     }

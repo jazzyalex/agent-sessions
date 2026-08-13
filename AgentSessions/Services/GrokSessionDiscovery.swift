@@ -45,6 +45,53 @@ final class GrokSessionDiscovery: SessionDiscovery {
             .appendingPathComponent("summary.json", isDirectory: false)
     }
 
+    /// What a subagent run records about its relationship to the session that spawned it.
+    struct SubagentLink {
+        let parentSessionID: String
+        let subagentType: String?
+        let description: String?
+    }
+
+    /// Resolves the subagent relationship for `sessionID`, which Grok records in the
+    /// *parent's* tree rather than the child's own sidecar.
+    ///
+    /// A spawned subagent is written twice: once as an ordinary top-level session
+    /// directory beside its parent, and once as
+    /// `<parent>/subagents/<childID>/meta.json`, which holds `parent_session_id`,
+    /// `subagent_type` and a short `description`. The child's `summary.json` carries
+    /// none of it, so the link can only be found by looking sideways at siblings — one
+    /// prompt that fans out into three subagents otherwise lists as four unrelated
+    /// sessions.
+    ///
+    /// Only sibling directories that actually have a `subagents/` child are opened, so
+    /// the common case (no subagents anywhere in the bucket) costs one directory read.
+    static func subagentLink(forSessionID sessionID: String, inBucket bucket: URL) -> SubagentLink? {
+        let fm = FileManager.default
+        guard let siblings = try? fm.contentsOfDirectory(at: bucket,
+                                                         includingPropertiesForKeys: [.isDirectoryKey],
+                                                         options: [.skipsHiddenFiles]) else { return nil }
+
+        for sibling in siblings {
+            guard sibling.lastPathComponent != sessionID else { continue }
+            let meta = sibling
+                .appendingPathComponent("subagents", isDirectory: true)
+                .appendingPathComponent(sessionID, isDirectory: true)
+                .appendingPathComponent("meta.json", isDirectory: false)
+            guard fm.fileExists(atPath: meta.path),
+                  let data = try? Data(contentsOf: meta),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+
+            // Prefer the recorded parent id, but fall back to the directory that owns
+            // the `subagents/` tree — the relationship is established by location.
+            let parent = (object["parent_session_id"] as? String) ?? sibling.lastPathComponent
+            guard !parent.isEmpty else { continue }
+            return SubagentLink(parentSessionID: parent,
+                                subagentType: object["subagent_type"] as? String,
+                                description: object["description"] as? String)
+        }
+        return nil
+    }
+
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
         let fm = FileManager.default

@@ -161,18 +161,22 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.0"
+    max_verified_version: "1.0.3"
     version_field: "not_logged"
-    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, and analytics"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and subagent hierarchy"
     unsupported_surfaces:
       - "live/active status"
       - "usage/rate-limit tracking"
-      - "subagent hierarchy"
       - "weekly session-format monitoring (no agent_watch driver yet)"
+    notes:
+      - "Subagent hierarchy resolves from the parent's tree, not the child's sidecar: a spawned run is written both as a top-level session directory and as <parent>/subagents/<childId>/meta.json, which is the only place parent_session_id and subagent_type appear. Verified across 9 subagent links at 1.0.3."
+      - "Grok's own `grok sessions list` hides subagent sessions; Agent Sessions surfaces them with parentage."
+      - "Nesting was not observed: a subagent asked to delegate produced further subagents recorded under the root session, and no child owned its own subagents/ tree."
+      - "Not yet exercised against real captures: the truncated-preview count fallback (no session has reached the 200-line preview cap; the largest seen is 167 lines) and the compaction/ subtree."
     evidence_docs:
-      - "grok --help at 1.0.0 (3cd0d0cbcebe)"
+      - "grok --help at 1.0.3 (1a29d5bc12d4)"
     evidence_captures:
-      - "~/.grok/sessions/<percent-encoded workdir>/<sessionId>/ (141 sessions surveyed)"
+      - "~/.grok/sessions/<percent-encoded workdir>/<sessionId>/ (141 sessions surveyed at 1.0.0; 13 sessions across 2 workdir buckets at 1.0.3, including 9 subagents, web-search backend_tool_call, and an image content part)"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/grok/chat_history.jsonl"
       - "Resources/Fixtures/stage0/agents/grok/summary.json"

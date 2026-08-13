@@ -106,6 +106,12 @@ enum GrokSessionParser {
         let cwd = sidecar?.info?.cwd ?? sidecar?.gitRootDir
         let title = firstNonEmpty(sidecar?.generatedTitle, sidecar?.sessionSummary, firstPromptText)
 
+        // A subagent run is written twice: as its own top-level session directory and
+        // as `<parent>/subagents/<id>/meta.json`. Only the latter records the parent,
+        // so resolve it from the sibling tree — the sidecar never carries it.
+        let bucket = url.deletingLastPathComponent().deletingLastPathComponent()
+        let subagent = GrokSessionDiscovery.subagentLink(forSessionID: id, inBucket: bucket)
+
         // `loadLines` stops at `previewLineLimit`, so a preview that came back
         // short read the whole transcript and its own non-meta count is exact.
         // Only a genuinely truncated preview falls back to the sidecar, whose
@@ -134,7 +140,8 @@ enum GrokSessionParser {
                        // A stored 0 short-circuits SearchCoordinator.shouldDeepScan
                        // ahead of its event count. Matches Kimi and OpenCode.
                        lightweightCommands: commandCount > 0 ? commandCount : nil,
-                       parentSessionID: sidecar?.parentSessionId,
+                       parentSessionID: sidecar?.parentSessionId ?? subagent?.parentSessionID,
+                       subagentType: subagent?.subagentType,
                        surface: .cli,
                        reasoningEffort: sidecar?.reasoningEffort)
     }

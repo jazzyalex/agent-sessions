@@ -159,6 +159,77 @@ final class GrokSessionParserTests: XCTestCase {
         XCTAssertEqual(full.events.filter { $0.kind != .meta }.count, session.eventCount)
     }
 
+    /// The sidecar owns the title, so loading the transcript must not override it.
+    ///
+    /// Grok's first `user` record is an injected `<user_info>`/`<user_query>` context
+    /// preamble, not a real prompt. Title derivation used to run as soon as events were
+    /// present, which produced a literal `<user_query> hi </user_query>` for a real
+    /// session whose sidecar said "Triada Architecture Coupling and Module Map".
+    func testSidecarTitleSurvivesAFullParse() throws {
+        let transcript = """
+        {"type":"user","content":[{"type":"text","text":"<user_info>\\nOS Version: macos\\n</user_info>\\n<user_query> hi </user_query>"}]}
+        {"type":"assistant","content":"I'll map the repo's layout and module boundaries."}
+        """
+        let summary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"},"generated_title":"Triada Architecture Coupling and Module Map","num_chat_messages":2}
+        """
+        let url = try stage(transcript: transcript, summary: summary)
+
+        let full = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
+        XCTAssertFalse(full.events.isEmpty, "guard: this must be the events-loaded path")
+        XCTAssertEqual(full.title, "Triada Architecture Coupling and Module Map")
+
+        let preview = try XCTUnwrap(GrokSessionParser.parseFile(at: url))
+        XCTAssertEqual(preview.title, full.title, "opening a session must not change its title")
+    }
+
+    /// Grok records the subagent relationship in the parent's tree, never in the child's
+    /// sidecar, so a fan-out otherwise lists as several unrelated top-level sessions.
+    func testSubagentParentageResolvesFromTheParentTree() throws {
+        let fm = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("grok-subagent-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? fm.removeItem(at: root) }
+
+        let bucket = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("%2Ftmp%2Fas-agent-lab%2Fgrok%2Fproject", isDirectory: true)
+        let parentID = "019ffca4-ef74-7a12-af00-5d758029446f"
+        let childID = "019ffca9-afc8-76f1-8ddf-f1e30b218aa4"
+
+        func writeSession(_ id: String, title: String) throws -> URL {
+            let dir = bucket.appendingPathComponent(id, isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let transcript = dir.appendingPathComponent("chat_history.jsonl")
+            try #"{"type":"user","content":[{"type":"text","text":"map the repo"}],"prompt_index":0}"#
+                .write(to: transcript, atomically: true, encoding: .utf8)
+            // Deliberately no `parent_session_id` — the real sidecars carry none.
+            try #"{"info":{"id":"\#(id)","cwd":"/tmp/as-agent-lab/grok/project"},"generated_title":"\#(title)"}"#
+                .write(to: dir.appendingPathComponent("summary.json"), atomically: true, encoding: .utf8)
+            return transcript
+        }
+
+        let parentTranscript = try writeSession(parentID, title: "User Initial Greeting")
+        let childTranscript = try writeSession(childID, title: "Triada Architecture Coupling and Module Map")
+
+        let metaDir = bucket
+            .appendingPathComponent(parentID, isDirectory: true)
+            .appendingPathComponent("subagents", isDirectory: true)
+            .appendingPathComponent(childID, isDirectory: true)
+        try fm.createDirectory(at: metaDir, withIntermediateDirectories: true)
+        try #"{"parent_session_id":"\#(parentID)","child_session_id":"\#(childID)","subagent_type":"explore","description":"Architecture module map","status":"completed"}"#
+            .write(to: metaDir.appendingPathComponent("meta.json"), atomically: true, encoding: .utf8)
+
+        let child = try XCTUnwrap(GrokSessionParser.parseFile(at: childTranscript))
+        XCTAssertEqual(child.parentSessionID, parentID)
+        XCTAssertEqual(child.subagentType, "explore")
+
+        // The parent owns a `subagents/` tree but is nobody's child.
+        let parent = try XCTUnwrap(GrokSessionParser.parseFile(at: parentTranscript))
+        XCTAssertNil(parent.parentSessionID)
+        XCTAssertNil(parent.subagentType)
+    }
+
     /// A transcript of nothing but `system` and `reasoning` records renders no
     /// visible content, so it has to report zero messages. The sidecar's raw
     /// record count includes all three, and taking it verbatim let an empty
