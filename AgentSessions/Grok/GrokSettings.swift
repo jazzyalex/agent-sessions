@@ -21,6 +21,12 @@ final class GrokSettings: ObservableObject {
     enum Keys {
         static let binaryPath = "GrokBinaryPath"
         static let resolvedBinaryPath = "GrokResolvedBinaryPath"
+        // Stored string deliberately says "Session", not "Resume". It is a
+        // leftover from porting this pane off Kimi, which probes `--session`
+        // where Grok probes `--resume`. Do not tidy it to match the constant:
+        // the key is already persisted in every existing install, and renaming
+        // it silently resets the stored capability, so resume goes quiet until
+        // the user reprobes the binary in Preferences.
         static let resolvedSupportsResume = "GrokResolvedSupportsSession"
         static let resolvedSupportsContinue = "GrokResolvedSupportsContinue"
     }
