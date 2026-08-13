@@ -228,8 +228,10 @@ stores; this bench scores the CLI session store only, and says so. Completeness,
 Openness, and Tooling verdicts are checklist items evaluated against real
 session files, the sanitized fixtures in the Agent Sessions repo, and the
 parsers that read all ten formats in production. Stability comes from a
-ledger that has fingerprinted every format's schema roughly weekly since
-2026-03-31.
+ledger that has fingerprinted each format's schema roughly weekly since it
+entered monitoring — 2026-03-31 for the longest-observed harnesses, later
+for others (Cursor and OpenClaw from April, Pi from May, Kimi from late
+July); every stability verdict states its own window.
 
 Grades can change, and the version scheme separates the two ways they can:
 the **bench version** (currently v{{ site.data.session_bench.version }}) is the rubric — gates, thresholds, scoring

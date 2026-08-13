@@ -122,15 +122,24 @@ def main() -> int:
                 results[gid] = "untested"
                 notes[gid] = g["desc"]
                 continue
-            # v0.2: T3 (honest version signal) is only meaningful when T2
-            # (declares a version) passes; absence of a version is already
-            # penalized by T2 and must not earn a T3 point.
-            if gid == "T3" and cells.get("T2", {}).get("state") != "pass":
-                results[gid] = "not_applicable"
-                notes[gid] = ("not scored: T2 failed — with no version signal there is "
-                              "nothing to judge for honesty, and absence is already "
-                              "penalized once by T2")
-                continue
+            # v0.2+: T3 (honest version signal) is only meaningful when T2
+            # (declares a format version) passes; absence of a version is
+            # already penalized by T2 and must not earn a T3 point. If T2
+            # itself could not be measured, T3 is likewise unresolved
+            # (not_run), not permanently removed.
+            if gid == "T3":
+                t2 = cells.get("T2", {}).get("state")
+                if t2 == "fail":
+                    results[gid] = "not_applicable"
+                    notes[gid] = ("not scored: T2 failed — with no format version there "
+                                  "is nothing to judge for honesty, and absence is "
+                                  "already penalized once by T2")
+                    continue
+                if t2 == "not_run":
+                    results[gid] = "not_run"
+                    notes[gid] = "unresolved: T2 itself could not be measured"
+                    not_run += 1
+                    continue
             cell = cells.get(gid)
             if cell is None:
                 raise SystemExit(f"missing verdict: {slug} {gid}")

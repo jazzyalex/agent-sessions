@@ -333,7 +333,7 @@ agents:
       (full window)'
     T2: per-line version field carries the application version, not a schema version
       (rescored in v0.3)
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: plain JSONL
     O2: single session file, appended live
@@ -392,20 +392,20 @@ agents:
     C3: event_msg/token_count with cumulative usage
     C4: tokens only, no dollar figure anywhere
     C5: function_call + function_call_output items
-    C6: 'raw thinking is encrypted, but 669 of 1,799 reasoning items (37%) across
+    C6: 'raw thinking is encrypted, but 701 of 1,915 reasoning items (36%) across
       a pinned 5-rollout artifact set carry non-empty plaintext summary_text — a stored
       summary, which the gate accepts. Artifact IDs, hashes, and per-file counts:
       scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED from fail
       2026-08-12)'
-    C7: 'session_meta carries parent_thread_id (38 lines) and rollouts contain sub_agent_activity
-      records (187 lines) in the pinned 5-rollout set — subagent runs recoverable.
+    C7: 'session_meta carries parent_thread_id (42 lines) and rollouts contain sub_agent_activity
+      records (198 lines) in the pinned 5-rollout set — subagent runs recoverable.
       Receipt: scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED
       from fail 2026-08-12)'
     T1: 'ledger: ~6 additive drifts, envelope unchanged; observed 2026-03-31 → 2026-08-04
       (full window)'
     T2: stamps only cli_version — an application version identifying the writer, not
       a schema version an external reader can dispatch on (rescored in v0.3)
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: plain JSONL
     O2: single rollout file, appended live
@@ -471,7 +471,7 @@ agents:
     T1: 'ledger: JSON tree → SQLite migration in window'
     T2: session.version tracks the application version, not a schema version (rescored
       in v0.3)
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: standard SQLite, JSON columns readable
     O2: database rows; nothing to tail
@@ -611,7 +611,7 @@ agents:
     C7: no thread/branch structure
     T1: 'ledger: JSON files → state.db migration in window'
     T2: 'no version marker (matrix: not_logged)'
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: standard SQLite
     O2: database rows; nothing to tail
@@ -680,7 +680,7 @@ agents:
     T1: 'ledger: v1.0 storage-layout break (flat → subdirs), runtime patch f77040f'
     T2: data.copilotVersion is an application version, not a schema version (rescored
       in v0.3)
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: plain JSONL (encryptedContent is one field, container readable)
     O2: events.jsonl appended live
@@ -746,7 +746,7 @@ agents:
     C7: no thread/branch links
     T1: 'ledger: markdown brain → JSONL transcript migration (largest in window)'
     T2: no version marker
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: plain JSONL
     O2: transcript.jsonl appended live
@@ -809,7 +809,7 @@ agents:
     C7: subagents/ directory convention with parent UUID
     T1: only additive turn_ended line; observed since 2026-04 (~4 months)
     T2: 'no version marker (matrix: not_logged)'
-    T3: 'not scored: T2 failed — with no version signal there is nothing to judge
+    T3: 'not scored: T2 failed — with no format version there is nothing to judge
       for honesty, and absence is already penalized once by T2'
     O1: store.db meta is hex-encoded JSON; blobs are protobuf
     O2: full record spans transcript + binary store.db
