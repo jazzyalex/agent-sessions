@@ -1,3 +1,30 @@
+## 2026-08-13 15:32 · grok-source · Grok CLI merged, then fixed against real sessions
+
+status: in-progress
+
+**State:** PR #55 (Grok CLI, contributor `thedavidweng`) merged and hardened against real 1.0.3 sessions; all work pushed through `b68f1710`, tree clean. PR #56 (Devin) still open and deliberately not taken.
+
+**Decided / don't redo:**
+- **Every bug this session was a hand-maintained per-source list the compiler can't check** — a `Set`, an array literal, an `&&` chain, or a `default:` arm. Twelve instances. Every exhaustive `switch` was already correct. When wiring a new source, hunt for `default:` and array literals, not switches.
+- **Grok's subagent parentage is in the PARENT's tree**, `<parent>/subagents/<childId>/meta.json` — the child's `summary.json` has no `parent_session_id`. Don't look in the child.
+- **Grok flattens delegation** — a subagent asked to delegate produced more subagents under the root, none owning their own `subagents/`. One-level lookup is correct; don't build chain-walking.
+- **`grok sessions list` hides subagents**; Agent Sessions surfaces them. Not a discrepancy — a capability.
+- **Registry refactor is planned, not started.** Do it before taking #56 (Devin's shared 5.4 GB SQLite store breaks archive-by-path and search-by-path). Plan + descriptor draft committed under `docs/superpowers/plans/2026-08-13-session-source-registry-*`.
+- `PresenceEngineTests`/`PresenceEngineRegressionTests` fail on clean `main` (12–14, count drifts per run) — environment-coupled, proven by stash-and-rerun, owned by a separate spun-off session. Not caused by this work.
+- Analytics now rolls up **every** source (`allCases`); Cursor and OpenClaw were excluded by omission, not design.
+
+**Key files:**
+- `AgentSessions/Services/GrokSessionDiscovery.swift` — `subagentLink(forSessionID:inBucket:)`, the sideways parentage lookup
+- `AgentSessions/Model/Session.swift` — `storesAuthoritativeLightweightTitle` (Grok-only; sidecar owns the title)
+- `AgentSessions/Utilities/CodexSessionImagePayload.swift` — 3 of the 4 image gates; all now exhaustive
+- `docs/agent-support/agent-support-matrix.yml` — records what is still **unexercised**: the truncated-preview count fallback (no session has hit the 200-line cap; largest 167) and the `compaction/` subtree
+
+**Next:**
+1. Session-source registry refactor — increments 1–6 in the plan doc; target is "new source = one folder + one registry entry".
+2. Rebase and merge PR #56 (Devin) onto the registry shape; do the rebase yourself rather than asking the contributor.
+3. Backlog: inline images lost their right-click menu everywhere (`docs/backlog.md`, top entry) — needs its own bisect, not caused by the image work.
+4. Unverified: image extraction for Kimi/Pi/Hermes/Cursor is wired on an assumption — no local session for any of them contains a `data:image/` URI.
+
 ## 2026-08-04 10:35 · agent-session-formats-check · Full format check: parser + pricing fixes, and a rebuilt monitor
 
 status: in-progress
