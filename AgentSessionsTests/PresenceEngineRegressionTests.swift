@@ -22,7 +22,13 @@ import XCTest
 /// `debugPollTaskIsRunning` / `debugIsForegroundProbeRampArmed`), which bypass
 /// the `AppRuntime.isRunningTests` early-returns that keep the real poll
 /// machinery quiet under XCTest. Shares the `FakeProbeRunner` fixture shape
-/// with `PresenceEngineTests`.
+/// with `PresenceEngineTests`, and its `FixedPresenceRootsResolver` /
+/// `PresenceFixtureRoots` / `RegistryOverrideRecorder` outright — the resolver
+/// is what keeps the registry read, the Claude runway scan, and the Desktop
+/// sidecar lookup off the real home directory. Every engine in this file is
+/// built with it, including the two ramp tests that do not currently refresh:
+/// a bare `PresenceEngine()` there would fork real probes the moment someone
+/// added a `debugRefreshOnce()` to them.
 @MainActor
 final class PresenceEngineRegressionTests: XCTestCase {
 
@@ -66,13 +72,16 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// Returns a fixed lsof machine-format blob for the codex query so a single
     /// refresh cycle discovers exactly one codex presence via the process-probe
     /// path (fixture format copied from `PresenceEngineTests.makeCodexPresenceRunner`).
+    /// The log path lives under `PresenceFixtureRoots.codexSessions` because
+    /// that is what `FixedPresenceRootsResolver.hermetic()` pins
+    /// `codexSessionsRoots()` to.
     private func makeCodexPresenceRunner(pid: Int = 4242, tty: String = "/dev/ttys044") -> FakeProbeRunner {
-        let sessionLogPath = NSHomeDirectory() + "/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
+        let sessionLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
         let lsofBlob = """
         p\(pid)
         fcwd
         tDIR
-        n\(NSHomeDirectory())/Repository/Demo
+        n\(PresenceFixtureRoots.base)/Repository/Demo
         f0
         tCHR
         n\(tty)
@@ -95,7 +104,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// flips `enabled` true -> false.
     func testEnabledToggleOff_stopsPollingAndClearsPresences() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var enabledEnv = PresenceEnvironment()
         enabledEnv.enabled = true
@@ -133,7 +142,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// but that call is quiet under XCTest, so the gate itself is what's pinned.)
     func testEnabledToggleOn_restartsPolling() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var disabledEnv = PresenceEnvironment()
         disabledEnv.enabled = false
@@ -156,7 +165,15 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// didSet).
     func testRegistryRootOverrideChange_refreshStillRuns() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        // The recorder makes the override's journey observable. Without it the
+        // fake resolver silently discards `registryRootOverride`, and this test
+        // would keep passing even if `PresenceEngine.registryRoots()` stopped
+        // forwarding `environment.registryRootOverride` altogether — which is
+        // the B1 defect this file exists to guard.
+        let overrideRecorder = RegistryOverrideRecorder()
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.registryOverrideSink = overrideRecorder
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: roots)
 
         var env = PresenceEnvironment()
         env.registryRootOverride = ""
@@ -169,13 +186,15 @@ final class PresenceEngineRegressionTests: XCTestCase {
         let snapshot = await engine.debugRefreshOnce()
         XCTAssertEqual(snapshot.presences.count, 1,
                        "refresh after a registry-root change must still run and discover presences")
+        XCTAssertEqual(overrideRecorder.received, "/tmp/some/registry/override",
+                       "the changed registry-root override must reach root resolution, not just survive in the environment")
     }
 
     // MARK: - B2: launch with feature disabled never polls
 
     func testLaunchWithEnabledFalse_neverStartsPolling() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var disabledEnv = PresenceEnvironment()
         disabledEnv.enabled = false
@@ -195,7 +214,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// Cockpit window hidden -> visible while active + a consumer visible must
     /// arm the ramp (v4.0 `setCockpitWindowVisible` edge, dropped by extraction).
     func testRamp_armsOnCockpitWindowBecomingVisibleWhileActive() async {
-        let engine = PresenceEngine()
+        let engine = PresenceEngine(rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var previous = PresenceEnvironment()
         previous.appIsActive = true
@@ -217,7 +236,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
 
     /// The same transition while INACTIVE must NOT arm (v4.0 gated on appIsActive).
     func testRamp_doesNotArmOnCockpitWindowVisibleWhileInactive() async {
-        let engine = PresenceEngine()
+        let engine = PresenceEngine(rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var previous = PresenceEnvironment()
         previous.appIsActive = false

@@ -42,6 +42,53 @@ protocol ProbeRunner: Sendable {
     func cancelAll() async
 }
 
+/// Injectable seam over the *filesystem* roots presence discovery reads —
+/// the counterpart to what `ProbeRunner` does for subprocess probes.
+///
+/// `ProbeRunner` alone is not enough to make a refresh cycle hermetic: the
+/// presence-discovery paths in `performRefreshDiscovery` never touch it and
+/// read real user directories instead — the registry JSON scan
+/// (`CodexActiveSessionsModel.loadPresences` over `registryRoots()`), the
+/// Claude runway synthesizer (`ClaudeRunwayPresenceSynthesizer.presences` over
+/// `claudeSessionScanRoots()`), and that synthesizer's own sidecar lookup
+/// (`ClaudeDesktopSessionTitles` over `claudeDesktopTitlesRoots()`, which both
+/// retitles and — via `isArchived` — silently DROPS identities). All feed the
+/// cycle's presence list, so a test could fake every subprocess and still pick
+/// up whatever `~/.codex/active`, `~/.claude/projects`, and
+/// `~/Library/Application Support/Claude` happen to hold on the machine running
+/// the suite. This seam closes that gap for presence discovery.
+///
+/// Not covered: the Cockpit-gated subagent-badge read
+/// (`runtimeCodexSubagentCountsByPresenceKey` -> `codexRuntimeRoots()`, which
+/// reaches real `~/.codex`). It is unreachable from every current test because
+/// they all leave `hudOpen`/`hasVisibleCockpitWindow` false — but a future
+/// cockpit-visible test asserting `badgeVersion` WILL read the developer's
+/// runtime DB. Extend this seam before writing one.
+///
+/// The default implementation (`DefaultPresenceRootsResolver`) is the real
+/// resolution logic — `@AppStorage`/`UserDefaults` overrides, `CODEX_HOME`,
+/// then the home-directory fallbacks — moved here verbatim, so production
+/// behavior is unchanged.
+protocol PresenceRootsResolving: Sendable {
+    /// Codex presence-registry directories (`~/.codex/active` and friends).
+    /// `registryRootOverride` is the engine's `PresenceEnvironment` value.
+    func registryRoots(registryRootOverride: String) -> [URL]
+    /// Codex session-log roots. Used as a path-prefix allow-list when deciding
+    /// whether a file `lsof` reports is a session log (see
+    /// `CodexActiveSessionsModel.matchesSessionLogPath`), so these need not exist.
+    func codexSessionsRoots() -> [URL]
+    func claudeSessionsRoots() -> [URL]
+    /// Roots the Claude runway synthesizer scans for recently-active desktop
+    /// sessions. Returning `[]` disables runway synthesis entirely.
+    func claudeSessionScanRoots() -> [URL]
+    /// Claude Desktop sidecar roots the runway synthesizer consults for session
+    /// titles and the `isArchived` flag. Returning `[]` yields no records, so
+    /// no identity is retitled or dropped.
+    func claudeDesktopTitlesRoots() -> [URL]
+    func opencodeSessionsRoots() -> [URL]
+    func antigravitySessionsRoots() -> [URL]
+}
+
 /// Off-main-actor presence engine. Owns the poll loop, interval policy,
 /// registry reads, probe launches (process fork/exec), merge/dedup,
 /// classification (including the osascript batch probe), the publish
@@ -80,6 +127,11 @@ actor PresenceEngine {
     // MARK: - Injected dependencies
 
     private let probeRunner: ProbeRunner
+
+    /// Filesystem-roots seam. See `PresenceRootsResolving` — this is what keeps
+    /// the registry read and the Claude runway scan out of the real home
+    /// directory when a test injects its own roots.
+    private let rootsResolver: PresenceRootsResolving
 
     /// Wall-clock seam used ONLY by the cadence-diet throttle
     /// (`emitFreshnessOnlyIfDue`/`emit`). Everything else in the engine
@@ -143,8 +195,11 @@ actor PresenceEngine {
     private var staleRefreshResultsDropped: UInt64 = 0
 #endif
 
-    init(probeRunner: ProbeRunner = RealProbeRunner(), now: @escaping () -> Date = Date.init) {
+    init(probeRunner: ProbeRunner = RealProbeRunner(),
+         rootsResolver: PresenceRootsResolving = DefaultPresenceRootsResolver(),
+         now: @escaping () -> Date = Date.init) {
         self.probeRunner = probeRunner
+        self.rootsResolver = rootsResolver
         self.now = now
         var continuation: AsyncStream<Emission>.Continuation!
         // Only the latest snapshot matters to a consumer that's behind: each
@@ -510,77 +565,42 @@ actor PresenceEngine {
 
     // MARK: - Registry root discovery (ported from CodexActiveSessionsModel)
 
-    private func registryRoots() -> [URL] {
-        var candidates: [URL] = []
+    // Each of these forwards to the injected `PresenceRootsResolving`. The real
+    // resolution logic lives in `DefaultPresenceRootsResolver` at the bottom of
+    // this file; keeping thin wrappers here leaves `refreshOnce`'s call sites
+    // and their ordering untouched.
 
-        if let override = Self.parsePath(environment.registryRootOverride) {
-            candidates.append(override)
-        }
-        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], let envURL = Self.parsePath(env) {
-            candidates.append(envURL.appendingPathComponent("active"))
-        }
-        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
-           let sessionsURL = Self.parsePath(sessionsOverride) {
-            candidates.append(sessionsURL.deletingLastPathComponent().appendingPathComponent("active"))
-        }
-        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/active"))
-        return Self.dedupRoots(candidates)
+    private func registryRoots() -> [URL] {
+        rootsResolver.registryRoots(registryRootOverride: environment.registryRootOverride)
     }
 
     private func codexSessionsRoots() -> [URL] {
-        var candidates: [URL] = []
-        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
-           let sessionsURL = Self.parsePath(sessionsOverride) {
-            candidates.append(sessionsURL)
-        }
-        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], let envURL = Self.parsePath(env) {
-            candidates.append(envURL.appendingPathComponent("sessions"))
-        }
-        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"))
-        return Self.dedupRoots(candidates)
+        rootsResolver.codexSessionsRoots()
     }
 
     private func claudeSessionsRoots() -> [URL] {
-        let defaults = UserDefaults.standard
-        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
-            ?? ""
-        let discovery = ClaudeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
-        return Self.dedupRoots([discovery.sessionsRoot()])
+        rootsResolver.claudeSessionsRoots()
     }
 
     private func claudeSessionScanRoots() -> [URL] {
-        let defaults = UserDefaults.standard
-        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
-            ?? ""
-        let trimmedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
-        let discovery = ClaudeSessionDiscovery(customRoot: trimmedOverride.isEmpty ? nil : trimmedOverride)
-        let roots = discovery.sessionScanRoots()
-        if !roots.isEmpty { return Self.dedupRoots(roots) }
-        let fallback = trimmedOverride.isEmpty
-            ? ClaudeRunwayRecentSessionScanner.defaultRoot()
-            : discovery.sessionsRoot()
-        return Self.dedupRoots([fallback])
+        rootsResolver.claudeSessionScanRoots()
+    }
+
+    private func claudeDesktopTitlesRoots() -> [URL] {
+        rootsResolver.claudeDesktopTitlesRoots()
     }
 
     private func opencodeSessionsRoots() -> [URL] {
-        let defaults = UserDefaults.standard
-        let override = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
-            ?? defaults.string(forKey: "OpenCodeSessionsRootOverride")
-            ?? ""
-        let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
-        return Self.dedupRoots([discovery.sessionsRoot()])
+        rootsResolver.opencodeSessionsRoots()
     }
 
     private func antigravitySessionsRoots() -> [URL] {
-        let defaults = UserDefaults.standard
-        let override = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
-        let discovery = AntigravitySessionDiscovery(customRoot: override.isEmpty ? nil : override)
-        return Self.dedupRoots([discovery.sessionsRoot()])
+        rootsResolver.antigravitySessionsRoots()
     }
 
-    private static func dedupRoots(_ candidates: [URL]) -> [URL] {
+    // `fileprivate nonisolated` so `DefaultPresenceRootsResolver` (same file,
+    // outside this actor's isolation domain) can reuse them unchanged.
+    fileprivate nonisolated static func dedupRoots(_ candidates: [URL]) -> [URL] {
         var out: [URL] = []
         var seen: Set<String> = []
         for u in candidates {
@@ -590,7 +610,7 @@ actor PresenceEngine {
         return out
     }
 
-    private static func parsePath(_ raw: String) -> URL? {
+    fileprivate nonisolated static func parsePath(_ raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let expanded = (trimmed as NSString).expandingTildeInPath
@@ -1034,11 +1054,19 @@ actor PresenceEngine {
         }
 
         var claimedClaudeLogPaths = Self.claimedLogPaths(in: out, source: .claude)
+        // Passed explicitly rather than left `nil`: `effectiveIdentities` treats
+        // `nil` as "fall back to `ClaudeDesktopSessionTitles.defaultRoots()`",
+        // which reads the real `~/Library/Application Support/Claude` sidecars
+        // and can retitle — or, on `isArchived`, silently drop — a synthesized
+        // identity. Production resolves to those same default roots; only an
+        // injected resolver can narrow them.
+        let desktopTitlesRoots = claudeDesktopTitlesRoots()
         for root in Self.claudeRunwayRoots(from: claudeRunwayRoots) {
             let synthesized = ClaudeRunwayPresenceSynthesizer.presences(
                 root: root,
                 now: now,
-                claimedLogPaths: claimedClaudeLogPaths
+                claimedLogPaths: claimedClaudeLogPaths,
+                desktopTitlesRoots: desktopTitlesRoots
             )
             out.append(contentsOf: synthesized)
             claimedClaudeLogPaths.formUnion(Self.claimedLogPaths(in: synthesized, source: .claude))
@@ -1493,6 +1521,89 @@ actor PresenceEngine {
             return []
         }
         return CodexActiveSessionsModel.parseITermSessionListOutput(String(decoding: out, as: UTF8.self))
+    }
+}
+
+/// Production `PresenceRootsResolving`: the real root-resolution logic, moved
+/// verbatim off `PresenceEngine`'s private methods so the engine can accept a
+/// test double in its place. Reads the same `@AppStorage`/`UserDefaults`
+/// override keys, `CODEX_HOME`, and home-directory fallbacks as before.
+struct DefaultPresenceRootsResolver: PresenceRootsResolving {
+    func registryRoots(registryRootOverride: String) -> [URL] {
+        var candidates: [URL] = []
+
+        if let override = PresenceEngine.parsePath(registryRootOverride) {
+            candidates.append(override)
+        }
+        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], let envURL = PresenceEngine.parsePath(env) {
+            candidates.append(envURL.appendingPathComponent("active"))
+        }
+        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+           let sessionsURL = PresenceEngine.parsePath(sessionsOverride) {
+            candidates.append(sessionsURL.deletingLastPathComponent().appendingPathComponent("active"))
+        }
+        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/active"))
+        return PresenceEngine.dedupRoots(candidates)
+    }
+
+    func codexSessionsRoots() -> [URL] {
+        var candidates: [URL] = []
+        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+           let sessionsURL = PresenceEngine.parsePath(sessionsOverride) {
+            candidates.append(sessionsURL)
+        }
+        if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], let envURL = PresenceEngine.parsePath(env) {
+            candidates.append(envURL.appendingPathComponent("sessions"))
+        }
+        candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"))
+        return PresenceEngine.dedupRoots(candidates)
+    }
+
+    func claudeSessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? ""
+        let discovery = ClaudeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
+    }
+
+    func claudeSessionScanRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
+            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? ""
+        let trimmedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
+        let discovery = ClaudeSessionDiscovery(customRoot: trimmedOverride.isEmpty ? nil : trimmedOverride)
+        let roots = discovery.sessionScanRoots()
+        if !roots.isEmpty { return PresenceEngine.dedupRoots(roots) }
+        let fallback = trimmedOverride.isEmpty
+            ? ClaudeRunwayRecentSessionScanner.defaultRoot()
+            : discovery.sessionsRoot()
+        return PresenceEngine.dedupRoots([fallback])
+    }
+
+    /// The same roots `ClaudeRunwaySnapshotLoader.effectiveIdentities` picks
+    /// when handed `nil`, now named explicitly so the engine never relies on
+    /// that implicit fallback.
+    func claudeDesktopTitlesRoots() -> [URL] {
+        ClaudeDesktopSessionTitles.defaultRoots()
+    }
+
+    func opencodeSessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+            ?? defaults.string(forKey: "OpenCodeSessionsRootOverride")
+            ?? ""
+        let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
+    }
+
+    func antigravitySessionsRoots() -> [URL] {
+        let defaults = UserDefaults.standard
+        let override = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
+        let discovery = AntigravitySessionDiscovery(customRoot: override.isEmpty ? nil : override)
+        return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
     }
 }
 
