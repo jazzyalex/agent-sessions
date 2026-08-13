@@ -404,6 +404,8 @@ extension View {
         hermesIndexer: hermesIndexer,
         copilotIndexer: copilotIndexer,
         droidIndexer: DroidSessionIndexer(),
+        openclawIndexer: OpenClawSessionIndexer(),
+        cursorIndexer: CursorSessionIndexer(),
         piIndexer: PiSessionIndexer(),
         kimiIndexer: KimiSessionIndexer(),
         grokIndexer: GrokSessionIndexer()

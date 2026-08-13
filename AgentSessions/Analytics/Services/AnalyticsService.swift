@@ -19,6 +19,8 @@ final class AnalyticsService: ObservableObject {
     private let hermesIndexer: HermesSessionIndexer
     private let copilotIndexer: CopilotSessionIndexer
     private let droidIndexer: DroidSessionIndexer
+    private let openclawIndexer: OpenClawSessionIndexer
+    private let cursorIndexer: CursorSessionIndexer
     private let piIndexer: PiSessionIndexer
     private let kimiIndexer: KimiSessionIndexer
     private let grokIndexer: GrokSessionIndexer
@@ -36,6 +38,8 @@ final class AnalyticsService: ObservableObject {
          hermesIndexer: HermesSessionIndexer,
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer,
+         openclawIndexer: OpenClawSessionIndexer,
+         cursorIndexer: CursorSessionIndexer,
          piIndexer: PiSessionIndexer,
          kimiIndexer: KimiSessionIndexer,
          grokIndexer: GrokSessionIndexer) {
@@ -46,6 +50,8 @@ final class AnalyticsService: ObservableObject {
         self.hermesIndexer = hermesIndexer
         self.copilotIndexer = copilotIndexer
         self.droidIndexer = droidIndexer
+        self.openclawIndexer = openclawIndexer
+        self.cursorIndexer = cursorIndexer
         self.piIndexer = piIndexer
         self.kimiIndexer = kimiIndexer
         self.grokIndexer = grokIndexer
@@ -97,6 +103,8 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.openclaw) { allSessions.append(contentsOf: openclawIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.cursor) { allSessions.append(contentsOf: cursorIndexer.allSessions) }
         if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
         if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
@@ -132,6 +140,8 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
         if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.openclaw) { allSessions.append(contentsOf: openclawIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.cursor) { allSessions.append(contentsOf: cursorIndexer.allSessions) }
         if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
         if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
         if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
@@ -390,9 +400,11 @@ final class AnalyticsService: ObservableObject {
         let raw: [String]
         switch filter {
         case .all:
-            // Keep the legacy OpenClaw DB query path while centralizing sources that
-            // participate in analytics build/readiness tracking.
-            raw = AnalyticsSourceSupport.sources.union([.openclaw]).map(\.rawValue).sorted()
+            // No union needed: every source now participates in analytics build and
+            // readiness tracking, OpenClaw included. It used to be queried here but
+            // excluded from the build, so its rollup tables were never populated and
+            // it contributed nothing to "All Agents" anyway.
+            raw = AnalyticsSourceSupport.sources.map(\.rawValue).sorted()
         case .codexOnly:
             raw = [SessionSource.codex.rawValue]
         case .claudeOnly:
@@ -409,6 +421,8 @@ final class AnalyticsService: ObservableObject {
             raw = [SessionSource.droid.rawValue]
         case .openclawOnly:
             raw = [SessionSource.openclaw.rawValue]
+        case .cursorOnly:
+            raw = [SessionSource.cursor.rawValue]
         case .piOnly:
             raw = [SessionSource.pi.rawValue]
         case .kimiOnly:
@@ -750,8 +764,8 @@ final class AnalyticsService: ObservableObject {
         // nothing. Add one back only alongside a sink that actually refreshes.
         Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
-            Publishers.CombineLatest3(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase, droidIndexer.$launchPhase),
-            Publishers.CombineLatest3(piIndexer.$launchPhase, kimiIndexer.$launchPhase, grokIndexer.$launchPhase)
+            Publishers.CombineLatest4(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase, droidIndexer.$launchPhase, openclawIndexer.$launchPhase),
+            Publishers.CombineLatest4(cursorIndexer.$launchPhase, piIndexer.$launchPhase, kimiIndexer.$launchPhase, grokIndexer.$launchPhase)
         )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -773,6 +787,8 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.hermes, hermesIndexer.launchPhase),
                 (SessionSource.copilot, copilotIndexer.launchPhase),
                 (SessionSource.droid, droidIndexer.launchPhase),
+                (SessionSource.openclaw, openclawIndexer.launchPhase),
+                (SessionSource.cursor, cursorIndexer.launchPhase),
                 (SessionSource.pi, piIndexer.launchPhase),
                 (SessionSource.kimi, kimiIndexer.launchPhase),
                 (SessionSource.grok, grokIndexer.launchPhase)

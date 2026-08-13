@@ -15,39 +15,45 @@ final class AnalyticsIndexerTests: XCTestCase {
         XCTAssertFalse(AnalyticsAgentFilter.kimiOnly.matches(.pi))
     }
 
-    /// Every source must be an explicit decision: either analytics rolls it up, or it
-    /// appears in `nonAnalyticsSources` below.
+    /// Analytics rolls up every source, with no exceptions to remember.
     ///
     /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter` only checks the forward
     /// direction, so a source left out of `AnalyticsSourceSupport.sources` entirely was
-    /// invisible to it. Grok shipped that way: it was wired into `AnalyticsService`,
-    /// `AnalyticsColors` and `AnalyticsView`, but never added to the one `Set` that gates
-    /// `enabledAnalyticsSources()`, so its sessions never entered an analytics build and
-    /// nothing failed. This test closes that direction — a new source now has to say which
-    /// side it is on.
-    func testEverySourceIsEitherAnalyticsSupportedOrExplicitlyExcluded() {
-        // Deliberately not rolled up. OpenClaw is long-standing and documented on
-        // `AnalyticsAgentFilter`; Cursor predates Grok and is unverified — revisit whether
-        // its DB-backed sessions should roll up rather than treating this as settled.
-        let nonAnalyticsSources: Set<SessionSource> = [.openclaw, .cursor]
-
+    /// invisible to it. Two shipped that way: Grok was wired into `AnalyticsService`,
+    /// `AnalyticsColors` and `AnalyticsView` but never added to the one `Set` that gates
+    /// `enabledAnalyticsSources()`, and Cursor had been absent for longer still. Neither
+    /// failed anything — the sessions simply never entered an analytics build.
+    func testEverySourceIsAnalyticsSupported() {
         for source in SessionSource.allCases {
-            let supported = AnalyticsSourceSupport.sources.contains(source)
-            let excluded = nonAnalyticsSources.contains(source)
-            XCTAssertTrue(supported != excluded,
-                          "\(source.rawValue) must either be in AnalyticsSourceSupport.sources or be listed as a deliberate exclusion — not neither, and not both")
+            XCTAssertTrue(AnalyticsSourceSupport.sources.contains(source),
+                          "\(source.rawValue) is missing from AnalyticsSourceSupport.sources, so its sessions never enter an analytics build")
+            XCTAssertTrue(AnalyticsSourceSupport.rawValues.contains(source.rawValue),
+                          "\(source.rawValue) is missing from AnalyticsSourceSupport.rawValues")
         }
     }
 
     /// Every analytics-supported source needs exactly one dedicated `AnalyticsAgentFilter`
     /// case, otherwise the Analytics agent picker has no way to isolate it and the source
-    /// only ever appears folded into "All Agents". The converse is deliberately not
-    /// asserted: `.openclawOnly` filters a source analytics does not roll up.
+    /// only ever appears folded into "All Agents".
+    ///
+    /// Both directions now hold: `AnalyticsSourceSupport.sources` is `allCases`, so a new
+    /// source fails this test until its filter case exists, and no filter is left pointing
+    /// at a source analytics does not roll up.
     func testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter() {
         for source in AnalyticsSourceSupport.sources {
             let matching = AnalyticsAgentFilter.allCases.filter { $0 != .all && $0.matches(source) }
             XCTAssertEqual(matching.count, 1,
                            "\(source.rawValue) needs exactly one dedicated agent filter, found \(matching.map(\.rawValue))")
+        }
+    }
+
+    /// The reverse of the above: no `AnalyticsAgentFilter` case may match zero sources.
+    /// A filter that isolates nothing renders as an empty picker entry.
+    func testEveryAgentFilterMatchesExactlyOneSource() {
+        for filter in AnalyticsAgentFilter.allCases where filter != .all {
+            let matched = SessionSource.allCases.filter { filter.matches($0) }
+            XCTAssertEqual(matched.count, 1,
+                           "\(filter.rawValue) should isolate exactly one source, matched \(matched.map(\.rawValue))")
         }
     }
 

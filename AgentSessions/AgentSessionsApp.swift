@@ -1108,6 +1108,8 @@ extension AgentSessionsApp {
             hermesIndexer: hermesIndexer,
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
+            openclawIndexer: openclawIndexer,
+            cursorIndexer: cursorIndexer,
             piIndexer: piIndexer,
             kimiIndexer: kimiIndexer,
             grokIndexer: grokIndexer
