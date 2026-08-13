@@ -1,0 +1,350 @@
+import Foundation
+import SwiftUI
+import AppKit
+
+// MARK: - SessionSourceRegistry
+//
+// A DATA-GATHERING PROTOTYPE, not yet wired into the app.
+//
+// This file collapses the per-source metadata that today is spread across five
+// independent switch statements into a single descriptor table:
+//   1. AgentSessions/Model/SessionSource.swift            (displayName, iconName, versionIntroduced, featureDescription)
+//   2. AgentSessions/Services/TranscriptColorSystem.swift  (agentBrandAccent(source:))
+//   3. AgentSessions/Analytics/Utilities/AnalyticsColors.swift (agentXGray monochrome Color(white:))
+//   4. AgentSessions/Onboarding/Components/OnboardingComponents.swift (AgentBadge.initials(for:))
+//   5. AgentSessions/Views/Preferences/PreferencesConstants.swift + AgentSessions/Services/AgentEnablement.swift
+//      (enablement/CLI-available/root-override UserDefaults keys, binary names, default-on behavior)
+//
+// Every value below is transcribed verbatim from those five files as of this writing.
+// Nothing here is invented or "improved" — irregularities found in the source switches
+// (missing keys, un-namespaced literals, pass-through vs. wrapped colors, extra keys)
+// are preserved and called out in comments rather than papered over.
+//
+// This file intentionally does NOT add a parseFull/discovery/indexer closure — that is
+// a later increment. This is plain per-source value data only.
+
+// MARK: - BrandHue
+
+/// How a source's brand accent color is produced by `TranscriptColorSystem.agentBrandAccent(source:)`.
+///
+/// This distinction is load-bearing: most sources use a hand-tuned RGB triple that gets
+/// wrapped in `adaptiveBrand(_:)` (light value preserved, dark mode gets a brightened/
+/// desaturated variant). Two sources (antigravity, opencode) instead pass an AppKit
+/// *system dynamic* color straight through, unwrapped — those colors already adapt to
+/// appearance on their own, so wrapping them would be redundant.
+enum BrandHue {
+    /// A system dynamic `NSColor` (e.g. `.systemTeal`), returned unwrapped —
+    /// no `adaptiveBrand` treatment, because system colors already adapt.
+    case system(NSColor)
+    /// A hand-tuned, light-mode-calibrated RGB triple. Reconstituting the actual
+    /// `NSColor` requires passing this through `adaptiveBrand(NSColor(calibratedRed:green:blue:alpha:))`
+    /// exactly as `TranscriptColorSystem.agentBrandAccent(source:)` does today.
+    case calibrated(red: CGFloat, green: CGFloat, blue: CGFloat)
+}
+
+// MARK: - SessionSourceDescriptor
+
+/// All per-source metadata that today is scattered across five switch statements,
+/// collapsed into one row per `SessionSource`.
+struct SessionSourceDescriptor {
+    /// The source this descriptor describes.
+    let source: SessionSource
+
+    // MARK: Identity (from SessionSource.swift)
+
+    /// Human-facing name, e.g. "Codex CLI".
+    let displayName: String
+    /// SF Symbol name used for the source's icon.
+    let iconName: String
+    /// App version in which support for this source was introduced.
+    let versionIntroduced: String
+    /// One-line description used in onboarding / feature-gate copy.
+    let featureDescription: String
+
+    // MARK: Color (from TranscriptColorSystem.swift + AnalyticsColors.swift)
+
+    /// Brand accent hue. See `BrandHue` for the system-passthrough-vs-calibrated distinction.
+    let brandHue: BrandHue
+    /// Monochrome gray value (`Color(white:)`) used when the analytics view's
+    /// "monochrome" mode is on.
+    let monochromeWhite: Double
+
+    // MARK: Badge (from OnboardingComponents.swift)
+
+    /// Short label shown on `AgentBadge` (`AgentBadge.initials(for:)`). Two letters,
+    /// except droid which is a single "D".
+    let badgeAbbreviation: String
+
+    // MARK: UserDefaults keys (from PreferencesConstants.swift + AgentEnablement.swift)
+
+    /// `PreferencesKey.Agents.*Enabled` — every source has one.
+    let enablementKey: String
+    /// `PreferencesKey.*CLIAvailable` — nil for openclaw, which has no such key at all
+    /// (see `AgentEnablement.storedBinaryPresence`, where `.openclaw` returns `nil`
+    /// rather than reading a defaults key).
+    let cliAvailableKey: String?
+    /// `PreferencesKey.Paths.*SessionsRootOverride` — nil only in principle; in practice
+    /// every source has *some* root-override key, but two of them (codex, antigravity)
+    /// are raw string literals read directly in `AgentEnablement.isAvailable(_:)` rather
+    /// than named `PreferencesKey.Paths` constants. Those two are called out per-entry
+    /// below since they can't be "referenced by name" the way the other ten can.
+    let rootOverrideKey: String?
+
+    // MARK: Binary detection (from AgentEnablement.binaryInstalled(for:))
+
+    /// Executable name(s) checked on PATH. Most sources have exactly one; a few check
+    /// multiple aliases.
+    let binaryNames: [String]
+
+    // MARK: Default-on behavior (from AgentEnablement.isEnabled(_:))
+
+    /// `true` for sources whose `isEnabled(_:)` case falls into the
+    /// "default OFF unless available" group (hermes, openclaw, cursor, pi, kimi, grok);
+    /// `false` for sources that hit `isEnabled(_:)`'s `default: return true` branch and
+    /// are therefore always default-on regardless of availability (codex, claude,
+    /// antigravity, opencode, copilot, droid).
+    let defaultsOnOnlyWhenAvailable: Bool
+}
+
+// MARK: - SessionSourceRegistry
+
+enum SessionSourceRegistry {
+    static let all: [SessionSource: SessionSourceDescriptor] = [
+        .codex: SessionSourceDescriptor(
+            source: .codex,
+            displayName: "Codex CLI",
+            iconName: "terminal",
+            versionIntroduced: "1.0",
+            featureDescription: "Track your Codex CLI coding sessions",
+            // Deep blue.
+            brandHue: .calibrated(red: 0.14, green: 0.30, blue: 0.60),
+            monochromeWhite: 0.4,
+            badgeAbbreviation: "CX",
+            enablementKey: PreferencesKey.Agents.codexEnabled,
+            cliAvailableKey: PreferencesKey.codexCLIAvailable,
+            // IRREGULARITY: no `PreferencesKey.Paths.codexSessionsRootOverride` exists.
+            // `AgentEnablement.isAvailable(_:)` reads the bare literal "SessionsRootOverride"
+            // directly (case .codex: `defaults.string(forKey: "SessionsRootOverride")`).
+            // Transcribed as a literal because there is no named constant to reference.
+            rootOverrideKey: "SessionsRootOverride",
+            binaryNames: ["codex"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .claude: SessionSourceDescriptor(
+            source: .claude,
+            displayName: "Claude Code",
+            iconName: "command",
+            versionIntroduced: "1.0",
+            featureDescription: "Browse your Claude Code conversations",
+            // Warm brown.
+            brandHue: .calibrated(red: 0.74, green: 0.46, blue: 0.22),
+            monochromeWhite: 0.5,
+            badgeAbbreviation: "CC",
+            enablementKey: PreferencesKey.Agents.claudeEnabled,
+            cliAvailableKey: PreferencesKey.claudeCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.claudeSessionsRootOverride,
+            binaryNames: ["claude", "claude-code"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .antigravity: SessionSourceDescriptor(
+            source: .antigravity,
+            displayName: "Antigravity",
+            iconName: "sparkles",
+            versionIntroduced: "4.0",
+            featureDescription: "Browse your Antigravity CLI conversations",
+            // Teal. Pass-through: NSColor.systemTeal is returned directly, NOT wrapped
+            // in adaptiveBrand (system dynamic colors already adapt to appearance).
+            brandHue: .system(NSColor.systemTeal),
+            monochromeWhite: 0.6,
+            badgeAbbreviation: "AG",
+            enablementKey: PreferencesKey.Agents.antigravityEnabled,
+            cliAvailableKey: PreferencesKey.antigravityCLIAvailable,
+            // IRREGULARITY: no `PreferencesKey.Paths.antigravitySessionsRootOverride`
+            // exists either. `AgentEnablement.isAvailable(_:)` reads the bare literal
+            // "AntigravitySessionsRootOverride" directly. Transcribed as a literal
+            // for the same reason as codex above.
+            rootOverrideKey: "AntigravitySessionsRootOverride",
+            // Binary name is "agy", NOT "antigravity" — AgentEnablement.binaryInstalled
+            // checks `binaryDetectedCached("agy")`.
+            binaryNames: ["agy"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .opencode: SessionSourceDescriptor(
+            source: .opencode,
+            displayName: "OpenCode",
+            iconName: "chevron.left.slash.chevron.right",
+            versionIntroduced: "2.8",
+            featureDescription: "Review your OpenCode sessions",
+            // Purple. Pass-through: NSColor.systemPurple returned directly, NOT wrapped
+            // in adaptiveBrand — same reasoning as antigravity's systemTeal above.
+            brandHue: .system(NSColor.systemPurple),
+            monochromeWhite: 0.7,
+            badgeAbbreviation: "OC",
+            enablementKey: PreferencesKey.Agents.openCodeEnabled,
+            cliAvailableKey: PreferencesKey.openCodeCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.opencodeSessionsRootOverride,
+            binaryNames: ["opencode"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .hermes: SessionSourceDescriptor(
+            source: .hermes,
+            displayName: "Hermes",
+            iconName: "brain",
+            versionIntroduced: "3.7",
+            featureDescription: "Browse your Hermes sessions and resume by ID",
+            // Olive-gold accent, shifted away from Claude/OpenClaw warm oranges.
+            brandHue: .calibrated(red: 0.62, green: 0.64, blue: 0.18),
+            monochromeWhite: 0.72,
+            badgeAbbreviation: "HM",
+            enablementKey: PreferencesKey.Agents.hermesEnabled,
+            cliAvailableKey: PreferencesKey.hermesCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.hermesSessionsRootOverride,
+            binaryNames: ["hermes"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+        .copilot: SessionSourceDescriptor(
+            source: .copilot,
+            displayName: "Copilot CLI",
+            iconName: "bolt.horizontal.circle",
+            versionIntroduced: "2.11",
+            featureDescription: "Browse your GitHub Copilot chat history",
+            // Magenta-ish.
+            brandHue: .calibrated(red: 0.90, green: 0.20, blue: 0.60),
+            monochromeWhite: 0.75,
+            badgeAbbreviation: "CP",
+            enablementKey: PreferencesKey.Agents.copilotEnabled,
+            cliAvailableKey: PreferencesKey.copilotCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.copilotSessionsRootOverride,
+            binaryNames: ["copilot"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .droid: SessionSourceDescriptor(
+            source: .droid,
+            displayName: "Droid",
+            iconName: "d.circle",
+            versionIntroduced: "3.0",
+            featureDescription: "View your Droid agent sessions",
+            // Green brand (disambiguation handled via styling, not hue).
+            brandHue: .calibrated(red: 0.16, green: 0.68, blue: 0.28),
+            monochromeWhite: 0.8,
+            badgeAbbreviation: "D",
+            enablementKey: PreferencesKey.Agents.droidEnabled,
+            cliAvailableKey: PreferencesKey.droidCLIAvailable,
+            // IRREGULARITY: droid has an EXTRA root-override key beyond the standard
+            // three modeled here. `AgentEnablement.isAvailable(_:)` checks BOTH
+            // `PreferencesKey.Paths.droidSessionsRootOverride` (sessions root) AND
+            // `PreferencesKey.Paths.droidProjectsRootOverride` (projects root, used as
+            // a fallback probe). This descriptor only carries the sessions-root key;
+            // `droidProjectsRootOverride` has no field here and would need one if this
+            // registry grows a discovery closure.
+            rootOverrideKey: PreferencesKey.Paths.droidSessionsRootOverride,
+            binaryNames: ["droid"],
+            defaultsOnOnlyWhenAvailable: false
+        ),
+        .openclaw: SessionSourceDescriptor(
+            source: .openclaw,
+            displayName: "OpenClaw",
+            iconName: "pawprint",
+            versionIntroduced: "3.1",
+            featureDescription: "Explore your OpenClaw conversations",
+            // Coral-orange accent, kept warm but separated from Claude/Hermes.
+            brandHue: .calibrated(red: 0.88, green: 0.33, blue: 0.20),
+            monochromeWhite: 0.85,
+            badgeAbbreviation: "CL",
+            enablementKey: PreferencesKey.Agents.openClawEnabled,
+            // IRREGULARITY: openclaw has NO CLI-available UserDefaults key at all.
+            // `AgentEnablement.storedBinaryPresence(for:)` returns `nil` outright for
+            // `.openclaw` (no `defaults.object(forKey:)` lookup happens), unlike every
+            // other source. Modeled as `nil` rather than fabricating a key name.
+            cliAvailableKey: nil,
+            rootOverrideKey: PreferencesKey.Paths.openClawSessionsRootOverride,
+            // Note: PreferencesKey.Paths also defines `openClawBinaryOverride`, a
+            // *binary path* override distinct from the sessions-root override — not
+            // one of the three keys this registry tracks, called out here so it isn't
+            // silently lost.
+            binaryNames: ["openclaw", "clawdbot"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+        .cursor: SessionSourceDescriptor(
+            source: .cursor,
+            displayName: "Cursor",
+            iconName: "cursorarrow.rays",
+            versionIntroduced: "3.2",
+            featureDescription: "Import and search your Cursor AI sessions",
+            // Teal-ish (Cursor brand).
+            brandHue: .calibrated(red: 0.20, green: 0.60, blue: 0.70),
+            monochromeWhite: 0.9,
+            badgeAbbreviation: "CR",
+            enablementKey: PreferencesKey.Agents.cursorEnabled,
+            cliAvailableKey: PreferencesKey.cursorCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.cursorSessionsRootOverride,
+            binaryNames: ["agent", "cursor", "cursor-agent"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+        .pi: SessionSourceDescriptor(
+            source: .pi,
+            displayName: "Pi",
+            iconName: "p.circle",
+            versionIntroduced: "3.8",
+            featureDescription: "Browse your Pi coding agent sessions",
+            // Green-cyan accent, distinct from Gemini and Cursor.
+            brandHue: .calibrated(red: 0.05, green: 0.62, blue: 0.48),
+            monochromeWhite: 0.68,
+            badgeAbbreviation: "PI",
+            enablementKey: PreferencesKey.Agents.piEnabled,
+            cliAvailableKey: PreferencesKey.piCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.piSessionsRootOverride,
+            binaryNames: ["pi"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+        .kimi: SessionSourceDescriptor(
+            source: .kimi,
+            displayName: "Kimi Code",
+            iconName: "k.circle",
+            versionIntroduced: "4.7",
+            featureDescription: "Browse your Kimi Code sessions",
+            // Indigo-violet accent, distinct from Codex's blue and OpenCode's purple.
+            brandHue: .calibrated(red: 0.46, green: 0.34, blue: 0.82),
+            monochromeWhite: 0.66,
+            badgeAbbreviation: "KM",
+            enablementKey: PreferencesKey.Agents.kimiEnabled,
+            cliAvailableKey: PreferencesKey.kimiCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.kimiSessionsRootOverride,
+            binaryNames: ["kimi"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+        .grok: SessionSourceDescriptor(
+            source: .grok,
+            displayName: "Grok CLI",
+            iconName: "g.circle",
+            versionIntroduced: "4.8",
+            featureDescription: "Browse your Grok CLI sessions",
+            // Slate blue-grey, echoing xAI's monochrome mark while staying clear of
+            // Codex's deep blue and Cursor's teal.
+            brandHue: .calibrated(red: 0.35, green: 0.40, blue: 0.52),
+            monochromeWhite: 0.62,
+            badgeAbbreviation: "GK",
+            enablementKey: PreferencesKey.Agents.grokEnabled,
+            cliAvailableKey: PreferencesKey.grokCLIAvailable,
+            rootOverrideKey: PreferencesKey.Paths.grokSessionsRootOverride,
+            // Homebrew also ships an unrelated `grok` formula (jordansissel/grok, a
+            // regex utility), so a bare PATH hit is not evidence of the Grok CLI.
+            // `AgentEnablement.binaryInstalled(for:)` additionally requires the CLI's
+            // own `~/.grok` home directory to exist alongside the binary — that extra
+            // filesystem check is NOT representable by `binaryNames: [String]` alone
+            // and is not modeled in this descriptor; a future discovery closure would
+            // need to special-case it.
+            binaryNames: ["grok"],
+            defaultsOnOnlyWhenAvailable: true
+        ),
+    ]
+
+    /// Convenience accessor. Every `SessionSource` case has an entry in `all`,
+    /// so this force-unwraps rather than returning an optional.
+    static func descriptor(for source: SessionSource) -> SessionSourceDescriptor {
+        guard let descriptor = all[source] else {
+            preconditionFailure("SessionSourceRegistry.all is missing an entry for \(source)")
+        }
+        return descriptor
+    }
+}
