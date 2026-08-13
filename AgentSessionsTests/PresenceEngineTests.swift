@@ -154,8 +154,8 @@ final class PresenceEngineTests: XCTestCase {
                                          tty: String = "/dev/ttys044",
                                          cwdBox: LockedBox<String>,
                                          extraPIDBox: LockedBox<Int?> = LockedBox(nil)) -> FakeProbeRunner {
-        // Both paths are hoisted out of the `@Sendable` responder below so it
-        // captures plain `String`s rather than reaching back through `Self`.
+        // Both paths are built once here rather than inside the `@Sendable`
+        // responder, which runs on every probe call.
         let sessionLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
         let extraLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-57-11111111-1111-1111-1111-111111111111.jsonl"
         let responder = FakeProbeRunner.Responder { executable, arguments in
@@ -256,11 +256,15 @@ final class PresenceEngineTests: XCTestCase {
 
         // Point the runway scan at the temp root through the roots seam rather
         // than by mutating `UserDefaults.standard`, which is process-global and
-        // therefore shared with every other test in the run. Registry and the
-        // remaining roots stay empty, so this test's snapshot contains the
-        // synthesized desktop presence and nothing the host machine happens to
-        // be running. `claudeRunwayRoots(from:)` re-derives `<root>/projects`
-        // from the config root exactly as the production resolver's output does.
+        // therefore shared with every other test in the run.
+        // `claudeRunwayRoots(from:)` re-derives `<root>/projects` from the
+        // config root exactly as the production resolver's output does.
+        //
+        // `claudeDesktopTitles` stays empty (inherited from `hermetic()`): the
+        // synthesizer would otherwise consult the real
+        // `~/Library/Application Support/Claude` sidecars, where a record keyed
+        // to this session id would rewrite its title or — if `isArchived` —
+        // drop the identity outright and fail the `XCTUnwrap` below.
         var roots = FixedPresenceRootsResolver.hermetic()
         roots.claudeSessions = [claudeRoot]
         roots.claudeScan = [claudeRoot]
@@ -699,24 +703,57 @@ struct FixedPresenceRootsResolver: PresenceRootsResolving {
     var claudeScan: [URL] = []
     var opencodeSessions: [URL] = []
     var antigravitySessions: [URL] = []
+    var claudeDesktopTitles: [URL] = []
 
-    func registryRoots(registryRootOverride: String) -> [URL] { registry }
+    /// Optional sink for the `registryRootOverride` the engine passes in.
+    /// Without it this fake would swallow that argument, and nothing in the
+    /// suite would notice if `PresenceEngine.registryRoots()` stopped forwarding
+    /// `environment.registryRootOverride` — the exact B1 defect
+    /// `PresenceEngineRegressionTests` exists to guard.
+    var registryOverrideSink: RegistryOverrideRecorder? = nil
+
+    func registryRoots(registryRootOverride: String) -> [URL] {
+        registryOverrideSink?.record(registryRootOverride)
+        return registry
+    }
     func codexSessionsRoots() -> [URL] { codexSessions }
     func claudeSessionsRoots() -> [URL] { claudeSessions }
     func claudeSessionScanRoots() -> [URL] { claudeScan }
+    func claudeDesktopTitlesRoots() -> [URL] { claudeDesktopTitles }
     func opencodeSessionsRoots() -> [URL] { opencodeSessions }
     func antigravitySessionsRoots() -> [URL] { antigravitySessions }
 
-    /// The standard hermetic resolver: the codex session root the lsof fixtures
-    /// write their log paths under, a Claude root that exists only as a string
-    /// (so the `claudeSessionLogCandidates` fallback in
-    /// `discoverProcessPresences` cannot reach the real `~/.claude`), and no
-    /// registry or runway roots at all — so the ONLY presences a cycle can
-    /// discover are the ones the injected `FakeProbeRunner` serves.
+    /// The standard hermetic resolver. `codexSessions` holds the root the lsof
+    /// fixtures write their log paths under and `claudeSessions` a string-only
+    /// Claude root (so the `claudeSessionLogCandidates` fallback in
+    /// `discoverProcessPresences` cannot reach the real `~/.claude`); those two
+    /// are allow-lists, never read from disk. Every remaining root — registry,
+    /// runway scan, Desktop sidecars, opencode, antigravity — is empty, so its
+    /// read is skipped outright and the ONLY presences a cycle can discover are
+    /// the ones the injected `FakeProbeRunner` serves.
     static func hermetic() -> FixedPresenceRootsResolver {
         FixedPresenceRootsResolver(
             codexSessions: [URL(fileURLWithPath: PresenceFixtureRoots.codexSessions, isDirectory: true)],
             claudeSessions: [URL(fileURLWithPath: PresenceFixtureRoots.claude, isDirectory: true)]
         )
+    }
+}
+
+/// Captures the `registryRootOverride` handed to `FixedPresenceRootsResolver`.
+/// A reference type behind a lock because the resolver is a `Sendable` value
+/// the engine calls from its own actor; the test reads `received` only after
+/// the awaited refresh has finished.
+final class RegistryOverrideRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func record(_ override: String) {
+        lock.lock(); defer { lock.unlock() }
+        value = override
+    }
+
+    var received: String? {
+        lock.lock(); defer { lock.unlock() }
+        return value
     }
 }

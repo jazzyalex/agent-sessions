@@ -45,16 +45,25 @@ protocol ProbeRunner: Sendable {
 /// Injectable seam over the *filesystem* roots presence discovery reads —
 /// the counterpart to what `ProbeRunner` does for subprocess probes.
 ///
-/// `ProbeRunner` alone is not enough to make a refresh cycle hermetic: two
-/// discovery paths in `performRefreshDiscovery` never touch it and read real
-/// user directories instead — the registry JSON scan
-/// (`CodexActiveSessionsModel.loadPresences` over `registryRoots()`) and the
+/// `ProbeRunner` alone is not enough to make a refresh cycle hermetic: the
+/// presence-discovery paths in `performRefreshDiscovery` never touch it and
+/// read real user directories instead — the registry JSON scan
+/// (`CodexActiveSessionsModel.loadPresences` over `registryRoots()`), the
 /// Claude runway synthesizer (`ClaudeRunwayPresenceSynthesizer.presences` over
-/// `claudeSessionScanRoots()`). Both append straight into the cycle's presence
-/// list, so a test could fake every subprocess and still pick up whatever
-/// `~/.codex/active` and `~/.claude/projects` happen to hold on the machine
-/// running the suite. This seam closes that gap: tests inject roots they own,
-/// and discovery depends on nothing outside the test's control.
+/// `claudeSessionScanRoots()`), and that synthesizer's own sidecar lookup
+/// (`ClaudeDesktopSessionTitles` over `claudeDesktopTitlesRoots()`, which both
+/// retitles and — via `isArchived` — silently DROPS identities). All feed the
+/// cycle's presence list, so a test could fake every subprocess and still pick
+/// up whatever `~/.codex/active`, `~/.claude/projects`, and
+/// `~/Library/Application Support/Claude` happen to hold on the machine running
+/// the suite. This seam closes that gap for presence discovery.
+///
+/// Not covered: the Cockpit-gated subagent-badge read
+/// (`runtimeCodexSubagentCountsByPresenceKey` -> `codexRuntimeRoots()`, which
+/// reaches real `~/.codex`). It is unreachable from every current test because
+/// they all leave `hudOpen`/`hasVisibleCockpitWindow` false — but a future
+/// cockpit-visible test asserting `badgeVersion` WILL read the developer's
+/// runtime DB. Extend this seam before writing one.
 ///
 /// The default implementation (`DefaultPresenceRootsResolver`) is the real
 /// resolution logic — `@AppStorage`/`UserDefaults` overrides, `CODEX_HOME`,
@@ -72,6 +81,10 @@ protocol PresenceRootsResolving: Sendable {
     /// Roots the Claude runway synthesizer scans for recently-active desktop
     /// sessions. Returning `[]` disables runway synthesis entirely.
     func claudeSessionScanRoots() -> [URL]
+    /// Claude Desktop sidecar roots the runway synthesizer consults for session
+    /// titles and the `isArchived` flag. Returning `[]` yields no records, so
+    /// no identity is retitled or dropped.
+    func claudeDesktopTitlesRoots() -> [URL]
     func opencodeSessionsRoots() -> [URL]
     func antigravitySessionsRoots() -> [URL]
 }
@@ -573,6 +586,10 @@ actor PresenceEngine {
         rootsResolver.claudeSessionScanRoots()
     }
 
+    private func claudeDesktopTitlesRoots() -> [URL] {
+        rootsResolver.claudeDesktopTitlesRoots()
+    }
+
     private func opencodeSessionsRoots() -> [URL] {
         rootsResolver.opencodeSessionsRoots()
     }
@@ -1037,11 +1054,19 @@ actor PresenceEngine {
         }
 
         var claimedClaudeLogPaths = Self.claimedLogPaths(in: out, source: .claude)
+        // Passed explicitly rather than left `nil`: `effectiveIdentities` treats
+        // `nil` as "fall back to `ClaudeDesktopSessionTitles.defaultRoots()`",
+        // which reads the real `~/Library/Application Support/Claude` sidecars
+        // and can retitle — or, on `isArchived`, silently drop — a synthesized
+        // identity. Production resolves to those same default roots; only an
+        // injected resolver can narrow them.
+        let desktopTitlesRoots = claudeDesktopTitlesRoots()
         for root in Self.claudeRunwayRoots(from: claudeRunwayRoots) {
             let synthesized = ClaudeRunwayPresenceSynthesizer.presences(
                 root: root,
                 now: now,
-                claimedLogPaths: claimedClaudeLogPaths
+                claimedLogPaths: claimedClaudeLogPaths,
+                desktopTitlesRoots: desktopTitlesRoots
             )
             out.append(contentsOf: synthesized)
             claimedClaudeLogPaths.formUnion(Self.claimedLogPaths(in: synthesized, source: .claude))
@@ -1556,6 +1581,13 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
             ? ClaudeRunwayRecentSessionScanner.defaultRoot()
             : discovery.sessionsRoot()
         return PresenceEngine.dedupRoots([fallback])
+    }
+
+    /// The same roots `ClaudeRunwaySnapshotLoader.effectiveIdentities` picks
+    /// when handed `nil`, now named explicitly so the engine never relies on
+    /// that implicit fallback.
+    func claudeDesktopTitlesRoots() -> [URL] {
+        ClaudeDesktopSessionTitles.defaultRoots()
     }
 
     func opencodeSessionsRoots() -> [URL] {
