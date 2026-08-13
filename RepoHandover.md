@@ -1,3 +1,25 @@
+## 2026-08-13 15:56 · test-hermeticity · Presence seam verified, then the same defect fixed in four more tests
+status: done
+
+**State:** Merge `7293faf9` (hermetic PresenceEngine discovery) verified — test target compiled for the first time, 7 consecutive clean runs. Then fixed the same class of defect in the four tests that failed for an outside contributor. Committed `d97d4df1` + `e6fc8212`, pushed.
+
+**Decided / don't redo:**
+- **The 15:32 grok-source entry above is stale on one point:** `PresenceEngineTests`/`PresenceEngineRegressionTests` no longer fail on clean `main`. 21/21 isolated (3x) and 1894 full-suite (2x), with live `claude` CLI sessions writing transcripts throughout — the condition that used to break them.
+- **CI green proved nothing about these tests.** The scheme's BuildAction holds only `AgentSessions.app`, so `xcodebuild build` never compiled the test target. Use `build-for-testing` to get a real compile signal.
+- **`AgentEnablement`'s defect was not the filesystem** — `AppRuntime.isHostedByTooling` is true whenever `isRunningTests`, so `binaryInstalled(for:)` is a `UserDefaults` read under XCTest. The test named for `claude-code` name matching never reached that logic; it passed on a stored `ClaudeCLIAvailable`. Its PATH/temp-dir setup was dead code. Use `binaryInstalled(for:pathOverride:)` in tests.
+- **Two tests asserted nothing meaningful** before this; the hyphen one said so in its own comment and fell back to re-testing `/tmp`.
+- `~/.codex/active` was empty for every run, so the Codex runway root is untested-under-load (unread in tests either way, via the seam).
+
+**Key files:**
+- `AgentSessions/Support/FileProbing.swift` — new shared seam, counterpart to `PresenceRootsResolving`; `DefaultFileProbe` = `FileManager.default`, all params defaulted, production behavior unchanged
+- `AgentSessionsTests/FakeFileProbe.swift` — file-scope + `Sendable` with no actor isolation, same reason as `PresenceFixtureRoots`
+- `AgentSessions/Services/AgentEnablement.swift` — `binaryInstalled(for:pathOverride:)` skips both the tooling gate and the PATH cache; `.grok` still reads real `~/.grok`, so don't assert `.grok` hermetically through it
+
+**Next:**
+1. Session-source registry refactor (increments 1–6) — unchanged, still the next real task.
+2. Optional: extend `FileProbing` to `.grok`'s home lookup if a hermetic Grok availability test is ever wanted.
+3. Watch for the same defect shape when wiring new sources — production code branching on `fileExists`/`isExecutableFile` with no seam.
+
 ## 2026-08-13 15:32 · grok-source · Grok CLI merged, then fixed against real sessions
 
 status: in-progress
