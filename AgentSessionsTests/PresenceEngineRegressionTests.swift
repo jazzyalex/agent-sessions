@@ -22,7 +22,9 @@ import XCTest
 /// `debugPollTaskIsRunning` / `debugIsForegroundProbeRampArmed`), which bypass
 /// the `AppRuntime.isRunningTests` early-returns that keep the real poll
 /// machinery quiet under XCTest. Shares the `FakeProbeRunner` fixture shape
-/// with `PresenceEngineTests`.
+/// with `PresenceEngineTests`, and its `FixedPresenceRootsResolver` /
+/// `PresenceFixtureRoots` outright — the latter is what keeps the registry read
+/// and the Claude runway scan off the real home directory.
 @MainActor
 final class PresenceEngineRegressionTests: XCTestCase {
 
@@ -66,13 +68,16 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// Returns a fixed lsof machine-format blob for the codex query so a single
     /// refresh cycle discovers exactly one codex presence via the process-probe
     /// path (fixture format copied from `PresenceEngineTests.makeCodexPresenceRunner`).
+    /// The log path lives under `PresenceFixtureRoots.codexSessions` because
+    /// that is what `FixedPresenceRootsResolver.hermetic()` pins
+    /// `codexSessionsRoots()` to.
     private func makeCodexPresenceRunner(pid: Int = 4242, tty: String = "/dev/ttys044") -> FakeProbeRunner {
-        let sessionLogPath = NSHomeDirectory() + "/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
+        let sessionLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
         let lsofBlob = """
         p\(pid)
         fcwd
         tDIR
-        n\(NSHomeDirectory())/Repository/Demo
+        n\(PresenceFixtureRoots.base)/Repository/Demo
         f0
         tCHR
         n\(tty)
@@ -95,7 +100,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// flips `enabled` true -> false.
     func testEnabledToggleOff_stopsPollingAndClearsPresences() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var enabledEnv = PresenceEnvironment()
         enabledEnv.enabled = true
@@ -133,7 +138,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// but that call is quiet under XCTest, so the gate itself is what's pinned.)
     func testEnabledToggleOn_restartsPolling() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var disabledEnv = PresenceEnvironment()
         disabledEnv.enabled = false
@@ -156,7 +161,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
     /// didSet).
     func testRegistryRootOverrideChange_refreshStillRuns() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var env = PresenceEnvironment()
         env.registryRootOverride = ""
@@ -175,7 +180,7 @@ final class PresenceEngineRegressionTests: XCTestCase {
 
     func testLaunchWithEnabledFalse_neverStartsPolling() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         var disabledEnv = PresenceEnvironment()
         disabledEnv.enabled = false

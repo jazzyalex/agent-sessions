@@ -15,7 +15,9 @@ import XCTest
 /// this task must keep green untouched). What's tested here is that the
 /// actor wires those functions together correctly across the new
 /// actor/Sendable boundary, with injected fixtures standing in for real
-/// subprocess probes.
+/// subprocess probes, and with `FixedPresenceRootsResolver` (bottom of this
+/// file) standing in for the filesystem roots discovery would otherwise read
+/// out of the real home directory.
 @MainActor
 final class PresenceEngineTests: XCTestCase {
 
@@ -75,23 +77,25 @@ final class PresenceEngineTests: XCTestCase {
     /// Fake that returns a fixed lsof machine-format blob whenever the
     /// arguments target codex (`-c codex`), so one refresh cycle discovers
     /// exactly one codex presence via the process-probe path (the registry
-    /// JSON directory read is real-filesystem and not fixture-friendly, so
-    /// membership tests drive presence discovery through the process probe
-    /// instead — see `CodexActiveSessionsRegistryTests.testParseLsofMachineOutput*`
-    /// for the parser-level oracle this fixture format is copied from).
+    /// JSON directory read is a plain directory scan rather than a subprocess,
+    /// so membership tests drive presence discovery through the process probe
+    /// and switch the registry root off via
+    /// `FixedPresenceRootsResolver.hermetic()` — see
+    /// `CodexActiveSessionsRegistryTests.testParseLsofMachineOutput*` for the
+    /// parser-level oracle this fixture format is copied from).
     private func makeCodexPresenceRunner(pid: Int = 4242, tty: String = "/dev/ttys044") -> FakeProbeRunner {
         // `parseLsofMachineOutput` only keeps a session-log record whose path
-        // falls under one of the engine's `codexSessionsRoots()` (default
-        // `~/.codex/sessions` — the engine reads the REAL home directory, same
-        // as pre-extraction code), so the fixture path must live under the
-        // real `NSHomeDirectory()` to be recognized as a session log rather
-        // than falling back to a keyless (tty-only) presence.
-        let sessionLogPath = NSHomeDirectory() + "/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
+        // falls under one of the engine's `codexSessionsRoots()`, which
+        // `FixedPresenceRootsResolver.hermetic()` pins to
+        // `PresenceFixtureRoots.codexSessions` — so the fixture path must live
+        // under THAT root to be recognized as a session log rather than
+        // falling back to a keyless (tty-only) presence.
+        let sessionLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
         let lsofBlob = """
         p\(pid)
         fcwd
         tDIR
-        n\(NSHomeDirectory())/Repository/Demo
+        n\(PresenceFixtureRoots.base)/Repository/Demo
         f0
         tCHR
         n\(tty)
@@ -150,7 +154,10 @@ final class PresenceEngineTests: XCTestCase {
                                          tty: String = "/dev/ttys044",
                                          cwdBox: LockedBox<String>,
                                          extraPIDBox: LockedBox<Int?> = LockedBox(nil)) -> FakeProbeRunner {
-        let sessionLogPath = NSHomeDirectory() + "/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
+        // Both paths are hoisted out of the `@Sendable` responder below so it
+        // captures plain `String`s rather than reaching back through `Self`.
+        let sessionLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-56-00000000-0000-0000-0000-000000000000.jsonl"
+        let extraLogPath = PresenceFixtureRoots.codexSessions + "/2026/02/09/rollout-2026-02-09T12-34-57-11111111-1111-1111-1111-111111111111.jsonl"
         let responder = FakeProbeRunner.Responder { executable, arguments in
             guard executable == "lsof" else { return nil }
             guard arguments.contains("codex") else { return Data() }
@@ -167,7 +174,6 @@ final class PresenceEngineTests: XCTestCase {
             n\(sessionLogPath)
             """
             if let extraPID = extraPIDBox.get() {
-                let extraLogPath = NSHomeDirectory() + "/.codex/sessions/2026/02/09/rollout-2026-02-09T12-34-57-11111111-1111-1111-1111-111111111111.jsonl"
                 blob += """
                 \np\(extraPID)
                 fcwd
@@ -190,7 +196,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testDebugSetEnvironment_isVisibleToSubsequentRefresh() async {
         let runner = FakeProbeRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         var env = PresenceEnvironment()
         env.hasVisibleConsumer = true
         env.appIsActive = true
@@ -209,7 +215,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testRefreshOnce_discoversCodexPresenceViaProcessProbe_andPublishesMembership() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         await engine.debugSetEnvironment(PresenceEnvironment())
 
         var emissions: [PresenceEngine.Emission] = []
@@ -248,18 +254,18 @@ final class PresenceEngineTests: XCTestCase {
         \(claudeAssistantLine(id: "a1", sessionID: "sess-desktop", at: now.addingTimeInterval(-5), stopReason: "tool_use"))
         """.write(to: log, atomically: true, encoding: .utf8)
 
-        let defaults = UserDefaults.standard
-        let oldOverride = defaults.object(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-        defaults.set(claudeRoot.path, forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-        defer {
-            if let oldOverride {
-                defaults.set(oldOverride, forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            } else {
-                defaults.removeObject(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            }
-        }
+        // Point the runway scan at the temp root through the roots seam rather
+        // than by mutating `UserDefaults.standard`, which is process-global and
+        // therefore shared with every other test in the run. Registry and the
+        // remaining roots stay empty, so this test's snapshot contains the
+        // synthesized desktop presence and nothing the host machine happens to
+        // be running. `claudeRunwayRoots(from:)` re-derives `<root>/projects`
+        // from the config root exactly as the production resolver's output does.
+        var roots = FixedPresenceRootsResolver.hermetic()
+        roots.claudeSessions = [claudeRoot]
+        roots.claudeScan = [claudeRoot]
 
-        let engine = PresenceEngine(probeRunner: FakeProbeRunner())
+        let engine = PresenceEngine(probeRunner: FakeProbeRunner(), rootsResolver: roots)
         await engine.debugSetEnvironment(PresenceEnvironment())
 
         let snapshot = await engine.debugRefreshOnce()
@@ -284,7 +290,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testRefreshOnce_secondIdenticalCycleDoesNotRepublish() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         await engine.debugSetEnvironment(PresenceEnvironment())
 
         let first = await engine.debugRefreshOnce()
@@ -300,7 +306,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testRefreshNow_cancelsInFlightProbesAndResetsThrottleCaches() async {
         let runner = FakeProbeRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         await engine.debugSetEnvironment(PresenceEnvironment())
 
         // Prime a cycle so lastProcessProbeAt/caches are populated.
@@ -373,7 +379,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testCadence_membershipChangeEmitsImmediatelyWhileInactive() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         var env = PresenceEnvironment()
         env.appIsActive = false
         await engine.debugSetEnvironment(env)
@@ -435,7 +441,9 @@ final class PresenceEngineTests: XCTestCase {
         let extraPIDBox = LockedBox<Int?>(nil)
         let runner = makeCodexPresenceRunner(cwdBox: cwdBox, extraPIDBox: extraPIDBox)
         let clockBox = LockedBox(Date(timeIntervalSince1970: 1_700_000_000))
-        let engine = PresenceEngine(probeRunner: runner, now: { clockBox.get() })
+        let engine = PresenceEngine(probeRunner: runner,
+                                    rootsResolver: FixedPresenceRootsResolver.hermetic(),
+                                    now: { clockBox.get() })
         var env = PresenceEnvironment()
         env.appIsActive = false
         await engine.debugSetEnvironment(env)
@@ -516,7 +524,7 @@ final class PresenceEngineTests: XCTestCase {
         // membership-establishing cycle, same as the inactive case above,
         // confirming the foreground path isn't accidentally gated too.
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         var env = PresenceEnvironment()
         env.appIsActive = true
         await engine.debugSetEnvironment(env)
@@ -551,7 +559,9 @@ final class PresenceEngineTests: XCTestCase {
         let cwdBox = LockedBox("/Users/tester/Repository/DemoA")
         let runner = makeCodexPresenceRunner(cwdBox: cwdBox)
         let farFuture = Date().addingTimeInterval(1_000)
-        let engine = PresenceEngine(probeRunner: runner, now: { farFuture })
+        let engine = PresenceEngine(probeRunner: runner,
+                                    rootsResolver: FixedPresenceRootsResolver.hermetic(),
+                                    now: { farFuture })
 
         // Seed an in-flight, unexpired defer directly on the engine (mirrors
         // what `deferExpensiveProbesForSelectionOpen` would set in
@@ -594,7 +604,7 @@ final class PresenceEngineTests: XCTestCase {
     func testUpdateEnvironment_expiredDeferDoesNotLingerAfterPush() async {
         let cwdBox = LockedBox("/Users/tester/Repository/DemoA")
         let runner = makeCodexPresenceRunner(cwdBox: cwdBox)
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
 
         // Seed a defer that has ALREADY expired relative to real wall-clock
         // time (deadline 2.5s in the past).
@@ -622,7 +632,7 @@ final class PresenceEngineTests: XCTestCase {
 
     func testStopClear_resetsGenerationAndEmitsClearedMembership() async {
         let runner = makeCodexPresenceRunner()
-        let engine = PresenceEngine(probeRunner: runner)
+        let engine = PresenceEngine(probeRunner: runner, rootsResolver: FixedPresenceRootsResolver.hermetic())
         await engine.debugSetEnvironment(PresenceEnvironment())
 
         // Attach the iterator BEFORE the priming refresh so its join emission
@@ -648,5 +658,65 @@ final class PresenceEngineTests: XCTestCase {
         XCTAssertTrue(snapshot.presences.isEmpty)
         XCTAssertTrue(snapshot.bySessionID.isEmpty)
         XCTAssertTrue(snapshot.byLogPath.isEmpty)
+    }
+}
+
+// MARK: - Hermetic roots (shared with PresenceEngineRegressionTests)
+
+/// Synthetic, deliberately non-existent fixture roots.
+///
+/// Nothing is ever read from these paths: `matchesSessionLogPath`
+/// prefix-matches the session-log root purely lexically (`normalizePath` is
+/// `standardizedFileURL`, which does not touch the filesystem), and every root
+/// whose resolver entry is empty has its read skipped outright. Kept off `/tmp`
+/// and `/var` so no `/private` symlink canonicalization can perturb the prefix
+/// match.
+enum PresenceFixtureRoots {
+    static let base = "/agent-sessions-presence-fixtures"
+    static let codexSessions = base + "/codex/sessions"
+    static let claude = base + "/claude"
+}
+
+/// Pins every filesystem root that presence discovery reads to a test-owned
+/// value.
+///
+/// `ProbeRunner` fakes only cover the *subprocess* probes; two discovery paths
+/// bypass them and read real user directories — the registry JSON scan over
+/// `registryRoots()` and the Claude runway synthesizer over
+/// `claudeSessionScanRoots()`. Without this seam a refresh cycle picks up
+/// whatever `~/.codex/active` and `~/.claude/projects` hold on the machine
+/// running the suite, so every `presences.count` assertion is only as stable as
+/// the developer's home directory — which is exactly how these tests came to
+/// fail on a machine that routinely runs agent CLIs while passing elsewhere.
+/// An empty array disables that root's read entirely.
+///
+/// Declared at file scope (rather than nested in the `@MainActor` test classes)
+/// so its `Sendable` conformance carries no global-actor isolation.
+struct FixedPresenceRootsResolver: PresenceRootsResolving {
+    var registry: [URL] = []
+    var codexSessions: [URL] = []
+    var claudeSessions: [URL] = []
+    var claudeScan: [URL] = []
+    var opencodeSessions: [URL] = []
+    var antigravitySessions: [URL] = []
+
+    func registryRoots(registryRootOverride: String) -> [URL] { registry }
+    func codexSessionsRoots() -> [URL] { codexSessions }
+    func claudeSessionsRoots() -> [URL] { claudeSessions }
+    func claudeSessionScanRoots() -> [URL] { claudeScan }
+    func opencodeSessionsRoots() -> [URL] { opencodeSessions }
+    func antigravitySessionsRoots() -> [URL] { antigravitySessions }
+
+    /// The standard hermetic resolver: the codex session root the lsof fixtures
+    /// write their log paths under, a Claude root that exists only as a string
+    /// (so the `claudeSessionLogCandidates` fallback in
+    /// `discoverProcessPresences` cannot reach the real `~/.claude`), and no
+    /// registry or runway roots at all — so the ONLY presences a cycle can
+    /// discover are the ones the injected `FakeProbeRunner` serves.
+    static func hermetic() -> FixedPresenceRootsResolver {
+        FixedPresenceRootsResolver(
+            codexSessions: [URL(fileURLWithPath: PresenceFixtureRoots.codexSessions, isDirectory: true)],
+            claudeSessions: [URL(fileURLWithPath: PresenceFixtureRoots.claude, isDirectory: true)]
+        )
     }
 }
