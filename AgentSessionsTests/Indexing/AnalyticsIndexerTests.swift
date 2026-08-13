@@ -57,6 +57,26 @@ final class AnalyticsIndexerTests: XCTestCase {
         }
     }
 
+    /// `AnalyticsView`'s agent picker is built from `dedicated(for:)`, so every source
+    /// must resolve to a filter or it silently disappears from the menu.
+    ///
+    /// This is the guard that was missing. Grok, Cursor and OpenClaw each had a working
+    /// enum case and passed the pairing test above, yet none of them ever reached the
+    /// picker, because the picker kept its own hand-written list that stopped at Kimi.
+    func testEverySourceResolvesToADedicatedFilterForThePicker() {
+        for source in SessionSource.allCases {
+            let filter = AnalyticsAgentFilter.dedicated(for: source)
+            XCTAssertNotNil(filter,
+                            "\(source.rawValue) resolves to no dedicated filter, so the Analytics agent picker cannot offer it")
+            XCTAssertTrue(filter?.matches(source) == true)
+        }
+
+        // A source appears at most once, so the picker cannot list duplicates.
+        let resolved = SessionSource.allCases.compactMap(AnalyticsAgentFilter.dedicated(for:))
+        XCTAssertEqual(Set(resolved).count, SessionSource.allCases.count,
+                       "two sources resolved to the same filter, which would collapse them in the picker")
+    }
+
     func testPiSessionMetaCanPopulateAnalyticsRollups() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }

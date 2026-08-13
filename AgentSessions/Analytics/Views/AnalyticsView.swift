@@ -17,6 +17,13 @@ struct AnalyticsView: View {
     // value yet — which is every preview and test run. Matches PreferencesView.
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+    // OpenClaw and Cursor keep the literal defaults PreferencesView and
+    // UnifiedSessionsView already use for these keys. The default only applies
+    // before `seedIfNeeded` writes an explicit value, and two views disagreeing
+    // about the same unset key is worse than either answer.
+    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
+    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
@@ -25,10 +32,37 @@ struct AnalyticsView: View {
     @State private var isRefreshing: Bool = false
     @State private var aggregationMetric: AnalyticsAggregationMetric = .messages
 
+    /// Exhaustive on purpose, with no `default`. This view used to carry four
+    /// independent hand-written lists of agents — an OR chain, an AND chain, a
+    /// sequence of `if enabled { append }` lines, and a set of `onChange`
+    /// handlers — and three of them silently stopped at Kimi. Grok, Cursor and
+    /// OpenClaw were absent from all three, so Analytics reported "no sources
+    /// enabled" when one of them was the only enabled agent and never offered
+    /// their filters in the picker. Everything below now derives from this one
+    /// switch, so the compiler refuses to build until a new source is handled.
+    private func isEnabled(_ source: SessionSource) -> Bool {
+        switch source {
+        case .codex:       return codexAgentEnabled
+        case .claude:      return claudeAgentEnabled
+        case .antigravity: return antigravityAgentEnabled
+        case .opencode:    return openCodeAgentEnabled
+        case .hermes:      return hermesAgentEnabled
+        case .copilot:     return copilotAgentEnabled
+        case .droid:       return droidAgentEnabled
+        case .openclaw:    return openClawAgentEnabled
+        case .cursor:      return cursorAgentEnabled
+        case .pi:          return piAgentEnabled
+        case .kimi:        return kimiAgentEnabled
+        case .grok:        return grokAgentEnabled
+        }
+    }
+
+    private var enabledSources: [SessionSource] {
+        SessionSource.allCases.filter(isEnabled)
+    }
+
     private var hasEnabledSources: Bool {
-        codexAgentEnabled || claudeAgentEnabled || antigravityAgentEnabled ||
-        openCodeAgentEnabled || hermesAgentEnabled || copilotAgentEnabled || droidAgentEnabled ||
-        piAgentEnabled || kimiAgentEnabled
+        !enabledSources.isEmpty
     }
 
     var body: some View {
@@ -95,15 +129,11 @@ struct AnalyticsView: View {
         .onChange(of: dateRange) { _, _ in refreshData() }
         .onChange(of: agentFilter) { _, _ in refreshData() }
         .onChange(of: projectFilter) { _, _ in refreshData() }
-        .onChange(of: codexAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: claudeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: antigravityAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: openCodeAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: hermesAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: copilotAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: droidAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: piAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
-        .onChange(of: kimiAgentEnabled) { _, _ in sanitizeAgentFilterIfNeeded() }
+        // One observer over the derived list rather than one per flag. Twelve
+        // separate `onChange` modifiers were both a hand-maintained list that
+        // stopped at Kimi and enough of a modifier chain to push `body` past the
+        // type-checker's time limit.
+        .onChange(of: enabledSources) { _, _ in sanitizeAgentFilterIfNeeded() }
         // Apply preferredColorScheme only for explicit Light/Dark modes
         // For System mode, omit the modifier entirely to avoid SwiftUI's buggy nil-handling
         .applyIf((AppAppearance(rawValue: appAppearanceRaw) ?? .system) == .light) {
@@ -345,21 +375,11 @@ struct AnalyticsView: View {
     }
 
     private var anyAgentDisabled: Bool {
-        !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && piAgentEnabled && kimiAgentEnabled)
+        enabledSources.count < SessionSource.allCases.count
     }
 
     private var availableAgentFilters: [AnalyticsAgentFilter] {
-        var out: [AnalyticsAgentFilter] = [.all]
-        if codexAgentEnabled { out.append(.codexOnly) }
-        if claudeAgentEnabled { out.append(.claudeOnly) }
-        if antigravityAgentEnabled { out.append(.antigravityOnly) }
-        if openCodeAgentEnabled { out.append(.opencodeOnly) }
-        if hermesAgentEnabled { out.append(.hermesOnly) }
-        if copilotAgentEnabled { out.append(.copilotOnly) }
-        if droidAgentEnabled { out.append(.droidOnly) }
-        if piAgentEnabled { out.append(.piOnly) }
-        if kimiAgentEnabled { out.append(.kimiOnly) }
-        return out
+        [.all] + enabledSources.compactMap(AnalyticsAgentFilter.dedicated(for:))
     }
 
     private func sanitizeAgentFilterIfNeeded() {

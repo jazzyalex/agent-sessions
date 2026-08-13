@@ -65,6 +65,19 @@ enum AnalyticsAgentFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The single-agent filter that isolates `source`, derived from `matches` rather
+    /// than a second hand-written mapping.
+    ///
+    /// The Analytics picker builds its options through this, so a source with no
+    /// dedicated case cannot silently vanish from the menu: it fails
+    /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter` first. The picker
+    /// previously kept its own list of `if enabled { append }` lines that stopped at
+    /// Kimi, which is how Grok, Cursor and OpenClaw ended up unreachable in the UI
+    /// while their enum cases existed and their tests passed.
+    static func dedicated(for source: SessionSource) -> AnalyticsAgentFilter? {
+        allCases.first { $0 != .all && $0.matches(source) }
+    }
+
     /// Check if a session source matches this filter
     func matches(_ source: SessionSource) -> Bool {
         switch self {
