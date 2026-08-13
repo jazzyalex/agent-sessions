@@ -78,7 +78,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         .openclaw: defaultFocusedSessionRefreshIntervals,
         .cursor: defaultFocusedSessionRefreshIntervals,
         .pi: defaultFocusedSessionRefreshIntervals,
-        .kimi: defaultFocusedSessionRefreshIntervals
+        .kimi: defaultFocusedSessionRefreshIntervals,
+        .grok: defaultFocusedSessionRefreshIntervals
     ]
     private struct FileSignature: Equatable {
         let path: String
@@ -323,6 +324,26 @@ final class UnifiedSessionIndexer: ObservableObject {
                 }
                 indexer.kimi.reloadSession(id: context.sessionID, force: force, reason: reason)
             }
+        ),
+        .grok: FocusedMonitorCapability(
+            supportsFocusedMonitoring: { true },
+            signatureSource: { indexer, context in
+                indexer.sourceAwareFocusedSignaturePath(for: context)
+            },
+            reloadFocusedSession: { indexer, context, trigger in
+                guard indexer.grokAgentEnabled else { return }
+                let force = (trigger != .selection)
+                let reason: GrokSessionIndexer.ReloadReason
+                switch trigger {
+                case .selection:
+                    reason = .selection
+                case .monitor:
+                    reason = .focusedSessionMonitor
+                case .manual:
+                    reason = .manualRefresh
+                }
+                indexer.grok.reloadSession(id: context.sessionID, force: force, reason: reason)
+            }
         )
     ]
 
@@ -425,6 +446,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let cursor: Bool
         let pi: Bool
         let kimi: Bool
+        let grok: Bool
     }
 
     struct SessionAggregationWork {
@@ -439,6 +461,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let cursorList: [Session]
         let piList: [Session]
         let kimiList: [Session]
+        let grokList: [Session]
         let favoritesSnapshot: FavoritesStore.Snapshot
         let favoritesVersion: UInt64
         let enablement: AgentEnablementSnapshot
@@ -455,6 +478,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             cursorList: [],
             piList: [],
             kimiList: [],
+            grokList: [],
             favoritesSnapshot: FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 0,
             enablement: AgentEnablementSnapshot(
@@ -468,7 +492,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                 openClaw: false,
                 cursor: false,
                 pi: false,
-                kimi: false
+                kimi: false,
+                grok: false
             )
         )
     }
@@ -630,6 +655,12 @@ final class UnifiedSessionIndexer: ObservableObject {
             recomputeNow()
         }
     }
+    @Published var includeGrok: Bool = UserDefaults.standard.object(forKey: "IncludeGrokSessions") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeGrok, forKey: "IncludeGrokSessions")
+            recomputeNow()
+        }
+    }
 
     // Global agent enablement (drives app-wide availability)
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
@@ -643,6 +674,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
     @Published private(set) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @Published private(set) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+    @Published private(set) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -685,6 +717,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     private let cursor: CursorSessionIndexer
     private let pi: PiSessionIndexer
     private let kimi: KimiSessionIndexer
+    private let grok: GrokSessionIndexer
     private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
     private var notificationObserverTokens: [NSObjectProtocol] = []
@@ -755,7 +788,8 @@ final class UnifiedSessionIndexer: ObservableObject {
          openclawIndexer: OpenClawSessionIndexer,
          cursorIndexer: CursorSessionIndexer,
          piIndexer: PiSessionIndexer,
-         kimiIndexer: KimiSessionIndexer) {
+         kimiIndexer: KimiSessionIndexer,
+         grokIndexer: GrokSessionIndexer) {
         self.codex = codexIndexer
         self.claude = claudeIndexer
         self.antigravity = antigravityIndexer
@@ -767,6 +801,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         self.cursor = cursorIndexer
         self.pi = piIndexer
         self.kimi = kimiIndexer
+        self.grok = grokIndexer
         self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
@@ -801,6 +836,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
         .combineLatest($piAgentEnabled)
         .combineLatest($kimiAgentEnabled)
+        .combineLatest($grokAgentEnabled)
 
         // Merge underlying allSessions whenever any changes
         Publishers.CombineLatest(
@@ -812,17 +848,20 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
             .combineLatest(pi.$allSessions)
             .combineLatest(kimi.$allSessions)
+            .combineLatest(grok.$allSessions)
             .combineLatest(agentEnabledFlags, favoritesAggregationVersion)
             .receive(on: DispatchQueue.main)
             .map { [weak self] sourceLists, flags, favoritesVersion -> SessionAggregationWork in
                 guard let self else { return .empty }
-                let (sourceListsWithPi, kimiList) = sourceLists
+                let (sourceListsWithKimi, grokList) = sourceLists
+                let (sourceListsWithPi, kimiList) = sourceListsWithKimi
                 let (sourceListsBase, piList) = sourceListsWithPi
                 let (combined, tail) = sourceListsBase
                 let (codexList, claudeList, antigravityList, opencodeList) = combined
                 let (hermesList, tailLists) = tail
                 let (copilotList, droidList, openclawList, cursorList) = tailLists
-                let (baseFlagsWithPi, kimiEnabled) = flags
+                let (baseFlagsWithKimi, grokEnabled) = flags
+                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
                 let (baseFlags, piEnabled) = baseFlagsWithPi
                 let (enabled4, enabledTail) = baseFlags
                 let (codexEnabled, claudeEnabled, antigravityEnabled, openCodeEnabled) = enabled4
@@ -840,6 +879,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     cursorList: cursorList,
                     piList: piList,
                     kimiList: kimiList,
+                    grokList: grokList,
                     favoritesSnapshot: self.favorites.snapshot(),
                     favoritesVersion: favoritesVersion,
                     enablement: AgentEnablementSnapshot(
@@ -853,7 +893,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                         openClaw: openClawEnabled,
                         cursor: cursorEnabled,
                         pi: piEnabled,
-                        kimi: kimiEnabled
+                        kimi: kimiEnabled,
+                        grok: grokEnabled
                     )
                 )
             }
@@ -882,21 +923,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
             .combineLatest(pi.$isIndexing)
             .combineLatest(kimi.$isIndexing)
+        .combineLatest(grok.$isIndexing)
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
-                let (statesWithPi, kimiState) = states
+                let (statesWithKimi, grokState) = states
+                let (statesWithPi, kimiState) = statesWithKimi
                 let (baseStates, piState) = statesWithPi
                 let (s4, statesTail) = baseStates
                 let (c, cl, g, o) = s4
                 let (hermesState, tailStates) = statesTail
                 let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (baseFlagsWithPi, kimiEnabled) = flags
+                let (baseFlagsWithKimi, grokEnabled) = flags
+                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
                 let (baseFlags, piEnabled) = baseFlagsWithPi
                 let (f4, flagsTail) = baseFlags
                 let (ec, ecl, eg, eo) = f4
                 let (eHermes, tailFlags) = flagsTail
                 let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState)
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState) || (grokEnabled && grokState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -918,33 +962,35 @@ final class UnifiedSessionIndexer: ObservableObject {
                     hermes.$filesProcessed,
                     Publishers.CombineLatest4(copilot.$filesProcessed, droid.$filesProcessed, openclaw.$filesProcessed, cursor.$filesProcessed)
                 )
-            ).combineLatest(pi.$filesProcessed).combineLatest(kimi.$filesProcessed),
+            ).combineLatest(pi.$filesProcessed).combineLatest(kimi.$filesProcessed).combineLatest(grok.$filesProcessed),
             Publishers.CombineLatest(
                 Publishers.CombineLatest4(codex.$totalFiles, claude.$totalFiles, antigravity.$totalFiles, opencode.$totalFiles),
                 Publishers.CombineLatest(
                     hermes.$totalFiles,
                     Publishers.CombineLatest4(copilot.$totalFiles, droid.$totalFiles, openclaw.$totalFiles, cursor.$totalFiles)
                 )
-            ).combineLatest(pi.$totalFiles).combineLatest(kimi.$totalFiles),
+            ).combineLatest(pi.$totalFiles).combineLatest(kimi.$totalFiles).combineLatest(grok.$totalFiles),
             Publishers.CombineLatest(
                 Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, antigravity.$isIndexing, opencode.$isIndexing),
                 Publishers.CombineLatest(
                     hermes.$isIndexing,
                     Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
                 )
-            ).combineLatest(pi.$isIndexing).combineLatest(kimi.$isIndexing)
+            ).combineLatest(pi.$isIndexing).combineLatest(kimi.$isIndexing).combineLatest(grok.$isIndexing)
         )
         .combineLatest(agentEnabledFlags)
         .map { metrics, flags in
-            let (baseFlagsWithPi, kimiEnabled) = flags
+            let (baseFlagsWithKimi, grokEnabled) = flags
+            let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
             let (baseFlags, piEnabled) = baseFlagsWithPi
             let (processed, totals, indexing) = metrics
-            let ((processedBase, piProcessed), kimiProcessed) = processed
-            let ((totalsBase, piTotal), kimiTotal) = totals
-            let ((indexingBase, piIndexing), kimiIndexing) = indexing
+            let (((processedBase, piProcessed), kimiProcessed), grokProcessed) = processed
+            let (((totalsBase, piTotal), kimiTotal), grokTotal) = totals
+            let (((indexingBase, piIndexing), kimiIndexing), grokIndexing) = indexing
             var snapshots = Self.coreProviderSnapshots(metrics: (processedBase, totalsBase, indexingBase), flags: baseFlags)
             snapshots.append(CoreProviderSnapshot(source: .pi, enabled: piEnabled, indexing: piIndexing, processed: piProcessed, total: piTotal))
             snapshots.append(CoreProviderSnapshot(source: .kimi, enabled: kimiEnabled, indexing: kimiIndexing, processed: kimiProcessed, total: kimiTotal))
+            snapshots.append(CoreProviderSnapshot(source: .grok, enabled: grokEnabled, indexing: grokIndexing, processed: grokProcessed, total: grokTotal))
             return Self.aggregateProgress(from: snapshots)
         }
         .receive(on: DispatchQueue.main)
@@ -965,21 +1011,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
             .combineLatest(pi.$isProcessingTranscripts)
             .combineLatest(kimi.$isProcessingTranscripts)
+        .combineLatest(grok.$isProcessingTranscripts)
             .combineLatest(agentEnabledFlags)
             .map { states, flags in
-                let (statesWithPi, kimiState) = states
+                let (statesWithKimi, grokState) = states
+                let (statesWithPi, kimiState) = statesWithKimi
                 let (baseStates, piState) = statesWithPi
                 let (s4, statesTail) = baseStates
                 let (c, cl, g, o) = s4
                 let (hermesState, tailStates) = statesTail
                 let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (baseFlagsWithPi, kimiEnabled) = flags
+                let (baseFlagsWithKimi, grokEnabled) = flags
+                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
                 let (baseFlags, piEnabled) = baseFlagsWithPi
                 let (f4, flagsTail) = baseFlags
                 let (ec, ecl, eg, eo) = f4
                 let (eHermes, tailFlags) = flagsTail
                 let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState)
+                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState) || (grokEnabled && grokState)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -1011,14 +1060,17 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
         .combineLatest(pi.$indexingError)
         .combineLatest(kimi.$indexingError)
+        .combineLatest(grok.$indexingError)
         let indexingErrorFlags = agentEnabledFlags.eraseToAnyPublisher()
         indexingErrors
             .combineLatest(indexingErrorFlags)
             .map { errs, flags in
-                let (errorsWithPi, kimiError) = errs
+                let (errorsWithKimi, grokError) = errs
+                let (errorsWithPi, kimiError) = errorsWithKimi
                 let (baseErrors, piError) = errorsWithPi
                 let (errs4, errsTail) = baseErrors
-                let (baseFlagsWithPi, kimiEnabled) = flags
+                let (baseFlagsWithKimi, grokEnabled) = flags
+                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
                 let (baseFlags, piEnabled) = baseFlagsWithPi
                 let (f4, flagsTail) = baseFlags
                 return Self.firstEnabledIndexingError(
@@ -1026,7 +1078,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                     tailErrors: errsTail,
                     headFlags: f4,
                     tailFlags: flagsTail
-                ) ?? (piEnabled ? piError : nil) ?? (kimiEnabled ? kimiError : nil)
+                ) ?? (piEnabled ? piError : nil) ?? (kimiEnabled ? kimiError : nil) ?? (grokEnabled ? grokError : nil)
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -1052,6 +1104,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
         .combineLatest($includePi)
         .combineLatest($includeKimi)
+        .combineLatest($includeGrok)
         Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags))
             .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] combined -> [Session] in
@@ -1059,13 +1112,15 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let (input, kinds, all, combinedFlags) = combined
                 let (q, from, to, model) = input
                 let (sources, enabledFlags) = combinedFlags
-                let (sourcesWithPi, incKimi) = sources
+                let (sourcesWithKimi, incGrok) = sources
+                let (sourcesWithPi, incKimi) = sourcesWithKimi
                 let (baseSources, incPi) = sourcesWithPi
                 let (src4, tailSources) = baseSources
                 let (incCodex, incClaude, incAntigravity, incOpenCode) = src4
                 let (incHermes, sourcesTail) = tailSources
                 let (incCopilot, incDroid, incOpenClaw, incCursor) = sourcesTail
-                let (baseEnabledWithPi, enKimi) = enabledFlags
+                let (baseEnabledWithKimi, enGrok) = enabledFlags
+                let (baseEnabledWithPi, enKimi) = baseEnabledWithKimi
                 let (baseEnabled, enPi) = baseEnabledWithPi
                 let (en4, enabledTail) = baseEnabled
                 let (enCodex, enClaude, enAntigravity, enOpenCode) = en4
@@ -1082,10 +1137,11 @@ final class UnifiedSessionIndexer: ObservableObject {
                 let effectiveCursor = incCursor && enCursor
                 let effectivePi = incPi && enPi
                 let effectiveKimi = incKimi && enKimi
+                let effectiveGrok = incGrok && enGrok
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !(effectiveCodex && effectiveClaude && effectiveAntigravity && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi && effectiveKimi) {
+                if !(effectiveCodex && effectiveClaude && effectiveAntigravity && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi && effectiveKimi && effectiveGrok) {
                     base = base.filter { s in
                         (s.source == .codex && effectiveCodex) ||
                         (s.source == .claude && effectiveClaude) ||
@@ -1097,7 +1153,8 @@ final class UnifiedSessionIndexer: ObservableObject {
                         (s.source == .openclaw && effectiveOpenClaw) ||
                         (s.source == .cursor && effectiveCursor) ||
                         (s.source == .pi && effectivePi) ||
-                        (s.source == .kimi && effectiveKimi)
+                        (s.source == .kimi && effectiveKimi) ||
+                        (s.source == .grok && effectiveGrok)
                     }
                 }
 
@@ -1203,6 +1260,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         )
             .combineLatest($includePi)
             .combineLatest($includeKimi)
+        .combineLatest($includeGrok)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateLaunchState()
@@ -1257,6 +1315,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: return cursorAgentEnabled
         case .pi: return piAgentEnabled
         case .kimi: return kimiAgentEnabled
+        case .grok: return grokAgentEnabled
         }
     }
 
@@ -1274,6 +1333,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         let c9 = AgentEnablement.isEnabled(.cursor, defaults: defaults)
         let c10 = AgentEnablement.isEnabled(.pi, defaults: defaults)
         let c11 = AgentEnablement.isEnabled(.kimi, defaults: defaults)
+        let c12 = AgentEnablement.isEnabled(.grok, defaults: defaults)
         if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
         if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
         if c3 != antigravityAgentEnabled { antigravityAgentEnabled = c3 }
@@ -1285,6 +1345,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if c9 != cursorAgentEnabled { cursorAgentEnabled = c9 }
         if c10 != piAgentEnabled { piAgentEnabled = c10 }
         if c11 != kimiAgentEnabled { kimiAgentEnabled = c11 }
+        if c12 != grokAgentEnabled { grokAgentEnabled = c12 }
 
         let afterSources = enabledAnalyticsSources()
         if analyticsLastBuiltAt != nil && !afterSources.subtracting(beforeSources).isEmpty {
@@ -1337,7 +1398,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             openClawAgentEnabled ? .openclaw : nil,
             cursorAgentEnabled ? .cursor : nil,
             piAgentEnabled ? .pi : nil,
-            kimiAgentEnabled ? .kimi : nil
+            kimiAgentEnabled ? .kimi : nil,
+            grokAgentEnabled ? .grok : nil
         ].compactMap { $0 }
         for source in sources {
             requestProviderRefresh(source: source, reason: "unified-refresh", trigger: trigger)
@@ -2152,6 +2214,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: return cursor.allSessions
         case .pi: return pi.allSessions
         case .kimi: return kimi.allSessions
+        case .grok: return grok.allSessions
         }
     }
 
@@ -2198,6 +2261,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: return cursorAgentEnabled && !cursor.isIndexing
         case .pi: return piAgentEnabled && !pi.isIndexing
         case .kimi: return kimiAgentEnabled && !kimi.isIndexing
+        case .grok: return grokAgentEnabled && !grok.isIndexing
         }
     }
 
@@ -2315,6 +2379,8 @@ final class UnifiedSessionIndexer: ObservableObject {
             livePath = pi.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         case .kimi:
             livePath = kimi.allSessions.first(where: { $0.id == context.sessionID })?.filePath
+        case .grok:
+            livePath = grok.allSessions.first(where: { $0.id == context.sessionID })?.filePath
         }
         if let livePath, !livePath.isEmpty { return livePath }
         return context.filePath
@@ -2417,6 +2483,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: cursor.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .pi: pi.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         case .kimi: kimi.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
+        case .grok: grok.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
         }
     }
 
@@ -2434,6 +2501,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         case .cursor: return cursor.isIndexing
         case .pi: return pi.isIndexing
         case .kimi: return kimi.isIndexing
+        case .grok: return grok.isIndexing
         }
     }
 
@@ -2649,6 +2717,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         phases[.cursor] = (cursorAgentEnabled && includeCursor) ? cursor.launchPhase : .ready
         phases[.pi] = (piAgentEnabled && includePi) ? pi.launchPhase : .ready
         phases[.kimi] = (kimiAgentEnabled && includeKimi) ? kimi.launchPhase : .ready
+        phases[.grok] = (grokAgentEnabled && includeGrok) ? grok.launchPhase : .ready
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -2697,6 +2766,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if work.enablement.cursor { merged.append(contentsOf: work.cursorList) }
         if work.enablement.pi { merged.append(contentsOf: work.piList) }
         if work.enablement.kimi { merged.append(contentsOf: work.kimiList) }
+        if work.enablement.grok { merged.append(contentsOf: work.grokList) }
         for index in merged.indices {
             merged[index].isFavorite = work.favoritesSnapshot.contains(id: merged[index].id, source: merged[index].source)
         }
@@ -2723,7 +2793,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// because their lightweight pass does not populate `lightweightCommands`.
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.
@@ -2767,6 +2837,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             case .cursor:   return cursorAgentEnabled && includeCursor
             case .pi:       return piAgentEnabled && includePi
             case .kimi:     return kimiAgentEnabled && includeKimi
+            case .grok:     return grokAgentEnabled && includeGrok
             }
         }
 

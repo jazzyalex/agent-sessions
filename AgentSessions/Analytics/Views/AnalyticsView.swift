@@ -405,7 +405,8 @@ extension View {
         copilotIndexer: copilotIndexer,
         droidIndexer: DroidSessionIndexer(),
         piIndexer: PiSessionIndexer(),
-        kimiIndexer: KimiSessionIndexer()
+        kimiIndexer: KimiSessionIndexer(),
+        grokIndexer: GrokSessionIndexer()
     )
 
     AnalyticsView(service: service)

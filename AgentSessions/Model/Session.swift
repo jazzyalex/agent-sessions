@@ -763,7 +763,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     private var storesAuthoritativeLightweightCwd: Bool {
         switch source {
         case .antigravity, .opencode, .copilot, .openclaw, .hermes,
-             .pi, .kimi, .cursor, .claude, .droid:
+             .pi, .kimi, .grok, .cursor, .claude, .droid:
             return true
         case .codex:
             return false

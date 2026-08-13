@@ -112,6 +112,7 @@ struct AgentBadge: View {
         case .cursor: return "CR"
         case .pi: return "PI"
         case .kimi: return "KM"
+        case .grok: return "GK"
         }
     }
 }

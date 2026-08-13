@@ -19,6 +19,7 @@ struct PreferencesView: View {
     @ObservedObject var cursorSettings = CursorSettings.shared
     @ObservedObject var piSettings = PiSettings.shared
     @ObservedObject var kimiSettings = KimiSettings.shared
+    @ObservedObject var grokSettings = GrokSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -65,6 +66,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.cursorCLIAvailable) var cursorCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.piCLIAvailable) var piCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.kimiCLIAvailable) var kimiCLIAvailable: Bool = true
+    @AppStorage(PreferencesKey.grokCLIAvailable) var grokCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -77,6 +79,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.piEnabled) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+    @AppStorage(PreferencesKey.Agents.grokEnabled) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -235,6 +238,10 @@ struct PreferencesView: View {
     @State var kimiVersionString: String? = nil
     @State var kimiResolvedPath: String? = nil
     @State var kimiProbeDebounce: DispatchWorkItem? = nil
+    @State var grokProbeState: ProbeState = .idle
+    @State var grokVersionString: String? = nil
+    @State var grokResolvedPath: String? = nil
+    @State var grokProbeDebounce: DispatchWorkItem? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -272,6 +279,11 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Paths.kimiSessionsRootOverride) var kimiSessionsPath: String = ""
     @State var kimiSessionsPathValid: Bool = true
     @State var kimiSessionsPathDebounce: DispatchWorkItem? = nil
+
+    // Grok CLI sessions root
+    @AppStorage(PreferencesKey.Paths.grokSessionsRootOverride) var grokSessionsPath: String = ""
+    @State var grokSessionsPathValid: Bool = true
+    @State var grokSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -279,7 +291,7 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi && $0 != .kimi }, id: \.self) { tab in
+                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi && $0 != .kimi && $0 != .grok }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -291,7 +303,7 @@ struct PreferencesView: View {
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
-                ForEach([PreferencesTab.cursor, .pi, .kimi, .hermesCLI, .openClawCLI], id: \.self) { tab in
+                ForEach([PreferencesTab.cursor, .pi, .kimi, .grok, .hermesCLI, .openClawCLI], id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -418,6 +430,8 @@ struct PreferencesView: View {
                 piTab
             case .kimi:
                 kimiTab
+            case .grok:
+                grokTab
             case .about:
                 aboutTab
             }
@@ -735,6 +749,8 @@ struct PreferencesView: View {
         piSettings.setResolvedBinaryPath(nil)
         kimiSettings.setBinaryPath("")
         kimiSettings.setResolvedBinaryPath(nil)
+        grokSettings.setBinaryPath("")
+        grokSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -746,11 +762,13 @@ struct PreferencesView: View {
         openClawSessionsPath = ""
         piSessionsPath = ""
         kimiSessionsPath = ""
+        grokSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
         validatePiSessionsPath()
         validateKimiSessionsPath()
+        validateGrokSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -894,6 +912,7 @@ struct PreferencesView: View {
         case .cursor: scheduleCursorProbe()
         case .pi: schedulePiProbe()
         case .kimi: scheduleKimiProbe()
+        case .grok: scheduleGrokProbe()
         }
     }
 
@@ -921,6 +940,8 @@ struct PreferencesView: View {
             return piResolvedPath
         case .kimi:
             return kimiResolvedPath
+        case .grok:
+            return grokResolvedPath
         }
     }
 
@@ -958,6 +979,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .kimi:
             let value = kimiSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .grok:
+            let value = grokSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1094,6 +1118,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case cursor
     case pi
     case kimi
+    case grok
     case about
 
     var id: String { rawValue }
@@ -1119,6 +1144,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .cursor: return "Cursor"
         case .pi: return "Pi"
         case .kimi: return "Kimi Code"
+        case .grok: return "Grok CLI"
         case .about: return "About"
         }
     }
@@ -1144,6 +1170,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .cursor: return "cursorarrow.rays"
         case .pi: return "p.circle"
         case .kimi: return "k.circle"
+        case .grok: return "g.circle"
         case .about: return "info.circle"
         }
     }
@@ -1151,7 +1178,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 
 private extension PreferencesView {
     // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .kimi, .hermesCLI, .openClawCLI] }
+    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .kimi, .grok, .hermesCLI, .openClawCLI] }
 }
 
 // MARK: - Probe helpers
@@ -1367,6 +1394,40 @@ extension PreferencesView {
         }
     }
 
+    func probeGrok() {
+        if grokProbeState == .probing { return }
+        grokProbeState = .probing
+        grokVersionString = nil
+        grokResolvedPath = nil
+        let override = grokSettings.binaryPath.isEmpty ? nil : grokSettings.binaryPath
+        let isAutoProbe = override == nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = GrokCLIEnvironment().probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.grokVersionString = res.versionString
+                    self.grokResolvedPath = res.binaryURL.path
+                    if isAutoProbe {
+                        self.grokSettings.setResolvedBinary(res.binaryURL.path,
+                                                            supportsResume: res.supportsResume,
+                                                            supportsContinue: res.supportsContinue)
+                    }
+                    self.grokProbeState = .success
+                    self.grokCLIAvailable = true
+                case .failure:
+                    self.grokVersionString = nil
+                    self.grokResolvedPath = nil
+                    if isAutoProbe {
+                        self.grokSettings.setResolvedBinaryPath(nil)
+                    }
+                    self.grokProbeState = .failure
+                    self.grokCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1415,6 +1476,8 @@ extension PreferencesView {
             if piVersionString == nil && piProbeState != .probing { probePi() }
         case .kimi:
             if kimiVersionString == nil && kimiProbeState != .probing { probeKimi() }
+        case .grok:
+            if grokVersionString == nil && grokProbeState != .probing { probeGrok() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1473,6 +1536,13 @@ extension PreferencesView {
         kimiProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeKimi() }
         kimiProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleGrokProbe() {
+        grokProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeGrok() }
+        grokProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

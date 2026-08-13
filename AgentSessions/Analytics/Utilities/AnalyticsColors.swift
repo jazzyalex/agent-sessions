@@ -28,6 +28,8 @@ extension Color {
     static let agentPi: Color = TranscriptColorSystem.agentBrandAccent(source: .pi)
     /// Kimi Code brand color
     static let agentKimi: Color = TranscriptColorSystem.agentBrandAccent(source: .kimi)
+    /// Grok CLI brand color
+    static let agentGrok: Color = TranscriptColorSystem.agentBrandAccent(source: .grok)
 
     // MARK: - Monochrome Support
 
@@ -43,6 +45,7 @@ extension Color {
     static let agentCursorGray = Color(white: 0.9)
     static let agentPiGray = Color(white: 0.68)
     static let agentKimiGray = Color(white: 0.66)
+    static let agentGrokGray = Color(white: 0.62)
 
     /// Get the brand color for a given session source
     static func agentColor(for source: SessionSource) -> Color {
@@ -58,6 +61,7 @@ extension Color {
         case .cursor: return .agentCursor
         case .pi: return .agentPi
         case .kimi: return .agentKimi
+        case .grok: return .agentGrok
         }
     }
 
@@ -76,6 +80,7 @@ extension Color {
             case .cursor: return .agentCursorGray
             case .pi: return .agentPiGray
             case .kimi: return .agentKimiGray
+            case .grok: return .agentGrokGray
             }
         } else {
             return agentColor(for: source)
@@ -107,6 +112,8 @@ extension Color {
             return .agentPi
         } else if lower.contains("kimi") {
             return .agentKimi
+        } else if lower.contains("grok") {
+            return .agentGrok
         } else {
             return .accentColor
         }
@@ -138,6 +145,8 @@ extension Color {
                 return .agentPiGray
             } else if lower.contains("kimi") {
                 return .agentKimiGray
+            } else if lower.contains("grok") {
+                return .agentGrokGray
             } else {
                 return .secondary
             }

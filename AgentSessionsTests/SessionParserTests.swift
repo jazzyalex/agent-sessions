@@ -421,6 +421,7 @@ final class SessionParserTests: XCTestCase {
                           includeCursor: false,
                           includePi: false,
                           includeKimi: false,
+                          includeGrok: false,
                           enableDeepScan: false,
                           all: [root, sideChat])
 
@@ -459,6 +460,7 @@ final class SessionParserTests: XCTestCase {
                           includeCursor: false,
                           includePi: false,
                           includeKimi: false,
+                          includeGrok: false,
                           enableDeepScan: false,
                           all: [root, sideChat])
 
@@ -489,6 +491,7 @@ final class SessionParserTests: XCTestCase {
                        includeCursor: false,
                        includePi: false,
                        includeKimi: true,
+                       includeGrok: true,
                        enableDeepScan: false,
                        all: [kimi])
 
@@ -510,6 +513,7 @@ final class SessionParserTests: XCTestCase {
                        includeCursor: false,
                        includePi: false,
                        includeKimi: false,
+                       includeGrok: false,
                        enableDeepScan: false,
                        all: [kimi, codex])
 

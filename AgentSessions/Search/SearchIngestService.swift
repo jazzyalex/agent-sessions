@@ -383,6 +383,8 @@ actor SearchIngestService {
             return PiSessionParser.parseFileFull(at: url)
         case .kimi:
             return KimiSessionParser.parseFileFull(at: url)
+        case .grok:
+            return GrokSessionParser.parseFileFull(at: url)
         }
     }
 }

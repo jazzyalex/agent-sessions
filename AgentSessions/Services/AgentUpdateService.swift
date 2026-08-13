@@ -449,6 +449,12 @@ private extension AgentUpdateService {
             return nil
         case .kimi:
             return nil
+        case .grok:
+            // No mapping on purpose. The Grok CLI ships as a Homebrew *cask*
+            // (`grok-build`), while the `grok` *formula* is an unrelated regex
+            // utility — offering that as an update path would upgrade the wrong
+            // package.
+            return nil
         }
     }
 

@@ -186,6 +186,7 @@ struct AgentSessionsApp: App {
     @StateObject private var cursorIndexer = CursorSessionIndexer()
     @StateObject private var piIndexer = PiSessionIndexer()
     @StateObject private var kimiIndexer = KimiSessionIndexer()
+    @StateObject private var grokIndexer = GrokSessionIndexer()
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
@@ -284,7 +285,8 @@ struct AgentSessionsApp: App {
                 openclawIndexer: openclawIndexer,
                 cursorIndexer: cursorIndexer,
                 piIndexer: piIndexer,
-                kimiIndexer: kimiIndexer
+                kimiIndexer: kimiIndexer,
+                grokIndexer: grokIndexer
             )
             configuredUnifiedWindow(unified: unified)
         }
@@ -306,6 +308,7 @@ struct AgentSessionsApp: App {
             cursorIndexer: cursorIndexer,
             piIndexer: piIndexer,
             kimiIndexer: kimiIndexer,
+            grokIndexer: grokIndexer,
             analyticsReady: analyticsReady,
             analyticsPhase: analyticsPhase,
             analyticsIsStale: analyticsStale,
@@ -390,6 +393,7 @@ struct AgentSessionsApp: App {
                     cursorIndexer: cursorIndexer,
                     piIndexer: piIndexer,
                     kimiIndexer: kimiIndexer,
+                    grokIndexer: grokIndexer,
                     codexUsageModel: codexUsageModel,
                     claudeUsageModel: claudeUsageModel
                 )
@@ -486,7 +490,8 @@ struct AgentSessionsApp: App {
                         openclawIndexer: openclawIndexer,
                         cursorIndexer: cursorIndexer,
                         piIndexer: piIndexer,
-                        kimiIndexer: kimiIndexer
+                        kimiIndexer: kimiIndexer,
+                        grokIndexer: grokIndexer
                     )
                 )
                 .environmentObject(archiveManager)
@@ -553,7 +558,8 @@ final class _UnifiedHolder: ObservableObject {
                      openclawIndexer: OpenClawSessionIndexer,
                      cursorIndexer: CursorSessionIndexer,
                      piIndexer: PiSessionIndexer,
-                     kimiIndexer: KimiSessionIndexer) -> UnifiedSessionIndexer {
+                     kimiIndexer: KimiSessionIndexer,
+                     grokIndexer: GrokSessionIndexer) -> UnifiedSessionIndexer {
         if let u = unified { return u }
         let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
                                       claudeIndexer: claudeIndexer,
@@ -565,7 +571,8 @@ final class _UnifiedHolder: ObservableObject {
                                       openclawIndexer: openclawIndexer,
                                       cursorIndexer: cursorIndexer,
                                       piIndexer: piIndexer,
-                                      kimiIndexer: kimiIndexer)
+                                      kimiIndexer: kimiIndexer,
+                                      grokIndexer: grokIndexer)
         unified = u
         return u
     }
@@ -783,7 +790,8 @@ extension AgentSessionsApp {
             openclawIndexer: openclawIndexer,
             cursorIndexer: cursorIndexer,
             piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer
+            kimiIndexer: kimiIndexer,
+            grokIndexer: grokIndexer
         )
     }
 
@@ -1101,7 +1109,8 @@ extension AgentSessionsApp {
             copilotIndexer: copilotIndexer,
             droidIndexer: droidIndexer,
             piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer
+            kimiIndexer: kimiIndexer,
+            grokIndexer: grokIndexer
         )
         analyticsService = service
 
@@ -1324,6 +1333,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         cursorIndexer: CursorSessionIndexer,
         piIndexer: PiSessionIndexer,
         kimiIndexer: KimiSessionIndexer,
+        grokIndexer: GrokSessionIndexer,
         codexUsageModel: CodexUsageModel,
         claudeUsageModel: ClaudeUsageModel
     ) {
@@ -1342,6 +1352,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
             cursorIndexer: cursorIndexer,
             piIndexer: piIndexer,
             kimiIndexer: kimiIndexer,
+            grokIndexer: grokIndexer,
             codexUsageModel: codexUsageModel,
             claudeUsageModel: claudeUsageModel
         )
@@ -1435,6 +1446,7 @@ private struct OnboardingWindowState {
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
     let kimiIndexer: KimiSessionIndexer
+    let grokIndexer: GrokSessionIndexer
     let codexUsageModel: CodexUsageModel
     let claudeUsageModel: ClaudeUsageModel
 }
@@ -1459,7 +1471,8 @@ private struct OnboardingWindowRoot: View {
                 openclawIndexer: state.openclawIndexer,
                 cursorIndexer: state.cursorIndexer,
                 piIndexer: state.piIndexer,
-                kimiIndexer: state.kimiIndexer
+                kimiIndexer: state.kimiIndexer,
+                grokIndexer: state.grokIndexer
             )
         case .powerTips(let content):
             OnboardingSheetView(
