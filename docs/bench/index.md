@@ -22,7 +22,7 @@ store queries {{ site.data.session_bench.dates.store_queries }} ·
 docs review {{ site.data.session_bench.dates.docs_review }} ·
 last corrected {{ site.data.session_bench.dates.last_corrected }} ·
 surface: {{ site.data.session_bench.surface }} ·
-<a href="{{ site.data.session_bench.methodology_url }}">measurements, checklist &amp; evaluator</a></p>
+<a href="{{ site.data.session_bench.methodology_url }}">github.com/jazzyalex/session-bench — methodology, data, evaluator &amp; corrections</a></p>
 
 <style>
 .bench-table { width:100%; border-collapse:collapse; margin:1.5rem 0; font-size:0.92rem; }
@@ -264,9 +264,11 @@ merges the checklist verdicts, and emits the data file this page renders;
 Re-running the evaluator reproduces the scoring from the versioned inputs;
 reproducing the observations end-to-end — harness execution to archived
 raw artifacts to extraction — is the 1.0 milestone, and until it lands
-this page does not claim to be a push-button-reproducible benchmark. All inputs live in the
-[repo]({{ site.data.session_bench.methodology_url }}); to dispute a score,
-dispute a measurement or an evidence line and re-run the evaluator.
+this page does not claim to be a push-button-reproducible benchmark. The benchmark's canonical home is
+[github.com/jazzyalex/session-bench]({{ site.data.session_bench.methodology_url }})
+— methodology, data, evaluator, tests, and the public corrections
+changelog. To dispute a score, open an issue there with the measurement or
+evidence you contest, and re-run the evaluator.
 
 The probe is one identical prompt — "{{ site.data.session_bench.probe_prompt }}" —
 attempted through each harness's {{ site.data.session_bench.surface }};

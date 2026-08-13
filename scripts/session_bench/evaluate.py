@@ -225,7 +225,7 @@ def main() -> int:
         "generated_by": "scripts/session_bench/evaluate.py",
         "surface": meas["probe"]["surface"],
         "probe_prompt": meas["probe"]["prompt"],
-        "methodology_url": "https://github.com/jazzyalex/agent-sessions/tree/main/scripts/session_bench",
+        "methodology_url": "https://github.com/jazzyalex/session-bench",
         "scored_gate_count": len(scored_gates),
         "gates": [{k: v for k, v in g.items() if k != "computed"} for g in gates],
         "agents": agents_out,

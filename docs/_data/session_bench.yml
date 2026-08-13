@@ -46,7 +46,7 @@ picks:
 generated_by: scripts/session_bench/evaluate.py
 surface: CLI, headless/one-shot mode
 probe_prompt: List the files in the current directory, then say hello in one sentence.
-methodology_url: https://github.com/jazzyalex/agent-sessions/tree/main/scripts/session_bench
+methodology_url: https://github.com/jazzyalex/session-bench
 scored_gate_count: 19
 gates:
 - id: S1
