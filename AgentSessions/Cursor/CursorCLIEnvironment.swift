@@ -41,37 +41,28 @@ struct CursorCLIEnvironment: CursorCLIEnvironmentProviding {
             if FileManager.default.isExecutableFile(atPath: url.path) { return url }
         }
 
-        let loginShellCandidates = [
-            whichViaLoginShell("agent"),
-            whichViaLoginShell("cursor")
-        ].compactMap { $0 }
-        if let url = bestCursorCLI(from: loginShellCandidates) {
-            return url
-        }
-
-        let pathCandidates = [
-            which("agent"),
-            which("cursor")
-        ].compactMap { $0 }
-        if let url = bestCursorCLI(from: pathCandidates) {
-            return url
-        }
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        // One ordered list, searched as a whole, rather than group-by-group
+        // early returns. `bestCursorCLI` falls back to the first executable it
+        // saw, so with the groups separated an unverified hit from the login
+        // shell was returned before the later locations were ever examined.
+        // That matters most here: `agent` is a generic enough name that an
+        // unrelated binary claiming it is entirely plausible, and it would
+        // otherwise mask a real Cursor CLI installed further down this list.
+        let candidates: [String] = [
+            whichViaLoginShell("agent"),
+            whichViaLoginShell("cursor"),
+            which("agent"),
+            which("cursor"),
             "\(home)/.local/bin/agent",
             "/opt/homebrew/bin/agent",
             "/usr/local/bin/agent",
             "\(home)/.local/bin/cursor",
             "/opt/homebrew/bin/cursor",
             "/usr/local/bin/cursor"
-        ]
+        ].compactMap { $0 }
 
-        if let url = bestCursorCLI(from: candidates) {
-            return url
-        }
-
-        return nil
+        return bestCursorCLI(from: candidates)
     }
 
     func probe(customPath: String?) -> Result<ProbeResult, ProbeError> {

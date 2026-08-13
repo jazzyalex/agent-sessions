@@ -40,23 +40,22 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
             return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
         }
 
-        let loginShellCandidates = [whichViaLoginShell("pi")].compactMap { $0 }
-        if let url = bestPiCLI(from: loginShellCandidates) {
-            return url
-        }
-
-        let pathCandidates = [which("pi")].compactMap { $0 }
-        if let url = bestPiCLI(from: pathCandidates) {
-            return url
-        }
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        // One ordered list, searched as a whole, rather than group-by-group
+        // early returns. `bestPiCLI` falls back to the first executable it saw,
+        // so with the groups separated an unverified hit from the login shell
+        // was returned before the later locations were ever examined — meaning
+        // an unrelated binary of the same name earlier in PATH would mask a
+        // real CLI installed under one of them. `pi` is a short, generic name,
+        // so that collision is not hypothetical.
+        let candidates: [String] = [
+            whichViaLoginShell("pi"),
+            which("pi"),
             "\(home)/.local/bin/pi",
             "\(home)/.npm-global/bin/pi",
             "/opt/homebrew/bin/pi",
             "/usr/local/bin/pi"
-        ]
+        ].compactMap { $0 }
 
         return bestPiCLI(from: candidates)
     }

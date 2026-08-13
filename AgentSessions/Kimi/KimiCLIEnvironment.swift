@@ -51,24 +51,22 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
             return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
         }
 
-        let loginShellCandidates = [whichViaLoginShell(Self.binaryName)].compactMap { $0 }
-        if let url = bestKimiCLI(from: loginShellCandidates) {
-            return url
-        }
-
-        let pathCandidates = [which(Self.binaryName)].compactMap { $0 }
-        if let url = bestKimiCLI(from: pathCandidates) {
-            return url
-        }
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        // One ordered list, searched as a whole, rather than group-by-group
+        // early returns. `bestKimiCLI` falls back to the first executable it
+        // saw, so with the groups separated an unverified hit from the login
+        // shell was returned before the later locations were ever examined —
+        // meaning an unrelated binary of the same name earlier in PATH would
+        // mask a real CLI installed under one of them.
+        let candidates: [String] = [
+            whichViaLoginShell(Self.binaryName),
+            which(Self.binaryName),
             "\(home)/.kimi-code/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
             "/opt/homebrew/bin/\(Self.binaryName)",
             "/usr/local/bin/\(Self.binaryName)"
-        ]
+        ].compactMap { $0 }
 
         return bestKimiCLI(from: candidates)
     }
