@@ -106,10 +106,16 @@ enum GrokSessionParser {
         let cwd = sidecar?.info?.cwd ?? sidecar?.gitRootDir
         let title = firstNonEmpty(sidecar?.generatedTitle, sidecar?.sessionSummary, firstPromptText)
 
-        // The sidecar counts the whole transcript, so prefer it over a preview
-        // pass that stopped at `previewLineLimit` and would otherwise report a
-        // truncated event count for every row in the list.
-        let eventCount = includeEvents ? nonMetaCount : (sidecar?.numChatMessages ?? nonMetaCount)
+        // `loadLines` stops at `previewLineLimit`, so a preview that came back
+        // short read the whole transcript and its own non-meta count is exact.
+        // Only a genuinely truncated preview falls back to the sidecar, whose
+        // `num_chat_messages` counts raw records — including `system` and
+        // `reasoning`, both of which render as meta — and so overstates the
+        // message count. Using it unconditionally let a transcript of nothing
+        // but meta records report a nonzero count and slip past the hide-zero
+        // and hide-low list filters.
+        let previewTruncated = lineLimit.map { lines.count >= $0 } ?? false
+        let eventCount = previewTruncated ? (sidecar?.numChatMessages ?? nonMetaCount) : nonMetaCount
 
         return Session(id: id,
                        source: .grok,

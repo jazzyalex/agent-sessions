@@ -148,7 +148,7 @@ extension PreferencesView {
                             .foregroundStyle(.red)
                     }
 
-                    Text("Grok writes one wire.jsonl journal per agent under its sessions directory. Override only when you point GROK_CODE_HOME at a non-default location.")
+                    Text("Grok writes one directory per session under its sessions root, holding chat_history.jsonl beside summary.json. Override only when you point GROK_HOME at a non-default location.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

@@ -15,9 +15,12 @@ protocol GrokCLIEnvironmentProviding {
 ///                          working directory.
 ///
 /// Homebrew also ships an unrelated `grok` *formula* (jordansissel/grok, a regex
-/// utility); the Grok CLI itself arrives as the `grok-build` *cask*. A candidate
-/// binary is therefore accepted only once its `--help` advertises the resume
-/// flags above, which the regex tool does not.
+/// utility); the Grok CLI itself arrives as the `grok-build` *cask*. Every
+/// candidate location is therefore searched as a single ordered list, and a
+/// binary whose `--help` advertises the resume flags above always wins over one
+/// that does not — so the regex tool cannot mask the real CLI by sitting
+/// earlier in PATH. When nothing advertises them the first executable is still
+/// returned, so Preferences can report what it actually found.
 struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
     static let binaryName = "grok"
 
@@ -55,24 +58,21 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
             return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
         }
 
-        let loginShellCandidates = [whichViaLoginShell(Self.binaryName)].compactMap { $0 }
-        if let url = bestGrokCLI(from: loginShellCandidates) {
-            return url
-        }
-
-        let pathCandidates = [which(Self.binaryName)].compactMap { $0 }
-        if let url = bestGrokCLI(from: pathCandidates) {
-            return url
-        }
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        // One ordered list, searched as a whole, rather than group-by-group
+        // early returns. An unverified hit must not end the search: with the
+        // groups separated, a jordansissel `grok` resolved by the login shell
+        // was returned as a fallback before `~/.grok/bin` was ever examined,
+        // permanently masking a real CLI installed there.
+        let candidates: [String] = [
+            whichViaLoginShell(Self.binaryName),
+            which(Self.binaryName),
             "\(home)/.grok/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
             "/opt/homebrew/bin/\(Self.binaryName)",
             "/usr/local/bin/\(Self.binaryName)"
-        ]
+        ].compactMap { $0 }
 
         return bestGrokCLI(from: candidates)
     }

@@ -12,14 +12,7 @@ final class GrokSessionParserTests: XCTestCase {
     /// Stages the fixture into the real on-disk layout so the parser exercises
     /// its session-id derivation and its `summary.json` sidecar join.
     private func stagedFixture() throws -> URL {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("grok-fixture-\(UUID().uuidString)", isDirectory: true)
-        let sessionDir = root
-            .appendingPathComponent("sessions", isDirectory: true)
-            // Grok percent-encodes the working directory into the bucket name.
-            .appendingPathComponent("%2Ftmp%2Fas-agent-lab%2Fgrok%2Fproject", isDirectory: true)
-            .appendingPathComponent(sessionID, isDirectory: true)
-        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let sessionDir = try makeSessionDirectory()
 
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -30,8 +23,32 @@ final class GrokSessionParserTests: XCTestCase {
                                              to: sessionDir.appendingPathComponent(name))
         }
 
-        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         return sessionDir.appendingPathComponent("chat_history.jsonl")
+    }
+
+    /// Stages arbitrary transcript and sidecar content into the same layout, for
+    /// shapes the shared fixture deliberately does not cover.
+    private func stage(transcript: String, summary: String) throws -> URL {
+        let sessionDir = try makeSessionDirectory()
+        let url = sessionDir.appendingPathComponent("chat_history.jsonl")
+        try transcript.write(to: url, atomically: true, encoding: .utf8)
+        try summary.write(to: sessionDir.appendingPathComponent("summary.json"),
+                          atomically: true,
+                          encoding: .utf8)
+        return url
+    }
+
+    private func makeSessionDirectory() throws -> URL {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("grok-fixture-\(UUID().uuidString)", isDirectory: true)
+        let sessionDir = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            // Grok percent-encodes the working directory into the bucket name.
+            .appendingPathComponent("%2Ftmp%2Fas-agent-lab%2Fgrok%2Fproject", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return sessionDir
     }
 
     func testParsesIdentityFromSidecar() throws {
@@ -123,14 +140,43 @@ final class GrokSessionParserTests: XCTestCase {
         XCTAssertEqual(users.last?.text, "[image]\nHere is a screenshot for reference.")
     }
 
-    /// The preview pass must not report a truncated event count for list rows,
-    /// so it takes `num_chat_messages` from the sidecar instead of counting.
-    func testLightweightParseUsesSidecarMessageCount() throws {
+    /// A preview that reached EOF counted the whole transcript, so it reports its
+    /// own exact non-meta total rather than the sidecar's `num_chat_messages`.
+    /// The fixture's 11 records hold 9 non-meta events: the sidecar counts the
+    /// `system` record and both `reasoning` records, all three of which render
+    /// as meta.
+    func testLightweightParseCountsNonMetaEventsWhenNotTruncated() throws {
         let url = try stagedFixture()
         let session = try XCTUnwrap(GrokSessionParser.parseFile(at: url))
 
-        XCTAssertEqual(session.eventCount, 11)
+        XCTAssertEqual(session.eventCount, 9)
         XCTAssertTrue(session.events.isEmpty)
         XCTAssertEqual(session.lightweightCommands, 3)
+
+        // The list estimate must agree with what a full parse actually renders,
+        // or `Session.messageCount`'s max() pins the larger number forever.
+        let full = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(full.events.filter { $0.kind != .meta }.count, session.eventCount)
+    }
+
+    /// A transcript of nothing but `system` and `reasoning` records renders no
+    /// visible content, so it has to report zero messages. The sidecar's raw
+    /// record count includes all three, and taking it verbatim let an empty
+    /// session claim three messages and slip past the hide-zero and hide-low
+    /// list filters.
+    func testMetaOnlyTranscriptReportsNoMessages() throws {
+        let transcript = """
+        {"type":"system","content":"You are Grok."}
+        {"type":"reasoning","summary":[{"text":"Considering the request."}]}
+        {"type":"reasoning","summary":[{"text":"Still considering."}]}
+        """
+        let summary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"},"num_chat_messages":3}
+        """
+        let url = try stage(transcript: transcript, summary: summary)
+        let session = try XCTUnwrap(GrokSessionParser.parseFile(at: url))
+
+        XCTAssertEqual(session.eventCount, 0)
+        XCTAssertEqual(session.messageCount, 0)
     }
 }
