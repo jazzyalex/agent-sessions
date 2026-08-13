@@ -35,6 +35,16 @@ surface: {{ site.data.session_bench.surface }} ·
 .bench-pass { color:#1a7f37; font-weight:600; }
 .bench-fail { color:#b42318; font-weight:600; }
 .bench-na { color:var(--muted, #898781); }
+.bench-poster {
+  margin:1.4rem 0 2rem;
+  padding:0.8rem 1rem;
+  border:1px solid var(--rule, #e1e0d9);
+  border-radius:12px;
+}
+.bench-poster summary { cursor:pointer; font-weight:600; }
+.bench-poster figure { max-width:420px; margin:1rem auto 0.25rem; }
+.bench-poster img { display:block; width:100%; height:auto; border-radius:18px; }
+.bench-poster figcaption { margin-top:0.6rem; text-align:center; }
 @media (prefers-color-scheme: dark) {
   .bench-table th, .bench-table td, .bench-matrix th, .bench-matrix td { border-bottom-color:#2c2c2a; }
   .bench-pass { color:#3fb950; }
@@ -81,6 +91,19 @@ measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash
 tolerance) is defined but unscored pending a real cross-harness
 truncation experiment.</p>
+
+<details class="bench-poster">
+  <summary>View or download the Session Bench v0.3 poster</summary>
+  <figure>
+    <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session Bench poster">
+      <img src="{{ '/assets/session-bench-poster.png' | relative_url }}"
+           width="1024" height="1536"
+           alt="Session Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
+           loading="lazy">
+    </a>
+    <figcaption class="bench-note">Open the image for the full-resolution 1024 × 1536 poster.</figcaption>
+  </figure>
+</details>
 
 Each area answers one question a developer actually has:
 

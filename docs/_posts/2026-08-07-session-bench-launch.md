@@ -37,6 +37,16 @@ is permanent, and grades will change when formats do. One caveat on scope,
 stated plainly: the bench measures each harness's CLI session store; desktop and
 IDE surfaces can differ and get their own rows in a future version.
 
+<figure class="post-figure bench-poster-figure">
+  <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session Bench poster">
+    <img src="{{ '/assets/session-bench-poster.png' | relative_url }}"
+         width="1024" height="1536"
+         alt="Session Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
+         loading="eager">
+  </a>
+  <figcaption>Session Bench v0.3 at a glance. Open the image for the full-resolution poster.</figcaption>
+</figure>
+
 ## The v0.3 leaderboard
 
 | # | Harness | Format | Gates cleared |

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Improvements
+- **Session Bench now includes a shareable v0.3 poster.** The launch article shows the full leaderboard graphic, while the benchmark page keeps it available in a compact download section beneath the scored table.
+
 ### Bug Fixes
 - **"Live sessions only" includes Claude Desktop chats.** Claude Desktop sessions have no terminal process for the usual live probes to find, so the filter could hide running Claude chats even though the Quota Meter saw their runway rows. The live session engine now synthesizes Claude Desktop presences from the same runway identities, preserving active/idle state and avoiding duplicates when a transcript is already claimed by another probe.
 - **The Session Runway switches units immediately.** Selecting Wk could leave the previous tokens-per-hour values visible while the asynchronous runway scan recalculated, and an automatic fallback after a quota window appeared or disappeared had the same problem. Rows now change to the effective unit at once and show a waiting value until recalculation finishes.
