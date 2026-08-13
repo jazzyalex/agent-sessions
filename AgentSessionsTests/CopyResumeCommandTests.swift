@@ -160,14 +160,32 @@ final class CopyResumeCommandTests: XCTestCase {
 
     // MARK: - Antigravity copy/resume command scenarios
 
+    /// The builder emits the full binary path only when that path is executable,
+    /// so the probe has to say it is — otherwise this asserts the full path on a
+    /// machine with `agy` installed there and the bare `agy` everywhere else.
     func testAntigravity_conversationID_and_cwd() throws {
-        let package = try AntigravityResumeCommandBuilder().makeCommand(
+        let builder = AntigravityResumeCommandBuilder(
+            fileProbe: FakeFileProbe(executables: ["/Users/alexm/.local/bin/agy"])
+        )
+        let package = try builder.makeCommand(
             strategy: .resumeByID(id: "conv-abc"),
             binaryURL: URL(fileURLWithPath: "/Users/alexm/.local/bin/agy"),
             workingDirectory: URL(fileURLWithPath: "/Users/alexm/my repo")
         )
         XCTAssertEqual(package.displayCommand, "'/Users/alexm/.local/bin/agy' --conversation 'conv-abc'")
         XCTAssertEqual(package.shellCommand, "cd '/Users/alexm/my repo' && '/Users/alexm/.local/bin/agy' --conversation 'conv-abc'")
+    }
+
+    /// The other branch, which was previously untested: an absent binary falls
+    /// back to the bare command name for the user's shell to resolve.
+    func testAntigravity_fallsBackToBareNameWhenBinaryNotExecutable() throws {
+        let builder = AntigravityResumeCommandBuilder(fileProbe: FakeFileProbe())
+        let package = try builder.makeCommand(
+            strategy: .resumeByID(id: "conv-abc"),
+            binaryURL: URL(fileURLWithPath: "/Users/alexm/.local/bin/agy"),
+            workingDirectory: nil
+        )
+        XCTAssertEqual(package.displayCommand, "'agy' --conversation 'conv-abc'")
     }
 
     func testAntigravity_continueRecent() throws {

@@ -29,9 +29,15 @@ final class CursorSettings: ObservableObject {
     @Published var defaultWorkingDirectory: String
 
     private let defaults: UserDefaults
+    /// Filesystem seam used by `effectiveWorkingDirectory`, whose CWD inference
+    /// otherwise reads the real home directory. See `FileProbing`.
+    private let fileProbe: any FileProbing
 
-    fileprivate init(defaults: UserDefaults = .standard, warmResolvedBinaryCache: Bool = true) {
+    fileprivate init(defaults: UserDefaults = .standard,
+                     warmResolvedBinaryCache: Bool = true,
+                     fileProbe: any FileProbing = DefaultFileProbe()) {
         self.defaults = defaults
+        self.fileProbe = fileProbe
         binaryPath = defaults.string(forKey: Keys.binaryPath) ?? ""
         resolvedBinaryPath = defaults.string(forKey: Keys.resolvedBinaryPath) ?? ""
         resolvedSupportsResume = defaults.bool(forKey: Keys.resolvedSupportsResume)
@@ -120,7 +126,8 @@ final class CursorSettings: ObservableObject {
         if let sessionCwd = session.cwd, !sessionCwd.isEmpty {
             return URL(fileURLWithPath: sessionCwd)
         }
-        if let inferredCwd = CursorSessionParser.inferCWDBestEffort(from: URL(fileURLWithPath: session.filePath)),
+        if let inferredCwd = CursorSessionParser.inferCWDBestEffort(from: URL(fileURLWithPath: session.filePath),
+                                                                   fileProbe: fileProbe),
            !inferredCwd.isEmpty {
             return URL(fileURLWithPath: inferredCwd)
         }
@@ -161,7 +168,8 @@ final class CursorSettings: ObservableObject {
 }
 
 extension CursorSettings {
-    static func makeForTesting(defaults: UserDefaults = UserDefaults(suiteName: "CursorTests") ?? .standard) -> CursorSettings {
-        CursorSettings(defaults: defaults, warmResolvedBinaryCache: false)
+    static func makeForTesting(defaults: UserDefaults = UserDefaults(suiteName: "CursorTests") ?? .standard,
+                               fileProbe: any FileProbing = DefaultFileProbe()) -> CursorSettings {
+        CursorSettings(defaults: defaults, warmResolvedBinaryCache: false, fileProbe: fileProbe)
     }
 }

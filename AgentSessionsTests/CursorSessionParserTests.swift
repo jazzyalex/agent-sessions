@@ -195,31 +195,58 @@ final class CursorSessionParserTests: XCTestCase {
 
     // MARK: - CWD Inference
 
+    // CWD inference decides where a `-` is a path separator by asking the
+    // filesystem, so every test here injects a `FakeFileProbe`. Asserting
+    // against real directories would make these tests pass or fail on the
+    // layout of whichever machine runs the suite.
+
     func testInferCWDResolvesSimplePath() {
-        // /Users and /tmp always exist on macOS
-        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "tmp")
+        let probe = FakeFileProbe(directories: ["/tmp"])
+        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "tmp", fileProbe: probe)
         XCTAssertEqual(cwd, "/tmp")
     }
 
     func testInferCWDReturnsNilForNonexistentPath() {
-        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "nonexistent-path-that-does-not-exist-anywhere")
+        let probe = FakeFileProbe(directories: [])
+        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "nonexistent-path-that-does-not-exist-anywhere",
+                                               fileProbe: probe)
         XCTAssertNil(cwd)
     }
 
     func testInferCWDPreservesHyphenatedComponents() {
-        // We can't guarantee a specific hyphenated directory exists on the test machine,
-        // but we can verify the algorithm doesn't split /tmp into /t/m/p
-        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "tmp")
-        // If /tmp exists (it always does on macOS), the result should be exactly "/tmp"
-        // not "/t/m/p" or similar
-        if let cwd = cwd {
-            XCTAssertEqual(cwd, "/tmp")
-        }
+        // A hyphenated leaf directory must survive as one component: the walk
+        // commits `/Users/alexm/Repository`, then finds no `Codex` beneath it
+        // and rejoins `Codex-History`.
+        let probe = FakeFileProbe(directories: [
+            "/Users",
+            "/Users/alexm",
+            "/Users/alexm/Repository",
+            "/Users/alexm/Repository/Codex-History"
+        ])
+        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "Users-alexm-Repository-Codex-History",
+                                               fileProbe: probe)
+        XCTAssertEqual(cwd, "/Users/alexm/Repository/Codex-History")
+    }
+
+    func testInferCWDSplitsOnDirectoriesThatDoExist() {
+        // The mirror image: with `Codex` present as a real directory, the same
+        // encoded name must decode to a deeper path instead.
+        let probe = FakeFileProbe(directories: [
+            "/Users",
+            "/Users/alexm",
+            "/Users/alexm/Repository",
+            "/Users/alexm/Repository/Codex",
+            "/Users/alexm/Repository/Codex/History"
+        ])
+        let cwd = CursorSessionParser.inferCWD(fromProjectDirName: "Users-alexm-Repository-Codex-History",
+                                               fileProbe: probe)
+        XCTAssertEqual(cwd, "/Users/alexm/Repository/Codex/History")
     }
 
     func testInferCWDBestEffortReturnsDecodedPathWhenFinalDirectoryMissing() {
+        let probe = FakeFileProbe.withDirectoryTree(upTo: "/Users/alexm/Repository")
         let projectName = "Users-alexm-Repository-This-Path-Should-Not-Exist-For-Tests"
-        let decoded = CursorSessionParser.inferCWDBestEffort(fromProjectDirName: projectName)
+        let decoded = CursorSessionParser.inferCWDBestEffort(fromProjectDirName: projectName, fileProbe: probe)
         XCTAssertEqual(decoded, "/Users/alexm/Repository/This-Path-Should-Not-Exist-For-Tests")
     }
 }

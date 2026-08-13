@@ -314,28 +314,54 @@ enum AgentEnablement {
         if AppRuntime.isHostedByTooling {
             return storedBinaryPresence(for: source) ?? false
         }
+        return binaryInstalled(for: source, detect: binaryDetectedCached)
+    }
 
+    /// PATH-scoped form of `binaryInstalled(for:)`, mirroring the `pathOverride`
+    /// seam already on `binaryDetectedInPATH(_:pathOverride:)`.
+    ///
+    /// A non-empty `pathOverride` replaces the process `PATH` *and* the built-in
+    /// fallback search paths (see `normalizedPATHDirectories`), so the lookup
+    /// only ever sees directories the caller named. It deliberately skips the
+    /// `isHostedByTooling` early return above: that gate turns the no-argument
+    /// form into a `UserDefaults` read under XCTest, which would make a caller
+    /// that has just staged a binary on disk assert against a stored preference
+    /// instead of against the name-matching logic below. It also skips
+    /// `binaryDetectedCached`, since the cache is process-wide and keyed on the
+    /// PATH signature.
+    ///
+    /// Note the `.grok` case still reads the real `~/.grok`; injecting a home
+    /// directory is out of scope here, so do not use this form to assert `.grok`
+    /// availability hermetically.
+    static func binaryInstalled(for source: SessionSource, pathOverride: String) -> Bool {
+        binaryInstalled(for: source, detect: { binaryDetectedInPATH($0, pathOverride: pathOverride) })
+    }
+
+    /// Which binary names count as which agent. The single source of truth for
+    /// both forms above; `detect` decides how a name is looked up.
+    private static func binaryInstalled(for source: SessionSource,
+                                        detect: (String) -> Bool) -> Bool {
         switch source {
-        case .codex: return binaryDetectedCached("codex")
-        case .claude: return binaryDetectedCached("claude") || binaryDetectedCached("claude-code")
-        case .antigravity: return binaryDetectedCached("agy")
-        case .opencode: return binaryDetectedCached("opencode")
-        case .hermes: return binaryDetectedCached("hermes")
-        case .copilot: return binaryDetectedCached("copilot")
-        case .droid: return binaryDetectedCached("droid")
+        case .codex: return detect("codex")
+        case .claude: return detect("claude") || detect("claude-code")
+        case .antigravity: return detect("agy")
+        case .opencode: return detect("opencode")
+        case .hermes: return detect("hermes")
+        case .copilot: return detect("copilot")
+        case .droid: return detect("droid")
         case .openclaw:
-            return binaryDetectedCached("openclaw") || binaryDetectedCached("clawdbot")
+            return detect("openclaw") || detect("clawdbot")
         case .cursor:
-            return binaryDetectedCached("agent") || binaryDetectedCached("cursor") || binaryDetectedCached("cursor-agent")
+            return detect("agent") || detect("cursor") || detect("cursor-agent")
         case .pi:
-            return binaryDetectedCached("pi")
+            return detect("pi")
         case .kimi:
-            return binaryDetectedCached("kimi")
+            return detect("kimi")
         case .grok:
             // Homebrew also ships an unrelated `grok` formula (jordansissel/grok,
             // a regex utility), so a bare PATH hit is not evidence of the Grok
             // CLI. Require the CLI's own home directory alongside the binary.
-            guard binaryDetectedCached("grok") else { return false }
+            guard detect("grok") else { return false }
             let grokHome = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".grok", isDirectory: true)
             var isGrokHome: ObjCBool = false

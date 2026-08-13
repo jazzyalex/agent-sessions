@@ -375,16 +375,16 @@ final class CursorSessionParser {
     /// Path pattern: ~/.cursor/projects/<encodedProjectPath>/agent-transcripts/...
     /// The project dir name encodes the path with `-` as separator:
     /// `Users-alexm-Repository-Codex-History` → `/Users/alexm/Repository/Codex-History`
-    static func inferCWD(from url: URL) -> String? {
+    static func inferCWD(from url: URL, fileProbe: any FileProbing = DefaultFileProbe()) -> String? {
         guard let projectName = extractProjectDirName(from: url) else { return nil }
-        return inferCWD(fromProjectDirName: projectName)
+        return inferCWD(fromProjectDirName: projectName, fileProbe: fileProbe)
     }
 
     /// Best-effort CWD inference for resume/copy command paths.
     /// Unlike `inferCWD`, this does not require the final path to exist.
-    static func inferCWDBestEffort(from url: URL) -> String? {
+    static func inferCWDBestEffort(from url: URL, fileProbe: any FileProbing = DefaultFileProbe()) -> String? {
         guard let projectName = extractProjectDirName(from: url) else { return nil }
-        return inferCWDBestEffort(fromProjectDirName: projectName)
+        return inferCWDBestEffort(fromProjectDirName: projectName, fileProbe: fileProbe)
     }
 
     /// Infer CWD from a Cursor project directory name (encoded with `-` as separator).
@@ -396,20 +396,19 @@ final class CursorSessionParser {
     /// We use a greedy left-to-right walk: split on `-`, then at each segment try treating it
     /// as a path separator first (check if the prefix directory exists), and if not, rejoin
     /// with the next segment using a literal hyphen.
-    static func inferCWD(fromProjectDirName projectName: String) -> String? {
-        let bestEffort = inferCWDBestEffort(fromProjectDirName: projectName)
+    static func inferCWD(fromProjectDirName projectName: String,
+                         fileProbe: any FileProbing = DefaultFileProbe()) -> String? {
+        let bestEffort = inferCWDBestEffort(fromProjectDirName: projectName, fileProbe: fileProbe)
         guard let bestEffort else { return nil }
 
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: bestEffort, isDirectory: &isDir), isDir.boolValue {
+        if fileProbe.directoryExists(atPath: bestEffort) {
             return bestEffort
         }
 
         // Fallback: try the naive all-slash replacement (for edge cases where no
         // intermediate directories exist, e.g. temp paths)
         let naive = "/" + projectName.replacingOccurrences(of: "-", with: "/")
-        if fm.fileExists(atPath: naive, isDirectory: &isDir), isDir.boolValue {
+        if fileProbe.directoryExists(atPath: naive) {
             return naive
         }
 
@@ -420,12 +419,10 @@ final class CursorSessionParser {
     /// Prefers segment boundaries that are known directories when possible,
     /// but always returns a decoded absolute path even when the final
     /// directory currently does not exist.
-    static func inferCWDBestEffort(fromProjectDirName projectName: String) -> String? {
+    static func inferCWDBestEffort(fromProjectDirName projectName: String,
+                                   fileProbe: any FileProbing = DefaultFileProbe()) -> String? {
         let segments = projectName.components(separatedBy: "-")
         guard !segments.isEmpty else { return nil }
-
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
 
         // Greedy walk: track the resolved prefix (committed path with slashes)
         // and the current component being built (may accumulate literal hyphens).
@@ -442,7 +439,7 @@ final class CursorSessionParser {
 
         while i < segments.count {
             let candidateDir = resolvedPrefix + "/" + currentComponent
-            if fm.fileExists(atPath: candidateDir, isDirectory: &isDir), isDir.boolValue {
+            if fileProbe.directoryExists(atPath: candidateDir) {
                 // currentComponent is a real directory — commit it as a path level
                 resolvedPrefix = candidateDir
                 currentComponent = segments[i]

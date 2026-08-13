@@ -7,7 +7,12 @@ final class CursorSettingsTests: XCTestCase {
     func testEffectiveWorkingDirectoryFallsBackToBestEffortFromFilePath() {
         let defaults = UserDefaults(suiteName: "CursorSettingsTests")!
         defaults.removePersistentDomain(forName: "CursorSettingsTests")
-        let settings = CursorSettings.makeForTesting(defaults: defaults)
+        // The fallback runs CWD inference, which walks the filesystem to place
+        // separators — inject the tree it should see instead of the real one.
+        let settings = CursorSettings.makeForTesting(
+            defaults: defaults,
+            fileProbe: FakeFileProbe.withDirectoryTree(upTo: "/Users/alexm/Repository")
+        )
 
         let filePath = "/Users/alex/.cursor/projects/Users-alexm-Repository-My-Repo/agent-transcripts/123/123.jsonl"
         let session = Session(id: "123",

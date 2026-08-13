@@ -1,6 +1,10 @@
 import Foundation
 
 struct AntigravityResumeCommandBuilder {
+    /// Filesystem seam for the executable check in `makeCommand`, which decides
+    /// between the full binary path and the bare command name. See `FileProbing`.
+    var fileProbe: any FileProbing = DefaultFileProbe()
+
     struct CommandPackage {
         let shellCommand: String
         let displayCommand: String
@@ -22,7 +26,7 @@ struct AntigravityResumeCommandBuilder {
         // Use the full path only if it points to a real executable; otherwise
         // fall back to the bare command name so the user's shell can resolve it.
         let binaryPath: String
-        if FileManager.default.isExecutableFile(atPath: binaryURL.path) {
+        if fileProbe.isExecutableFile(atPath: binaryURL.path) {
             binaryPath = binaryURL.path
         } else {
             binaryPath = binaryURL.lastPathComponent
