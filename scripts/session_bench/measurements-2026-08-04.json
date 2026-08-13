@@ -1,5 +1,5 @@
 {
-  "bench_version": "0.2",
+  "bench_version": "0.3",
   "data_date": "2026-08-04",
   "probe": {
     "prompt": "List the files in the current directory, then say hello in one sentence.",

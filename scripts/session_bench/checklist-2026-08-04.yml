@@ -29,8 +29,8 @@ gates:
      desc: "Threads, branches, or subagent runs are recoverable via links or artifacts."}
   - {id: T1, area: Stability, name: No schema break,
      desc: "No breaking schema change while under observation. Observation windows differ per harness (stated in each cell); a window too short to establish stability scores not_run."}
-  - {id: T2, area: Stability, name: Declares a version,
-     desc: "The artifact itself declares a version. A format/schema version is the real ask; an application version stamped per artifact passes with a note — it identifies the writer, not the schema, and per-agent evidence says which kind each harness stamps."}
+  - {id: T2, area: Stability, name: Declares a format version,
+     desc: "The artifact declares the version of its session FORMAT — a schema/protocol version an external reader can dispatch on. An application/CLI version stamped in the artifact does not pass: it identifies the writer, not the schema (tightened in v0.3; v0.2 wrongly accepted writer versions)."}
   - {id: T3, area: Stability, name: Honest version signal,
      desc: "The declared version matches the shipped reality. Scored only when T2 passes: with no version signal there is nothing to judge, and absence is already penalized by T2 (changed in v0.2 — v0.1 wrongly awarded this point to harnesses with no version at all)."}
   - {id: O1, area: Openness, name: Standard-tools readable,
@@ -56,10 +56,10 @@ verdicts:
     C3: {state: pass, evidence: "event_msg/token_count with cumulative usage"}
     C4: {state: fail, evidence: "tokens only, no dollar figure anywhere"}
     C5: {state: pass, evidence: "function_call + function_call_output items"}
-    C6: {state: pass, evidence: "raw thinking is encrypted, but 483 of 1,382 reasoning items in the 5 newest real rollouts carry a non-empty plaintext summary_text — a stored summary beyond the final answer, which the gate accepts (verified 2026-08-12; CORRECTED from fail — the old evidence predated the summary field)"}
-    C7: {state: pass, evidence: "session_meta carries parent_thread_id and real rollouts contain sub_agent_activity records (137 lines across 5 newest) — subagent runs recoverable (verified 2026-08-12; CORRECTED from fail)"}
+    C6: {state: pass, evidence: "raw thinking is encrypted, but 669 of 1,799 reasoning items (37%) across a pinned 5-rollout artifact set carry non-empty plaintext summary_text — a stored summary, which the gate accepts. Artifact IDs, hashes, and per-file counts: scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED from fail 2026-08-12)"}
+    C7: {state: pass, evidence: "session_meta carries parent_thread_id (38 lines) and rollouts contain sub_agent_activity records (187 lines) in the pinned 5-rollout set — subagent runs recoverable. Receipt: scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED from fail 2026-08-12)"}
     T1: {state: pass, evidence: "ledger: ~6 additive drifts, envelope unchanged; observed 2026-03-31 → 2026-08-04 (full window)"}
-    T2: {state: pass, evidence: "payload.cli_version in session_meta (application version, not a schema version — identifies the writer)"}
+    T2: {state: fail, evidence: "stamps only cli_version — an application version identifying the writer, not a schema version an external reader can dispatch on (rescored in v0.3)"}
     T3: {state: pass, evidence: "cli_version matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single rollout file, appended live"}
@@ -76,7 +76,7 @@ verdicts:
     C6: {state: fail, evidence: "~97.5% of recent thinking blocks signature-only, text empty; no stored summary"}
     C7: {state: pass, evidence: "parentUuid DAG + subagents/*.jsonl artifacts"}
     T1: {state: pass, evidence: "ledger: 15+ additive changes, zero breaking; observed 2026-03-31 → 2026-08-04 (full window)"}
-    T2: {state: pass, evidence: "top-level version field per line (application version, not a schema version)"}
+    T2: {state: fail, evidence: "per-line version field carries the application version, not a schema version (rescored in v0.3)"}
     T3: {state: pass, evidence: "version matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL"}
     O2: {state: pass, evidence: "single session file, appended live"}
@@ -93,11 +93,11 @@ verdicts:
     C6: {state: pass, evidence: "reasoningText field (alongside reasoningOpaque)"}
     C7: {state: fail, evidence: "linear id→parentId chain, no branch structure"}
     T1: {state: fail, evidence: "ledger: v1.0 storage-layout break (flat → subdirs), runtime patch f77040f"}
-    T2: {state: pass, evidence: "data.copilotVersion (application version, not a schema version)"}
+    T2: {state: fail, evidence: "data.copilotVersion is an application version, not a schema version (rescored in v0.3)"}
     T3: {state: pass, evidence: "copilotVersion matches installed CLI"}
     O1: {state: pass, evidence: "plain JSONL (encryptedContent is one field, container readable)"}
     O2: {state: pass, evidence: "events.jsonl appended live"}
-    O3: {state: pass, evidence: "config-dir reference documents session-state/events.jsonl; SDK docs enumerate persisted event types, and the type names in our measured CLI events.jsonl (session.start, assistant.message, tool.execution_start/complete, session.shutdown) match that documented set — artifact-to-docs comparison, same event vocabulary. CORRECTED 2026-08-12: originally scored fail in error"}
+    O3: {state: pass, evidence: "config-dir reference documents session-state/events.jsonl; SDK docs enumerate persisted event types, and the type names in our measured CLI events.jsonl (session.start, assistant.message, tool.execution_start/complete, session.shutdown) match that documented set — artifact-to-docs comparison, same event vocabulary; no single official page ties the SDK contract to the CLI file, so this is the weakest O3 pass and is flagged as such. CORRECTED 2026-08-12: originally scored fail in error"}
     O4: {state: fail, evidence: "same v1.0 flat→subdir migration"}
     P1: {state: pass, evidence: "each event once; tool join optional for content"}
     P3: {state: fail, evidence: "session title only in sidecar workspace.yaml"}
@@ -126,7 +126,7 @@ verdicts:
     C6: {state: pass, evidence: "746/1,207 reasoning parts carry plaintext text"}
     C7: {state: fail, evidence: "subagent identity only via title regex '(@x subagent)'"}
     T1: {state: fail, evidence: "ledger: JSON tree → SQLite migration in window"}
-    T2: {state: pass, evidence: "session.version field (tracks the app version, not a schema version)"}
+    T2: {state: fail, evidence: "session.version tracks the application version, not a schema version (rescored in v0.3)"}
     T3: {state: pass, evidence: "version tracks app version"}
     O1: {state: pass, evidence: "standard SQLite, JSON columns readable"}
     O2: {state: fail, evidence: "database rows; nothing to tail"}

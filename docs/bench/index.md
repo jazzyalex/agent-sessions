@@ -73,11 +73,13 @@ surface: {{ site.data.session_bench.surface }} ·
 <p class="bench-note">Ranking is by fraction of scored gates cleared; ties
 share a rank. A gate whose measurement could not be taken for a harness is
 marked <em>not run</em> and drops out of that harness's denominator — an
-authentication failure is not evidence about a format. Ranks marked †
+authentication failure is not evidence about a format, and an observation
+window too short to judge stability (Kimi, onboarded 2026-07-25) is not
+evidence of stability. Ranks marked †
 are provisional: hover for the best/worst range pending the missing
 measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash
-tolerance) is defined but unscored in v0.2 pending a real cross-harness
+tolerance) is defined but unscored pending a real cross-harness
 truncation experiment.</p>
 
 Each area answers one question a developer actually has:
@@ -190,6 +192,18 @@ behind it.
   observation window — Kimi's ~10 days is too short to establish stability
   and is now not-run. Denominators shifted accordingly.
 
+- **2026-08-12 (third correction) — v0.2 → v0.3: T2 tightened to format
+  versions only.** v0.2 still awarded "declares a version" to harnesses
+  that stamp an application/CLI version — the original defect restated.
+  T2 now requires a schema/protocol version an external reader can
+  dispatch on: Pi (`version` 1-3, documented), OpenClaw (`version` 3), and
+  Kimi (`protocol_version`) keep the point; Claude Code, Codex, Copilot,
+  and OpenCode lose it (their stamps identify the writer, not the format),
+  and their T3 becomes not-applicable. Claude and Codex 14→12/18,
+  OpenCode 13→11/17, Copilot 12→10/18. The Codex C6/C7 evidence now cites
+  a pinned artifact set with hashes
+  ([receipt](https://github.com/jazzyalex/agent-sessions/blob/main/scripts/session_bench/receipts-2026-08-12-codex-c6c7.md)).
+
 ## Method
 
 What this is, stated precisely: scores are mechanically generated from
@@ -210,7 +224,7 @@ The probe is one identical prompt — "{{ site.data.session_bench.probe_prompt }
 attempted through each harness's {{ site.data.session_bench.surface }};
 where it produced a session, the artifact was measured byte-for-byte, and
 where it could not run, the affected gate says so. Desktop apps and IDE surfaces may use different
-stores; v0.1 scores the CLI session store only, and says so. Completeness,
+stores; this bench scores the CLI session store only, and says so. Completeness,
 Openness, and Tooling verdicts are checklist items evaluated against real
 session files, the sanitized fixtures in the Agent Sessions repo, and the
 parsers that read all ten formats in production. Stability comes from a
