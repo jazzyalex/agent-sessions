@@ -1,4 +1,4 @@
-# Codex task: Session Bench public receipts repo
+# Codex task: Session-Bench public receipts repo
 
 Owner: Alex (@jazzyalex). Prepared 2026-08-07 by Claude (main session).
 Model to copy: github.com/phuryn/experiments ("when a post claims a number,
@@ -8,7 +8,7 @@ layout, and especially its Anonymization section (rules as code).
 ## Goal
 
 A new public repo, **jazzyalex/session-bench**, holding the receipts behind
-Session Bench (live at jazzyalex.github.io/agent-sessions/bench/): redacted
+Session-Bench (live at jazzyalex.github.io/agent-sessions/bench/): redacted
 probe artifacts, measurement outputs, per-gate evidence, and the graphics —
 so every cell on the leaderboard has an inspectable receipt. The scoring
 engine stays in agent-sessions (scripts/session_bench/); this repo holds

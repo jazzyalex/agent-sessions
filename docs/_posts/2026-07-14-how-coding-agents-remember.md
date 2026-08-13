@@ -285,7 +285,7 @@ renames a field. For files this valuable, that is a strange industry norm.
 storage layout and persisted event types, and Hermes documents its
 persistence layers and stored fields — both existed when this was written
 and our search missed them. The claim holds for Claude Code, Codex, Cursor,
-and OpenCode. [Session Bench]({{ '/bench/' | relative_url }}) now tracks
+and OpenCode. [Session-Bench]({{ '/bench/' | relative_url }}) now tracks
 this per-harness, with links to each vendor's documentation.*
 
 ## What a session format should be
@@ -332,5 +332,5 @@ and never writes back. The measurement script and raw aggregates behind
 every number here are in the repo, and the companion post on the exact disk
 locations is [here]({% post_url 2026-07-11-where-agents-store-history %}).
 This field study later grew into a standing benchmark:
-[Session Bench]({{ '/bench/' | relative_url }}) now scores ten formats on
+[Session-Bench]({{ '/bench/' | relative_url }}) now scores ten formats on
 nineteen pass/fail gates, with the evidence behind every cell.

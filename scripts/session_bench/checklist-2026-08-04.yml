@@ -1,4 +1,4 @@
-# Session Bench manual-gate checklist. Signal gates (S1-S3) are computed by
+# Session-Bench manual-gate checklist. Signal gates (S1-S3) are computed by
 # evaluate.py from measurements-*.json; every verdict here is a checklist item
 # with its evidence. P2 is globally untested (excluded from scoring) until a
 # cross-harness truncation experiment exists.

@@ -1,16 +1,16 @@
 ---
 layout: blog
-title: "Session Bench — the coding-agent session-format benchmark"
-description: "Session Bench measures whether coding-agent harnesses preserve a useful, inspectable, and portable record of their work. SWE-bench measures whether the agent completed the work; Session Bench measures what the harness preserved after it was done."
+title: "Session-Bench — the coding-agent session-format benchmark"
+description: "Session-Bench measures whether coding-agent harnesses preserve a useful, inspectable, and portable record of their work. SWE-bench measures whether the agent completed the work; Session-Bench measures what the harness preserved after it was done."
 permalink: /bench/
 image: /assets/bench-social-card.png
 ---
 <p class="eyebrow">Agent Sessions</p>
-<h1>Session Bench</h1>
-<p class="lede">Session Bench measures whether coding-agent harnesses
+<h1>Session-Bench</h1>
+<p class="lede">Session-Bench measures whether coding-agent harnesses
 preserve a useful, inspectable, and portable record of their work — the
 session files they write to disk. SWE-bench measures whether the agent
-completed the work; Session Bench measures what the harness preserved
+completed the work; Session-Bench measures what the harness preserved
 after the work was done. Nineteen scored pass/fail gates across five
 areas, each backed by a measurement, a fixture, or a monitoring-ledger
 entry. No partial credit: a gate is pass, fail, or explicitly
@@ -96,12 +96,12 @@ tolerance) is defined but unscored pending a real cross-harness
 truncation experiment.</p>
 
 <details class="bench-poster">
-  <summary>View or download the Session Bench v0.3 poster</summary>
+  <summary>View or download the Session-Bench v0.3 poster</summary>
   <figure>
-    <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session Bench poster">
+    <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session-Bench poster">
       <img src="{{ '/assets/session-bench-poster.png' | relative_url }}"
            width="1024" height="1536"
-           alt="Session Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
+           alt="Session-Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
            loading="lazy">
     </a>
     <figcaption class="bench-note">Open the image for the full-resolution 1024 × 1536 poster.</figcaption>

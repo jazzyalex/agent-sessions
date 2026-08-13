@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session Bench evaluator.
+"""Session-Bench evaluator.
 
 Reads a measurements manifest (probe + corpus numbers) and the manual-gate
 checklist, computes the Signal gates from thresholds, merges verdicts, and

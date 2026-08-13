@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session Bench measurement extractor.
+"""Session-Bench measurement extractor.
 
 Given a session artifact, recompute the numbers the manifest records:
 physical bytes, record count, largest single record, and (for JSONL) the

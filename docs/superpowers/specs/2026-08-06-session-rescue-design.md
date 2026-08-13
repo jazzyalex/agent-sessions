@@ -251,7 +251,7 @@ In-app: one toggle, **Rescue**, on by default for Claude.
 hold the primary evidence: mtime-keyed `unlink()`, no trash, the `deleted_<uuid>` tombstones
 sitting on disk, the Desktop update wipe, the 6.3 GB corpus measurements, the compression numbers.
 "Anatomy of how Claude Code deletes your work" carries the feature as its closing CTA, not its
-headline. Sequence: ship week 1, publish week 2, return to Session Bench.
+headline. Sequence: ship week 1, publish week 2, return to Session-Bench.
 
 ## 9. Testing
 

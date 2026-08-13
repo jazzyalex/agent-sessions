@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Session Bench: 19 pass/fail gates for coding-agent session formats"
+title: "Session-Bench: 19 pass/fail gates for coding-agent session formats"
 description: "We scored what ten coding agents write to disk — signal density, completeness, stability, openness, tooling cost. Pass, fail, or not run; no partial credit. Pi tops it. Cursor comes last. Pi documents its format properly; most still don't."
 date: 2026-08-07
 last_modified_at: 2026-08-12
@@ -25,9 +25,9 @@ formats.
 
 Opinions about that are cheap, so we turned ours into a benchmark — of
 the layer existing benchmarks skip. SWE-bench measures whether the agent
-completed the work; Session Bench measures what the harness preserved
+completed the work; Session-Bench measures what the harness preserved
 after the work was done.
-**[Session Bench]({{ '/bench/' | relative_url }})** scores the session
+**[Session-Bench]({{ '/bench/' | relative_url }})** scores the session
 format of every harness we support on nineteen scored pass/fail gates
 across five areas: signal density, completeness, stability, openness, and
 tooling cost. No partial credit, no vibes; a gate is pass, fail, or
@@ -41,13 +41,13 @@ stated plainly: the bench measures each harness's CLI session store; desktop and
 IDE surfaces can differ and get their own rows in a future version.
 
 <figure class="post-figure bench-poster-figure">
-  <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session Bench poster">
+  <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session-Bench poster">
     <img src="{{ '/assets/session-bench-poster.png' | relative_url }}"
          width="1024" height="1536"
-         alt="Session Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
+         alt="Session-Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
          loading="eager">
   </a>
-  <figcaption>Session Bench v0.3 at a glance. Open the image for the full-resolution poster.</figcaption>
+  <figcaption>Session-Bench v0.3 at a glance. Open the image for the full-resolution poster.</figcaption>
 </figure>
 
 ## The v0.3 leaderboard
@@ -91,7 +91,7 @@ exactly that.
 </style>
 <svg viewBox="0 0 720 396" role="img" aria-label="Bar chart: bytes written for the identical one-line task, by agent. OpenCode 274 KB as a fresh database file, Kimi 101 KB, Codex 78 KB, Copilot 67 KB, Claude Code 40 KB, Antigravity 6.8 KB, Cursor 1.9 KB, Pi 1.5 KB.">
   <text x="12" y="20" font-size="14" font-weight="600" fill="var(--viz-ink)">Bytes on disk for the identical one-line task</text>
-  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">The Session Bench probe prompt — measured 2026-08-04</text>
+  <text x="12" y="38" font-size="12" fill="var(--viz-ink2)">The Session-Bench probe prompt — measured 2026-08-04</text>
   <line x1="140" y1="52" x2="140" y2="356" stroke="var(--viz-axis)" stroke-width="1"/>
   <g font-size="12.5">
     <text x="132" y="72" text-anchor="end" fill="var(--viz-ink)">OpenCode</text>

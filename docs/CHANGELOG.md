@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Improvements
-- **Session Bench now includes a shareable v0.3 poster.** The launch article shows the full leaderboard graphic, while the benchmark page keeps it available in a compact download section beneath the scored table.
+- **Session-Bench now includes a shareable v0.3 poster.** The launch article shows the full leaderboard graphic, while the benchmark page keeps it available in a compact download section beneath the scored table.
 
 ### Bug Fixes
 - **"Live sessions only" includes Claude Desktop chats.** Claude Desktop sessions have no terminal process for the usual live probes to find, so the filter could hide running Claude chats even though the Quota Meter saw their runway rows. The live session engine now synthesizes Claude Desktop presences from the same runway identities, preserving active/idle state and avoiding duplicates when a transcript is already claimed by another probe. The approach — Claude Desktop chats as first-class live presences — came from @Krazycatt in [#51](https://github.com/jazzyalex/agent-sessions/pull/51); my thanks.
