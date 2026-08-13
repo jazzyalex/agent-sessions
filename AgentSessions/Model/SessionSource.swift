@@ -13,6 +13,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case cursor = "cursor"
     case pi = "pi"
     case kimi = "kimi"
+    case grok = "grok"
 
     public var displayName: String {
         switch self {
@@ -27,6 +28,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .cursor: return "Cursor"
         case .pi: return "Pi"
         case .kimi: return "Kimi Code"
+        case .grok: return "Grok CLI"
         }
     }
 
@@ -43,6 +45,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .cursor: return "cursorarrow.rays"
         case .pi: return "p.circle"
         case .kimi: return "k.circle"
+        case .grok: return "g.circle"
         }
     }
 
@@ -58,6 +61,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .cursor:           return "3.2"
         case .pi:               return "3.8"
         case .kimi:             return "4.7"
+        case .grok:             return "4.8"
         }
     }
 
@@ -74,6 +78,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .cursor:   return "Import and search your Cursor AI sessions"
         case .pi:       return "Browse your Pi coding agent sessions"
         case .kimi:     return "Browse your Kimi Code sessions"
+        case .grok:     return "Browse your Grok CLI sessions"
         }
     }
 }

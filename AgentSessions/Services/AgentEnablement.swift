@@ -62,6 +62,8 @@ enum AgentEnablement {
             return isAvailable(.pi, defaults: defaults)
         case .kimi:
             return isAvailable(.kimi, defaults: defaults)
+        case .grok:
+            return isAvailable(.grok, defaults: defaults)
         default:
             return true
         }
@@ -89,6 +91,7 @@ enum AgentEnablement {
         case .cursor:   return PreferencesKey.Agents.cursorEnabled
         case .pi:       return PreferencesKey.Agents.piEnabled
         case .kimi:     return PreferencesKey.Agents.kimiEnabled
+        case .grok:     return PreferencesKey.Agents.grokEnabled
         }
     }
 
@@ -194,6 +197,7 @@ enum AgentEnablement {
             setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
             setEnabledInternal(.pi, enabled: isAvailable(.pi, defaults: defaults), defaults: defaults)
             setEnabledInternal(.kimi, enabled: isAvailable(.kimi, defaults: defaults), defaults: defaults)
+            setEnabledInternal(.grok, enabled: isAvailable(.grok, defaults: defaults), defaults: defaults)
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
@@ -208,6 +212,7 @@ enum AgentEnablement {
             let cursor = isAvailable(.cursor, defaults: defaults)
             let pi = isAvailable(.pi, defaults: defaults)
             let kimi = isAvailable(.kimi, defaults: defaults)
+            let grok = isAvailable(.grok, defaults: defaults)
 
             setEnabledInternal(.codex, enabled: codex, defaults: defaults)
             setEnabledInternal(.claude, enabled: claude, defaults: defaults)
@@ -220,6 +225,7 @@ enum AgentEnablement {
             setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
             setEnabledInternal(.pi, enabled: pi, defaults: defaults)
             setEnabledInternal(.kimi, enabled: kimi, defaults: defaults)
+            setEnabledInternal(.grok, enabled: grok, defaults: defaults)
         }
 
         // Guarantee at least one enabled agent.
@@ -283,6 +289,9 @@ enum AgentEnablement {
         case .kimi:
             let custom = defaults.string(forKey: PreferencesKey.Paths.kimiSessionsRootOverride) ?? ""
             root = KimiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
+        case .grok:
+            let custom = defaults.string(forKey: PreferencesKey.Paths.grokSessionsRootOverride) ?? ""
+            root = GrokSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         }
         if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
         if source == .droid {
@@ -322,6 +331,15 @@ enum AgentEnablement {
             return binaryDetectedCached("pi")
         case .kimi:
             return binaryDetectedCached("kimi")
+        case .grok:
+            // Homebrew also ships an unrelated `grok` formula (jordansissel/grok,
+            // a regex utility), so a bare PATH hit is not evidence of the Grok
+            // CLI. Require the CLI's own home directory alongside the binary.
+            guard binaryDetectedCached("grok") else { return false }
+            let grokHome = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".grok", isDirectory: true)
+            var isGrokHome: ObjCBool = false
+            return FileManager.default.fileExists(atPath: grokHome.path, isDirectory: &isGrokHome) && isGrokHome.boolValue
         }
     }
 
@@ -376,6 +394,8 @@ enum AgentEnablement {
             return defaults.object(forKey: PreferencesKey.piCLIAvailable) as? Bool
         case .kimi:
             return defaults.object(forKey: PreferencesKey.kimiCLIAvailable) as? Bool
+        case .grok:
+            return defaults.object(forKey: PreferencesKey.grokCLIAvailable) as? Bool
         }
     }
 

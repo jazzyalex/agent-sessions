@@ -160,3 +160,24 @@ agents:
       - "AgentSessionsTests/KimiSessionParserTests.swift"
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
+  grok_cli:
+    max_verified_version: "1.0.0"
+    version_field: "not_logged"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, and analytics"
+    unsupported_surfaces:
+      - "live/active status"
+      - "usage/rate-limit tracking"
+      - "subagent hierarchy"
+      - "weekly session-format monitoring (no agent_watch driver yet)"
+    evidence_docs:
+      - "grok --help at 1.0.0 (3cd0d0cbcebe)"
+    evidence_captures:
+      - "~/.grok/sessions/<percent-encoded workdir>/<sessionId>/ (141 sessions surveyed)"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/grok/chat_history.jsonl"
+      - "Resources/Fixtures/stage0/agents/grok/summary.json"
+    evidence_tests:
+      - "AgentSessionsTests/GrokSessionParserTests.swift"
+      - "AgentSessionsTests/GrokSessionDiscoveryTests.swift"
+    evidence_tools:
+      - "scripts/grok_chat_schema_probe.py"

@@ -21,6 +21,7 @@ final class AnalyticsService: ObservableObject {
     private let droidIndexer: DroidSessionIndexer
     private let piIndexer: PiSessionIndexer
     private let kimiIndexer: KimiSessionIndexer
+    private let grokIndexer: GrokSessionIndexer
 
     private var cancellables = Set<AnyCancellable>()
     private let repository: AnalyticsRepository?
@@ -36,7 +37,8 @@ final class AnalyticsService: ObservableObject {
          copilotIndexer: CopilotSessionIndexer,
          droidIndexer: DroidSessionIndexer,
          piIndexer: PiSessionIndexer,
-         kimiIndexer: KimiSessionIndexer) {
+         kimiIndexer: KimiSessionIndexer,
+         grokIndexer: GrokSessionIndexer) {
         self.codexIndexer = codexIndexer
         self.claudeIndexer = claudeIndexer
         self.antigravityIndexer = antigravityIndexer
@@ -46,6 +48,7 @@ final class AnalyticsService: ObservableObject {
         self.droidIndexer = droidIndexer
         self.piIndexer = piIndexer
         self.kimiIndexer = kimiIndexer
+        self.grokIndexer = grokIndexer
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -96,6 +99,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
         if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
         if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -130,6 +134,7 @@ final class AnalyticsService: ObservableObject {
         if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
         if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
         if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
+        if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -744,7 +749,7 @@ final class AnalyticsService: ObservableObject {
         Publishers.CombineLatest3(
             Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
             Publishers.CombineLatest3(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase, droidIndexer.$launchPhase),
-            Publishers.CombineLatest(piIndexer.$launchPhase, kimiIndexer.$launchPhase)
+            Publishers.CombineLatest3(piIndexer.$launchPhase, kimiIndexer.$launchPhase, grokIndexer.$launchPhase)
         )
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -767,7 +772,8 @@ final class AnalyticsService: ObservableObject {
                 (SessionSource.copilot, copilotIndexer.launchPhase),
                 (SessionSource.droid, droidIndexer.launchPhase),
                 (SessionSource.pi, piIndexer.launchPhase),
-                (SessionSource.kimi, kimiIndexer.launchPhase)
+                (SessionSource.kimi, kimiIndexer.launchPhase),
+                (SessionSource.grok, grokIndexer.launchPhase)
             ].filter { enabled.contains($0.0) }.map { $0.1 }
             let phasesReady = phases.allSatisfy { phase in
                 switch phase {

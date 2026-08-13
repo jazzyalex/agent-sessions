@@ -102,6 +102,10 @@ enum TranscriptColorSystem {
         case .kimi:
             // Indigo-violet accent, distinct from Codex's blue and OpenCode's purple.
             return adaptiveBrand(NSColor(calibratedRed: 0.46, green: 0.34, blue: 0.82, alpha: 1.0))
+        case .grok:
+            // Slate blue-grey, echoing xAI's monochrome mark while staying clear
+            // of Codex's deep blue and Cursor's teal.
+            return adaptiveBrand(NSColor(calibratedRed: 0.35, green: 0.40, blue: 0.52, alpha: 1.0))
         }
     }
 

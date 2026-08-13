@@ -278,6 +278,8 @@ struct OnboardingPalette {
             return Color.agentPi
         case .kimi:
             return Color.agentKimi
+        case .grok:
+            return Color.agentGrok
         }
     }
 }

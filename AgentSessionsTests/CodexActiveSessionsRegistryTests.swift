@@ -3777,6 +3777,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             cursorList: [],
             piList: [],
             kimiList: [],
+            grokList: [],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: [favoriteKey]),
             favoritesVersion: 1,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
@@ -3790,7 +3791,8 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 openClaw: false,
                 cursor: false,
                 pi: false,
-                kimi: false
+                kimi: false,
+                grok: false
             )
         )
 
@@ -3815,6 +3817,7 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             cursorList: [],
             piList: [],
             kimiList: [],
+            grokList: [],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 3,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
@@ -3828,7 +3831,8 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
                 openClaw: false,
                 cursor: false,
                 pi: false,
-                kimi: false
+                kimi: false,
+                grok: false
             )
         )
 

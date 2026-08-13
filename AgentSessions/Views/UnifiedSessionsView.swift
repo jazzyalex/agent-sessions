@@ -340,6 +340,7 @@ struct UnifiedSessionsView: View {
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
     let kimiIndexer: KimiSessionIndexer
+    let grokIndexer: GrokSessionIndexer
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -427,6 +428,7 @@ struct UnifiedSessionsView: View {
 	    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
 	    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
 	    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+	    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
 	    @State private var autoSelectEnabled: Bool = true
 	    @State private var isDatasetChurning: Bool = false
 	    // Set by updateCachedRows() exactly when the canonical selection id was
@@ -487,6 +489,7 @@ struct UnifiedSessionsView: View {
          cursorIndexer: CursorSessionIndexer,
          piIndexer: PiSessionIndexer,
          kimiIndexer: KimiSessionIndexer,
+         grokIndexer: GrokSessionIndexer,
          analyticsReady: Bool,
          analyticsPhase: AnalyticsIndexPhase,
          analyticsIsStale: Bool,
@@ -504,6 +507,7 @@ struct UnifiedSessionsView: View {
         self.cursorIndexer = cursorIndexer
         self.piIndexer = piIndexer
         self.kimiIndexer = kimiIndexer
+        self.grokIndexer = grokIndexer
         self.analyticsReady = analyticsReady
         self.analyticsPhase = analyticsPhase
         self.analyticsIsStale = analyticsIsStale
@@ -575,6 +579,11 @@ struct UnifiedSessionsView: View {
                 transcriptCache: kimiIndexer.searchTranscriptCache,
                 update: { kimiIndexer.updateSession($0) },
                 parseFull: { url, _ in KimiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
+            ),
+            .grok: .init(
+                transcriptCache: grokIndexer.searchTranscriptCache,
+                update: { grokIndexer.updateSession($0) },
+                parseFull: { url, _ in GrokSessionParser.parseFileFull(at: url, allowLargeFile: true) }
             ),
         ])
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
@@ -680,8 +689,10 @@ struct UnifiedSessionsView: View {
 
         let afterKimi = afterPi
             .onChange(of: unified.includeKimi) { _, _ in restartSearchIfRunning() }
+        let afterGrok = afterKimi
+            .onChange(of: unified.includeGrok) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterKimi
+        let afterActiveOnly = afterGrok
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -734,6 +745,7 @@ struct UnifiedSessionsView: View {
 			.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 			.onChange(of: kimiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
+			.onChange(of: grokAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 
 		let afterSessions = afterAgents
 			.onReceive(unified.$sessions) { sessions in
@@ -1535,6 +1547,11 @@ struct UnifiedSessionsView: View {
             // valid fallback when the working directory is known, so
             // copyResumeCommand may still decline; see its .kimi arm.
             return true
+        case .grok:
+            // session.id is the on-disk session dir (a bare UUIDv7).
+            // `--continue` is only a valid fallback when the working directory
+            // is known, so copyResumeCommand may still decline; see its .grok arm.
+            return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         default:
@@ -1657,6 +1674,20 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
+        case .grok:
+            let settings = GrokSettings.shared
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            // Same refusal as GrokResumeCoordinator: `--continue` resolves
+            // against the working directory, so without a `cd` it would hand the
+            // user a command that reopens an unrelated session.
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
+            let builder = GrokResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary) else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            write(command)
+
         case .antigravity:
             let settings = AntigravityCLISettings.shared
             guard let sid = antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session) else { return }
@@ -1687,7 +1718,8 @@ struct UnifiedSessionsView: View {
                                openclawIndexer: openclawIndexer,
                                cursorIndexer: cursorIndexer,
                                piIndexer: piIndexer,
-                               kimiIndexer: kimiIndexer)
+                               kimiIndexer: kimiIndexer,
+                               grokIndexer: grokIndexer)
                 .environmentObject(focusCoordinator)
                 .environmentObject(searchState)
                 .id("transcript-host")
@@ -1710,6 +1742,7 @@ struct UnifiedSessionsView: View {
                         case .cursor: return "Cursor"
                         case .pi: return "Pi"
                         case .kimi: return "Kimi Code"
+                        case .grok: return "Grok CLI"
                         }
                     }()
                     let accent: Color = sourceAccent(s)
@@ -1983,6 +2016,11 @@ struct UnifiedSessionsView: View {
             // ⌘1–⌘9 are fully allocated (Codex=1, Claude=2, … Pi=9), so Kimi
             // takes no shortcut — same as Hermes.
             specs.append(.init(id: "kimi", title: "Kimi Code", color: Color.agentKimi, isOn: $unified.includeKimi, shortcut: nil))
+        }
+        if grokAgentEnabled {
+            // ⌘1–⌘9 are fully allocated (Codex=1, Claude=2, … Pi=9), so Kimi
+            // takes no shortcut — same as Hermes.
+            specs.append(.init(id: "grok", title: "Grok CLI", color: Color.agentGrok, isOn: $unified.includeGrok, shortcut: nil))
         }
         return specs
     }
@@ -2495,6 +2533,8 @@ struct UnifiedSessionsView: View {
             if !unified.includePi { unified.includePi = true }
         case .kimi:
             if !unified.includeKimi { unified.includeKimi = true }
+        case .grok:
+            if !unified.includeGrok { unified.includeGrok = true }
         }
     }
 
@@ -2553,6 +2593,8 @@ struct UnifiedSessionsView: View {
             if unified.piAgentEnabled, let e = piIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { piIndexer.reloadSession(id: id); return true }
         case .kimi:
             if unified.kimiAgentEnabled, let e = kimiIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { kimiIndexer.reloadSession(id: id); return true }
+        case .grok:
+            if unified.grokAgentEnabled, let e = grokIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { grokIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -2916,6 +2958,7 @@ struct UnifiedSessionsView: View {
         case .cursor: label = "Cursor"
         case .pi: label = "Pi"
         case .kimi: label = "Kimi Code"
+        case .grok: label = "Grok CLI"
         }
         let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
         return HStack(spacing: 6) {
@@ -3189,6 +3232,7 @@ struct UnifiedSessionsView: View {
         case .cursor: return "Cursor CLI"
         case .pi: return "Pi CLI"
         case .kimi: return "Kimi Code"
+        case .grok: return "Grok CLI"
         case .antigravity: return "Antigravity CLI"
         default: return "CLI"
         }
@@ -3200,7 +3244,7 @@ struct UnifiedSessionsView: View {
             return canResumeCodexInCLI(s)
         case .claude:
             return !s.isClaudeWorkflowSubagent
-        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi:
+        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok:
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
@@ -3346,6 +3390,25 @@ struct UnifiedSessionsView: View {
                 let result = await coord.resumeInTerminal(input: input, dryRun: false)
                 reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
+        case .grok:
+            let settings = GrokSettings.shared
+            let sid = s.id
+            let wd = effectiveWorkingDirectoryURL(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = GrokResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: GrokTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return GrokITermLauncher()
+                    case .warp:                    return GrokWarpLauncher()
+                    case .warpPreview:             return GrokWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return GrokTerminalLauncher()
+                    }
+                }()
+                let coord = GrokResumeCoordinator(env: GrokCLIEnvironment(), builder: GrokResumeCommandBuilder(), launcher: launcher)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
+            }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
             let sid = AntigravitySessionIDHelper.deriveSessionID(from: s)
@@ -3459,12 +3522,13 @@ struct UnifiedSessionsView: View {
                                 includeCursor: unified.includeCursor && cursorAgentEnabled,
                                 includePi: unified.includePi && piAgentEnabled,
                                 includeKimi: unified.includeKimi && kimiAgentEnabled,
+                                includeGrok: unified.includeGrok && grokAgentEnabled,
                                 enableDeepScan: searchCoordinator.deepScanEnabled,
                                 all: unified.allSessions)
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled && kimiAgentEnabled)
+        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled && kimiAgentEnabled && grokAgentEnabled)
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
@@ -3489,6 +3553,7 @@ struct UnifiedSessionsView: View {
         case .cursor: return Color.agentCursor
         case .pi: return Color.agentPi
         case .kimi: return Color.agentKimi
+        case .grok: return Color.agentGrok
         }
     }
 
@@ -3983,6 +4048,7 @@ private struct TranscriptHostView: View {
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
     let kimiIndexer: KimiSessionIndexer
+    let grokIndexer: GrokSessionIndexer
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -4199,6 +4265,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var searchState: UnifiedSearchState
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -4336,6 +4403,7 @@ private struct UnifiedSearchFiltersView: View {
                      includeCursor: unified.includeCursor,
                      includePi: unified.includePi && piAgentEnabled,
                      includeKimi: unified.includeKimi && kimiAgentEnabled,
+                     includeGrok: unified.includeGrok && grokAgentEnabled,
                      enableDeepScan: deepScan,
                      all: unified.allSessions)
     }
@@ -4373,6 +4441,7 @@ private struct UnifiedSearchFiltersView: View {
                          includeCursor: unified.includeCursor,
                          includePi: unified.includePi && piAgentEnabled,
                          includeKimi: unified.includeKimi && kimiAgentEnabled,
+                         includeGrok: unified.includeGrok && grokAgentEnabled,
                          enableDeepScan: false,
                          all: unified.allSessions)
         }

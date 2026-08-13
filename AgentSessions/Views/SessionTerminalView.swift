@@ -307,6 +307,7 @@ struct SessionTerminalView: View {
         case .cursor: return "Cursor"
         case .pi: return "Pi"
         case .kimi: return "Kimi Code"
+        case .grok: return "Grok CLI"
         }
     }
 

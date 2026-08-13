@@ -20,6 +20,7 @@ struct FirstRunSetupView: View {
     let cursorIndexer: CursorSessionIndexer
     let piIndexer: PiSessionIndexer
     let kimiIndexer: KimiSessionIndexer
+    let grokIndexer: GrokSessionIndexer
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -35,6 +36,7 @@ struct FirstRunSetupView: View {
     @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
+    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -104,6 +106,7 @@ struct FirstRunSetupView: View {
         .onReceive(cursorIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(piIndexer.$allSessions) { _ in handleSessionDataUpdate() }
         .onReceive(kimiIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(grokIndexer.$allSessions) { _ in handleSessionDataUpdate() }
     }
 
     private var content: some View {
@@ -352,6 +355,7 @@ struct FirstRunSetupView: View {
         case .cursor: return cursorIndexer.allSessions
         case .pi: return piIndexer.allSessions
         case .kimi: return kimiIndexer.allSessions
+        case .grok: return grokIndexer.allSessions
         }
     }
 
@@ -394,6 +398,7 @@ struct FirstRunSetupView: View {
         case .cursor: return cursorAgentEnabled
         case .pi: return piAgentEnabled
         case .kimi: return kimiAgentEnabled
+        case .grok: return grokAgentEnabled
         }
     }
 
@@ -439,7 +444,7 @@ struct FirstRunSetupView: View {
 
         if hasCommandsOnlyPref {
             switch session.source {
-            case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi:
+            case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok:
                 if !session.events.isEmpty {
                     if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
                 } else {
