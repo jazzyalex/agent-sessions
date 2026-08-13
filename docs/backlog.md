@@ -5,6 +5,26 @@ decision if one was made. Newest on top.
 
 ---
 
+## Transcript UI
+
+### Inline images lost their right-click menu everywhere
+- **Where:** the inline image row in the transcript —
+  [InlineImageThumbnailGridView.swift](../AgentSessions/Views/InlineImageThumbnailGridView.swift)
+  and its host [TranscriptBlockListView.swift](../AgentSessions/Views/TranscriptBlockListView.swift).
+- **What:** inline image thumbnails no longer offer a right-click context menu in any
+  provider's transcript. Click-to-open still works and is the preferred primary
+  interaction, so this is about the secondary actions the menu carried (copy, reveal,
+  open externally), not about changing how a plain click behaves.
+- **Why deferred:** reported 2026-08-13 while verifying Grok inline images; explicitly
+  deferred by the owner rather than fixed in that pass. Not caused by the Grok inline
+  image work, which only widened the per-source gating in
+  `SessionInlineImageMapper` / `refreshRichInlineImages` and touched no gesture or menu
+  code — so the loss predates it and needs its own bisect.
+- **Note:** any fix should keep click-to-open as the primary gesture; the menu is
+  additive, not a replacement.
+
+---
+
 ## Agent Source Plumbing
 
 ### Hand-maintained per-source lists drift every time an agent is added

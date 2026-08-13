@@ -101,11 +101,23 @@ actor ImageBrowserIndexCache {
         let createdAt = Int64(Date().timeIntervalSince1970)
 
         switch session.source {
-        case .codex, .claude, .openclaw:
+        case .codex, .claude, .openclaw, .grok, .kimi, .pi, .hermes, .cursor:
             let located: [Base64ImageDataURLScanner.LocatedSpan] = {
                 do {
                     switch session.source {
-                    case .codex:
+                    case .codex, .grok, .kimi, .pi, .hermes, .cursor:
+                        // Grok inlines the whole image as a `data:image/…;base64,…`
+                        // value on an `image` content part's `url` key, so the generic
+                        // scanner finds it without a provider-specific reader.
+                        //
+                        // Kimi, Pi, Hermes and Cursor are wired to the same scanner on
+                        // the assumption they inline data URIs too — unverified. Their
+                        // parsers only ever emit a marker ("[image]", "Image attached")
+                        // and never read the payload, and no local session for any of
+                        // them contains a `data:image/` URI, so there was nothing to
+                        // confirm the shape against. If one of them references images
+                        // by path or https URL instead, this scan finds nothing and
+                        // that provider needs its own reader rather than this arm.
                         return try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     case .claude:
                         return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
@@ -124,9 +136,15 @@ actor ImageBrowserIndexCache {
                 let span = item.span
                 guard span.base64PayloadLength >= 64, span.approxBytes >= 32 else { return false }
                 switch session.source {
-                case .codex:
+                case .codex, .kimi, .pi, .hermes, .cursor:
+                    // The conservative filter for the providers whose payload shape is
+                    // unconfirmed: require the match to sit in something that reads like
+                    // an image URL, so stray base64 in tool output cannot masquerade as
+                    // an attachment.
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: url, startOffset: span.startOffset)
-                case .claude, .openclaw:
+                case .claude, .openclaw, .grok:
+                    // Every Grok match is already an `image` content part's data URI,
+                    // so there is no non-image base64 to disambiguate the way Codex has.
                     return true
                 default:
                     return false
@@ -243,7 +261,12 @@ actor ImageBrowserIndexCache {
             saveIndex(built, forPath: session.filePath)
             return built
 
-        default:
+        case .droid:
+            // Deliberately no image extraction. Exhaustive on purpose — this used to be
+            // a `default:`, which silently gave every unlisted provider an empty index:
+            // Grok, Kimi, Pi, Hermes and Cursor all landed here and showed no images,
+            // with nothing to distinguish "this format has none" from "nobody wired it
+            // up". A new source now has to say which it is.
             let built = ImageBrowserStoredIndex(signature: signature,
                                                 spans: [],
                                                 openCodeImages: nil,

@@ -1090,10 +1090,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             return
         }
 
+        // Exhaustive on purpose. This was a `default:` that silently dropped every
+        // unlisted provider, which is why a Grok session with a real attachment showed
+        // it in the Image Browser and nothing in the transcript: the browser had been
+        // wired, this gate had not, and neither failed.
         switch session.source {
-        case .codex, .claude, .opencode, .antigravity, .copilot, .openclaw:
+        case .codex, .claude, .opencode, .antigravity, .copilot, .openclaw,
+             .grok, .kimi, .pi, .hermes, .cursor:
             break
-        default:
+        case .droid:
             richHasInlineImages = false
             richInlineImagesByBlockIndex = [:]
             return

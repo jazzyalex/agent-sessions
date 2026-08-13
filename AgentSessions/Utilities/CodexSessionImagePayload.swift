@@ -79,7 +79,17 @@ enum SessionInlineImageMapper {
 
         let hasAny: Bool = {
             switch session.source {
-            case .codex:
+            case .codex, .grok, .kimi, .pi, .hermes, .cursor:
+                // Same generic data-URI scanner these providers use in
+                // `ImageBrowserIndexCache`, so both paths agree on which providers can
+                // carry inline images and which scanner finds them.
+                //
+                // They do not agree on every individual span: the browser additionally
+                // drops anything under `base64PayloadLength >= 64 / approxBytes >= 32`
+                // and this path has no lower bound, so a very small image (a 1x1 GIF,
+                // say) renders inline while the browser omits it. That asymmetry
+                // predates Grok and applies to Codex too; tightening it here would
+                // change what Codex shows, so it is left alone deliberately.
                 return Base64ImageDataURLScanner.fileContainsBase64ImageDataURL(at: sessionFileURL,
                                                                                minimumBase64PayloadLength: 1,
                                                                                shouldCancel: shouldCancel)
@@ -100,7 +110,7 @@ enum SessionInlineImageMapper {
                 return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: shouldCancel)
             case .antigravity:
                 return AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionFileURL, shouldCancel: shouldCancel)
-            default:
+            case .droid:
                 return false
             }
         }()
@@ -109,7 +119,7 @@ enum SessionInlineImageMapper {
         let located: [InlineScanResult] = {
             do {
                 switch session.source {
-                case .codex:
+                case .codex, .grok, .kimi, .pi, .hermes, .cursor:
                     return try Base64ImageDataURLScanner
                         .scanFileWithLineIndexes(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                         .map { InlineScanResult(payload: .base64(sourceURL: sessionFileURL, span: $0.span), lineIndex: $0.lineIndex) }
@@ -159,7 +169,7 @@ enum SessionInlineImageMapper {
                         .scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                         .map { InlineScanResult(payload: .file(fileURL: $0.fileURL, mediaType: $0.mediaType, fileSizeBytes: $0.fileSizeBytes),
                                                 lineIndex: $0.lineIndex) }
-                default:
+                case .droid:
                     return []
                 }
             } catch {
@@ -169,14 +179,14 @@ enum SessionInlineImageMapper {
 
         let filtered: [InlineScanResult] = {
             switch session.source {
-            case .codex:
+            case .codex, .kimi, .pi, .hermes, .cursor:
                 return located.filter { item in
                     guard case .base64(_, let span) = item.payload else { return false }
                     return Base64ImageDataURLScanner.isLikelyImageURLContext(at: sessionFileURL, startOffset: span.startOffset)
                 }
-            case .claude, .opencode, .copilot, .openclaw, .antigravity:
+            case .claude, .opencode, .copilot, .openclaw, .antigravity, .grok:
                 return located
-            default:
+            case .droid:
                 return []
             }
         }()
