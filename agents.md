@@ -66,8 +66,14 @@ Suggested build steps
 ### Stable XCTest Invocation (avoid intermittent macOS code-sign flakes)
 - Prefer the stable test wrapper: `./scripts/xcode_test_stable.sh`.
 - Equivalent direct command:
-  - `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath "$PWD/.deriveddata-tests" -parallel-testing-enabled NO clean test`
+  - `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath .deriveddata-tests -parallel-testing-enabled NO clean test`
 - Rationale: isolates test artifacts/signing state from shared `DerivedData`, which avoids intermittent `AgentSessionsTests.xctest` nested-signature failures.
+- The path is deliberately **relative**. It used to read `"$PWD/.deriveddata-tests"`, which is
+  identical in a normal shell but breaks the moment the line is copied somewhere `$PWD` is not
+  expanded — a single-quoted string, a JSON/YAML field, or any runner that passes the argument
+  straight to `xcodebuild`. The literal directory `$PWD/` then gets created in the repo root.
+  That happened once and sat there unnoticed for four months, alongside a `Users/` tree from the
+  same mistake made with an absolute path that lost its leading slash. Keep it relative.
 
 ## Git Branch and Worktree Safety
 - **Never create, switch, rename, or delete a git branch without explicit user approval.** This includes `git checkout -b`, `git switch -c`, `git branch`, `git branch -d/-D`, and `git worktree add`.
