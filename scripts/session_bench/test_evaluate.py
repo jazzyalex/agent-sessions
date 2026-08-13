@@ -99,3 +99,25 @@ def test_computed_gate_override_rejected(tmp_path):
         capture_output=True, text=True, cwd=REPO)
     assert r.returncode != 0
     assert "may not override" in r.stderr
+
+
+def test_t2_not_run_makes_t3_not_run(tmp_path):
+    import yaml
+    bad = tmp_path / "t2nr.yml"
+    src = (HERE / "checklist-2026-08-04.yml").read_text()
+    assert 'T2: {state: fail, evidence: "no version marker (matrix: not_logged)"}' in src
+    bad.write_text(src.replace(
+        'T2: {state: fail, evidence: "no version marker (matrix: not_logged)"}',
+        'T2: {state: not_run, evidence: "hypothetical: could not inspect"}', 1))
+    out = tmp_path / "o.yml"
+    r = subprocess.run(
+        [sys.executable, str(HERE / "evaluate.py"),
+         "--measurements", str(HERE / "measurements-2026-08-04.json"),
+         "--checklist", str(bad), "--out", str(out)],
+        capture_output=True, text=True, cwd=REPO)
+    assert r.returncode == 0, r.stderr
+    data = yaml.safe_load(out.read_text())
+    cursor = next(a for a in data["agents"] if a["slug"] == "cursor")
+    assert cursor["results"]["T2"] == "not_run"
+    assert cursor["results"]["T3"] == "not_run"
+    assert "unresolved" in cursor["notes"]["T3"]

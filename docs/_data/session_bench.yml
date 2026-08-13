@@ -392,15 +392,16 @@ agents:
     C3: event_msg/token_count with cumulative usage
     C4: tokens only, no dollar figure anywhere
     C5: function_call + function_call_output items
-    C6: 'raw thinking is encrypted, but 701 of 1,915 reasoning items (36%) across
+    C6: 'raw thinking is encrypted, but 712 of 1,954 reasoning records (36%) across
       a pinned 5-rollout artifact set carry non-empty plaintext summary_text — a stored
       summary, which the gate accepts. Artifact IDs, hashes, and per-file counts:
       scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED from fail
       2026-08-12)'
-    C7: 'session_meta carries parent_thread_id (42 lines) and rollouts contain sub_agent_activity
-      records (198 lines) in the pinned 5-rollout set — subagent runs recoverable.
-      Receipt: scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED
-      from fail 2026-08-12)'
+    C7: 'structured records in the pinned 5-rollout set: 164 payload.type==sub_agent_activity
+      records and 3 records whose payload carries a parent_thread_id key (session_meta)
+      — subagent runs recoverable via first-class records. Receipt with hashes + query:
+      scripts/session_bench/receipts-2026-08-12-codex-c6c7.md (CORRECTED from fail
+      2026-08-12; counts corrected same day from substring to structured matching)'
     T1: 'ledger: ~6 additive drifts, envelope unchanged; observed 2026-03-31 → 2026-08-04
       (full window)'
     T2: stamps only cli_version — an application version identifying the writer, not

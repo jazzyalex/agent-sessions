@@ -20,6 +20,9 @@ from pathlib import Path
 
 
 def count(path: Path) -> dict:
+    """Structured counts only: record types and payload keys, never substring
+    matches — conversation text that merely mentions a field name must not
+    count as a structural record."""
     reasoning = with_summary = sub_agent = parent_thread = 0
     for raw in path.open(errors="replace"):
         try:
@@ -27,24 +30,25 @@ def count(path: Path) -> dict:
         except ValueError:
             continue
         payload = obj.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
         if payload.get("type") == "reasoning":
             reasoning += 1
             summary = payload.get("summary") or []
             if any(isinstance(x, dict) and x.get("type") == "summary_text"
                    and x.get("text") for x in summary):
                 with_summary += 1
-        line = json.dumps(obj)
-        if "sub_agent_activity" in line:
+        if payload.get("type") == "sub_agent_activity":
             sub_agent += 1
-        if "parent_thread_id" in line:
+        if "parent_thread_id" in payload:
             parent_thread += 1
     return {
         "file": path.name,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "reasoning": reasoning,
         "with_summary_text": with_summary,
-        "sub_agent_activity_lines": sub_agent,
-        "parent_thread_id_lines": parent_thread,
+        "sub_agent_activity_records": sub_agent,
+        "parent_thread_id_key_records": parent_thread,
     }
 
 
@@ -52,13 +56,15 @@ def main(argv: list[str]) -> int:
     rows = [count(Path(p)) for p in argv]
     tot = {k: sum(r[k] for r in rows)
            for k in ("reasoning", "with_summary_text",
-                     "sub_agent_activity_lines", "parent_thread_id_lines")}
+                     "sub_agent_activity_records", "parent_thread_id_key_records")}
     print("# Receipt: Codex C6/C7 verification (pinned artifact set, 2026-08-12)")
     print()
     print("Query: this script (`receipt_codex_c6c7.py`), verbatim — per line,")
-    print("parse JSON; count payload.type=='reasoning' items and those whose")
+    print("parse JSON; count payload.type=='reasoning' records and those whose")
     print("payload.summary contains a summary_text entry with non-empty text;")
-    print("count lines containing sub_agent_activity / parent_thread_id.")
+    print("count records with payload.type=='sub_agent_activity' and records")
+    print("whose payload carries a parent_thread_id KEY. Structured fields")
+    print("only — text that merely mentions a field name does not count.")
     print()
     print("The artifact set is pinned by filename and full SHA-256. The raw")
     print("files are private local session data; identity and query are")
@@ -68,14 +74,14 @@ def main(argv: list[str]) -> int:
         print(f"- `{r['file']}`")
         print(f"  sha256: `{r['sha256']}`")
         print(f"  reasoning {r['reasoning']}, with summary_text {r['with_summary_text']}, "
-              f"sub_agent_activity {r['sub_agent_activity_lines']}, "
-              f"parent_thread_id {r['parent_thread_id_lines']}")
+              f"sub_agent_activity records {r['sub_agent_activity_records']}, "
+              f"parent_thread_id-keyed records {r['parent_thread_id_key_records']}")
     pct = 100 * tot["with_summary_text"] // max(tot["reasoning"], 1)
     print()
-    print(f"Totals: reasoning items {tot['reasoning']:,}, with non-empty "
+    print(f"Totals: reasoning records {tot['reasoning']:,}, with non-empty "
           f"summary_text {tot['with_summary_text']:,} ({pct}%), "
-          f"sub_agent_activity lines {tot['sub_agent_activity_lines']}, "
-          f"parent_thread_id lines {tot['parent_thread_id_lines']}.")
+          f"sub_agent_activity records {tot['sub_agent_activity_records']}, "
+          f"parent_thread_id-keyed records {tot['parent_thread_id_key_records']}.")
     return 0
 
 
