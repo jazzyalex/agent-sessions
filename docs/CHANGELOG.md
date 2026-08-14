@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.8] - 2026-08-14
+
 ### Highlights
 - **Grok CLI is the eleventh current agent source Agent Sessions reads.** Its sessions land in the session list, in search, in Analytics and in the Image Browser, with tool calls, reasoning and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Grok CLI on your Mac, and Settings → Agents gains a Grok CLI pane for the binary path and storage root. Subagent runs are shown under the session that spawned them — Grok records that parentage in the parent's own tree, so `grok sessions list` does not show them at all. Schema verified against 141 real sessions. Contributed by [@thedavidweng](https://github.com/thedavidweng) in [#55](https://github.com/jazzyalex/agent-sessions/pull/55).
 
