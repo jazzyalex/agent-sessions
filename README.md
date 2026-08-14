@@ -25,7 +25,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg"><b>Download Agent Sessions 4.7 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.8/AgentSessions-4.8.dmg"><b>Download Agent Sessions 4.8 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -36,7 +36,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.7** — Kimi Code joins as the tenth current agent source, active Claude cloud sessions appear in the Quota Meter, and Pi and Cursor sessions get back the working directory their resume commands and project filters depend on. [See what's new ↓](#whats-new-in-47)
+> **New in 4.8** — Grok CLI joins as the eleventh current agent source, Analytics counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi, Pi and Grok. [See what's new ↓](#whats-new-in-48)
 
 ## Overview
 
@@ -78,18 +78,18 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.7
+## What's New in 4.8
 
-**TL;DR** - Kimi Code is the tenth current agent source Agent Sessions reads, active Claude cloud sessions now show up in the Quota Meter, and a working-directory bug that quietly broke resume commands and project filtering for Pi and Cursor is fixed.
+**TL;DR** - Grok CLI is the eleventh current agent source Agent Sessions reads, Analytics finally counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi, Pi and Grok.
 
-New in 4.7:
-- **Kimi Code, the tenth current agent source** — sessions in the list, in search and in Analytics, with tool calls and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. It switches itself on when Kimi Code is on your Mac.
-- **Claude cloud sessions in the Quota Meter** — sessions running on Anthropic's infrastructure were invisible outside Claude Desktop; they now sit beside your local agents, marked Cloud. Off by default, offered once you have saved a claude.ai cookie.
-- **Pi and Cursor get their working directory back** — resume commands came back without the `cd`, and the search index stored no path at all, so filtering by project silently missed those sessions. History you already have is repaired in the background after you update.
-- **A resume that fails now says so** — every failure reason produced an error nothing displayed, so a refused launch looked exactly like no launch. Warp in particular used to report success when it never opened.
-- **Checking an agent's CLI no longer freezes the window** — eight of the agent coordinators probed binaries on the main thread with no timeout, so a slow shell profile hung the whole app.
+New in 4.8:
+- **Grok CLI, the eleventh current agent source** — sessions in the list, in search, in Analytics and in the Image Browser, with tool calls, reasoning and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. Subagent runs nest under the session that spawned them, which `grok sessions list` does not show at all. It switches itself on when Grok CLI is on your Mac.
+- **Analytics counts every agent** — the rollup ran on a hand-written list, and Cursor and OpenClaw were never on it, so their sessions contributed nothing to any total, chart or project breakdown and nothing said so. Analytics now derives from the full set of sources, and Cursor gains the agent-picker entry it never had.
+- **The right CLI wins the PATH race** — Cursor, Kimi, Pi and Grok returned the first executable they found even when it did not advertise the flags the CLI needs, so a same-named binary earlier in PATH permanently masked the real install. Live for Grok: Homebrew ships an unrelated `grok` regex utility, while Grok CLI arrives as the `grok-build` cask.
+- **Inline images from a Grok session appear** — four separate gates each dropped a real attachment silently, so it showed in neither the transcript nor the Image Browser. The same scanner now covers Kimi, Pi, Hermes and Cursor.
+- **"Live sessions only" includes Claude Desktop chats** — Claude Desktop has no terminal process for the usual live probes to find, so the filter could hide running chats the Quota Meter could already see.
 
-**Recent releases** — 4.6.4: Compact and Full Agent Cockpit retired, leaving the Quota Meter as the only mode. 4.6.3: the footer usage meters can finally be switched off. 4.6.2: Codex guardian sessions nest under their parent instead of duplicating it. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
+**Recent releases** — 4.7: Kimi Code joins as the tenth current agent source, and active Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit retired, leaving the Quota Meter as the only mode. 4.6.3: the footer usage meters can finally be switched off. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -145,7 +145,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.7.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg)
+1. [Download AgentSessions-4.8.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.8/AgentSessions-4.8.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

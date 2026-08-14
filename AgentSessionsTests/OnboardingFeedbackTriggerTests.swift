@@ -192,4 +192,24 @@ final class WhatsNewCatalogTests: XCTestCase {
     func testTeaserPresentFor47() {
         XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.7"))
     }
+
+    /// The shipping release must carry authored content, not just the provider row
+    /// `providerHighlights(for:)` generates for free. `hasContent` is true the moment
+    /// a source declares `versionIntroduced`, so a release that forgot its What's New
+    /// copy still flags the card — and shows a single generic line. Pins the same
+    /// order as 4.7, and that Grok is not authored twice.
+    func testAuthoredHighlightsLeadProviderAndSupportRowsIn48() {
+        let items = WhatsNewCatalog.assemble(for: "4.8")
+        XCTAssertEqual(items.map(\.title), [
+            "Analytics counts every agent",
+            "The right CLI wins",
+            "New: Grok CLI",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.last?.kind, .support)
+    }
+
+    func testTeaserPresentFor48() {
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.8"))
+    }
 }

@@ -106,10 +106,37 @@ enum WhatsNewCatalog {
 
     private static let teasers: [String: String] = [
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
-        "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions."
+        "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
+        "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "4.8": [
+            // Grok itself is NOT authored here: `providerHighlights(for:)` generates its
+            // row from `SessionSource.grok.versionIntroduced == "4.8"`, and authoring it
+            // again would show it twice. Same split as 4.7, where Kimi's row is auto and
+            // these two are not.
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "chart.bar",
+                title: "Analytics counts every agent",
+                body: "Analytics ran on a hand-written list of agents, and Cursor and OpenClaw were never on it — their sessions showed up everywhere else but contributed to no total, chart or project breakdown. Every agent you enable is now counted, and Cursor gets its own entry in the agent picker."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "terminal",
+                title: "The right CLI wins",
+                body: "Cursor, Kimi, Pi and Grok used the first matching binary they found, so an unrelated tool of the same name earlier in your PATH could mask the real one — reporting its version and refusing to resume. Each now looks for the CLI that answers like the CLI."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "4.7": [
             WhatsNewItem(
                 kind: .highlight,
