@@ -328,11 +328,37 @@ def build_notes_bundle(version: str, changelog_path: str, github_url: Optional[s
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _CODE_RE = re.compile(r"`([^`]+?)`")
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+
+# Only schemes that are safe to emit into a panel rendered inside the app. Anything
+# else keeps its literal markdown rather than becoming an anchor — a changelog is
+# hand-written, so a `javascript:` URL means someone made a mistake worth seeing.
+_SAFE_LINK_SCHEMES = ("http://", "https://", "mailto:")
 
 
 def _md_inline_html(text: str) -> str:
-    """Escape, then render inline markdown (**bold**, `code`) to HTML."""
+    """Escape, then render inline markdown (links, **bold**, `code`) to HTML.
+
+    Links run first so the URL is settled before bold/code touch the string, and so
+    markup inside the link *text* (`[**#55**](…)`) still renders. Without this the
+    Sparkle panel showed raw `[@name](https://…)` source to the user — the stylesheet
+    has carried an `.rn a` rule the whole time, so anchors were always the intent; the
+    renderer just never produced one. Every contributor credit hit this.
+
+    GitHub release bodies are unaffected: they are markdown, so the same text already
+    renders as a link there. This is the HTML surface only.
+    """
     t = html.escape(text)
+
+    def _link(match: "re.Match[str]") -> str:
+        label, url = match.group(1), match.group(2)
+        # `url` is post-escape, so compare against the escaped form of the scheme too;
+        # html.escape only rewrites & < > " and leaves the scheme itself intact.
+        if not url.lower().startswith(_SAFE_LINK_SCHEMES):
+            return match.group(0)
+        return f'<a href="{url}">{label}</a>'
+
+    t = _LINK_RE.sub(_link, t)
     t = _BOLD_RE.sub(r"<strong>\1</strong>", t)
     t = _CODE_RE.sub(r"<code>\1</code>", t)
     return t

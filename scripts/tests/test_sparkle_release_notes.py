@@ -77,3 +77,48 @@ def test_deploy_rejects_notes_file_override():
     assert "NOTES_FILE override is no longer supported" in script
     assert 'gh release edit "$TAG" --notes-file "$RELEASE_NOTES_FILE"' in script
     assert 'gh release create "$TAG" "$DMG" "$DMG.sha256" --title "Agent Sessions ${VERSION}" --notes-file "$RELEASE_NOTES_FILE"' in script
+
+
+def test_markdown_links_become_anchors():
+    """Contributor credits are the reason this exists.
+
+    The panel used to show raw `[@name](https://…)` to the user, because the inline
+    renderer handled bold and code but never links — while the stylesheet shipped an
+    `.rn a` rule the whole time.
+    """
+    out = sparkle_release_notes._md_inline_html(
+        "Contributed by [@thedavidweng](https://github.com/thedavidweng) "
+        "in [#55](https://github.com/jazzyalex/agent-sessions/pull/55)."
+    )
+
+    assert '<a href="https://github.com/jazzyalex/agent-sessions/pull/55">#55</a>' in out
+    assert '<a href="https://github.com/thedavidweng">@thedavidweng</a>' in out
+    assert "](" not in out, "no literal markdown link syntax may survive"
+
+
+def test_link_text_still_renders_bold_and_code():
+    out = sparkle_release_notes._md_inline_html("see [**the** `flag`](https://example.com/x)")
+
+    assert '<a href="https://example.com/x">' in out
+    assert "<strong>the</strong>" in out
+    assert "<code>flag</code>" in out
+
+
+def test_unsafe_link_scheme_is_left_as_literal_text():
+    """A hand-written changelog should never yield a script URL; if one appears, show it
+    rather than turning it into a working anchor."""
+    out = sparkle_release_notes._md_inline_html("[click](javascript:alert(1))")
+
+    assert "<a " not in out
+    assert "javascript:" in out
+
+
+def test_link_rendering_does_not_break_escaping():
+    out = sparkle_release_notes._md_inline_html(
+        "keeps <system-reminder> escaped next to [a link](https://example.com/a?x=1&y=2)"
+    )
+
+    assert "&lt;system-reminder&gt;" in out
+    assert "<system-reminder>" not in out
+    # `&` inside the URL must stay escaped inside the attribute.
+    assert 'href="https://example.com/a?x=1&amp;y=2"' in out
