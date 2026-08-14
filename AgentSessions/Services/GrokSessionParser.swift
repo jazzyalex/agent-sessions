@@ -193,6 +193,43 @@ enum GrokSessionParser {
         return try? JSONDecoder().decode(Sidecar.self, from: data)
     }
 
+    // MARK: - Event id ↔ transcript line
+
+    /// Builds a Grok event id as `"<lineIndex>-<suffix>"`, where `lineIndex` is the
+    /// 0-based index of the transcript line the record came from and `suffix`
+    /// separates the several events one record can produce (`u`, `a`, `t0`…, `r`,
+    /// `b`, `s`, `m`, `think`).
+    ///
+    /// The line number is load-bearing outside this parser. `SessionInlineImageMapper`
+    /// gets a *physical line index* from the base64 scanner and otherwise has no way
+    /// back to a parsed event, because a Grok record is not one event: an assistant
+    /// reply carrying both `content` text and `tool_calls` emits an `.assistant`
+    /// event plus one `.tool_call` per call, and an unparseable record emits none.
+    /// Event positions therefore drift away from line numbers as a session goes on,
+    /// and comparing the two directly pins an inline image to an *earlier* user turn
+    /// than the one it belongs to. Reading the line back off the id is the only way
+    /// to reconcile the two coordinate spaces.
+    ///
+    /// Construction and decoding sit together on purpose so that changing the format
+    /// is one edit rather than two, and `InlineSessionImageMappingTests` pins the
+    /// literal shape so a rename fails a test instead of silently misplacing images.
+    ///
+    /// One caveat the format cannot express: `loadLines` drops empty lines, so this
+    /// counts non-empty lines while the scanner counts newline bytes. The Grok CLI
+    /// writes exactly one JSON object per line and never a blank, so the two agree;
+    /// the OpenClaw branch of the same mapper already relies on that same equivalence
+    /// (`JSONLReader` skips empty lines too).
+    static func eventID(lineIndex: Int, suffix: String) -> String {
+        "\(lineIndex)-\(suffix)"
+    }
+
+    /// Recovers the 0-based transcript line an event was parsed from, or nil for an
+    /// id that does not carry one — callers fall back rather than guess.
+    static func sourceLineIndex(forEventID eventID: String) -> Int? {
+        guard let separator = eventID.firstIndex(of: "-") else { return nil }
+        return Int(eventID[eventID.startIndex..<separator])
+    }
+
     private static func makeEvents(type: String,
                                    object: [String: Any],
                                    time: Date?,
@@ -201,31 +238,31 @@ enum GrokSessionParser {
         switch type {
         case "user":
             let text = textContent(from: object["content"])
-            return [SessionEvent(id: "\(index)-u", timestamp: time, kind: .user, role: "user", text: text,
+            return [SessionEvent(id: eventID(lineIndex: index, suffix: "u"), timestamp: time, kind: .user, role: "user", text: text,
                                  toolName: nil, toolInput: nil, toolOutput: nil,
                                  messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
 
         case "assistant":
             var out: [SessionEvent] = []
             if let text = object["content"] as? String, !text.isEmpty {
-                out.append(SessionEvent(id: "\(index)-a", timestamp: time, kind: .assistant, role: "assistant", text: text,
+                out.append(SessionEvent(id: eventID(lineIndex: index, suffix: "a"), timestamp: time, kind: .assistant, role: "assistant", text: text,
                                         toolName: nil, toolInput: nil, toolOutput: nil,
                                         messageID: nil, parentID: nil, isDelta: false, rawJSON: line))
             }
             let calls = object["tool_calls"] as? [[String: Any]] ?? []
             for (callIndex, call) in calls.enumerated() {
-                out.append(SessionEvent(id: "\(index)-t\(callIndex)", timestamp: time, kind: .tool_call, role: "assistant", text: nil,
+                out.append(SessionEvent(id: eventID(lineIndex: index, suffix: "t\(callIndex)"), timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                         toolName: call["name"] as? String,
                                         // `arguments` is already a JSON string on the wire.
                                         toolInput: call["arguments"] as? String,
                                         toolOutput: nil,
                                         messageID: call["id"] as? String, parentID: nil, isDelta: false, rawJSON: line))
             }
-            if out.isEmpty { out.append(meta(index: index, suffix: "-m", role: "assistant", text: nil, time: time, line: line)) }
+            if out.isEmpty { out.append(meta(index: index, suffix: "m", role: "assistant", text: nil, time: time, line: line)) }
             return out
 
         case "tool_result":
-            return [SessionEvent(id: "\(index)-r", timestamp: time, kind: .tool_result, role: "tool", text: nil,
+            return [SessionEvent(id: eventID(lineIndex: index, suffix: "r"), timestamp: time, kind: .tool_result, role: "tool", text: nil,
                                  toolName: nil, toolInput: nil,
                                  toolOutput: object["content"] as? String,
                                  messageID: object["tool_call_id"] as? String,
@@ -236,30 +273,30 @@ enum GrokSessionParser {
             // opaque server blob. Rendered as meta with a `thinking` role, the
             // same shape Pi uses for its thinking blocks.
             guard let text = summaryText(from: object["summary"]), !text.isEmpty else {
-                return [meta(index: index, suffix: "-m", role: "thinking", text: nil, time: time, line: line)]
+                return [meta(index: index, suffix: "m", role: "thinking", text: nil, time: time, line: line)]
             }
-            return [meta(index: index, suffix: "-think", role: "thinking", text: "[thinking] \(text)", time: time, line: line)]
+            return [meta(index: index, suffix: "think", role: "thinking", text: "[thinking] \(text)", time: time, line: line)]
 
         case "backend_tool_call":
             // Server-side tool (web search). The descriptor is the payload; no
             // separate tool_result record accompanies it.
             let kind = object["kind"] as? [String: Any]
-            return [SessionEvent(id: "\(index)-b", timestamp: time, kind: .tool_call, role: "assistant", text: nil,
+            return [SessionEvent(id: eventID(lineIndex: index, suffix: "b"), timestamp: time, kind: .tool_call, role: "assistant", text: nil,
                                  toolName: kind?["tool_type"] as? String ?? "backend_tool",
                                  toolInput: jsonString(kind?["action"]),
                                  toolOutput: nil,
                                  messageID: nil, parentID: nil, isDelta: false, rawJSON: line)]
 
         case "system":
-            return [meta(index: index, suffix: "-s", role: "system", text: object["content"] as? String, time: time, line: line)]
+            return [meta(index: index, suffix: "s", role: "system", text: object["content"] as? String, time: time, line: line)]
 
         default:
-            return [meta(index: index, suffix: "-m", role: type, text: nil, time: time, line: line)]
+            return [meta(index: index, suffix: "m", role: type, text: nil, time: time, line: line)]
         }
     }
 
     private static func meta(index: Int, suffix: String, role: String?, text: String?, time: Date?, line: String) -> SessionEvent {
-        SessionEvent(id: "\(index)\(suffix)", timestamp: time, kind: .meta, role: role, text: text,
+        SessionEvent(id: eventID(lineIndex: index, suffix: suffix), timestamp: time, kind: .meta, role: role, text: text,
                      toolName: nil, toolInput: nil, toolOutput: nil,
                      messageID: nil, parentID: nil, isDelta: false, rawJSON: line)
     }

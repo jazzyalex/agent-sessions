@@ -52,6 +52,70 @@ struct InlineSessionImage: Identifiable, Hashable, Sendable {
     var id: String { "\(sessionID)-\(payload.stableID)" }
 }
 
+/// Reconciles Grok's two coordinate spaces for image placement.
+///
+/// Image scanners report a *physical transcript line index*; both surfaces that
+/// place images otherwise compare that against positions in `session.events`. For
+/// Grok those are not the same number: one record is not one event, because an
+/// assistant reply carrying both `content` text and `tool_calls` emits an
+/// `.assistant` event plus one `.tool_call` per call (and an unparseable record
+/// emits none). Event positions therefore drift ahead of line numbers, and once the
+/// drift exceeds the gap between a user turn and a later image, "last user event
+/// index <= line index" resolves that image to an *earlier* prompt than the one it
+/// belongs to.
+///
+/// This lives in one type because two callers need it — `SessionInlineImageMapper`
+/// for inline images in the transcript and `ImageBrowserViewModel` for the browser's
+/// prompt label — and those two already carry lookalike copies of the generic
+/// nearest-user rule that have drifted apart once. Duplicating the Grok correction
+/// into both would guarantee the same thing happens again.
+///
+/// Constructing this for a non-Grok session is free and yields an empty set, so
+/// `userEventIndex(forFileLineIndex:)` returns nil and every other provider keeps
+/// whatever placement its caller already did. That is the same shape as the OpenClaw
+/// escape hatch in `SessionInlineImageMapper`: opt in by returning a value, opt out
+/// by returning nil.
+struct GrokImageUserTurns {
+    /// Each Grok user turn as (transcript line it was parsed from, its position in
+    /// `session.events`). Non-decreasing in both components.
+    private let turns: [(lineIndex: Int, eventIndex: Int)]
+
+    init(session: Session) {
+        guard session.source == .grok else {
+            turns = []
+            return
+        }
+        var built: [(lineIndex: Int, eventIndex: Int)] = []
+        for (idx, ev) in session.events.enumerated() where ev.kind == .user {
+            // A Grok event id is "<line>-<suffix>"; see
+            // `GrokSessionParser.sourceLineIndex(forEventID:)`, which owns that format
+            // and is pinned by `InlineSessionImageMappingTests` so a rename fails a
+            // test rather than silently returning images to the wrong prompt.
+            guard let line = GrokSessionParser.sourceLineIndex(forEventID: ev.id) else { continue }
+            built.append((lineIndex: line, eventIndex: idx))
+        }
+        turns = built
+    }
+
+    /// The same rule both generic paths use — last user turn at or before the image,
+    /// else the first one after it — evaluated in line space instead of event space.
+    ///
+    /// There is nothing else to reproduce: the transcript mapper's preamble
+    /// preference is gated to Codex/Droid/Claude/OpenCode and Grok transcripts carry
+    /// no AGENTS preamble turn, so that preference is already a no-op here.
+    ///
+    /// Returns nil for a non-Grok session, or for a Grok session whose ids no longer
+    /// carry a line — callers then fall back to their existing behaviour rather than
+    /// dropping the image.
+    func userEventIndex(forFileLineIndex fileLineIndex: Int) -> Int? {
+        guard !turns.isEmpty else { return nil }
+        if let prior = turns.last(where: { $0.lineIndex <= fileLineIndex }) {
+            return prior.eventIndex
+        }
+        return turns.first?.eventIndex
+    }
+}
+
 enum SessionInlineImageMapper {
     /// Maps each user block's `eventID` to the block identity the terminal renderer
     /// attaches inline images by (i.e. `line.blockIndex`). Keyed by the stable
@@ -209,6 +273,9 @@ enum SessionInlineImageMapper {
             return openClawEventBase + String(format: "-%06d", fileLineIndex + 1)
         }
 
+        // Empty for every non-Grok session, so the branch below cannot fire for them.
+        let grokUserTurns = GrokImageUserTurns(session: session)
+
         func isPreambleUserEventIndex(_ idx: Int) -> Bool {
             guard session.source == .codex || session.source == .droid || session.source == .claude || session.source == .opencode else { return false }
             guard session.events.indices.contains(idx) else { return false }
@@ -216,6 +283,20 @@ enum SessionInlineImageMapper {
             return Session.isAgentsPreambleText(session.events[idx].text ?? "")
         }
 
+        // Takes a physical file line index and returns an index into
+        // `session.events` — two different coordinate spaces, compared directly.
+        // That only holds while a provider emits about one event per transcript
+        // line, which is why Grok (several events from one assistant record) and
+        // OpenClaw each get their own branch in `resolved` below. It is left as-is
+        // for everyone else on purpose: the providers that reach here have shipped
+        // with this placement, and widening the fix would move images in Codex,
+        // Claude and OpenCode transcripts for no reported defect.
+        //
+        // `ImageBrowserViewModel.buildItems` carries a near-twin of this function for
+        // the Image Browser's prompt label. The two HAD drifted — that copy predates
+        // the preamble preference below and never received it — and are now aligned
+        // deliberately. Change both or neither; the Grok correction is shared
+        // (`GrokImageUserTurns`) precisely so it cannot drift the same way.
         func nearestUserEventIndex(for lineIndex: Int) -> Int? {
             if session.source == .antigravity, userEventIndices.isEmpty {
                 return session.events.indices.first
@@ -234,20 +315,30 @@ enum SessionInlineImageMapper {
             return nil
         }
 
-        func userPromptIndexForLineIndex(_ lineIndex: Int) -> Int? {
-            guard lineIndex >= 0 else { return nil }
+        // Counts how many user turns precede `eventIndex`, i.e. the "prompt #N"
+        // ordinal carried alongside an image.
+        //
+        // This was called `userPromptIndexForLineIndex`, which was a lie: every
+        // caller already passes an index into `session.events` (the resolved user
+        // event), never a file line index, and the body compares against
+        // `session.events.enumerated()` positions accordingly. The old name is what
+        // made the line/event mismatch above look like it extended here too, so the
+        // name now says which space it wants rather than leaving that to be
+        // rediscovered.
+        func userPromptOrdinal(forEventIndex eventIndex: Int) -> Int? {
+            guard eventIndex >= 0 else { return nil }
             var userIndex: Int? = nil
             var seenUsers = 0
             for (idx, event) in session.events.enumerated() {
                 if event.kind == .user {
-                    if idx <= lineIndex {
+                    if idx <= eventIndex {
                         userIndex = seenUsers
                     } else if userIndex == nil {
                         userIndex = seenUsers
                     }
                     seenUsers += 1
                 }
-                if idx > lineIndex, userIndex != nil { break }
+                if idx > eventIndex, userIndex != nil { break }
             }
             return userIndex
         }
@@ -276,14 +367,28 @@ enum SessionInlineImageMapper {
                 if let openClawEventID, let blockIndex = userEventIDToBlockIndex[openClawEventID] {
                     let eventIndex = session.events.firstIndex(where: { $0.id == openClawEventID })
                     return (openClawEventID,
-                            eventIndex.flatMap { userPromptIndexForLineIndex($0) },
+                            eventIndex.flatMap { userPromptOrdinal(forEventIndex: $0) },
                             blockIndex)
+                }
+
+                // Grok resolves in line space. `GrokImageUserTurns` returns nil for
+                // every other provider and for a Grok id that no longer carries its
+                // line, and falling through then puts the image back where it used to
+                // land rather than dropping it — the pinning test in
+                // `InlineSessionImageMappingTests` is what makes that fallback loud.
+                if let targetGrokUserEventIndex = grokUserTurns.userEventIndex(forFileLineIndex: item.lineIndex) {
+                    let targetGrokUserEventID = session.events[targetGrokUserEventIndex].id
+                    if let blockIndex = userEventIDToBlockIndex[targetGrokUserEventID] {
+                        return (targetGrokUserEventID,
+                                userPromptOrdinal(forEventIndex: targetGrokUserEventIndex),
+                                blockIndex)
+                    }
                 }
 
                 guard let targetUserEventIndex = nearestUserEventIndex(for: item.lineIndex) else { return nil }
                 let targetUserEventID = session.events[targetUserEventIndex].id
                 guard let blockIndex = userEventIDToBlockIndex[targetUserEventID] else { return nil }
-                return (targetUserEventID, userPromptIndexForLineIndex(targetUserEventIndex), blockIndex)
+                return (targetUserEventID, userPromptOrdinal(forEventIndex: targetUserEventIndex), blockIndex)
             }()
             guard let (imageEventID, userPromptIndex, targetUserBlockIndex) = resolved else { continue }
 

@@ -335,7 +335,15 @@ private extension ImageBrowserViewModel {
             self.selectedItemID = merged.first?.id
         }
     }
+}
 
+// `buildItems` sits in its own internal extension rather than the fileprivate one
+// above so `InlineSessionImageMappingTests` can call it. It is the whole of the
+// "which prompt does this image belong to?" decision for the browser and the only
+// pure function in here — everything around it needs a populated view model — so
+// testing it any other way means driving async indexing and asserting on published
+// state. Nothing outside this file calls it; the widened access exists for the test.
+extension ImageBrowserViewModel {
     func buildItems(for session: Session, index: ImageBrowserStoredIndex) -> [Item] {
         switch session.source {
         case .opencode:
@@ -468,14 +476,51 @@ private extension ImageBrowserViewModel {
                 ev.kind == .user ? idx : nil
             }
 
+            // Whether a user record is injected scaffolding rather than something the
+            // person typed. Mirrors `isPreambleUserEventIndex` in
+            // `SessionInlineImageMapper.imagesByUserBlockIndex` exactly, including its
+            // source gate — of the sources that reach this `default:` arm only Codex
+            // and Claude are gated in, since OpenCode, Copilot and Antigravity have
+            // their own `case` arms above and Droid is handed an empty index.
+            func isPreambleUserEventIndex(_ idx: Int) -> Bool {
+                guard session.source == .codex || session.source == .droid || session.source == .claude || session.source == .opencode else { return false }
+                guard session.events.indices.contains(idx) else { return false }
+                guard session.events[idx].kind == .user else { return false }
+                return Session.isAgentsPreambleText(session.events[idx].text ?? "")
+            }
+
+            // Takes `stored.lineIndex` — a physical transcript line — and returns an
+            // index into `session.events`. Two coordinate spaces compared directly,
+            // which only holds while a provider emits about one event per line.
+            //
+            // This is a near-twin of `nearestUserEventIndex` inside
+            // `SessionInlineImageMapper.imagesByUserBlockIndex`. The two HAD drifted:
+            // this copy is the older one and never received the preamble preference the
+            // mapper gained, so an image whose nearest preceding user record was
+            // injected scaffolding (AGENTS.md / <environment_context> /
+            // <system-reminder>) was labelled with that scaffolding here while the
+            // transcript labelled it with the real prompt. Claude injects such blocks
+            // mid-session, so the two surfaces could disagree about the same image.
+            // They are now aligned deliberately — change both or neither.
+            //
+            // A negative index no longer short-circuits to `userEventIndices.first`:
+            // it falls through, `prior` comes back empty, and the `after` branch
+            // returns the first turn anyway — now preferring a real prompt, which is
+            // what the mapper already did for the same input.
             func nearestUserEventIndex(for lineIndex: Int) -> Int? {
-                guard lineIndex >= 0 else { return userEventIndices.first }
                 guard !userEventIndices.isEmpty else { return nil }
                 let prior = userEventIndices.filter { $0 <= lineIndex }
-                if let preferred = prior.last { return preferred }
+                if let preferred = prior.last(where: { !isPreambleUserEventIndex($0) }) ?? prior.last {
+                    return preferred
+                }
                 let after = userEventIndices.filter { $0 > lineIndex }
-                return after.first
+                return after.first(where: { !isPreambleUserEventIndex($0) }) ?? after.first
             }
+
+            // Grok is the provider where "one line, one event" is plainly false, so it
+            // resolves in line space instead. Empty — and therefore inert — for every
+            // other source; see `GrokImageUserTurns`.
+            let grokUserTurns = GrokImageUserTurns(session: session)
 
             var out: [Item] = []
             out.reserveCapacity(min(index.spans.count, 64))
@@ -513,7 +558,13 @@ private extension ImageBrowserViewModel {
                 }()
 
                 let resolvedEventIndex = openClawEventIndex ?? stored.lineIndex
-                let resolvedUserEventIndex = nearestUserEventIndex(for: resolvedEventIndex) ?? resolvedEventIndex
+                // The Grok lookup takes `stored.lineIndex` directly rather than
+                // `resolvedEventIndex`: the two are equal here (only OpenClaw sets
+                // `openClawEventIndex`) but they mean different things, and this one
+                // wants the file line.
+                let resolvedUserEventIndex = grokUserTurns.userEventIndex(forFileLineIndex: stored.lineIndex)
+                    ?? nearestUserEventIndex(for: resolvedEventIndex)
+                    ?? resolvedEventIndex
 
                 out.append(
                     Item(
@@ -537,7 +588,9 @@ private extension ImageBrowserViewModel {
             return out
         }
     }
+}
 
+private extension ImageBrowserViewModel {
     func fileSignature(forPath path: String) -> ImageBrowserFileSignature? {
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: path)

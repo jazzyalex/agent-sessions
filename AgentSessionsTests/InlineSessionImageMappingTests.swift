@@ -100,6 +100,234 @@ final class InlineSessionImageMappingTests: XCTestCase {
         XCTAssertNil(userPromptIndexForLineIndex(session: session, lineIndex: 10))
     }
 
+    // MARK: - Grok: line index vs event index
+
+    /// Stages a Grok transcript in the real on-disk layout (`<bucket>/<sessionID>/`)
+    /// so the parser exercises its own session-id derivation and the mapper scans the
+    /// same file the parser read. The session id is fresh per call because
+    /// `SessionTranscriptBuilder.coalescedBlocks` caches blocks under it.
+    private func stageGrokTranscript(_ transcript: String) throws -> URL {
+        let sessionID = UUID().uuidString
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("InlineSessionImageMappingTests-\(sessionID)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+
+        let sessionDir = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            // Grok percent-encodes the working directory into the bucket name.
+            .appendingPathComponent("%2Ftmp%2Fas-agent-lab%2Fgrok%2Fproject", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        let url = sessionDir.appendingPathComponent("chat_history.jsonl")
+        try transcript.write(to: url, atomically: true, encoding: .utf8)
+        try #"{"info":{"id":"\#(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"}}"#
+            .write(to: sessionDir.appendingPathComponent("summary.json"), atomically: true, encoding: .utf8)
+        return url
+    }
+
+    /// A Grok image has to land under the prompt it actually followed, even after the
+    /// event stream has run ahead of the line numbering.
+    ///
+    /// The scanner reports a *physical line index*; the shared mapper otherwise
+    /// compares that against positions in `session.events`. Line 1 below is one
+    /// record that yields three events (assistant text plus two tool calls), so by
+    /// the time the second prompt is read it sits at event index 5 while living on
+    /// line 3. The image is on line 4: "last user event index <= 4" then picks the
+    /// *first* prompt, and the screenshot renders under the wrong turn.
+    func testGrokImageMapsToTheLaterPromptWhenEventsOutrunLines() throws {
+        let transcript = """
+        {"type":"user","content":[{"type":"text","text":"first prompt"}],"prompt_index":0}
+        {"type":"assistant","content":"Reading both files.","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{}"},{"id":"call-2","name":"read_file","arguments":"{}"}]}
+        {"type":"tool_result","content":"first file","tool_call_id":"call-1"}
+        {"type":"user","content":[{"type":"text","text":"second prompt"}],"prompt_index":1}
+        {"type":"tool_result","content":"screenshot","tool_call_id":"call-2","images":["data:image/png;base64,QUJDRA=="]}
+        """
+        let url = try stageGrokTranscript(transcript)
+        let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
+
+        // Guard the premise: if a future parser change stops emitting several events
+        // per record, this fixture no longer reproduces the drift and the assertions
+        // below would pass for the wrong reason.
+        XCTAssertEqual(session.events.map(\.id),
+                       ["0-u", "1-a", "1-t0", "1-t1", "2-r", "3-u", "4-r"])
+        let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
+            ev.kind == .user ? idx : nil
+        }
+        XCTAssertEqual(userEventIndices, [0, 5],
+                       "guard: the second prompt must sit at an event index (5) past its line index (3)")
+
+        let located = try Base64ImageDataURLScanner.scanFileWithLineIndexes(at: url, maxMatches: 20)
+        XCTAssertEqual(located.map(\.lineIndex), [4], "guard: the image must be on transcript line 4")
+
+        let mapped = SessionInlineImageMapper.imagesByUserBlockIndex(for: session)
+
+        // "3-u" is the second prompt; it coalesces into block 5 (one block per event,
+        // nothing merges here). Block 0 is the first prompt — where the image landed
+        // before the line/event spaces were reconciled.
+        XCTAssertEqual(mapped.keys.sorted(), [5])
+        XCTAssertNil(mapped[0], "the image must not fall back onto the first prompt")
+        XCTAssertEqual(mapped[5]?.count, 1)
+        XCTAssertEqual(mapped[5]?.first?.imageEventID, "3-u")
+        XCTAssertEqual(mapped[5]?.first?.userPromptIndex, 1)
+        XCTAssertEqual(mapped[5]?.first?.payload.mediaType, "image/png")
+    }
+
+    /// The same defect on the second surface: the Image Browser labels each image
+    /// with the prompt it followed, and `ImageBrowserViewModel.buildItems` fed the
+    /// stored *physical line index* into its own copy of the nearest-user rule, which
+    /// compares against positions in `session.events`.
+    ///
+    /// Goes through the real `ImageBrowserIndexCache` rather than a hand-built index
+    /// so the fixture also has to survive the browser's `base64PayloadLength >= 64 /
+    /// approxBytes >= 32` floor, which the inline path does not apply.
+    @MainActor
+    func testGrokImageBrowserLabelsTheLaterPromptWhenEventsOutrunLines() async throws {
+        let base64 = String(repeating: "A", count: 160)
+        let transcript = """
+        {"type":"user","content":[{"type":"text","text":"first prompt"}],"prompt_index":0}
+        {"type":"assistant","content":"Reading both files.","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{}"},{"id":"call-2","name":"read_file","arguments":"{}"}]}
+        {"type":"tool_result","content":"first file","tool_call_id":"call-1"}
+        {"type":"user","content":[{"type":"text","text":"second prompt"}],"prompt_index":1}
+        {"type":"tool_result","content":"screenshot","tool_call_id":"call-2","images":["data:image/png;base64,\(base64)"]}
+        """
+        let url = try stageGrokTranscript(transcript)
+        let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
+        XCTAssertEqual(session.events.map(\.id),
+                       ["0-u", "1-a", "1-t0", "1-t1", "2-r", "3-u", "4-r"],
+                       "guard: the second prompt must sit at event index 5 while living on line 3")
+
+        let cacheRoot = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("ImageBrowserCache-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: cacheRoot) }
+        let cache = ImageBrowserIndexCache(cacheRootOverride: cacheRoot)
+        let index = await cache.getOrBuildIndex(for: session, maxMatches: 10)
+        XCTAssertEqual(index.spans.map(\.lineIndex), [4],
+                       "guard: the stored span must record the image on transcript line 4")
+
+        // Same overridden cache root on the view model so its background indexing
+        // cannot write into the user's real Caches directory.
+        let viewModel = ImageBrowserViewModel(indexCache: cache)
+        viewModel.updateSessions(allSessions: [session], seedSession: session)
+        viewModel.cancelBackgroundWork()
+
+        let items = viewModel.buildItems(for: session, index: index)
+        XCTAssertEqual(items.count, 1)
+        let item = try XCTUnwrap(items.first)
+
+        // Before the fix all three landed on the first prompt: eventID "0-u",
+        // userPromptIndex 0, lineIndex 0.
+        XCTAssertEqual(item.eventID, "3-u")
+        XCTAssertEqual(item.userPromptIndex, 1)
+        // `Item.lineIndex` is misnamed: it holds the resolved *event* index, which is
+        // what `loadedUserPromptText` indexes into `session.events`.
+        XCTAssertEqual(item.lineIndex, 5)
+        XCTAssertEqual(viewModel.loadedUserPromptText(for: item), "second prompt")
+    }
+
+    /// Pins the Image Browser to the same preamble preference the transcript mapper
+    /// uses, because the two carry separate copies of the nearest-user rule and this
+    /// is exactly where they had drifted: the browser's copy is the older one and
+    /// took the literal nearest user record, so an image whose nearest preceding turn
+    /// was injected scaffolding got labelled with the scaffolding here while the
+    /// transcript labelled it with the real prompt — the same image, two answers.
+    ///
+    /// Claude is the live case: it injects `<system-reminder>` blocks into user
+    /// records mid-session, so the scaffolding turn is not merely the first record
+    /// (which is why a Codex-shaped fixture would not discriminate — its preamble is
+    /// the opening record, and every rule resolves past it identically).
+    ///
+    /// Events map 1:1 to lines here on purpose, to isolate the preamble behaviour
+    /// from the line/event drift the Grok tests above cover.
+    @MainActor
+    func testImageBrowserSkipsAMidSessionPreambleTurnLikeTheTranscriptDoes() throws {
+        let events: [SessionEvent] = [
+            makeEvent(id: "e0", kind: .user, text: "explain this repo", rawJSON: #"{"type":"user"}"#),
+            makeEvent(id: "e1", kind: .assistant, text: "sure", rawJSON: #"{"type":"assistant"}"#),
+            makeEvent(id: "e2",
+                      kind: .user,
+                      text: "<system-reminder>the user opened a new file</system-reminder>",
+                      rawJSON: #"{"type":"user"}"#),
+            makeEvent(id: "e3", kind: .tool_result, text: nil, rawJSON: #"{"type":"tool_result"}"#)
+        ]
+        let session = Session(id: "claude-preamble",
+                              source: .claude,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: "/tmp/does-not-need-to-exist.jsonl",
+                              eventCount: events.count,
+                              events: events)
+
+        XCTAssertTrue(Session.isAgentsPreambleText(events[2].text ?? ""),
+                      "guard: event 2 must classify as scaffolding, or this test proves nothing")
+
+        let signature = ImageBrowserFileSignature(filePath: session.filePath,
+                                                  fileSizeBytes: 1,
+                                                  modifiedAtUnixSeconds: 1)
+        let index = ImageBrowserStoredIndex(
+            signature: signature,
+            spans: [ImageBrowserStoredSpan(startOffset: 0,
+                                           endOffset: 200,
+                                           mediaType: "image/png",
+                                           base64PayloadOffset: 40,
+                                           base64PayloadLength: 160,
+                                           approxBytes: 120,
+                                           lineIndex: 3)],
+            openCodeImages: nil,
+            copilotAttachments: nil,
+            antigravityImages: nil,
+            createdAtUnixSeconds: 1
+        )
+
+        let viewModel = ImageBrowserViewModel()
+        viewModel.cancelBackgroundWork()
+        let items = viewModel.buildItems(for: session, index: index)
+
+        XCTAssertEqual(items.count, 1)
+        let item = try XCTUnwrap(items.first)
+        // Before the alignment this resolved to event 2 — the `<system-reminder>` —
+        // giving eventID "e2" and userPromptIndex 1.
+        XCTAssertEqual(item.eventID, "e0")
+        XCTAssertEqual(item.userPromptIndex, 0)
+        XCTAssertEqual(item.lineIndex, 0)
+    }
+
+    /// Pins the Grok event-id format, which is a cross-file contract and not an
+    /// implementation detail: `SessionInlineImageMapper` reads the transcript line
+    /// back out of the id to place inline images, and a rename that only touched
+    /// `GrokSessionParser` would silently return images to the wrong prompt rather
+    /// than fail anything. Every record type is present so no suffix can drift
+    /// unnoticed.
+    func testGrokEventIDsEncodeTheirTranscriptLine() throws {
+        let transcript = """
+        {"type":"system","content":"You are Grok."}
+        {"type":"user","content":[{"type":"text","text":"hi"}],"prompt_index":0}
+        {"type":"reasoning","summary":[{"text":"Considering the request."}]}
+        {"type":"assistant","content":"On it.","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{}"}]}
+        {"type":"tool_result","content":"file body","tool_call_id":"call-1"}
+        {"type":"backend_tool_call","kind":{"tool_type":"web_search","action":{"query":"grok"}}}
+        {"type":"assistant","content":""}
+        {"type":"some_future_record"}
+        """
+        let url = try stageGrokTranscript(transcript)
+        let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: url))
+
+        XCTAssertEqual(session.events.map(\.id),
+                       ["0-s", "1-u", "2-think", "3-a", "3-t0", "4-r", "5-b", "6-m", "7-m"])
+
+        let expectedLines: [Int?] = [0, 1, 2, 3, 3, 4, 5, 6, 7]
+        XCTAssertEqual(session.events.map { GrokSessionParser.sourceLineIndex(forEventID: $0.id) },
+                       expectedLines)
+
+        XCTAssertEqual(GrokSessionParser.eventID(lineIndex: 41, suffix: "t2"), "41-t2")
+        XCTAssertEqual(GrokSessionParser.sourceLineIndex(forEventID: "41-t2"), 41)
+        // Anything that does not lead with a line number decodes to nil so the mapper
+        // falls back instead of inventing a position.
+        XCTAssertNil(GrokSessionParser.sourceLineIndex(forEventID: "abc-000042"))
+        XCTAssertNil(GrokSessionParser.sourceLineIndex(forEventID: "12"))
+    }
+
     func testCodexInlineImageMarkersRenderAsBracketedToken() {
         let events: [SessionEvent] = [
             makeEvent(id: "e0",
