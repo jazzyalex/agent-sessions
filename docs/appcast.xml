@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>4.7</title>
-            <pubDate>Tue, 04 Aug 2026 15:36:15 -0700</pubDate>
+            <title>4.8</title>
+            <pubDate>Fri, 14 Aug 2026 12:48:58 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,38 +27,36 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 4.7</h2>
+<h2>What&#x27;s New in 4.8</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Kimi Code is the tenth current agent source Agent Sessions reads.</strong> Its sessions land in the session list, in search and in Analytics, with tool calls and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Kimi Code on your Mac, and Settings → Agents gains a Kimi Code pane for the binary path and storage root.</li>
-<li><strong>Active Claude cloud sessions appear in the Quota Meter.</strong> Sessions running on Anthropic&#x27;s infrastructure were invisible outside Claude Desktop; they now sit in the pinned Quota Meter beside your local agents, marked <strong>Cloud</strong> and ordered above them. They carry no burn rate — there is no local transcript to measure — so they report status instead of a runway. Off by default, and offered only once you have saved a claude.ai cookie under Settings → Usage Tracking, since the fetch depends on it.</li>
+<li><strong>Grok CLI is the eleventh current agent source Agent Sessions reads.</strong> Its sessions land in the session list, in search, in Analytics and in the Image Browser, with tool calls, reasoning and assistant output rendered in the transcript, a filter pill in the toolbar, and both Copy Resume Command and terminal resume. Agent Sessions switches it on when it finds Grok CLI on your Mac, and Settings → Agents gains a Grok CLI pane for the binary path and storage root. Subagent runs are shown under the session that spawned them — Grok records that parentage in the parent&#x27;s own tree, so <code>grok sessions list</code> does not show them at all. Schema verified against 141 real sessions. Contributed by [@thedavidweng](https://github.com/thedavidweng) in [#55](https://github.com/jazzyalex/agent-sessions/pull/55).</li>
 </ul>
 <h3>Features</h3>
 <ul>
-<li><strong>Agent runs with no terminal now reach the Quota Meter.</strong> A <code>claude -p</code> run started by launchd, a shell script, or another app has no controlling terminal, and presence discovery required one — so those sessions never appeared in Live Sessions even though the main window indexed their transcripts normally. They are picked up now.</li>
-<li><strong>Analytics counts Pi sessions.</strong> Pi has been a supported source since 3.8 but was missing from the analytics rollups. Its sessions, messages, durations and projects are now included, with a Pi-only filter alongside the others.</li>
+<li><strong>Analytics counts every agent you have enabled.</strong> The rollup ran on a hand-written list of sources, and Cursor and OpenClaw were never on it — their sessions were indexed, searchable and visible in the list, but contributed nothing to any total, chart or project breakdown, and nothing reported the gap. Analytics now derives from the full set of sources, so every agent counts and a new one cannot be forgotten. Cursor also gains the agent-picker entry it never had. Existing installs rebuild their analytics once on the next launch to pick up the two missing sources; it reads the session index and touches no files.</li>
+<li><strong>Inline images from a Grok session now appear.</strong> A Grok transcript can carry a real attachment inlined as a data URI, and four separate gates each dropped it silently — so a session with an image showed one in neither the transcript nor the Image Browser. All four are now exhaustive, and the same scanner is extended to Kimi, Pi, Hermes and Cursor, which previously could only ever render a placeholder.</li>
 </ul>
 <h3>Improvements</h3>
 <ul>
-<li><strong>Turning an agent on or off updates the rest of the app.</strong> Agent Sessions only watched five of the eleven agent switches, so toggling any of the other six left Analytics and the usage meters running on the previous set until relaunch.</li>
-<li><strong>A refused Copy Resume Command leaves your clipboard alone.</strong> It cleared the pasteboard before working out whether it had anything to write, so the cases where it declines — a Codex session whose id cannot be resolved, a session with no known working directory — wiped whatever you were holding and replaced it with nothing.</li>
+<li><strong>Session-Bench now includes a shareable v0.3 poster.</strong> The launch article shows the full leaderboard graphic, while the benchmark page keeps it available in a compact download section beneath the scored table.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Pi and Cursor sessions get their working directory back.</strong> After a full parse, a Pi or Cursor session lost the directory it ran in. Two things broke as a result: its resume command came back without the <code>cd</code>, so the resumed agent started wherever your terminal happened to point, and the search index stored no path for it at all, so filtering by project silently stopped matching those sessions. Both are fixed, and sessions indexed before the fix are re-read once in the background after you update, so the repair reaches the history you already have rather than only new sessions.</li>
-<li><strong>A resume that fails now tells you.</strong> Every reason a resume could fail — a CLI that could not be found, a Warp that refused to launch, a session whose working directory is unknown — produced an error nothing ever displayed, so all of them looked identical on screen: nothing happened. Failures now come back as an alert. Warp in particular used to report success even when it never opened, and a failed launch would quietly retry a different command that could resume an entirely different session while reporting the one you clicked.</li>
-<li><strong>Checking an agent&#x27;s CLI no longer freezes the window.</strong> Probing a binary spawns a login shell and a <code>--help</code> for each candidate path, and eight of the agent coordinators ran that on the main thread with no timeout — so a slow shell profile or an unresponsive binary hung the whole app until it finished. Probes now run off the main thread.</li>
-<li><strong>The Codex meter no longer sits on &quot;reconnecting…&quot; forever.</strong> With no Codex CLI run in the previous two days, the background refresh returned before ever making its live usage call — so whenever Agent Sessions was not the frontmost app the meter stayed on &quot;reconnecting…&quot; indefinitely, and only recovered if you focused the window. The live fetch no longer depends on a recent local session file. And when a fetch genuinely comes back empty, the meter now says <strong>no active session</strong> rather than implying a connection it is still waiting on.</li>
-<li><strong>Codex sessions containing an auto-review turn reappear in the dollar view.</strong> Codex bills real tokens for its <code>codex-auto-review</code> model, but no price key matched it — and an unpriceable slice makes the whole session unpriceable, so the runway dropped those sessions from the $ view entirely and fell back to tokens per hour without saying why. The model is priced now.</li>
-<li><strong>Antigravity code edits and web searches read as tool work again.</strong> <code>CODE_ACTION</code> and <code>SEARCH_WEB</code> carry the same result envelope as the file and command events, but fell through to the parser&#x27;s default branch and rendered as system noise — a code edit was indistinguishable from a checkpoint. Transcripts the CLI truncated upstream are also marked as such now, instead of rendering as though they were complete.</li>
+<li><strong>An unrelated binary earlier in your PATH no longer masks the real CLI.</strong> Cursor, Kimi, Pi and Grok searched candidate locations group by group and returned the first executable they found, even when it did not advertise the flags the CLI needs — so a same-named binary in the login shell&#x27;s PATH won before the actual install directory was ever examined, reporting its version as the agent&#x27;s and refusing resume outright. This one is live rather than theoretical for Grok: Homebrew ships an unrelated <code>grok</code> regex utility, while Grok CLI arrives as the <code>grok-build</code> cask. Each source now searches one ordered list, and a binary that advertises the right flags always wins.</li>
+<li><strong>Analytics no longer reports &quot;no sources enabled&quot; over data it has.</strong> Its empty state, the banner warning that totals exclude an agent, and the agent picker were three more hand-written lists, each stopping at a different source. With Grok, Cursor or OpenClaw as your only enabled agent, Analytics claimed nothing was enabled while showing that agent&#x27;s data, and the picker could not isolate any of the three. All three lists now derive from one source of truth.</li>
+<li><strong>A Grok session shows the title its own sidecar records.</strong> Grok writes a generated title, but its transcripts open with an injected context preamble rather than your prompt — so once the transcript loaded, the title fell through to that preamble and displayed literal <code>&lt;user_query&gt;</code> markup or the opening line of an assistant reply.</li>
+<li><strong>Grok transcripts open with content in them.</strong> The transcript view keeps one layer per provider and reveals the right one, and Grok had no layer — its indexer was wired up and then never used, which no compiler could catch. A test now checks that every source has one.</li>
+<li><strong>A Grok session&#x27;s message count matches its transcript.</strong> The count came from a sidecar field that includes system and reasoning records, both of which render as meta — so a transcript of nothing but meta records claimed three messages and slipped past the filters that hide empty and low-message sessions.</li>
+<li><strong>The Image Browser credits the prompt that produced an image, not the scaffolding around it.</strong> Agents inject housekeeping blocks into the conversation as if they were your messages — an AGENTS.md preamble, <code>&lt;environment_context&gt;</code>, a <code>&lt;system-reminder&gt;</code>. The transcript already knew to look past those when deciding which prompt an image belongs to; the Image Browser did not, so an image could be filed under a <code>&lt;system-reminder&gt;</code> there while the transcript filed the same image under the real prompt. Claude injects those blocks mid-conversation, so this was not limited to the opening of a session. Both now agree.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.7">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.7</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v4.8">https://github.com/jazzyalex/agent-sessions/releases/tag/v4.8</a></p>
 </div>
             ]]></description>
-            <sparkle:version>66</sparkle:version>
-            <sparkle:shortVersionString>4.7</sparkle:shortVersionString>
+            <sparkle:version>67</sparkle:version>
+            <sparkle:shortVersionString>4.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.7/AgentSessions-4.7.dmg" length="21968620" type="application/octet-stream" sparkle:edSignature="Sa1Jn7Gex72EvGahmnZ0o/0NPOJLL27cuKoJNz6JIeIDuwIWCwoV/Y7UVELp6dsH5TkSZbOxHagVYJ7V0NecCw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v4.8/AgentSessions-4.8.dmg" length="22260606" type="application/octet-stream" sparkle:edSignature="mEgKe1I3oTdsMYzUK8j1QpHOFVg2mbCW7wfc3JoOHv64VrQtWAr9modl7LAXl85fLHkWbcNCVlGWwE1wQwv5Aw=="/>
         </item>
     </channel>
 </rss>
