@@ -62,12 +62,44 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - Versioned "What's New in X.Y" section to `docs/index.html`
 - Detailed release notes to README or website (those live in `docs/CHANGELOG.md`)
 
+## Never Announce a Bug the User Never Had (Hard Rule)
+
+**A fix to a feature that ships in this same release is not a Bug Fix. It is development.**
+
+When a feature is new in X.Y, every defect found and fixed in it before X.Y shipped was
+never in anyone's hands. Listing those under "Bug Fixes" invents a history of breakage
+users never experienced, and buries the actual feature under a list of things that sound
+broken. Ship the feature; the fixes are part of it.
+
+Before writing any Bug Fix entry, ask: **which released version had this bug?** If the
+answer is "none — the code is new in this release", the entry does not exist. Fold
+anything user-visible into the feature's own Highlight instead.
+
+Worked example (4.8, Grok CLI's first release):
+- ❌ "A Grok session shows the title its own sidecar records" — Grok shipped in 4.8; no
+  user ever saw the wrong title.
+- ❌ "Grok transcripts open with content in them" — same.
+- ❌ "A Grok session's message count matches its transcript" — same.
+- ✅ "Grok CLI is the eleventh current agent source…" — the Highlight, which already says
+  transcripts, images, Analytics and resume work.
+
+Mixed entries need splitting, not deleting: a fix spanning shipped **and** new sources is
+real for the shipped ones. Describe it in terms of those, and drop the new source from the
+list. In 4.8 the CLI PATH-masking fix covered Cursor, Kimi and Pi (all shipped) plus Grok
+(new) — it stayed, naming only the three.
+
+This applies identically to `docs/CHANGELOG.md`, the Sparkle notes, the GitHub release
+body, and the README "What's New". The changelog is the source all of them derive from, so
+fix it there first.
+
 ### After pushing
 - Verify GitHub Pages reflects updated `docs/index.html` (check meta description and download button)
 
 ## Pre-Deploy Checklist (Run Before Bump)
 
 - [ ] `docs/CHANGELOG.md` `[Unreleased]` section has full, accurate content for this release (this is the only changelog — root `CHANGELOG.md` is a pointer to it, not a copy to sync)
+- [ ] Every Bug Fix entry names a defect that existed in a **released** version — no fixes to features shipping in this same release (see "Never Announce a Bug the User Never Had")
+- [ ] In-app What's New has an entry for this version in `AgentSessions/Onboarding/Models/WhatsNewCatalog.swift` — both a `teasers` line and a `bundled` array. `hasContent` goes true on the auto-generated new-provider row alone, so a forgotten release still shows the card, just with one generic line and no teaser. Do not author a row for a new source by hand: `providerHighlights(for:)` generates it from `versionIntroduced`, and authoring it again shows it twice.
 - [ ] README.md download links updated to new version (both occurrences)
 - [ ] README.md "What's New" section updated to new version heading + rewritten highlights
 - [ ] `docs/index.html` download button URL and label updated

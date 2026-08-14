@@ -5,6 +5,124 @@ decision if one was made. Newest on top.
 
 ---
 
+## Cross-Surface Session Storage
+
+### Audit and support distinct CLI, Desktop, IDE, and side-session stores
+- **Scope:** local session persistence only. Cloud sync, vendor backends, and remote
+  account history are explicitly out of scope.
+- **Why this exists:** sharing a CLI, SDK, or base event model does not prove that two
+  product surfaces write the same local record. A surface can use a different root,
+  companion database, sidecar metadata, event vocabulary, or retention path even when
+  its primary transcript remains JSONL.
+- **Confirmed Claude split:** standard transcripts are discovered under
+  `~/.claude/projects`; Desktop Code metadata also lives under
+  `~/Library/Application Support/Claude/claude-code-sessions`; Cowork/local-agent
+  transcripts live in nested `.claude/projects` trees under
+  `~/Library/Application Support/Claude/local-agent-mode-sessions`. The current reader
+  already scans these roots, but coverage, joins, and duplicate handling have not been
+  certified as one cross-surface contract.
+- **Confirmed Codex split:** normal CLI, Desktop, IDE, and subagent rollouts share
+  `~/.codex/sessions`, while side conversations are reconstructed from
+  `~/.codex/sqlite/logs_*.sqlite`. `/side` is also available in current Codex CLI, but
+  `CodexSideChatLogReader` currently labels every reconstructed side conversation as
+  Codex Desktop.
+- **Confirmed Cursor split:** the current Cursor reader covers
+  `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and
+  `~/.cursor/chats/**/store.db`. Cursor Desktop also has conversation/composer records
+  in `~/Library/Application Support/Cursor/User/**/state.vscdb`; that artifact family is
+  not currently discovered. Some modern Desktop agent windows may also write the
+  `~/.cursor` stores, so the work must classify artifacts from controlled sessions
+  rather than assign every path to one surface by assumption.
+
+#### Investigation work
+- Build a versioned storage matrix with one row per harness surface and columns for
+  primary root, companion roots, physical format, stable session ID, surface marker,
+  project/task identity, archive path, and retention behavior.
+- Run paired, minimal local probes for CLI and Desktop using the same task. Record all
+  files created or changed before interpreting their schemas. Include one ordinary
+  session and one side/fork/subagent session where the surface supports it.
+- For Codex, compare CLI `/side` with Desktop side conversations and determine whether
+  both use the same log database records, whether either produces a rollout, and which
+  structural field can identify the originating surface. Do not infer the surface from
+  the location of the shared database.
+- For Claude, test standard CLI, Desktop Code, and Cowork independently. Verify the
+  transcript-to-sidecar join, missing-sidecar behavior, duplicate discovery across
+  roots, surface-specific record types, and project/task attribution.
+- For Cursor, identify which Desktop modes write `state.vscdb`, which write the
+  `~/.cursor` JSONL/`store.db` pair, and whether IDs can join the two families. Document
+  the `ItemTable` and `cursorDiskKV` records needed to reconstruct a conversation before
+  adding a reader.
+
+#### Parser work after the probes
+- Remove the hard-coded Codex Desktop classification from reconstructed side sessions;
+  derive a surface only from recorded evidence and use an explicit unknown value when
+  the artifact does not identify it.
+- Add Cursor Desktop discovery and parsing for the proven `state.vscdb` conversation
+  families, with deterministic deduplication against any matching `~/.cursor` session.
+- Harden Claude cross-root identity and deduplication so a transcript plus Desktop
+  sidecar becomes one session, while Cowork sessions remain independently discoverable
+  when the standard root is absent.
+- Preserve artifact provenance on every parsed session: surface, primary artifact,
+  companion artifacts, join key, and whether any expected component was missing.
+- Keep all database access read-only and bounded; never depend on vendor UI state or a
+  network/backend request to enumerate local history.
+
+#### Acceptance evidence
+- Commit sanitized fixtures for every physically distinct artifact family, including
+  missing-companion and duplicate-ID cases.
+- Add discovery tests proving that each supported root is found independently.
+- Add parser tests for surface classification, stable joins, project/task attribution,
+  side-session recovery, and deterministic deduplication.
+- Add a local coverage report that lists discovered and unparsed artifact families so a
+  new vendor storage path cannot silently disappear from the product.
+- Re-run the same probes after vendor upgrades and record format drift per surface, not
+  only per harness name.
+- **Why deferred:** this needs controlled sessions and fixture sanitization before parser
+  changes. Implementing from the current live databases alone would bake uncertain
+  surface attribution into production code.
+
+---
+
+## Marketing Surfaces
+
+### Session-Bench needs an in-app surface, and it is not a changelog entry
+- **Where:** currently only the public pages — `docs/bench/` and the launch post. Nothing
+  in the app references it.
+- **What:** Session-Bench is a separate research/accountability project, **not an Agent
+  Sessions feature.** It was briefly listed under "Improvements" in the 4.8 changelog
+  (the v0.3 poster); that framing was wrong and the entry was removed. Release notes
+  describe what changed in the app, and the poster changed a website.
+- **Decision:** surface it in-app as a **chip**, not as a release-note line and not as a
+  feature panel row. Design it deliberately rather than bolting it onto the next release.
+- **Why deferred:** wants its own design pass on placement and wording; there is no
+  deadline pressure and shipping it inside a release note would repeat the category error.
+
+---
+
+## Agent Source Coverage
+
+### Image extraction for Kimi, Pi, Hermes and Cursor is wired but inert
+- **Where:** the per-source gates in
+  [CodexSessionImagePayload.swift](../AgentSessions/Utilities/CodexSessionImagePayload.swift)
+  and [ImageBrowserIndexCache.swift](../AgentSessions/Utilities/ImageBrowserIndexCache.swift),
+  shipped in `da428bf3`.
+- **What:** those four providers were pointed at the generic
+  `Base64ImageDataURLScanner` alongside Grok, but nothing confirms they ever emit an
+  inline image. Verified 2026-08-14: **zero** occurrences of `data:image/` across every
+  local session tree for them — `~/.kimi-code` (26 files), `~/.pi` (5), `~/.hermes`
+  (2,973 + 3 SQLite), `~/.cursor` (255 incl. 20 `store.db`) — text and binary alike.
+  Independently, they take the conservative `isLikelyImageURLContext` filter, whose regex
+  requires an unescaped `"image_url":` immediately before `"data:image`; the real Grok
+  payload uses a bare `"url"` key, so even a Grok-shaped URI would be filtered out for
+  these four.
+- **Why deferred:** additive and harmless while inert, and there is nothing to verify
+  against without a real session. If one of them references images by path or https URL
+  instead of a data URI, it needs its own reader — the generic scanner will never find it.
+- **Note:** the 4.8 changelog says the scanner is *extended* to them, deliberately
+  avoiding a promise that images appear. Keep that wording honest if this is revisited.
+
+---
+
 ## Transcript UI
 
 ### Inline images lost their right-click menu everywhere

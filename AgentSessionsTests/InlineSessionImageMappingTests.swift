@@ -225,9 +225,60 @@ final class InlineSessionImageMappingTests: XCTestCase {
         XCTAssertEqual(viewModel.loadedUserPromptText(for: item), "second prompt")
     }
 
+    /// The transcript half of the preamble-preference pin. Its counterpart below covers
+    /// the Image Browser, and both now run through the same `ImageUserTurnResolver` — so
+    /// this pair is what makes a change to that shared rule fail on both surfaces rather
+    /// than only the one that happens to have coverage.
+    ///
+    /// The transcript has had this preference since `843bf476` with nothing asserting it;
+    /// that gap is why the browser's copy could lose it and stay quiet.
+    ///
+    /// Uses Codex rather than Claude because the transcript path picks its scanner per
+    /// provider and Claude's wants Claude's own record shape, while Codex takes the
+    /// generic data-URI scanner a synthetic fixture can satisfy. The preference itself is
+    /// gated identically for both, and the browser counterpart below covers Claude.
+    func testTranscriptSkipsAMidSessionPreambleTurn() throws {
+        let jsonl = """
+        {"type":"user","text":"explain this repo"}
+        {"type":"assistant","text":"sure"}
+        {"type":"user","text":"<system-reminder>the user opened a new file</system-reminder>"}
+        {"type":"tool_result","output":{"image_url":"data:image/png;base64,QUJDRA=="}}
+        """
+        let url = try writeTempJSONL(jsonl + "\n")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let events: [SessionEvent] = [
+            makeEvent(id: "e0", kind: .user, text: "explain this repo", rawJSON: #"{"type":"user"}"#),
+            makeEvent(id: "e1", kind: .assistant, text: "sure", rawJSON: #"{"type":"assistant"}"#),
+            makeEvent(id: "e2",
+                      kind: .user,
+                      text: "<system-reminder>the user opened a new file</system-reminder>",
+                      rawJSON: #"{"type":"user"}"#),
+            makeEvent(id: "e3", kind: .tool_result, text: nil, rawJSON: #"{"type":"tool_result"}"#)
+        ]
+        let session = Session(id: "codex-preamble-transcript",
+                              source: .codex,
+                              startTime: nil,
+                              endTime: nil,
+                              model: nil,
+                              filePath: url.path,
+                              eventCount: events.count,
+                              events: events)
+
+        XCTAssertTrue(Session.isAgentsPreambleText(events[2].text ?? ""),
+                      "guard: event 2 must classify as scaffolding, or this test proves nothing")
+
+        let mapped = SessionInlineImageMapper.imagesByUserBlockIndex(for: session)
+        let placed = mapped.values.flatMap { $0 }
+        XCTAssertEqual(placed.count, 1)
+        // Without the preference this resolves to "e2" — the `<system-reminder>`.
+        XCTAssertEqual(placed.first?.imageEventID, "e0")
+        XCTAssertEqual(placed.first?.userPromptIndex, 0)
+    }
+
     /// Pins the Image Browser to the same preamble preference the transcript mapper
-    /// uses, because the two carry separate copies of the nearest-user rule and this
-    /// is exactly where they had drifted: the browser's copy is the older one and
+    /// uses. The two used to carry separate copies of the nearest-user rule and this
+    /// is exactly where they had drifted: the browser's copy was the older one and
     /// took the literal nearest user record, so an image whose nearest preceding turn
     /// was injected scaffolding got labelled with the scaffolding here while the
     /// transcript labelled it with the real prompt — the same image, two answers.

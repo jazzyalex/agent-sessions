@@ -36,7 +36,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.8** — Grok CLI joins as the eleventh current agent source, Analytics counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi, Pi and Grok. [See what's new ↓](#whats-new-in-48)
+> **New in 4.8** — Grok CLI joins as the eleventh current agent source, Analytics counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi and Pi. [See what's new ↓](#whats-new-in-48)
 
 ## Overview
 
@@ -80,13 +80,13 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 4.8
 
-**TL;DR** - Grok CLI is the eleventh current agent source Agent Sessions reads, Analytics finally counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi, Pi and Grok.
+**TL;DR** - Grok CLI is the eleventh current agent source Agent Sessions reads, Analytics finally counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi and Pi.
 
 New in 4.8:
 - **Grok CLI, the eleventh current agent source** — sessions in the list, in search, in Analytics and in the Image Browser, with tool calls, reasoning and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. Subagent runs nest under the session that spawned them, which `grok sessions list` does not show at all. It switches itself on when Grok CLI is on your Mac.
 - **Analytics counts every agent** — the rollup ran on a hand-written list, and Cursor and OpenClaw were never on it, so their sessions contributed nothing to any total, chart or project breakdown and nothing said so. Analytics now derives from the full set of sources, and Cursor gains the agent-picker entry it never had.
-- **The right CLI wins the PATH race** — Cursor, Kimi, Pi and Grok returned the first executable they found even when it did not advertise the flags the CLI needs, so a same-named binary earlier in PATH permanently masked the real install. Live for Grok: Homebrew ships an unrelated `grok` regex utility, while Grok CLI arrives as the `grok-build` cask.
-- **Inline images from a Grok session appear** — four separate gates each dropped a real attachment silently, so it showed in neither the transcript nor the Image Browser. The same scanner now covers Kimi, Pi, Hermes and Cursor.
+- **The right CLI wins the PATH race** — Cursor, Kimi and Pi returned the first executable they found even when it did not advertise the flags the CLI needs, so a same-named binary earlier in PATH permanently masked the real install, reported its version as the agent's, and refused resume outright.
+- **The Image Browser credits the right prompt** — agents inject housekeeping blocks as if they were your messages, and the browser filed an image under that scaffolding while the transcript filed it under the real prompt. Both now agree.
 - **"Live sessions only" includes Claude Desktop chats** — Claude Desktop has no terminal process for the usual live probes to find, so the filter could hide running chats the Quota Meter could already see.
 
 **Recent releases** — 4.7: Kimi Code joins as the tenth current agent source, and active Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit retired, leaving the Quota Meter as the only mode. 4.6.3: the footer usage meters can finally be switched off. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).

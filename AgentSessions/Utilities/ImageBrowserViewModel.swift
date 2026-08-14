@@ -472,55 +472,14 @@ extension ImageBrowserViewModel {
         default:
             let url = URL(fileURLWithPath: session.filePath)
             let signature = index.signature
-            let userEventIndices: [Int] = session.events.enumerated().compactMap { (idx, ev) in
-                ev.kind == .user ? idx : nil
-            }
-
-            // Whether a user record is injected scaffolding rather than something the
-            // person typed. Mirrors `isPreambleUserEventIndex` in
-            // `SessionInlineImageMapper.imagesByUserBlockIndex` exactly, including its
-            // source gate — of the sources that reach this `default:` arm only Codex
-            // and Claude are gated in, since OpenCode, Copilot and Antigravity have
-            // their own `case` arms above and Droid is handed an empty index.
-            func isPreambleUserEventIndex(_ idx: Int) -> Bool {
-                guard session.source == .codex || session.source == .droid || session.source == .claude || session.source == .opencode else { return false }
-                guard session.events.indices.contains(idx) else { return false }
-                guard session.events[idx].kind == .user else { return false }
-                return Session.isAgentsPreambleText(session.events[idx].text ?? "")
-            }
-
-            // Takes `stored.lineIndex` — a physical transcript line — and returns an
-            // index into `session.events`. Two coordinate spaces compared directly,
-            // which only holds while a provider emits about one event per line.
+            // The same rule the transcript uses, from the same implementation — see
+            // `ImageUserTurnResolver`, which exists because this used to be a second copy
+            // that drifted out of step with the transcript's over several releases.
             //
-            // This is a near-twin of `nearestUserEventIndex` inside
-            // `SessionInlineImageMapper.imagesByUserBlockIndex`. The two HAD drifted:
-            // this copy is the older one and never received the preamble preference the
-            // mapper gained, so an image whose nearest preceding user record was
-            // injected scaffolding (AGENTS.md / <environment_context> /
-            // <system-reminder>) was labelled with that scaffolding here while the
-            // transcript labelled it with the real prompt. Claude injects such blocks
-            // mid-session, so the two surfaces could disagree about the same image.
-            // They are now aligned deliberately — change both or neither.
-            //
-            // A negative index no longer short-circuits to `userEventIndices.first`:
-            // it falls through, `prior` comes back empty, and the `after` branch
-            // returns the first turn anyway — now preferring a real prompt, which is
-            // what the mapper already did for the same input.
-            func nearestUserEventIndex(for lineIndex: Int) -> Int? {
-                guard !userEventIndices.isEmpty else { return nil }
-                let prior = userEventIndices.filter { $0 <= lineIndex }
-                if let preferred = prior.last(where: { !isPreambleUserEventIndex($0) }) ?? prior.last {
-                    return preferred
-                }
-                let after = userEventIndices.filter { $0 > lineIndex }
-                return after.first(where: { !isPreambleUserEventIndex($0) }) ?? after.first
-            }
-
-            // Grok is the provider where "one line, one event" is plainly false, so it
-            // resolves in line space instead. Empty — and therefore inert — for every
-            // other source; see `GrokImageUserTurns`.
-            let grokUserTurns = GrokImageUserTurns(session: session)
+            // `antigravityFallsBackToFirstEvent: false`: Antigravity is handled by its own
+            // `case` arm above and never reaches here, so the transcript's empty-session
+            // fallback would be dead code on this path.
+            let turns = ImageUserTurnResolver(session: session, antigravityFallsBackToFirstEvent: false)
 
             var out: [Item] = []
             out.reserveCapacity(min(index.spans.count, 64))
@@ -562,8 +521,8 @@ extension ImageBrowserViewModel {
                 // `resolvedEventIndex`: the two are equal here (only OpenClaw sets
                 // `openClawEventIndex`) but they mean different things, and this one
                 // wants the file line.
-                let resolvedUserEventIndex = grokUserTurns.userEventIndex(forFileLineIndex: stored.lineIndex)
-                    ?? nearestUserEventIndex(for: resolvedEventIndex)
+                let resolvedUserEventIndex = turns.grokUserEventIndex(forFileLineIndex: stored.lineIndex)
+                    ?? turns.nearestUserEventIndex(for: resolvedEventIndex)
                     ?? resolvedEventIndex
 
                 out.append(
