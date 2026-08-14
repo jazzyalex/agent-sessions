@@ -987,3 +987,99 @@ class PiPromptDriver:
 
 
 DRIVERS["pi_prompt"] = PiPromptDriver()
+
+
+class KimiPromptDriver:
+    name = "kimi_prompt"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        kimi_home = sandbox / ".kimi-code"
+        sessions_root = kimi_home / "sessions"
+        sessions_root.mkdir(parents=True, exist_ok=True)
+        # F2: env is built by prepare_auth in _run_prebump. The driver only
+        # adds CLI-specific HOME-relative pins; it never calls os.environ.copy().
+        env = dict(env)
+        env["KIMI_CODE_HOME"] = str(kimi_home)
+
+        # Kimi's own moonshot-ai/"kimi" provider gates every call on
+        # providerConfig.apiKey being present in the *loaded config*
+        # (packages/agent-core-v2/src/app/auth/auth.ts: AuthTokenMissingError
+        # otherwise) -- confirmed by reading dist/main.mjs. A bare KIMI_API_KEY
+        # env var with no config.toml on disk still fails with "provider
+        # moonshot-ai has no credential configured", so forwarding that var
+        # alone is not sufficient. kimi-code ships a purpose-built escape
+        # hatch for exactly this: KIMI_MODEL_NAME + KIMI_MODEL_API_KEY
+        # (applyEnvModelConfig) synthesize an in-memory-only provider+model
+        # that the CLI itself guarantees is never persisted back to
+        # config.toml (stripEnvModelConfig guards the getConfig->setConfig
+        # round-trip). Normalize whichever credential prepare_auth forwarded
+        # (env_vars-first: KIMI_API_KEY or KIMI_MODEL_API_KEY) into that
+        # shape. When prepare_auth instead copied a real
+        # ~/.kimi-code/config.toml via credential_files, neither var is set
+        # here and this block is a no-op -- the copied file's own
+        # default_model/providers already carry a real api_key.
+        # Endpoint and provider type come from the agent's prebump config
+        # (model_base_url / model_provider_type, forwarded as AGENT_WATCH_*),
+        # never baked in here: a user whose moonshot provider points at another
+        # region, a gateway, or a self-hosted proxy would otherwise have the
+        # sandbox authenticate against a backend they do not use — reported as a
+        # driver failure when nothing is wrong with the session format.
+        api_key = env.get("KIMI_MODEL_API_KEY") or env.get("KIMI_API_KEY")
+        if api_key:
+            env["KIMI_MODEL_API_KEY"] = api_key
+            env["KIMI_MODEL_NAME"] = env.get("AGENT_WATCH_MODEL") or "kimi-k2.7-code"
+            env.setdefault(
+                "KIMI_MODEL_PROVIDER_TYPE",
+                env.get("AGENT_WATCH_MODEL_PROVIDER_TYPE") or "kimi",
+            )
+            env.setdefault(
+                "KIMI_MODEL_BASE_URL",
+                env.get("AGENT_WATCH_MODEL_BASE_URL") or "https://api.moonshot.ai/v1",
+            )
+
+        stdout_file = sandbox / "kimi.stdout.txt"
+        stderr_file = sandbox / "kimi.stderr.txt"
+        try:
+            proc = subprocess.run(
+                ["kimi", "-p", prompt, "--output-format", "text"],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            stdout_file.write_text(proc.stdout or "")
+            stderr_file.write_text(proc.stderr or "")
+            rc = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            stdout_file.write_text("")
+            stderr_file.write_text(f"timeout after {timeout}s: {exc}")
+            return DriverResult(False, None, stdout_file, stderr_file, 124, f"timeout:{timeout}")
+        except FileNotFoundError as exc:
+            stderr_file.write_text(f"kimi not found: {exc}")
+            return DriverResult(False, None, stdout_file, stderr_file, 127, "kimi_not_found")
+
+        # Discover the newest main-agent wire.jsonl under the sandboxed
+        # KIMI_CODE_HOME. Restricted to agents/main/ (not agents/<subagent>/)
+        # to match the weekly local_schema glob
+        # (sessions/**/agents/main/wire.jsonl) -- a "say hello" prompt has no
+        # subagents, but a stray agents/agent-0/wire.jsonl must never win.
+        newest: Path | None = None
+        newest_m = -1.0
+        if sessions_root.exists():
+            for p in sessions_root.rglob("agents/main/wire.jsonl"):
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m > newest_m:
+                    newest = p
+                    newest_m = m
+
+        if rc != 0 or newest is None:
+            return DriverResult(False, newest, stdout_file, stderr_file, rc, f"kimi_prompt_failed rc={rc}")
+        return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
+
+
+DRIVERS["kimi_prompt"] = KimiPromptDriver()

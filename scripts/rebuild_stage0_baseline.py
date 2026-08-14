@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,7 +54,9 @@ STRUCTURAL_KEYS = {"type", "role", "subtype", "model"}
 
 # Fixture that receives appended coverage, per agent.
 TARGET_FIXTURE = {
+    "antigravity": "antigravity/cli_small.jsonl",
     "claude": "claude/small.jsonl",
+    "grok": "grok/chat_history.jsonl",
     "codex": "codex/small.jsonl",
     "copilot": "copilot/small.jsonl",
 }
@@ -62,6 +66,7 @@ MATRIX_KEY = {
     "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
     "antigravity": "antigravity", "opencode": "opencode", "hermes": "hermes",
     "openclaw": "openclaw", "cursor": "cursor", "pi": "pi", "kimi": "kimi_code",
+    "grok": "grok_cli",
 }
 
 
@@ -123,6 +128,12 @@ def _redact(value, opaque: frozenset[str], key: str | None = None):
 
 
 def _record_buckets(agent: str, record: dict, tmp: Path) -> dict[str, list[str]]:
+    """Buckets a single record contributes, fingerprinted the same way as the agent.
+
+    `tmp` must live OUTSIDE the fixture tree: a directory-aware fingerprinter
+    (grok reads the sibling `summary.json`) would otherwise pick up the target
+    fixture's own neighbours and report their buckets for every probed record.
+    """
     tmp.write_text(json.dumps(record) + "\n", encoding="utf-8")
     return agent_watch._schema_fingerprint_for_agent(agent, tmp, max_lines=5).get("type_keys") or {}
 
@@ -178,8 +189,13 @@ def main(argv: list[str]) -> int:
         print("\n(report only -- rerun with --emit to append redacted coverage)")
         return 1
 
+    if agent not in TARGET_FIXTURE:
+        print(f"{agent}: no TARGET_FIXTURE configured -- cannot --emit for this agent",
+              file=sys.stderr)
+        return 4
     target = FIXTURES / TARGET_FIXTURE[agent]
-    tmp = target.parent / ".rebuild_probe.jsonl"
+    probe_dir = tempfile.mkdtemp(prefix="rebuild-probe-")
+    tmp = Path(probe_dir) / "probe.jsonl"
     harvested: list[dict] = []
     remaining = set(missing)
 
@@ -209,6 +225,7 @@ def main(argv: list[str]) -> int:
                     remaining -= closes
     finally:
         tmp.unlink(missing_ok=True)
+        shutil.rmtree(probe_dir, ignore_errors=True)
 
     if harvested:
         with target.open("a", encoding="utf-8") as fh:

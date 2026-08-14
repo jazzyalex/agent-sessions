@@ -17,8 +17,17 @@ This is intentionally **non-destructive**:
 
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 9 active agents including `antigravity`, `copilot`, `cursor`, `hermes`, and `pi` (release watch + minimal probes + schema fingerprints).
+- Weekly: all 11 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok` (release watch + minimal probes + schema fingerprints).
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
+- A contract may declare `required_companion_files` — sidecars that must sit beside the sampled
+  transcript for the app to discover the session at all. Entries are relative to the transcript's
+  own directory and are either a bare path (existence) or `{path, must_parse: "json_object", note}`.
+  A breach fails the contract, which means `severity: high`, `verdict: monitoring_broken`, and a
+  `probe_or_discovery_failed` blocker. Grok declares `summary.json`: `GrokSessionDiscovery` skips
+  any session directory that lacks it, so its loss removes every Grok session from the app while
+  the schema fingerprint still reports `unknown_types: []` — a missing sidecar contributes no keys,
+  and the schema diff ignores `missing_keys`/`missing_types` by design. The schema channel can
+  never catch this class of break; the contract is the only thing that does.
 
 ## Sources of Truth
 - Current snapshot (latest): `docs/agent-support/agent-support-matrix.yml`
@@ -64,6 +73,32 @@ most recent prior successful upstream version from agent-watch history;
 mean no usable latest candidate was available for the current report.
 Use `compatibility.blockers` for the exact reason a support claim is blocked.
 Weekly stdout prints every monitored agent with its compatibility verdict.
+
+### Where the latest version came from
+
+`upstream.parsed_version` is not always the configured registry's answer, so never read it
+without `upstream.parsed_version_provenance`:
+
+| Provenance | Meaning |
+|------------|---------|
+| `upstream_source` | The configured `upstream` source (GitHub release, npm, cask, URL regex). |
+| `cached_prior_report` | The source was degraded; the version was carried over from an earlier report. |
+| `cli_probe` | A weekly probe's own answer won, because it was higher than the configured source. |
+| `both_agree` | A probe answered and matched the configured source exactly. |
+| `none` | No usable version from any source. |
+
+A weekly probe becomes a latest-version source by declaring `latest_version_key` in config —
+the key of its parsed JSON holding the vendor's own "latest" (Grok's `grok_update_check` uses
+`latestVersion`). Reconciliation takes the **higher** of the two, never a straight replacement:
+a CLI answers for the channel it is pinned to, so a lower CLI answer must not be allowed to
+hide a newer published release. Because it can only raise the number, reconciliation can add a
+`upstream_newer_than_verified` alarm but never silence one. A failed probe gets no vote.
+The full comparison is in `upstream.reconciliation`, and any disagreement prints on the weekly
+summary line as `latest_disagree=probe:<v>/source:<v>/used:<v>`.
+
+Reconciliation deliberately does **not** clear `risk.monitoring_failed`. If the configured
+source failed outright, that source is still broken and stays reported as broken; a CLI
+self-report is better data for the version, not a repair of the monitoring path.
 Do not treat `supports_installed_only`, `latest_unknown`, `blocked_stale_sample`,
 or `blocked_no_fresh_evidence` as verified latest support. For active agents,
 `supports_latest` requires `evidence.fresh_evidence_source ==
@@ -98,7 +133,11 @@ Recommendation guidelines:
 
 ## What “usage/limits drift” means (Claude + Codex)
 - Codex:
-  - Passive channel: session JSONL `token_count` / `rate_limits` event structure.
+  - Passive channel: session JSONL `token_count` / `rate_limits` event structure. Covered by the
+    schema fingerprint **only because codex is fingerprinted nested** — these events live under
+    `event_msg.payload`, and the flat fingerprint that ran until 2026-08-03 stopped at
+    `{payload,timestamp,type}` and could never see them. Moving codex back to the flat
+    fingerprint would silently unwatch this channel.
   - Active channel (weekly/when-risk): `codex_status_capture.sh` output schema.
 - Claude:
   - Active channel (weekly/when-risk): `claude_usage_capture.sh` output schema and probe health.

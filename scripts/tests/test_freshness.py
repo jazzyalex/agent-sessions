@@ -1030,3 +1030,57 @@ def test_daily_report_does_not_use_weekly_compatibility_blockers(tmp_path, monke
     assert codex["severity"] == "none"
     assert codex["recommendation"] == "ignore"
     assert codex["compatibility"]["verdict"] == "not_evaluated_daily"
+
+
+def _assessment(**overrides):
+    """Minimal _build_compatibility_assessment call; overrides win."""
+    kwargs = dict(
+        verified=agent_watch.Semver.parse("1.0.0"),
+        installed=agent_watch.Semver.parse("1.0.0"),
+        upstream=agent_watch.Semver.parse("1.0.0"),
+        upstream_source_status="current_fetch",
+        upstream_sources_configured=True,
+        upstream_errors=[],
+        installed_newer_than_verified=False,
+        upstream_newer_than_verified=False,
+        monitoring_failed=False,
+        schema_matches_baseline=True,
+        schema_diff=None,
+        sample_freshness={"is_stale": False},
+        fresh_evidence_source="latest_prebump_report",
+        probe_failed=False,
+        real_session_driver_configured=True,
+    )
+    kwargs.update(overrides)
+    return agent_watch._build_compatibility_assessment(**kwargs)
+
+
+THIN = {"coverage_ratio": 0.30, "observed_event_count": 20, "unknown_only_is_empty": True}
+RICH = {"coverage_ratio": 0.56, "observed_event_count": 2808, "unknown_only_is_empty": True}
+
+
+def test_thin_prebump_does_not_override_rich_weekly_union():
+    """A passing prebump must never DOWNGRADE an agent that also has rich weekly evidence.
+
+    Regression: on 2026-08-13 codex reported blocked_thin_sample off its 20-event
+    prebump session while the weekly union carried 2808 clean events, because the
+    prebump diff had replaced the weekly one before the thin-sample gate ran.
+    """
+    got = _assessment(schema_diff=THIN, weekly_schema_diff=RICH)
+    assert "sample_coverage_too_thin" not in got["blockers"]
+    assert got["verdict"] != "blocked_thin_sample"
+
+
+def test_thin_sample_still_blocks_when_every_sample_is_thin():
+    got = _assessment(schema_diff=THIN, weekly_schema_diff=THIN)
+    assert "sample_coverage_too_thin" in got["blockers"]
+    assert got["verdict"] == "blocked_thin_sample"
+
+    got_single = _assessment(schema_diff=THIN)
+    assert "sample_coverage_too_thin" in got_single["blockers"]
+
+
+def test_rich_sample_is_never_thin():
+    assert not agent_watch._sample_is_thin(RICH)
+    assert agent_watch._sample_is_thin(THIN)
+    assert not agent_watch._sample_is_thin(None)

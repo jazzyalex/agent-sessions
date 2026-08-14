@@ -43,6 +43,31 @@ def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _read_json_object(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """Read `path` as a JSON object, returning `(object, error_code)`.
+
+    The error CODE is the point. A caller that only learns "no object came back"
+    cannot tell an upstream rename from a truncated write from a file that now
+    holds an array, and those need three different triage paths. The single
+    `except (OSError, json.JSONDecodeError)` this replaces collapsed all of them
+    into a silent `None`.
+    """
+    if not path.exists():
+        return None, "missing"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        # Permissions, a directory where a file is expected, an unreadable mount.
+        return None, "unreadable"
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, "invalid_json"
+    if not isinstance(obj, dict):
+        return None, "not_json_object"
+    return obj, None
+
+
 def _expand_path(p: str) -> Path:
     # Expand env vars and ~
     expanded = os.path.expandvars(p)
@@ -633,6 +658,77 @@ def _newest_files_with_types(
     return out
 
 
+def _check_required_companion_files(
+    local_file: str, entries_cfg: Any
+) -> list[dict[str, Any]]:
+    """Verify the sibling files an agent's DISCOVERY requires, not just its parser.
+
+    Some agents treat a session as a directory and refuse to list it at all when a
+    sidecar next to the transcript is gone. Grok is the live case:
+    `GrokSessionDiscovery.discoverSessionFiles()` skips any session directory whose
+    `summary.json` is absent, so losing that one file makes every Grok session
+    vanish from the app — a total outage for that source.
+
+    The schema fingerprint cannot catch this. A sidecar that fails to load simply
+    contributes no keys, and `_schema_diff` deliberately ignores `missing_keys` /
+    `missing_types` (a thin sample legitimately lacks baseline types; that is what
+    `coverage_ratio` is for). So the drift report stayed "compatible, no drift"
+    while discovery was already dead. This check is declared in config next to
+    `patterns` because it is the same class of thing: a discovery precondition
+    whose breach must flip the agent's status, not merely be logged.
+
+    Each entry is either a bare relative path (existence is enough) or an object
+    `{path, must_parse, note}`. `must_parse: "json_object"` additionally requires
+    the file to load as a JSON object — for Grok that is the difference between
+    "sessions disappear" (missing) and "every session loses its id, cwd, title and
+    both timestamps" (present but unparseable), and both are app-visible breaks.
+    """
+    if not isinstance(entries_cfg, list) or not entries_cfg:
+        return []
+
+    base = Path(local_file).parent
+    results: list[dict[str, Any]] = []
+    for entry in entries_cfg:
+        if isinstance(entry, str):
+            entry = {"path": entry}
+        if not isinstance(entry, dict):
+            results.append({"ok": False, "error": "invalid_companion_entry"})
+            continue
+        rel = entry.get("path")
+        if not isinstance(rel, str) or not rel:
+            results.append({"ok": False, "error": "invalid_companion_entry"})
+            continue
+
+        must_parse = entry.get("must_parse")
+        target = base / rel
+        record: dict[str, Any] = {"path": rel, "resolved": str(target)}
+        if must_parse is not None:
+            record["must_parse"] = must_parse
+
+        if must_parse is None:
+            exists = target.is_file()
+            record["ok"] = exists
+            if not exists:
+                record["error"] = "missing"
+        elif must_parse == "json_object":
+            _obj, err = _read_json_object(target)
+            record["ok"] = err is None
+            if err:
+                record["error"] = err
+        else:
+            # An unrecognized rule must fail loudly. Treating it as "no requirement"
+            # would turn a config typo into exactly the silent pass this check exists
+            # to remove.
+            record["ok"] = False
+            record["error"] = "unsupported_must_parse"
+
+        note = entry.get("note")
+        if isinstance(note, str) and note:
+            record["note"] = note
+        results.append(record)
+    return results
+
+
 def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[str, Any]) -> dict[str, Any]:
     patterns_raw = contract_cfg.get("patterns")
     patterns = [p for p in (patterns_raw if isinstance(patterns_raw, list) else []) if isinstance(p, str) and p]
@@ -645,13 +741,23 @@ def _check_discovery_path_contract(local_file: str | None, contract_cfg: dict[st
         return {"ok": False, "error": "no_local_file", "patterns": patterns, "description": description}
 
     matched = next((pat for pat in patterns if re.search(pat, candidate)), None)
-    return {
-        "ok": bool(matched),
+    # Resolved against the ORIGINAL path, not the forward-slashed `candidate`:
+    # `candidate` exists only so the regexes can be written one way, and rewriting
+    # separators before touching the filesystem is how a check starts stat-ing paths
+    # that do not exist.
+    companions = _check_required_companion_files(local_file or "", contract_cfg.get("required_companion_files"))
+    companions_ok = all(bool(c.get("ok")) for c in companions)
+
+    result: dict[str, Any] = {
+        "ok": bool(matched) and companions_ok,
         "file": candidate,
         "matched_pattern": matched,
         "patterns": patterns,
         "description": description,
     }
+    if companions:
+        result["required_companion_files"] = companions
+    return result
 
 
 def _tail_lines(path: Path, max_lines: int) -> list[str]:
@@ -720,7 +826,7 @@ _MIN_SAMPLE_EVENT_COUNT = 25
 # {data,id,parentId,timestamp,type} — almost nothing. Claude's envelope is genuinely
 # informative (18 keys), but `.message` hid its content-block types and the entire
 # `usage` struct, so it belongs here too.
-_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude"}
+_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude", "grok"}
 
 # Keys whose values are open-ended maps rather than fixed structs. Descending into
 # these turns ordinary content into permanent phantom drift — a new model name, tool
@@ -745,6 +851,11 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # carries set-cookie; its KEY NAMES would land in fixtures and reports. `mcpMeta`
     # is whatever an MCP server chose to return.
     "claude": {"input", "toolUseResult", "headers", "mcpMeta"},
+    # Grok's transcript nests the parts that matter (content blocks, tool_calls,
+    # reasoning summaries, backend_tool_call kinds), so it is worth walking. The one
+    # exclusion is `arguments` — a tool's own parameter object, where every new tool
+    # parameter would otherwise read as Grok schema drift.
+    "grok": {"arguments"},
 }
 
 
@@ -857,6 +968,59 @@ def _observed_event_count(fingerprint: dict[str, Any] | None) -> int | None:
     return None
 
 
+def _grok_session_schema_fingerprint(path: Path, max_lines: int) -> dict[str, Any]:
+    """Fingerprint a Grok session directory from its `chat_history.jsonl`.
+
+    A Grok session is a directory, not a single file: the transcript lives in
+    `chat_history.jsonl` and everything discovery depends on (ids, cwd, model,
+    `chat_format_version`) lives in the sibling `summary.json`. Fingerprinting only
+    the transcript would leave the discovery-critical half unwatched, so the summary
+    is merged in as its own `summary` bucket.
+
+    A sidecar that cannot be read contributes no keys, and no key-level diff can
+    represent that: `_schema_diff` ignores `missing_keys`/`missing_types` on purpose,
+    so an unreadable summary.json reads as a clean bill of health here. The
+    fingerprint therefore records `summary_error` so the failure is at least visible
+    in the report, and the loud verdict-flipping check lives in the discovery
+    contract (`required_companion_files`), where a discovery precondition belongs.
+    """
+    fp = _nested_jsonl_schema_fingerprint(
+        path,
+        max_lines=max_lines,
+        opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get("grok", ())),
+    )
+
+    summary_path = path.parent / "summary.json"
+    type_keys = dict(fp.get("type_keys") or {})
+    type_counts = dict(fp.get("type_counts") or {})
+    summary, summary_error = _read_json_object(summary_path)
+    if isinstance(summary, dict):
+        buckets: dict[str, set[str]] = {}
+        _nested_bucket_walk(
+            "summary",
+            summary,
+            buckets,
+            depth=0,
+            max_depth=_NESTED_FINGERPRINT_MAX_DEPTH,
+            opaque_keys=frozenset(_NESTED_OPAQUE_KEYS.get("grok", ())),
+        )
+        for bucket, keys in buckets.items():
+            merged = set(type_keys.get(bucket, [])) | keys
+            type_keys[bucket] = sorted(merged)
+        # Deliberately NOT counted in `type_counts`: summary.json is one metadata
+        # file, not a transcript event, and `_observed_event_count` sums these
+        # counts to feed the thin-sample gate. Counting it would hand every
+        # sampled session a free event and let a genuinely thin grok sample clear
+        # `_MIN_SAMPLE_EVENT_COUNT` on phantom volume. The keys still land in
+        # `type_keys`, which is where drift detection actually looks.
+
+    fp["type_keys"] = {k: type_keys[k] for k in sorted(type_keys)}
+    fp["type_counts"] = {k: type_counts[k] for k in sorted(type_counts)}
+    fp["summary_file"] = str(summary_path) if isinstance(summary, dict) else None
+    fp["summary_error"] = summary_error
+    return fp
+
+
 def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -> dict[str, Any]:
     """Single place that decides how deep an agent's JSONL is fingerprinted.
 
@@ -865,6 +1029,8 @@ def _schema_fingerprint_for_agent(agent_name: str, path: Path, max_lines: int) -
     """
     if agent_name == "kimi":
         return _kimi_wire_schema_fingerprint(path, max_lines=max_lines)
+    if agent_name == "grok":
+        return _grok_session_schema_fingerprint(path, max_lines=max_lines)
     if agent_name in _NESTED_PAYLOAD_AGENTS:
         return _nested_jsonl_schema_fingerprint(
             path,
@@ -1777,6 +1943,16 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_cursor_transcript_schema_fingerprint(bp, max_lines=5000))
+    elif agent_name == "grok":
+        # Keyed off chat_history.jsonl only: the fingerprinter picks up the sibling
+        # summary.json itself, so listing the summary fixture separately would just
+        # fingerprint it twice.
+        for p in filtered:
+            if not p.endswith("chat_history.jsonl"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_grok_session_schema_fingerprint(bp, max_lines=5000))
 
     return _merge_type_keys(fps)
 
@@ -1892,6 +2068,11 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
             parsed = json.loads(stdout) if stdout else None
         except Exception:
             parsed = None
+    elif parse_kind == "grok_update_json":
+        try:
+            parsed = json.loads(stdout) if stdout else None
+        except Exception:
+            parsed = None
 
     ok = rc == 0
     if parse_kind == "claude_usage_json":
@@ -1902,11 +2083,17 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
         ok = ok and isinstance(parsed, dict) and bool(parsed.get("ok") is True)
     if parse_kind == "cursor_sqlite_json":
         ok = ok and isinstance(parsed, dict) and bool(parsed.get("ok") is True)
+    if parse_kind == "grok_update_json":
+        # Health is "did the CLI answer with a parseable update report", NOT the
+        # exit code: a checker that exits non-zero to signal "update available"
+        # would otherwise flip the agent to monitoring_broken/severity=high at
+        # exactly the moment a new build ships — when the signal matters most.
+        ok = isinstance(parsed, dict) and parsed.get("latestVersion") is not None
 
     if verbose and not ok:
         print(f"Probe {label} failed (exit={rc}).", file=sys.stderr)
 
-    return {
+    result: dict[str, Any] = {
         "label": label,
         "argv": argv,
         "exit_code": rc,
@@ -1916,6 +2103,13 @@ def _run_probe_script(probe: dict[str, Any], out_dir: Path, verbose: bool) -> di
         "stdout_file": str(out_dir / f"{label}.stdout.txt"),
         "stderr_file": str(out_dir / f"{label}.stderr.txt"),
     }
+    # Carried through so version reconciliation stays config-driven: the probe entry
+    # declares which key of its own JSON is the vendor's authoritative "latest",
+    # rather than agent_watch hard-coding another `if agent_name == ...` branch.
+    latest_version_key = probe.get("latest_version_key")
+    if isinstance(latest_version_key, str) and latest_version_key:
+        result["latest_version_key"] = latest_version_key
+    return result
 
 
 def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
@@ -1984,6 +2178,93 @@ def _fetch_upstream(source: dict[str, Any], timeout: int) -> dict[str, Any]:
         return {"ok": True, "version": str(best), "url": url}
 
     return {"ok": False, "error": "unsupported_source_kind", "kind": kind}
+
+
+def _reconcile_latest_version_from_probes(
+    *,
+    upstream: str | None,
+    probe_results: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Reconcile the configured upstream version with the version a CLI reports itself.
+
+    Some agents ship no registry we can trust for "latest". Grok is distributed as a
+    native x.ai binary through the `grok-build` Homebrew cask, and that cask lags an
+    x.ai release — the config note for it already claimed the `grok_update_check`
+    probe made the report "carry the authoritative number", but nothing downstream
+    ever read `latestVersion`, so every compatibility decision kept running against
+    the stale cask value.
+
+    The rule is MAX, not replace. Replacing outright is unsafe in one direction: a
+    CLI's own updater answers for the channel that CLI is pinned to (`"channel":
+    "stable"` in Grok's payload), and a pinned, cached or broken checker reporting a
+    LOWER number would then hide a newer published release and quietly make an agent
+    look current. Taking the higher of the two can only ever move
+    `upstream_newer_than_verified` toward true, so reconciliation can add an alarm
+    but never silence one.
+
+    Disagreement in either direction is recorded — a probe that reports lower than
+    the registry is itself the interesting signal (pinned channel, stale cache) and
+    is not something a monitoring run should swallow.
+
+    Only the first probe declaring `latest_version_key` is consulted; an agent has
+    one authoritative self-report, and picking silently among several would be the
+    same class of hidden choice this function exists to remove.
+    """
+    for pr in probe_results:
+        if not isinstance(pr, dict):
+            continue
+        key = pr.get("latest_version_key")
+        if not isinstance(key, str) or not key:
+            continue
+
+        probe_version: str | None = None
+        probe_error: str | None = None
+        if not pr.get("ok"):
+            # A failed probe already fails the run through `probe_failed`; it must not
+            # also get a vote on the version number.
+            probe_error = "probe_failed"
+        else:
+            parsed = pr.get("parsed")
+            raw = parsed.get(key) if isinstance(parsed, dict) else None
+            if not isinstance(raw, str) or not raw:
+                probe_error = "missing_version_key"
+            else:
+                probe_version = _extract_semver(raw)
+                if probe_version is None:
+                    probe_error = "unparseable_version"
+
+        source_version = upstream
+        if probe_version and source_version:
+            cmp = _compare_semver(probe_version, source_version)
+            if cmp == 1:
+                chosen, provenance = probe_version, "cli_probe"
+            elif cmp == 0:
+                chosen, provenance = source_version, "both_agree"
+            else:
+                # cmp == -1, or None when the registry value is not semver-parseable.
+                # Either way the configured source stands and the divergence is
+                # reported rather than resolved by guessing.
+                chosen, provenance = source_version, "upstream_source"
+        elif probe_version:
+            chosen, provenance = probe_version, "cli_probe"
+        elif source_version:
+            chosen, provenance = source_version, "upstream_source"
+        else:
+            chosen, provenance = None, "none"
+
+        return {
+            "probe_label": pr.get("label") or "probe",
+            "probe_version_key": key,
+            "probe_version": probe_version,
+            "probe_error": probe_error,
+            "upstream_source_version": source_version,
+            "chosen_version": chosen,
+            "provenance": provenance,
+            "sources_disagree": bool(
+                probe_version and source_version and probe_version != source_version
+            ),
+        }
+    return None
 
 
 def _apply_stale_override(
@@ -2142,6 +2423,7 @@ def _format_summary_line(
     recommendation: str,
     sample_freshness: dict[str, Any] | None,
     compatibility: dict[str, Any] | None = None,
+    upstream_reconciliation: dict[str, Any] | None = None,
 ) -> str:
     base = (
         f"{agent_name}: severity={severity} "
@@ -2150,6 +2432,15 @@ def _format_summary_line(
         f"upstream={upstream or 'unknown'} "
         f"rec={recommendation}"
     )
+    # Two latest-version sources disagreeing is never allowed to be a report-only
+    # detail: the printed weekly summary is what a human actually reads, and
+    # "upstream=1.0.5" alone hides that the registry still says 1.0.3.
+    if isinstance(upstream_reconciliation, dict) and upstream_reconciliation.get("sources_disagree"):
+        base = (
+            f"{base} latest_disagree=probe:{upstream_reconciliation.get('probe_version')}"
+            f"/source:{upstream_reconciliation.get('upstream_source_version')}"
+            f"/used:{upstream_reconciliation.get('chosen_version')}"
+        )
     if isinstance(compatibility, dict):
         verdict = compatibility.get("verdict")
         scope = compatibility.get("scope")
@@ -2184,6 +2475,25 @@ def _compatibility_evidence_source(
     return "fresh_local_sample"
 
 
+def _sample_is_thin(schema_diff: dict[str, Any] | None) -> bool:
+    """True when a sample was BOTH narrow and tiny, so it evidenced nothing either way.
+
+    Low coverage alone is NOT thin: a baseline deliberately contains rare
+    interactive-only families (claude's ai-title, pr-link, permission-mode) that a
+    perfectly good 1000-event session will never contain.
+    """
+    if not isinstance(schema_diff, dict):
+        return False
+    coverage_ratio = schema_diff.get("coverage_ratio")
+    observed_events = schema_diff.get("observed_event_count")
+    return (
+        isinstance(coverage_ratio, (int, float))
+        and coverage_ratio < _MIN_SAMPLE_COVERAGE_RATIO
+        and isinstance(observed_events, int)
+        and observed_events < _MIN_SAMPLE_EVENT_COUNT
+    )
+
+
 def _build_compatibility_assessment(
     *,
     verified: str | None,
@@ -2202,6 +2512,7 @@ def _build_compatibility_assessment(
     real_session_driver_configured: bool,
     failed_prebump_evidence: dict[str, Any] | None = None,
     upstream_source_status: str | None = None,
+    weekly_schema_diff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Answer whether current AS code supports the latest available agent format.
 
@@ -2249,19 +2560,15 @@ def _build_compatibility_assessment(
     # is not hypothetical: a "Say hello" prebump session landed in the real store,
     # became the newest sample, and flipped antigravity from format_drift_detected
     # to clean without a single parser change.
-    coverage_ratio = schema_diff.get("coverage_ratio") if isinstance(schema_diff, dict) else None
-    observed_events = schema_diff.get("observed_event_count") if isinstance(schema_diff, dict) else None
-    # Low coverage alone is NOT thin: a baseline deliberately contains rare
-    # interactive-only families (claude's ai-title, pr-link, permission-mode) that a
-    # perfectly good 1000-event session will never contain. Only a sample that is both
-    # narrow AND tiny has genuinely shown nothing.
-    thin_sample = (
-        isinstance(coverage_ratio, (int, float))
-        and coverage_ratio < _MIN_SAMPLE_COVERAGE_RATIO
-        and isinstance(observed_events, int)
-        and observed_events < _MIN_SAMPLE_EVENT_COUNT
-        and not unknown_schema_drift
-    )
+    # Judge thinness across EVERY sample we have, not just whichever diff was
+    # substituted last. A passing prebump replaces `schema_diff` with its own
+    # one-line-prompt session, so scoring that alone let a fresh prebump DOWNGRADE an
+    # agent that also had a rich, clean weekly union: on 2026-08-13 codex reported
+    # blocked_thin_sample off a 20-event prebump while its weekly union carried 2808
+    # clean events. Adding evidence must never make the verdict worse.
+    thin_sample = all(
+        _sample_is_thin(d) for d in (schema_diff, weekly_schema_diff) if isinstance(d, dict)
+    ) and isinstance(schema_diff, dict) and not unknown_schema_drift
 
     if monitoring_failed:
         blockers.append("latest_source_failed")
@@ -2757,6 +3064,17 @@ def _run_prebump(
         model_override = pb.get("model")
         if isinstance(model_override, str) and model_override:
             env["AGENT_WATCH_MODEL"] = model_override
+        # Endpoint/provider come from config too, so a driver never bakes in a
+        # vendor URL: a CLI whose provider points at a different region, gateway
+        # or self-hosted proxy would otherwise be probed against a backend the
+        # user does not actually use.
+        for cfg_key, env_key in (
+            ("model_base_url", "AGENT_WATCH_MODEL_BASE_URL"),
+            ("model_provider_type", "AGENT_WATCH_MODEL_PROVIDER_TYPE"),
+        ):
+            val = pb.get(cfg_key)
+            if isinstance(val, str) and val:
+                env[env_key] = val
         if args.allow_real_home and pb.get("real_home_session") is True:
             env["HOME"] = str(real_home)
             env["AGENT_WATCH_SESSION_HOME"] = str(real_home)
@@ -3023,6 +3341,7 @@ def main(argv: list[str]) -> int:
         "cursor": matrix_versions.get("cursor"),
         "pi": matrix_versions.get("pi"),
         "kimi": matrix_versions.get("kimi_code"),
+        "grok": matrix_versions.get("grok_cli"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -3148,11 +3467,13 @@ def main(argv: list[str]) -> int:
             monitoring_failed = not _upstream_fetch_degraded(upstream_errors)
 
         weekly_details: dict[str, Any] | None = None
+        upstream_reconciliation: dict[str, Any] | None = None
         probe_failed = False
         probe_failed_but_upstream_degraded = False
         discovery_contract_failed = False
         schema_matches_baseline: bool | None = None
         schema_diff: dict[str, Any] | None = None
+        weekly_schema_diff: dict[str, Any] | None = None
         if args.mode == "weekly":
             weekly_details = {}
             local_schema_cfg = (agent_cfg.get("weekly") or {}).get("local_schema")
@@ -3172,6 +3493,7 @@ def main(argv: list[str]) -> int:
                     "cursor": "cursor",
                     "pi": "pi",
                     "kimi": "kimi_code",
+                    "grok": "grok_cli",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
@@ -3331,6 +3653,27 @@ def main(argv: list[str]) -> int:
                     if degraded and not usage_ok:
                         probe_failed_but_upstream_degraded = True
 
+            # Version reconciliation has to run HERE, after the probes: `upstream` and
+            # `upstream_newer_than_verified` were computed from the configured registry
+            # source long before any CLI was asked what it thinks the latest build is.
+            upstream_reconciliation = _reconcile_latest_version_from_probes(
+                upstream=upstream, probe_results=probe_results
+            )
+            if isinstance(upstream_reconciliation, dict):
+                weekly_details["latest_version_reconciliation"] = upstream_reconciliation
+                chosen = upstream_reconciliation.get("chosen_version")
+                if isinstance(chosen, str) and chosen and chosen != upstream:
+                    upstream = chosen
+                    # Recompute the drift flag against the version we actually adopted;
+                    # leaving it derived from the superseded value is the whole defect.
+                    upstream_newer_than_verified = bool(
+                        verified_semver and _compare_semver(upstream, verified_semver) == 1
+                    )
+                    # `monitoring_failed` is deliberately NOT cleared here. If the
+                    # configured source failed outright, that source is still broken and
+                    # must stay reported as broken; a CLI self-report is better data for
+                    # the version, not a repair of the monitoring path.
+
         severity, recommendation = _pick_severity(
             upstream_newer_than_verified=upstream_newer_than_verified,
             installed_newer_than_verified=installed_newer_than_verified,
@@ -3380,6 +3723,10 @@ def main(argv: list[str]) -> int:
                     cli_binary_mtime=cli_mtime,
                 )
                 if prebump_evidence is not None:
+                    # Keep the weekly union's own diff: the substitution below swaps in
+                    # the prebump's tiny one-prompt session, and the thin-sample gate
+                    # must still see the richer sample we already collected.
+                    weekly_schema_diff = schema_diff if isinstance(schema_diff, dict) else None
                     prebump_sample = prebump_evidence.get("sample_freshness")
                     if isinstance(prebump_sample, dict):
                         sample_freshness = dict(prebump_sample)
@@ -3431,6 +3778,7 @@ def main(argv: list[str]) -> int:
                 monitoring_failed=monitoring_failed,
                 schema_matches_baseline=schema_matches_baseline,
                 schema_diff=schema_diff,
+                weekly_schema_diff=weekly_schema_diff,
                 sample_freshness=sample_freshness,
                 fresh_evidence_source=fresh_evidence_source,
                 probe_failed=probe_failed,
@@ -3487,6 +3835,20 @@ def main(argv: list[str]) -> int:
             },
             "upstream": {
                 "parsed_version": upstream,
+                # Where the number above actually came from. Without this a reader
+                # cannot tell a registry answer from a CLI self-report from a cached
+                # value carried over from a prior run, and all three lead to different
+                # conclusions when the version looks surprising.
+                "parsed_version_provenance": (
+                    upstream_reconciliation.get("provenance")
+                    if isinstance(upstream_reconciliation, dict)
+                    else (
+                        "cached_prior_report"
+                        if upstream and upstream_source_status == "cached_prior_report"
+                        else ("upstream_source" if upstream else "none")
+                    )
+                ),
+                "reconciliation": upstream_reconciliation,
                 "source_used": upstream_source_used,
                 "source_status": upstream_source_status,
                 "errors": upstream_errors[:3],
@@ -3526,6 +3888,7 @@ def main(argv: list[str]) -> int:
                     recommendation=recommendation,
                     sample_freshness=sample_freshness,
                     compatibility=compatibility,
+                    upstream_reconciliation=upstream_reconciliation,
                 )
             )
 

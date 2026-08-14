@@ -23,5 +23,7 @@
   "generated_title": "Read hello.py and summarize what it prints",
   "agent_name": "grok",
   "sandbox_profile": "off",
-  "reasoning_effort": "high"
+  "reasoning_effort": "high",
+  "last_turn_summary": "Read hello.py and reported its printed output.",
+  "last_turn_summary_prompt_id": "00000000-0000-4000-8000-000000000000"
 }

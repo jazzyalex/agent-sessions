@@ -224,7 +224,14 @@
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["agy", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.antigravity.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app",
+          "pattern": "Stable Version:\\s*([0-9]+\\.[0-9]+\\.[0-9]+)",
+          "note": "The CLI's OWN auto-updater service, extracted from the agy binary; it answers with the stable rollout version. agy is a self-updating standalone binary - there is no npm package, and the unrelated npm `antigravity-cli` (0.0.1) is a squat, the same trap as cursor-agent."
+        }
+      ],
       "risk_keywords": {
         "schema": ["session", "transcript", "markdown", "format", "transcript.jsonl", "jsonl"],
         "usage": ["usage", "token", "tokens", "limit", "quota"]
@@ -254,7 +261,7 @@
       "prebump": {
         "driver": "antigravity_print",
         "sandbox": {"mode": "home_override", "subdir": "antigravity_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Say hi, then list the files in the current directory using your tools.",
         "timeout_seconds": 180,
         "real_home_session": true,
         "env_vars": [],
@@ -362,7 +369,7 @@
       "prebump": {
         "driver": "openclaw_local_agent",
         "sandbox": {"mode": "home_override", "subdir": "openclaw_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Say hi, then list the files in the current directory using your tools.",
         "real_home_session": true,
         "timeout_seconds": 180,
         "env_vars": [
@@ -433,7 +440,7 @@
       "prebump": {
         "driver": "cursor_agent_print",
         "sandbox": {"mode": "home_override", "subdir": "cursor_sandbox"},
-        "prompt": "Say hello in one sentence.",
+        "prompt": "Say hi, then list the files in the current directory using your tools.",
         "real_home_session": true,
         "timeout_seconds": 180,
         "env_vars": ["CURSOR_API_KEY"],
@@ -532,7 +539,79 @@
           "required_types": ["metadata", "context.append_message"],
           "max_lines": 2500
         },
-        "freshness_window_days": 30
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "Kimi sessions live under <KIMI_CODE_HOME or ~/.kimi-code>/sessions/wd_<workdir-slug>_<hash>/session_<uuid>/agents/main/wire.jsonl; subagent transcripts hang off sibling agents/<agent-id>/wire.jsonl and are excluded.",
+          "patterns": ["/sessions/wd_[^/]+/session_[^/]+/agents/main/wire\\.jsonl$"]
+        }
+      },
+      "prebump": {
+        "driver": "kimi_prompt",
+        "sandbox": {"mode": "home_override", "subdir": "kimi_sandbox"},
+        "prompt": "Say hello in one sentence.",
+        "model": "kimi-k2.7-code",
+        "model_provider_type": "kimi",
+        "model_base_url": "https://api.moonshot.ai/v1",
+        "timeout_seconds": 180,
+        "env_vars": ["KIMI_API_KEY", "KIMI_MODEL_API_KEY"],
+        "credential_files": ["~/.kimi-code/config.toml"],
+        "_credential_note": "config.toml inlines providers.<name>.api_key alongside non-secret default_model/models routing, so it is declared as a credential_file (strict 0600-mode hygiene gate applies) rather than a support_file. Prefer exporting KIMI_API_KEY (or KIMI_MODEL_API_KEY): kimi-code's moonshot-ai/\"kimi\" provider requires providerConfig.apiKey in the *loaded* config (AuthTokenMissingError otherwise -- verified against dist/main.mjs, packages/agent-core-v2/src/app/auth/auth.ts), so the kimi_prompt driver normalizes a forwarded env-var key into kimi-code's own in-memory-only KIMI_MODEL_NAME/KIMI_MODEL_API_KEY provider-synthesis contract, which the CLI itself guarantees is never written back to config.toml.",
+        "discover_session": {
+          "kind": "kimi_wire_newest",
+          "roots": [".kimi-code/sessions"],
+          "globs": ["**/agents/main/wire.jsonl"],
+          "required_types": ["metadata", "context.append_message"]
+        }
+      }
+    },
+    "grok": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["grok", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.grok_cli.max_verified_version",
+      "upstream": [
+        {
+          "kind": "url_regex_semver_max",
+          "url": "https://formulae.brew.sh/api/cask/grok-build.json",
+          "pattern": "grok-(\\d+\\.\\d+\\.\\d+)-macos-(?:aarch64|x86_64)",
+          "note": "Grok Build ships as a native binary via the grok-build Homebrew cask (x.ai/cli/...), not npm, and the cask can lag an x.ai release. The grok_update_check probe declares latest_version_key: latestVersion, and agent_watch reconciles the two by taking the HIGHER version, recording the provenance in upstream.parsed_version_provenance and printing a latest_disagree token on the weekly summary whenever they differ. Max, not replace: the CLI answers for its own pinned channel, so a lower CLI answer must never be allowed to hide a newer published release."
+        }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "jsonl", "chat_history", "summary", "format", "schema", "transcript", "storage", "migration", "chat_format_version", "subagent"],
+        "usage": ["usage", "token", "tokens", "limit", "quota"]
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["~/.grok/sessions"],
+          "glob": "*/*/chat_history.jsonl",
+          "required_types": ["user", "assistant"],
+          "max_lines": 2500
+        },
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "Grok sessions live under ~/.grok/sessions/<percent-encoded workdir>/<sessionId>/chat_history.jsonl with a sibling summary.json; subagents hang off <session>/subagents/<childId>/meta.json.",
+          "patterns": [
+            "/\\.grok/sessions/[^/]+/[^/]+/chat_history\\.jsonl$"
+          ],
+          "required_companion_files": [
+            {
+              "path": "summary.json",
+              "must_parse": "json_object",
+              "note": "GrokSessionDiscovery.discoverSessionFiles() skips any session directory whose summary.json is absent, so losing this one file removes EVERY Grok session from the app. The schema fingerprint cannot see it - an unreadable sidecar just contributes no keys, and _schema_diff ignores missing_keys/missing_types by design - so before this contract existed a total discovery outage reported as 'compatible, no drift'. must_parse is stricter than discovery's own fileExists check on purpose: a present-but-corrupt sidecar still lists the session but strips its id, cwd, title and both timestamps, which is an app-visible break of its own."
+            }
+          ]
+        },
+        "probes": [
+          {
+            "kind": "script",
+            "label": "grok_update_check",
+            "argv": ["grok", "update", "--check", "--json"],
+            "timeout_seconds": 30,
+            "parse": "grok_update_json",
+            "latest_version_key": "latestVersion"
+          }
+        ]
       }
     }
   }

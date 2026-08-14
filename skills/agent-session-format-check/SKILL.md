@@ -127,6 +127,21 @@ Flags:
 - `--allow-real-home` — copilot/real-HOME opt-in after a sandbox-breach
   diagnostic; never persistent.
 
+**A thin prebump can no longer downgrade a rich weekly union.** A passing prebump
+*replaces* the weekly `schema_diff` with its own one-prompt session, and the thin-sample
+gate used to score only that: on 2026-08-13 codex reported `blocked_thin_sample` off a
+20-event prebump while its weekly union carried 2808 clean events — adding evidence made
+the verdict worse. `_sample_is_thin()` is now applied to *every* available sample and only
+blocks when all of them are thin (pinned by `test_thin_prebump_does_not_override_rich_weekly_union`).
+
+**Give `real_home_session` agents a tool-using prompt.** Their prebump session lands in the
+real store and enters the newest-`_LOCAL_SCHEMA_SAMPLE_COUNT` window, so a "Say hello"
+prompt actively degrades the next weekly sample — two such runs pushed antigravity's union
+down to 24 events and a genuine `blocked_thin_sample`. Claude's `"Say hi, then use the Bash
+tool to run pwd."` is the pattern; verify any prompt change with a real run, since a
+tool-using prompt can hang or return nothing on CLIs whose one-shot mode does not complete
+a tool turn.
+
 **A passing prebump is a floor, not a ceiling.** Drivers use one-line prompts, so a fresh
 session may contain only the four most basic event types and still report
 `fresh_matches_baseline=True` — it proves the CLI still writes parseable output, not that
@@ -136,8 +151,16 @@ stops it from masking drift. Check the fresh session's type count before treatin
 broad evidence.
 
 Configured real-session drivers today are `codex`, `claude`, `antigravity`,
-`copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, and `pi`. Droid is
-legacy-only and excluded from active checks.
+`copilot`, `opencode`, `hermes`, `openclaw`, `cursor`, `pi`, and `kimi`. Droid is
+legacy-only and excluded from active checks. Grok is weekly-only — it has no
+prebump driver, so it reports `no_real_session_driver_configured` and can never
+claim `supports_latest`; judge it on the weekly schema diff instead.
+
+**Staleness short-circuits the schema verdict.** `blocked_stale_sample` is reported
+*instead of* drift, so a stale agent can be hiding real drift behind it. Kimi sat at
+`blocked_stale_sample` while every one of its sessions carried two unmodelled event
+types; building its driver surfaced them immediately. Treat a stale verdict as
+"unknown", never as "clean".
 
 Prebump uses the hybrid env-var-first auth policy: if the relevant API-key
 env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
@@ -147,7 +170,7 @@ credential file from real HOME into the sandbox after running three hygiene
 gates (64 KiB max, mode `0600`, ≤90-day mtime warning). v1 drivers:
 `codex_exec`, `claude_print`, `antigravity_print`, `copilot_prompt`,
 `opencode_run`, `hermes_oneshot`, `openclaw_local_agent`,
-`cursor_agent_print`, and `pi_prompt`. Some OAuth/keychain-backed CLIs use
+`cursor_agent_print`, `pi_prompt`, and `kimi_prompt`. Some OAuth/keychain-backed CLIs use
 `real_home_session: true`; run them with `--allow-real-home` so the session
 lands in the real agent store instead of copying single-use auth state into a
 sandbox.
@@ -362,6 +385,81 @@ Key contracts (simplified from regexes in `agent-watch-config.json`):
 | Copilot  | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
 | Cursor   | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |
+| Grok     | `~/.grok/sessions/<enc-workdir>/<sessionId>/chat_history.jsonl` |
+
+### `required_companion_files` — sidecars discovery refuses to work without
+
+A contract may also declare `required_companion_files`, a list of paths resolved
+**relative to the sampled transcript's own directory**. Each entry is either a bare
+string (existence is enough) or `{path, must_parse, note}`, where
+`must_parse: "json_object"` additionally requires the file to load as a JSON object.
+A breach fails the whole contract, so it lands as `severity: high`,
+`verdict: monitoring_broken`, and a `probe_or_discovery_failed` blocker — the same
+escalation as a moved store.
+
+Declare one whenever the app's discovery **guard chain** refuses a session over a file
+that is not the transcript. The schema fingerprint structurally cannot cover this: a
+sidecar that fails to load simply contributes no keys, and `_schema_diff` ignores
+`missing_keys`/`missing_types` on purpose (a thin sample legitimately lacks baseline
+types — that is what `coverage_ratio` is for). Sibling-union sampling then erases even
+that trace, because the other four sampled sessions refill the bucket. Verified on a
+copy of the real Grok store with one sidecar hidden: `unknown_types: []`,
+`unknown_keys: {}`, `unknown_only_is_empty: true` — a *total* discovery outage reporting
+as no drift. Never expect the schema channel to catch a missing companion file.
+
+---
+
+## 4a  Grok Sessions Are Directories
+
+A Grok session is a directory, not a file: `chat_history.jsonl` holds the transcript and
+the sibling `summary.json` holds everything discovery depends on (`info.id`, `info.cwd`,
+`current_model_id`, `chat_format_version`). Fingerprinting only the transcript would leave
+that half unwatched, so `_grok_session_schema_fingerprint()` merges the summary in as a
+`summary` bucket — schema diffs on `summary`/`summary.info` are summary.json drift, not
+transcript drift.
+
+**The sidecar is a discovery precondition, not a schema nicety.**
+`GrokSessionDiscovery.discoverSessionFiles()` skips any session directory whose
+`summary.json` is absent, so losing that one file removes *every* Grok session from the
+app. Merging it into the fingerprint does not protect it — see §4
+`required_companion_files`, which is what actually flips the verdict. Grok declares it
+with `must_parse: "json_object"`, deliberately stricter than the app's own `fileExists`
+guard: a present-but-corrupt sidecar still lists the session but strips its id, cwd,
+title and both timestamps. `_grok_session_schema_fingerprint()` also records a
+`summary_error` (`missing` / `unreadable` / `invalid_json` / `not_json_object`) so the
+fingerprint stops pretending it read a sidecar it could not.
+
+Grok is fingerprinted **nested** (§5a). Flat would stop at `{type, content, ...}` and hide
+the content-part types (`user.content:text`, `user.content:image`) and
+`backend_tool_call.kind.action`, which is where its format actually moves. `arguments` is
+opaque — it is a tool's parameter object, not Grok format.
+
+The baseline is **two** session directories: `grok/` (top-level) and `grok/subagent/`.
+That split is deliberate — `session_kind` appears *only* on subagent sessions and is
+absent from top-level ones, so stamping it on the top-level fixture would have taught the
+inverted semantics to anything that later classifies on it. Keys that belong to one kind
+go in that kind's fixture; the baseline unions both.
+
+**Latest version comes from two sources that disagree.** Grok ships a native x.ai binary
+through the `grok-build` Homebrew cask, and the cask lags x.ai releases. The
+`grok_update_check` probe declares `latest_version_key: "latestVersion"`, and
+`_reconcile_latest_version_from_probes()` takes the **higher** of cask and CLI — max, not
+replace, because the CLI answers only for its own pinned `channel`, so a lower CLI answer
+must never hide a newer published release. The chosen number's origin is in
+`upstream.parsed_version_provenance` (`cli_probe` / `upstream_source` / `both_agree` /
+`cached_prior_report`), the full comparison in `upstream.reconciliation`, and any
+disagreement prints on the weekly summary line as
+`latest_disagree=probe:<v>/source:<v>/used:<v>`. Never read `upstream.parsed_version`
+without its provenance.
+
+Still unwatched: `subagents/<childId>/meta.json` — the parent's sidecar, and the only
+place `parent_session_id` and `subagent_type` appear, so the hierarchy feature depends on
+it (the `grok/subagent/` fixture is a subagent *session*, not that sidecar) — and the
+`compaction/` subtree. No fixture covers either yet. Also unwatched: the app's 50 MB
+`defaultFullParseMaxBytes` ceiling, above which `GrokSessionParser` silently declines to
+parse a transcript, and a wholesale move of the `~/.grok/sessions` root, which surfaces
+only as `local_schema.error: no_files_found` plus a stale sample rather than as a named
+contract failure (`discovery_contract_failed` is gated on a file having been found).
 
 ---
 

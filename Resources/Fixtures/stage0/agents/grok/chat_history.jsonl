@@ -1,11 +1,11 @@
 {"type":"system","content":"You are Grok 4.5 released by xAI. You are an interactive CLI tool that helps users with software engineering tasks."}
 {"type":"user","content":[{"type":"text","text":"<user_info>\nOS Version: macos\nWorkspace Path: /tmp/as-agent-lab/grok/project\n</user_info>"}],"synthetic_reason":"environment_context"}
-{"type":"user","content":[{"type":"text","text":"Read hello.py and summarize what it prints without editing files."}],"prompt_index":0}
+{"type":"user","content":[{"type":"text","text":"Read hello.py and summarize what it prints without editing files."}],"prompt_index":0,"prior_turn_interrupt":"mid_turn_abort"}
 {"type":"reasoning","id":"rs_00000000-0000-4000-8000-000000000001","summary":[{"type":"summary_text","text":"The user wants a summary of hello.py without edits. I should read the file first."}],"encrypted_content":"<opaque>","status":"completed"}
 {"type":"assistant","content":"I'll read the file first.","tool_calls":[{"id":"call-00000000-0000-4000-8000-000000000002-0","name":"read_file","arguments":"{\"target_file\":\"/tmp/as-agent-lab/grok/project/hello.py\"}"}],"model_id":"grok-4.5","model_fingerprint":"fp_0000000000000000","reasoning_effort":"high"}
 {"type":"tool_result","tool_call_id":"call-00000000-0000-4000-8000-000000000002-0","content":"print(\"hello from the grok fixture\")\n"}
-{"type":"backend_tool_call","kind":{"tool_type":"web_search","action":{"type":"search","query":"python print builtin","sources":[]}}}
+{"type":"backend_tool_call","kind":{"tool_type":"web_search","action":{"type":"search","query":"python print builtin","sources":[{"type":"url","url":"https://example.com/search-result"}]},"id":"ws_00000000-0000-4000-8000-000000000004_call-00000000-0000-4000-8000-000000000004-0","status":"completed"}}
 {"type":"assistant","content":"","tool_calls":[{"id":"call-00000000-0000-4000-8000-000000000002-1","name":"run_terminal_cmd","arguments":"{\"command\":\"python3 hello.py\"}"}],"model_id":"grok-4.5","model_fingerprint":"fp_0000000000000000","reasoning_effort":"high"}
 {"type":"tool_result","tool_call_id":"call-00000000-0000-4000-8000-000000000002-1","content":"hello from the grok fixture\n"}
 {"type":"reasoning","id":"rs_00000000-0000-4000-8000-000000000003","summary":[{"type":"summary_text","text":"Confirmed the output. I can answer now."}],"encrypted_content":"<opaque>","status":"completed"}
-{"type":"user","content":[{"type":"image","image":{"url":"data:image/png;base64,<scrubbed>"}},{"type":"text","text":"Here is a screenshot for reference."}],"prompt_index":1}
+{"type":"user","content":[{"type":"image","url":"data:image/png;base64,<scrubbed>"},{"type":"text","text":"Here is a screenshot for reference."}],"prompt_index":1}

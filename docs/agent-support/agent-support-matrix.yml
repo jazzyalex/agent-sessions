@@ -1,6 +1,6 @@
-agent_sessions_version: 4.6
-as_of_commit: 8f2848ff
-as_of_date: 2026-08-01
+agent_sessions_version: 4.7
+as_of_commit: b6fe38d6
+as_of_date: 2026-08-13
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
   - "Max verified versions come from repo fixtures and documented format changes."
@@ -40,9 +40,10 @@ notes:
   - "2026-08-01: Kimi fixture gap CLOSED, and closing it exposed a parser defect. CORRECTION to the 2026-07-25 note above: \"Conversation content is context.append_message carrying role/content-parts/toolCalls\" is WRONG - that shape is Kimi's internal Message type, not what the journal emits. Real journals split conversation across TWO op families: context.append_message holds USER TURNS ONLY (23 of 23 ops across seven captures were role:user, none carried toolCalls), while context.append_loop_event holds everything the model produced - {type:content.part, part:{type:text|think}} for assistant text and reasoning, {type:tool.call, toolCallId, name, args, description, display} and {type:tool.result, parentUuid, toolCallId, result:{output[, isError][, note]}} for tools. KimiSessionParser only read context.append_message, so its .assistant/.tool_call/.tool_result branches were unreachable against real data and every Kimi transcript rendered as user turns alone: the new fixture's session surfaced 13 of its 57 real events, and the Analytics message counts added in the Kimi/Pi analytics work counted only those 13. Fixed by parsing loop events (content.part text -> .assistant, think dropped as reasoning per the existing textContent rule; tool.call -> .tool_call with args serialised via sortedKeys; tool.result -> .tool_result, or .error when the NESTED result.isError is true - there is no top-level error flag). The earlier \"account suspended, cannot capture\" blocker was a false negative from checking only context.append_message; no funded re-capture was needed, the material was already on disk. New fixture assistant_tools.jsonl + assistant_tools.state.json is a 200-line redacted authentic capture (6 assistant replies, 19 tool calls over Bash/Agent/Glob/Write/ExitPlanMode/Read/Grep, one isError result, two note results, multi-call steps, plan mode, full compaction); redaction matches small.jsonl (system prompt + tools snapshot trimmed, home/workdir rewritten to the as-agent-lab sandbox path, long payloads clipped). It also extends the weekly baseline with seven op families small.jsonl never had: usage.record, permission.record_approval_result, plan_mode.enter/exit, full_compaction.begin/complete, context.apply_compaction. KNOWN BLIND SPOT: _jsonl_schema_fingerprint keys only on the TOP-LEVEL type, so it cannot see drift inside event.* - a new content.part part type or tool.result key would not be flagged; loop-event internals are covered by KimiSessionParserTests, not by the weekly scan."
   - "2026-08-03: Kimi integration surfaces completed; three defects from the tier-2 merge fixed. CORRECTION to the 2026-07-25 note above: \"launch-in-terminal resume remain unsupported\" is NO LONGER TRUE - Kimi now has the full resume stack (KimiResumeCoordinator/KimiTerminalLauncher/KimiResumeTypes) mirroring Pi, reaching Terminal.app, iTerm2, Warp, and Warp Preview via the shared AgentTerminalLauncher. Policy is sessionThenContinue: `--session <id>` when the CLI advertises it and the session carries an id, else `--continue` for the working directory; there is no `--resume` flag in Kimi, so unlike Pi/Cursor there is no resumeByID strategy and no supportsResume capability to probe. Live status, analytics token accounting, and usage/quota tracking remain unsupported. THE THREE DEFECTS, all of them integration-surface omissions the exhaustive-switch discipline could not catch because each site was a hand-maintained list rather than a switch: (1) NO PREFERENCES PANE - PreferencesTab had no .kimi case, so KimiSessionsRootOverride had three readers (KimiSessionIndexer, AgentEnablement.isAvailable, SessionArchiveManager) and ZERO writers anywhere in the app. Plan Task 7 Step 2 had explicitly required this row; the merge left `// Tier-2: no CLI resume/binary-probe UI for Kimi yet` stubs at three PreferencesView switch sites instead. Now a full Pi-parity pane (PreferencesView+Kimi.swift) with binary Auto/Custom picker, version probe, Check Version/Copy Path/Reveal, availability status, default root, and the storage-root override. (2) NO TOOLBAR FILTER PILL - enabledOtherAgentSpecs in UnifiedSessionsView ended at the Pi arm, so with Kimi enabled there was no pill AND no Agents-overflow entry, leaving includeKimi (default true, persisted at IncludeKimiSessions, fully plumbed through search and the indexer) untogglable; it also undercounted enabledAgentCount so the pills-to-overflow collapse fired one agent late. Kimi takes no keyboard shortcut - Cmd-1..9 are fully allocated (Codex=1, Claude=2 ... Pi=9), same posture as Hermes. (3) HAS-COMMANDS FILTER - the quick filter's JSONL-provider list omitted .kimi, so Kimi sessions fell through to the trailing `return true` and passed the filter with zero tool calls. Predicate extracted to UnifiedSessionIndexer.passesHasCommandsFilter, matching the passesLowMessageVisibilityFilter static beside it, which makes it both testable and exhaustive so the twelfth source cannot repeat this. Also wired KimiSettings into copy-resume, which had hardcoded binaryCommand \"kimi\" and would have made the new binary picker inert. New KimiCLIEnvironment.swift finally lands the file plan Task 8 specified but never created. Coverage: KimiIntegrationSurfaceTests (8) + KimiResumeCoordinatorTests (8); the has-commands regressions were confirmed to fail against the old behaviour before the fix landed."
   - "2026-08-03 full format check: bumped Codex 0.145.0->0.146.0, Claude 2.1.217->2.1.220, OpenCode 1.18.4->1.18.11, Pi 0.81.1->0.83.0, all from fresh prebump. Also bumped Copilot 1.0.65->1.0.77 after fixing its prebump driver (it passed the deprecated --config-dir and its declared credential file ~/.copilot/hosts.json no longer exists, so with no GITHUB_TOKEN exported it had no auth path at all; now sets COPILOT_HOME and falls back to `gh auth token`). The working driver immediately found real 1.0.77 drift: rte/encryptedContent on message+tool events, interactionId on system.message, and eight new auto-router telemetry keys - all additive. Claude also moved to nested fingerprinting, exposing its usage struct (cache_creation, server_tool_use, iterations, service_tier, inference_geo, speed) and ten attachment subtypes; that work exposed a walker defect where only the FIRST dict of a list was sampled, hiding Claude's heterogeneous message.content blocks. HELD: OpenClaw 2026.6.11 (missing-provider-auth; shares Codex OAuth store, real-HOME gives refresh_token_reused 401), Antigravity 1.1.1 (only rich session predates the 1.1.10 upgrade), Hermes 0.17.0 (thin sample). PARSER FIX: Antigravity CODE_ACTION/SEARCH_WEB now render as .tool_result instead of system .meta, and truncated_fields is surfaced instead of silently dropped. PRICING FIX: codex-auto-review had no price key and bills real tokens, which DELETED whole sessions from the $ runway (any unpriceable contributing slice nils the session); added at gpt-5.6/sol rates to prices.json + bundledJSON. MONITORING REBUILD: the fingerprint was blind to every nested payload (codex fingerprinted as {payload,timestamp,type}), so the token_count/rate_limits usage channel monitoring.md claimed to watch was never actually watched; added nested fingerprinting at depth 3 with opaque-key and discriminator-depth guards (codex patch_apply_end.changes is keyed by absolute file path and was leaking real user paths into reports). Weekly now unions the newest 5 sessions - single-session sampling let a 4-line prebump hello mask antigravity drift entirely - with a blocked_thin_sample verdict gated on low coverage AND low volume. Baseline convention fixed: verified-and-handled types go in the normal fixture, not schema_drift.jsonl, which is why Copilot's two 2026-07-22 types had re-reported as drift every week since. codex/small.jsonl and copilot/small.jsonl rebuilt at modern shape; 1837 tests pass. Weekly scripts/probe_scan_output/agent_watch/20260803-211811Z/report.json."
+  - "2026-08-13 full format check + GROK ADDED AS THE 11TH MONITORED AGENT. Grok shipped in the app with zero agent_watch coverage; it now has a weekly fingerprint that treats a session as the DIRECTORY it is (chat_history.jsonl nested to depth 3, merged with the sibling summary.json as a `summary` bucket), a grok-build Homebrew cask upstream source, and a grok_update_check probe. BUMPED: Codex 0.146.0->0.147.0, Copilot 1.0.77->1.0.79, Cursor 2026.7.20->2026.8.11, Antigravity 1.1.1->1.1.12 (held since 2026-08-03), OpenCode 1.18.11->1.18.16, Pi 0.83.0->0.84.1, Kimi 0.31.1->0.34.0, OpenClaw 2026.6.11->2026.7.1. Claude stays 2.1.220 (upstream 2.1.232 is not installed); Hermes stays 0.17.0. Every agent now reports unknown_types=[] and unknown_keys={}. THE PREBUMP EARNED ITS KEEP TWICE: a fresh stable-0.147.0 codex session emitted world_state.state.orchestrator_skills, multi_agent_usage_hint and multi_agent_mode.usage_hint_hash that appear in ZERO of the 1184 sessions on disk (including 33 on the immediately-prior alpha); and building Kimi's first-ever prebump driver exposed profile.bind + turn.ended + event.step.end{providerFinishReason,rawFinishReason} present in EVERY kimi session, which blocked_stale_sample had been hiding because staleness short-circuits the schema verdict. INSTRUMENT FIXES: (1) a passing prebump replaces the weekly schema_diff with its own one-prompt session, and the thin-sample gate scored only that - so codex reported blocked_thin_sample off a 20-event prebump while its weekly union held 2808 clean events; thinness is now judged across every sample and pinned by tests. (2) real_home_session prebump sessions land in the real store and enter the newest-5 window, so 'Say hello' prompts were actively degrading the next weekly sample (two of them dropped antigravity to 24 events and a genuine blocked_thin_sample); antigravity/cursor/openclaw now use a tool-using prompt, hermes was left alone because it fails with either prompt. (3) Antigravity finally has an upstream source - its own auto-updater endpoint, extracted from the agy binary, which answers 'Stable Version: 1.1.12'; latest_unknown was never a property of the agent, just a missing config. NO PARSER CHANGES WERE NEEDED: claude thinking_tokens is a SUBSET of output_tokens (verified on 143 records) so the Runway is right to ignore it; antigravity GENERIC, kimi profile.bind/turn.ended and codex world_state all resolve to .meta by design. ONE LATENT RISK LOGGED: the Copilot parser never reads data.messageId, so if Copilot ever emits chunkCount>1 the fragments will render as separate assistant bubbles (every record on disk is 0/1 today). OPENCLAW IS BROKEN FOR THE USER, NOT JUST FOR US: its only model routes through an agentRuntime 'codex' harness whose @openclaw/codex plugin is not installed, on top of an expired openai:default token. 1897 Swift + 138 python tests pass. Weekly scripts/probe_scan_output/agent_watch/20260814-000832Z/report.json."
 agents:
   codex_cli:
-    max_verified_version: "0.146.0"
+    max_verified_version: "0.147.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
@@ -58,14 +59,14 @@ agents:
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f.jsonl"
       - "Resources/Fixtures/stage0/agents/claude/subagent/0a1b2c3d-4e5f-4061-8071-2a3b4c5d6e7f/subagents/agent-a0ad4f44468bdf20d.jsonl"
   antigravity:
-    max_verified_version: "1.1.1"
+    max_verified_version: "1.1.12"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/antigravity/small.md"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.77"
+    max_verified_version: "1.0.79"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -73,7 +74,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.18.11"
+    max_verified_version: "1.18.16"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -100,14 +101,14 @@ agents:
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
       - "Resources/Fixtures/stage0/agents/hermes/schema_drift.json"
   openclaw:
-    max_verified_version: "2026.6.11"
+    max_verified_version: "2026.7.1"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/openclaw/small.jsonl"
       - "Resources/Fixtures/stage0/agents/openclaw/large.jsonl"
       - "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl"
   cursor:
-    max_verified_version: "2026.7.20"
+    max_verified_version: "2026.8.11"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
@@ -116,7 +117,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.83.0"
+    max_verified_version: "0.84.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -137,7 +138,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "0.31.1"
+    max_verified_version: "0.34.0"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -167,8 +168,9 @@ agents:
     unsupported_surfaces:
       - "live/active status"
       - "usage/rate-limit tracking"
-      - "weekly session-format monitoring (no agent_watch driver yet)"
+      - "prebump real-session validation (no agent_watch prebump driver yet; weekly monitoring is configured)"
     notes:
+      - "Weekly agent_watch monitoring added 2026-08-13: nested fingerprint over <session>/chat_history.jsonl merged with the sibling summary.json (bucket `summary`), plus a `grok_update_check` probe for authoritative latest. Latest source is the grok-build Homebrew cask JSON — Grok ships a native x.ai binary, not npm."
       - "Subagent hierarchy resolves from the parent's tree, not the child's sidecar: a spawned run is written both as a top-level session directory and as <parent>/subagents/<childId>/meta.json, which is the only place parent_session_id and subagent_type appear. Verified across 9 subagent links at 1.0.3."
       - "Grok's own `grok sessions list` hides subagent sessions; Agent Sessions surfaces them with parentage."
       - "Nesting was not observed: a subagent asked to delegate produced further subagents recorded under the root session, and no child owned its own subagents/ tree."
@@ -180,6 +182,8 @@ agents:
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/grok/chat_history.jsonl"
       - "Resources/Fixtures/stage0/agents/grok/summary.json"
+      - "Resources/Fixtures/stage0/agents/grok/subagent/chat_history.jsonl"
+      - "Resources/Fixtures/stage0/agents/grok/subagent/summary.json"
     evidence_tests:
       - "AgentSessionsTests/GrokSessionParserTests.swift"
       - "AgentSessionsTests/GrokSessionDiscoveryTests.swift"
