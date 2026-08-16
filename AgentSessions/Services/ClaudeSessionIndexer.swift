@@ -50,7 +50,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     // Expose cache for SearchCoordinator (internal - not public API)
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
 
-    @AppStorage("ClaudeSessionsRootOverride") var sessionsRootOverride: String = ""
+    @AppStorage(PreferencesKey.Paths.claudeSessionsRootOverride) var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet {
             publishAfterCurrentUpdate { [weak self] in
@@ -104,7 +104,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
     init() {
         // Initialize discovery with current override (if any)
-        let initialOverride = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+        let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
         self.discovery = ClaudeSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
         self.lastSessionsRootOverride = initialOverride
 
@@ -156,7 +156,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         // showHousekeeping are @AppStorage above with their own didSet that
         // already bumps filterEpoch, so they don't need tracking here.
         let rootOverrideObserver = FilteredDefaultsObserver(keys: [
-            "ClaudeSessionsRootOverride",
+            PreferencesKey.Paths.claudeSessionsRootOverride,
             "ShowSystemProbeSessions"
         ])
         self.rootOverrideDefaultsObserver = rootOverrideObserver
@@ -167,7 +167,7 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.publishAfterCurrentUpdate { [weak self] in
                     guard let self else { return }
                     // React to Sessions root override changes from Preferences
-                    let current = UserDefaults.standard.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+                    let current = UserDefaults.standard.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
                     if current != self.lastSessionsRootOverride {
                         self.lastSessionsRootOverride = current
                         self.discovery = ClaudeSessionDiscovery(customRoot: current.isEmpty ? nil : current)

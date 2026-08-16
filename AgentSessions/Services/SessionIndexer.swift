@@ -156,7 +156,7 @@ final class SessionIndexer: ObservableObject {
     }
     @Published var sortDescriptor: SessionSortDescriptor = .init(key: .modified, ascending: false)
     // Preferences
-    @AppStorage("SessionsRootOverride") var sessionsRootOverride: String = ""
+    @AppStorage(PreferencesKey.Paths.codexSessionsRootOverride) var sessionsRootOverride: String = ""
     @AppStorage("TranscriptTheme") private var themeRaw: String = TranscriptTheme.codexDark.rawValue
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }

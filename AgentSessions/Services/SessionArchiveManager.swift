@@ -380,7 +380,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 if !base.isEmpty { map[base] = url }
             }
         case .codex:
-            let custom = defaults.string(forKey: "SessionsRootOverride")
+            let custom = defaults.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride)
             let discovery = CodexSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
                 map[sha256Hex(url.path)] = url
@@ -392,7 +392,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 map[sha256Hex(url.path)] = url
             }
         case .antigravity:
-            let custom = defaults.string(forKey: "AntigravitySessionsRootOverride")
+            let custom = defaults.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride)
             let discovery = AntigravitySessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
                 if let session = AntigravitySessionParser.parseFile(at: url), !session.id.isEmpty {
@@ -404,7 +404,7 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
                 }
             }
         case .opencode:
-            let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride")
+            let custom = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
             let discovery = OpenCodeSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
             for url in discovery.discoverSessionFiles() {
                 let base = url.deletingPathExtension().lastPathComponent

@@ -197,7 +197,7 @@ struct PreferencesView: View {
     @State var antigravityResolvedPath: String? = nil
     @State var antigravityProbeDebounce: DispatchWorkItem? = nil
     // Antigravity artifact directory override
-    @AppStorage("AntigravitySessionsRootOverride") var antigravitySessionsPath: String = ""
+    @AppStorage(PreferencesKey.Paths.antigravitySessionsRootOverride) var antigravitySessionsPath: String = ""
     @State var antigravitySessionsPathValid: Bool = true
     @State var antigravitySessionsPathDebounce: DispatchWorkItem? = nil
 
@@ -208,7 +208,7 @@ struct PreferencesView: View {
     @State var opencodeResolvedPath: String? = nil
     @State var opencodeProbeDebounce: DispatchWorkItem? = nil
     // OpenCode Sessions directory override
-    @AppStorage("OpenCodeSessionsRootOverride") var opencodeSessionsPath: String = ""
+    @AppStorage(PreferencesKey.Paths.opencodeSessionsRootOverride) var opencodeSessionsPath: String = ""
     @State var opencodeSessionsPathValid: Bool = true
     @State var opencodeSessionsPathDebounce: DispatchWorkItem? = nil
     // Hermes probe state

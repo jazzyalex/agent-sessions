@@ -589,75 +589,75 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     // Source filters (persisted with @Published for Combine compatibility)
-    @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: "IncludeCodexSessions") as? Bool ?? true {
+    @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.codex) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeCodex, forKey: "IncludeCodexSessions")
+            UserDefaults.standard.set(includeCodex, forKey: PreferencesKey.Include.codex)
             recomputeNow()
         }
     }
-    @Published var includeClaude: Bool = UserDefaults.standard.object(forKey: "IncludeClaudeSessions") as? Bool ?? true {
+    @Published var includeClaude: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.claude) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeClaude, forKey: "IncludeClaudeSessions")
+            UserDefaults.standard.set(includeClaude, forKey: PreferencesKey.Include.claude)
             recomputeNow()
         }
     }
-    @Published var includeAntigravity: Bool = UserDefaults.standard.object(forKey: "IncludeAntigravitySessions") as? Bool ?? true {
+    @Published var includeAntigravity: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.antigravity) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeAntigravity, forKey: "IncludeAntigravitySessions")
+            UserDefaults.standard.set(includeAntigravity, forKey: PreferencesKey.Include.antigravity)
             recomputeNow()
         }
     }
-    @Published var includeOpenCode: Bool = UserDefaults.standard.object(forKey: "IncludeOpenCodeSessions") as? Bool ?? true {
+    @Published var includeOpenCode: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.opencode) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeOpenCode, forKey: "IncludeOpenCodeSessions")
+            UserDefaults.standard.set(includeOpenCode, forKey: PreferencesKey.Include.opencode)
             recomputeNow()
         }
     }
-    @Published var includeHermes: Bool = UserDefaults.standard.object(forKey: "IncludeHermesSessions") as? Bool ?? true {
+    @Published var includeHermes: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.hermes) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeHermes, forKey: "IncludeHermesSessions")
+            UserDefaults.standard.set(includeHermes, forKey: PreferencesKey.Include.hermes)
             recomputeNow()
         }
     }
-    @Published var includeCopilot: Bool = UserDefaults.standard.object(forKey: "IncludeCopilotSessions") as? Bool ?? true {
+    @Published var includeCopilot: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.copilot) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeCopilot, forKey: "IncludeCopilotSessions")
+            UserDefaults.standard.set(includeCopilot, forKey: PreferencesKey.Include.copilot)
             recomputeNow()
         }
     }
-    @Published var includeDroid: Bool = UserDefaults.standard.object(forKey: "IncludeDroidSessions") as? Bool ?? true {
+    @Published var includeDroid: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.droid) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeDroid, forKey: "IncludeDroidSessions")
+            UserDefaults.standard.set(includeDroid, forKey: PreferencesKey.Include.droid)
             recomputeNow()
         }
     }
-    @Published var includeOpenClaw: Bool = UserDefaults.standard.object(forKey: "IncludeOpenClawSessions") as? Bool ?? true {
+    @Published var includeOpenClaw: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.openclaw) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeOpenClaw, forKey: "IncludeOpenClawSessions")
+            UserDefaults.standard.set(includeOpenClaw, forKey: PreferencesKey.Include.openclaw)
             recomputeNow()
         }
     }
-    @Published var includeCursor: Bool = UserDefaults.standard.object(forKey: "IncludeCursorSessions") as? Bool ?? true {
+    @Published var includeCursor: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.cursor) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeCursor, forKey: "IncludeCursorSessions")
+            UserDefaults.standard.set(includeCursor, forKey: PreferencesKey.Include.cursor)
             recomputeNow()
         }
     }
-    @Published var includePi: Bool = UserDefaults.standard.object(forKey: "IncludePiSessions") as? Bool ?? true {
+    @Published var includePi: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.pi) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includePi, forKey: "IncludePiSessions")
+            UserDefaults.standard.set(includePi, forKey: PreferencesKey.Include.pi)
             recomputeNow()
         }
     }
-    @Published var includeKimi: Bool = UserDefaults.standard.object(forKey: "IncludeKimiSessions") as? Bool ?? true {
+    @Published var includeKimi: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.kimi) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeKimi, forKey: "IncludeKimiSessions")
+            UserDefaults.standard.set(includeKimi, forKey: PreferencesKey.Include.kimi)
             recomputeNow()
         }
     }
-    @Published var includeGrok: Bool = UserDefaults.standard.object(forKey: "IncludeGrokSessions") as? Bool ?? true {
+    @Published var includeGrok: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.grok) as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(includeGrok, forKey: "IncludeGrokSessions")
+            UserDefaults.standard.set(includeGrok, forKey: PreferencesKey.Include.grok)
             recomputeNow()
         }
     }
@@ -1812,7 +1812,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     private func codexSessionsRoot() -> URL {
-        if let custom = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+        if let custom = UserDefaults.standard.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride),
            !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
@@ -1824,7 +1824,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     private func claudeProjectsRoot() -> URL {
         let defaults = UserDefaults.standard
-        let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? defaults.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+        let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
         let claudeRoot: URL
         if !custom.isEmpty {
             claudeRoot = URL(fileURLWithPath: custom)

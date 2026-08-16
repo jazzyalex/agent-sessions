@@ -1106,7 +1106,7 @@ final class CodexActiveSessionsModel {
     nonisolated private static func codexRuntimeRoots() -> [URL] {
         var candidates: [URL] = []
 
-        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+        if let sessionsOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride),
            let sessionsURL = parseNonisolatedPath(sessionsOverride) {
             candidates.append(sessionsURL.deletingLastPathComponent())
         }

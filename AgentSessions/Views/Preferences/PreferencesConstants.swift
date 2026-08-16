@@ -151,7 +151,9 @@ enum PreferencesKey {
     }
 
     enum Paths {
+        static let codexSessionsRootOverride = "SessionsRootOverride"
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"
+        static let antigravitySessionsRootOverride = "AntigravitySessionsRootOverride"
         static let opencodeSessionsRootOverride = "OpenCodeSessionsRootOverride"
         static let hermesSessionsRootOverride = "HermesSessionsRootOverride"
         static let copilotSessionsRootOverride = "CopilotSessionsRootOverride"
@@ -163,6 +165,23 @@ enum PreferencesKey {
         static let piSessionsRootOverride = "PiSessionsRootOverride"
         static let kimiSessionsRootOverride = "KimiSessionsRootOverride"
         static let grokSessionsRootOverride = "GrokSessionsRootOverride"
+    }
+
+    /// Per-source "include in unified view" toggles. Each key is source-local and
+    /// historical; new sources add a new static here, not a shared switch (K2).
+    enum Include {
+        static let codex = "IncludeCodexSessions"
+        static let claude = "IncludeClaudeSessions"
+        static let antigravity = "IncludeAntigravitySessions"
+        static let opencode = "IncludeOpenCodeSessions"
+        static let hermes = "IncludeHermesSessions"
+        static let copilot = "IncludeCopilotSessions"
+        static let droid = "IncludeDroidSessions"
+        static let openclaw = "IncludeOpenClawSessions"
+        static let cursor = "IncludeCursorSessions"
+        static let pi = "IncludePiSessions"
+        static let kimi = "IncludeKimiSessions"
+        static let grok = "IncludeGrokSessions"
     }
 
     enum Archives {

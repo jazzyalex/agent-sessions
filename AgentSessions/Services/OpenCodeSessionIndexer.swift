@@ -33,7 +33,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     private let transcriptCache = TranscriptCache()
     internal var searchTranscriptCache: TranscriptCache { transcriptCache }
 
-    @AppStorage("OpenCodeSessionsRootOverride") var sessionsRootOverride: String = ""
+    @AppStorage(PreferencesKey.Paths.opencodeSessionsRootOverride) var sessionsRootOverride: String = ""
     @AppStorage("HideZeroMessageSessions") var hideZeroMessageSessionsPref: Bool = true {
         didSet { recomputeNow() }
     }
@@ -51,7 +51,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var detectedBackend: OpenCodeStorageBackend = .none
 
     init() {
-        let initialOverride = UserDefaults.standard.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
+        let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride) ?? ""
         self.discovery = OpenCodeSessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
 
         // Debounced filtering similar to Claude/Gemini indexers

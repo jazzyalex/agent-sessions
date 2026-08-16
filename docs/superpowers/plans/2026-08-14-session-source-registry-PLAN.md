@@ -301,7 +301,13 @@ func testResumeGatingMatchesLegacyBehavior() {
 - Modify: `AgentSessions/Onboarding/Components/OnboardingComponents.swift:102-117`
 - Modify: `AgentSessions/Onboarding/Components/OnboardingPalette.swift:257-284`
 - Modify: `AgentSessions/Views/SessionTerminalView.swift:297-312`
-- Modify: `AgentSessions/Views/UnifiedSessionsView.swift:1732-1745, 2949-2962, 3544-3557`
+- Modify: `AgentSessions/Views/UnifiedSessionsView.swift:1732-1745, 2949-2962` (the TWO
+  short-label switches here — Task 2 erratum: there are three label switches total, not
+  four) and `:3544-3557` — which is `sourceAccent(_:)`, a COLOR switch whose palette is
+  byte-for-byte the pill palette plus `Color.agentCodex`/`agentClaude`; derive it from
+  `descriptor.otherAgentPill?.color` with a `Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for:))`
+  fallback for codex/claude (Task 2 review confirmed `Color.agentX` is defined as exactly
+  that)
 
 - [ ] **Step 1: Target-membership check** (K15): confirm none of the six files above is
   compiled by `AgentSessionsLogicTests` (`grep '<filename> in Sources' AgentSessions.xcodeproj/project.pbxproj`
@@ -314,6 +320,11 @@ func testResumeGatingMatchesLegacyBehavior() {
   (diff each site's strings first; a differing site keeps its switch + report note).
 - [ ] **Step 3: Convert the brand-hue parity test to golden literals** (12 pinned
   values captured from the pre-flip switch) — the parity form is circular post-flip.
+  Capture goldens PER-APPEARANCE as RGBA components (aqua + darkAqua) — dynamic NSColors
+  from `adaptiveBrand` never compare equal as objects (Task 2 finding; its parity test
+  shows the working comparison pattern). Extend the goldens to `shortLabel` (all 12) and
+  the 10 pill colors (Task 2 review I2 — these fields currently have no automated
+  parity, and this flip is the moment they become load-bearing).
 - [ ] **Step 4: Build + tests green** (`testTranscriptHostCoversEverySource`,
   `NewProviderDiscoverabilityTests` sentinels).
 - [ ] **Step 5: Checkpoint** — `"refactor(palette): brand colors, badges and labels read the registry"`
@@ -544,7 +555,14 @@ func testKimiLaunchPhaseEmissionUpdatesLaunchState() {
   → one `FilteredDefaultsObserver(keys: AgentEnablement.allEnablementKeys)` receiver
   (§8.4, pattern from `AgentSessionsApp.swift:359-363`); resume gates prepend
   `descriptor.supportsResume` guard, labels → `descriptor.resumeAgentLabel ?? "CLI"`,
-  dispatchers keep exhaustive switches with explicit droid/openclaw `break` arms;
+  dispatchers keep exhaustive switches with explicit droid/openclaw `break` arms.
+  **Task 2 review I1 — `supportsResume` is strictly WEAKER than the live predicate:**
+  `canResumeSession` is per-SESSION for three sources (codex: `canResumeCodexInCLI` —
+  side-chat/VS Code exclusion; claude: `!isClaudeWorkflowSubagent`; antigravity: ID
+  derivability). The descriptor guard is a source-level PRE-gate only — prepend it,
+  never substitute it, or those session subtypes sprout broken Resume affordances.
+  Likewise `resumeAgentLabel ?? "CLI"` is load-bearing (droid/openclaw + any future
+  label-less source), not cosmetic;
   Preferences sidebar groups + `visibleTabs` derive via a NEW `PreferencesTab(source:)`
   mapping (it does not exist today — create it, one exhaustive switch, K13/spike c5-c8;
   derive `PreferencesTab.title`/`iconName` for source tabs through it from the

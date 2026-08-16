@@ -246,18 +246,18 @@ enum AgentEnablement {
         let root: URL
         switch source {
         case .codex:
-            let custom = defaults.string(forKey: "SessionsRootOverride") ?? ""
+            let custom = defaults.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride) ?? ""
             root = CodexSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .claude:
-            let custom = defaults.string(forKey: "ClaudeSessionsRootOverride") ?? ""
+            let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
             let discovery = ClaudeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
             if discovery.hasDiscoverableSessionsRoot() { return true }
             root = discovery.sessionsRoot()
         case .antigravity:
-            let custom = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
+            let custom = defaults.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride) ?? ""
             root = AntigravitySessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
         case .opencode:
-            let custom = defaults.string(forKey: "OpenCodeSessionsRootOverride") ?? ""
+            let custom = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride) ?? ""
             // Check opencode.db first (v1.2+ SQLite backend)
             if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom.isEmpty ? nil : custom) { return true }
             root = OpenCodeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()

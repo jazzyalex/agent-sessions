@@ -3438,7 +3438,7 @@ actor CodexStatusService {
                 roots.append(url)
             }
         }
-        if let override = UserDefaults.standard.string(forKey: "SessionsRootOverride"), !override.isEmpty {
+        if let override = UserDefaults.standard.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride), !override.isEmpty {
             add(override)
         }
         if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], !env.isEmpty {

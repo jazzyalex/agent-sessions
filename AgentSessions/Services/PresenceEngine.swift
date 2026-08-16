@@ -1538,7 +1538,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
         if let env = ProcessInfo.processInfo.environment["CODEX_HOME"], let envURL = PresenceEngine.parsePath(env) {
             candidates.append(envURL.appendingPathComponent("active"))
         }
-        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+        if let sessionsOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride),
            let sessionsURL = PresenceEngine.parsePath(sessionsOverride) {
             candidates.append(sessionsURL.deletingLastPathComponent().appendingPathComponent("active"))
         }
@@ -1548,7 +1548,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
 
     func codexSessionsRoots() -> [URL] {
         var candidates: [URL] = []
-        if let sessionsOverride = UserDefaults.standard.string(forKey: "SessionsRootOverride"),
+        if let sessionsOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride),
            let sessionsURL = PresenceEngine.parsePath(sessionsOverride) {
             candidates.append(sessionsURL)
         }
@@ -1562,7 +1562,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
     func claudeSessionsRoots() -> [URL] {
         let defaults = UserDefaults.standard
         let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
             ?? ""
         let discovery = ClaudeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
         return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
@@ -1571,7 +1571,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
     func claudeSessionScanRoots() -> [URL] {
         let defaults = UserDefaults.standard
         let override = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            ?? defaults.string(forKey: "ClaudeSessionsRootOverride")
+            ?? defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
             ?? ""
         let trimmedOverride = override.trimmingCharacters(in: .whitespacesAndNewlines)
         let discovery = ClaudeSessionDiscovery(customRoot: trimmedOverride.isEmpty ? nil : trimmedOverride)
@@ -1593,7 +1593,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
     func opencodeSessionsRoots() -> [URL] {
         let defaults = UserDefaults.standard
         let override = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
-            ?? defaults.string(forKey: "OpenCodeSessionsRootOverride")
+            ?? defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
             ?? ""
         let discovery = OpenCodeSessionDiscovery(customRoot: override.isEmpty ? nil : override)
         return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
@@ -1601,7 +1601,7 @@ struct DefaultPresenceRootsResolver: PresenceRootsResolving {
 
     func antigravitySessionsRoots() -> [URL] {
         let defaults = UserDefaults.standard
-        let override = defaults.string(forKey: "AntigravitySessionsRootOverride") ?? ""
+        let override = defaults.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride) ?? ""
         let discovery = AntigravitySessionDiscovery(customRoot: override.isEmpty ? nil : override)
         return PresenceEngine.dedupRoots([discovery.sessionsRoot()])
     }
