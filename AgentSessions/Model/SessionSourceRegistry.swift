@@ -4,11 +4,16 @@ import AppKit
 
 // MARK: - SessionSourceAdapter
 
-/// A source's entry in the registry (SPEC §3.2). Task 2 carries value data only; Task 6
-/// adds `makeRuntime: @MainActor () -> SourceRuntime` so one adapter supplies both the
-/// descriptor and the source's runtime object graph.
+/// A source's entry in the registry (SPEC §3.2): the descriptor's value data plus the
+/// factory for that source's runtime object graph, so one adapter supplies everything the
+/// app needs from a provider.
+///
+/// `makeRuntime` is called exactly once per source, by `SessionProviderCatalog.init`, on the
+/// main actor. Each source declares its own in its descriptor file, so adding a source is
+/// still one new file plus one line in `ordered` below.
 struct SessionSourceAdapter {
     let descriptor: SessionSourceDescriptor
+    let makeRuntime: @MainActor () -> SourceRuntime
 }
 
 // MARK: - SessionSourceRegistry
@@ -20,19 +25,21 @@ struct SessionSourceAdapter {
 /// wrong place, fails immediately rather than drifting invisibly through the ~35 hand lists
 /// this program replaces.
 enum SessionSourceRegistry {
+    /// Each entry is a `static let` declared in that source's own descriptor file, next to
+    /// the descriptor it wraps.
     static let ordered: [SessionSourceAdapter] = [
-        SessionSourceAdapter(descriptor: .codex),
-        SessionSourceAdapter(descriptor: .claude),
-        SessionSourceAdapter(descriptor: .antigravity),
-        SessionSourceAdapter(descriptor: .opencode),
-        SessionSourceAdapter(descriptor: .hermes),
-        SessionSourceAdapter(descriptor: .copilot),
-        SessionSourceAdapter(descriptor: .droid),
-        SessionSourceAdapter(descriptor: .openclaw),
-        SessionSourceAdapter(descriptor: .cursor),
-        SessionSourceAdapter(descriptor: .pi),
-        SessionSourceAdapter(descriptor: .kimi),
-        SessionSourceAdapter(descriptor: .grok)
+        .codex,
+        .claude,
+        .antigravity,
+        .opencode,
+        .hermes,
+        .copilot,
+        .droid,
+        .openclaw,
+        .cursor,
+        .pi,
+        .kimi,
+        .grok
     ]
 
     static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(

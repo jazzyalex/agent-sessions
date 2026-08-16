@@ -171,22 +171,25 @@ enum CockpitNavigationBridge {
 @main
 struct AgentSessionsApp: App {
     @NSApplicationDelegateAdaptor(AgentSessionsApplicationDelegate.self) private var appDelegate
-    @StateObject private var indexer = SessionIndexer()
-    @StateObject private var claudeIndexer = ClaudeSessionIndexer()
-    @StateObject private var opencodeIndexer = OpenCodeSessionIndexer()
+    /// One lifecycle owner for all twelve providers, replacing the twelve `@StateObject`
+    /// indexers that used to be declared here and threaded positionally into every
+    /// downstream consumer (SPEC §3.3).
+    ///
+    /// K16: the catalog publishes nothing after init, so holding it in a `@StateObject`
+    /// costs no invalidation — this scene no longer observes `SessionIndexer` at all, and
+    /// `body` reads no `@Published` off any indexer (`indexer.columnVisibility` is a plain
+    /// `let`, and the appearance/preferences calls below are inside button actions).
+    @StateObject private var catalog = SessionProviderCatalog()
+    /// The three concrete indexers this file still names directly: the Quota Meter window
+    /// takes Codex/Claude/OpenCode, and Preferences + the appearance menu take Codex.
+    /// Everything else now receives the catalog.
+    private var indexer: SessionIndexer { catalog.indexer(.codex, as: SessionIndexer.self) }
+    private var claudeIndexer: ClaudeSessionIndexer { catalog.indexer(.claude, as: ClaudeSessionIndexer.self) }
+    private var opencodeIndexer: OpenCodeSessionIndexer { catalog.indexer(.opencode, as: OpenCodeSessionIndexer.self) }
     @StateObject private var archiveManager = SessionArchiveManager.shared
     @StateObject private var codexUsageModel = CodexUsageModel.shared
     @StateObject private var claudeUsageModel = ClaudeUsageModel.shared
     @State private var activeCodexSessions = CodexActiveSessionsModel()
-    @StateObject private var antigravityIndexer = AntigravitySessionIndexer()
-    @StateObject private var hermesIndexer = HermesSessionIndexer()
-    @StateObject private var copilotIndexer = CopilotSessionIndexer()
-    @StateObject private var droidIndexer = DroidSessionIndexer()
-    @StateObject private var openclawIndexer = OpenClawSessionIndexer()
-    @StateObject private var cursorIndexer = CursorSessionIndexer()
-    @StateObject private var piIndexer = PiSessionIndexer()
-    @StateObject private var kimiIndexer = KimiSessionIndexer()
-    @StateObject private var grokIndexer = GrokSessionIndexer()
     @StateObject private var updaterController = UpdaterController()
     @StateObject private var onboardingCoordinator = OnboardingCoordinator()
     @StateObject private var unifiedIndexerHolder = _UnifiedHolder()
@@ -274,20 +277,7 @@ struct AgentSessionsApp: App {
         if AppRuntime.isRunningTests {
             EmptyView()
         } else {
-            let unified = unifiedIndexerHolder.makeUnified(
-                codexIndexer: indexer,
-                claudeIndexer: claudeIndexer,
-                antigravityIndexer: antigravityIndexer,
-                opencodeIndexer: opencodeIndexer,
-                hermesIndexer: hermesIndexer,
-                copilotIndexer: copilotIndexer,
-                droidIndexer: droidIndexer,
-                openclawIndexer: openclawIndexer,
-                cursorIndexer: cursorIndexer,
-                piIndexer: piIndexer,
-                kimiIndexer: kimiIndexer,
-                grokIndexer: grokIndexer
-            )
+            let unified = unifiedIndexerHolder.makeUnified(catalog: catalog)
             configuredUnifiedWindow(unified: unified)
         }
     }
@@ -297,18 +287,7 @@ struct AgentSessionsApp: App {
         let layoutMode = LayoutMode(rawValue: layoutModeRaw) ?? .vertical
         UnifiedSessionsView(
             unified: unified,
-            codexIndexer: indexer,
-            claudeIndexer: claudeIndexer,
-            antigravityIndexer: antigravityIndexer,
-            opencodeIndexer: opencodeIndexer,
-            hermesIndexer: hermesIndexer,
-            copilotIndexer: copilotIndexer,
-            droidIndexer: droidIndexer,
-            openclawIndexer: openclawIndexer,
-            cursorIndexer: cursorIndexer,
-            piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer,
-            grokIndexer: grokIndexer,
+            catalog: catalog,
             analyticsReady: analyticsReady,
             analyticsPhase: analyticsPhase,
             analyticsIsStale: analyticsStale,
@@ -382,18 +361,7 @@ struct AgentSessionsApp: App {
                 onboardingWindowPresenter.show(
                     presentation: presentation,
                     coordinator: onboardingCoordinator,
-                    codexIndexer: indexer,
-                    claudeIndexer: claudeIndexer,
-                    antigravityIndexer: antigravityIndexer,
-                    opencodeIndexer: opencodeIndexer,
-                    hermesIndexer: hermesIndexer,
-                    copilotIndexer: copilotIndexer,
-                    droidIndexer: droidIndexer,
-                    openclawIndexer: openclawIndexer,
-                    cursorIndexer: cursorIndexer,
-                    piIndexer: piIndexer,
-                    kimiIndexer: kimiIndexer,
-                    grokIndexer: grokIndexer,
+                    catalog: catalog,
                     codexUsageModel: codexUsageModel,
                     claudeUsageModel: claudeUsageModel
                 )
@@ -479,20 +447,7 @@ struct AgentSessionsApp: App {
                 EmptyView()
             } else {
                 PinnedSessionsView(
-                    unified: unifiedIndexerHolder.makeUnified(
-                        codexIndexer: indexer,
-                        claudeIndexer: claudeIndexer,
-                        antigravityIndexer: antigravityIndexer,
-                        opencodeIndexer: opencodeIndexer,
-                        hermesIndexer: hermesIndexer,
-                        copilotIndexer: copilotIndexer,
-                        droidIndexer: droidIndexer,
-                        openclawIndexer: openclawIndexer,
-                        cursorIndexer: cursorIndexer,
-                        piIndexer: piIndexer,
-                        kimiIndexer: kimiIndexer,
-                        grokIndexer: grokIndexer
-                    )
+                    unified: unifiedIndexerHolder.makeUnified(catalog: catalog)
                 )
                 .environmentObject(archiveManager)
                 .background(WindowOpenRegistrationView())
@@ -548,31 +503,10 @@ struct AgentSessionsApp: App {
 final class _UnifiedHolder: ObservableObject {
     // Internal cache only; no need to publish during view updates
     var unified: UnifiedSessionIndexer? = nil
-    func makeUnified(codexIndexer: SessionIndexer,
-                     claudeIndexer: ClaudeSessionIndexer,
-                     antigravityIndexer: AntigravitySessionIndexer,
-                     opencodeIndexer: OpenCodeSessionIndexer,
-                     hermesIndexer: HermesSessionIndexer,
-                     copilotIndexer: CopilotSessionIndexer,
-                     droidIndexer: DroidSessionIndexer,
-                     openclawIndexer: OpenClawSessionIndexer,
-                     cursorIndexer: CursorSessionIndexer,
-                     piIndexer: PiSessionIndexer,
-                     kimiIndexer: KimiSessionIndexer,
-                     grokIndexer: GrokSessionIndexer) -> UnifiedSessionIndexer {
+    @MainActor
+    func makeUnified(catalog: SessionProviderCatalog) -> UnifiedSessionIndexer {
         if let u = unified { return u }
-        let u = UnifiedSessionIndexer(codexIndexer: codexIndexer,
-                                      claudeIndexer: claudeIndexer,
-                                      antigravityIndexer: antigravityIndexer,
-                                      opencodeIndexer: opencodeIndexer,
-                                      hermesIndexer: hermesIndexer,
-                                      copilotIndexer: copilotIndexer,
-                                      droidIndexer: droidIndexer,
-                                      openclawIndexer: openclawIndexer,
-                                      cursorIndexer: cursorIndexer,
-                                      piIndexer: piIndexer,
-                                      kimiIndexer: kimiIndexer,
-                                      grokIndexer: grokIndexer)
+        let u = UnifiedSessionIndexer(catalog: catalog)
         unified = u
         return u
     }
@@ -779,20 +713,7 @@ extension AgentSessionsApp {
 
     @MainActor
     private func unifiedIndexer() -> UnifiedSessionIndexer {
-        unifiedIndexerHolder.makeUnified(
-            codexIndexer: indexer,
-            claudeIndexer: claudeIndexer,
-            antigravityIndexer: antigravityIndexer,
-            opencodeIndexer: opencodeIndexer,
-            hermesIndexer: hermesIndexer,
-            copilotIndexer: copilotIndexer,
-            droidIndexer: droidIndexer,
-            openclawIndexer: openclawIndexer,
-            cursorIndexer: cursorIndexer,
-            piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer,
-            grokIndexer: grokIndexer
-        )
+        unifiedIndexerHolder.makeUnified(catalog: catalog)
     }
 
     @MainActor
@@ -1100,20 +1021,7 @@ extension AgentSessionsApp {
         }
 
         // Create analytics service with indexers
-        let service = AnalyticsService(
-            codexIndexer: indexer,
-            claudeIndexer: claudeIndexer,
-            antigravityIndexer: antigravityIndexer,
-            opencodeIndexer: opencodeIndexer,
-            hermesIndexer: hermesIndexer,
-            copilotIndexer: copilotIndexer,
-            droidIndexer: droidIndexer,
-            openclawIndexer: openclawIndexer,
-            cursorIndexer: cursorIndexer,
-            piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer,
-            grokIndexer: grokIndexer
-        )
+        let service = AnalyticsService(catalog: catalog)
         analyticsService = service
 
         // Relay readiness and analytics phase from unified indexer to the service.
@@ -1324,18 +1232,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
     func show(
         presentation: OnboardingPresentation,
         coordinator: OnboardingCoordinator,
-        codexIndexer: SessionIndexer,
-        claudeIndexer: ClaudeSessionIndexer,
-        antigravityIndexer: AntigravitySessionIndexer,
-        opencodeIndexer: OpenCodeSessionIndexer,
-        hermesIndexer: HermesSessionIndexer,
-        copilotIndexer: CopilotSessionIndexer,
-        droidIndexer: DroidSessionIndexer,
-        openclawIndexer: OpenClawSessionIndexer,
-        cursorIndexer: CursorSessionIndexer,
-        piIndexer: PiSessionIndexer,
-        kimiIndexer: KimiSessionIndexer,
-        grokIndexer: GrokSessionIndexer,
+        catalog: SessionProviderCatalog,
         codexUsageModel: CodexUsageModel,
         claudeUsageModel: ClaudeUsageModel
     ) {
@@ -1343,18 +1240,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
         state = OnboardingWindowState(
             presentation: presentation,
             coordinator: coordinator,
-            codexIndexer: codexIndexer,
-            claudeIndexer: claudeIndexer,
-            antigravityIndexer: antigravityIndexer,
-            opencodeIndexer: opencodeIndexer,
-            hermesIndexer: hermesIndexer,
-            copilotIndexer: copilotIndexer,
-            droidIndexer: droidIndexer,
-            openclawIndexer: openclawIndexer,
-            cursorIndexer: cursorIndexer,
-            piIndexer: piIndexer,
-            kimiIndexer: kimiIndexer,
-            grokIndexer: grokIndexer,
+            catalog: catalog,
             codexUsageModel: codexUsageModel,
             claudeUsageModel: claudeUsageModel
         )
@@ -1437,18 +1323,7 @@ final class OnboardingWindowPresenter: NSObject, NSWindowDelegate {
 private struct OnboardingWindowState {
     let presentation: OnboardingPresentation
     let coordinator: OnboardingCoordinator
-    let codexIndexer: SessionIndexer
-    let claudeIndexer: ClaudeSessionIndexer
-    let antigravityIndexer: AntigravitySessionIndexer
-    let opencodeIndexer: OpenCodeSessionIndexer
-    let hermesIndexer: HermesSessionIndexer
-    let copilotIndexer: CopilotSessionIndexer
-    let droidIndexer: DroidSessionIndexer
-    let openclawIndexer: OpenClawSessionIndexer
-    let cursorIndexer: CursorSessionIndexer
-    let piIndexer: PiSessionIndexer
-    let kimiIndexer: KimiSessionIndexer
-    let grokIndexer: GrokSessionIndexer
+    let catalog: SessionProviderCatalog
     let codexUsageModel: CodexUsageModel
     let claudeUsageModel: ClaudeUsageModel
 }
@@ -1463,18 +1338,7 @@ private struct OnboardingWindowRoot: View {
         case .firstRunSetup:
             FirstRunSetupView(
                 coordinator: state.coordinator,
-                codexIndexer: state.codexIndexer,
-                claudeIndexer: state.claudeIndexer,
-                antigravityIndexer: state.antigravityIndexer,
-                opencodeIndexer: state.opencodeIndexer,
-                hermesIndexer: state.hermesIndexer,
-                copilotIndexer: state.copilotIndexer,
-                droidIndexer: state.droidIndexer,
-                openclawIndexer: state.openclawIndexer,
-                cursorIndexer: state.cursorIndexer,
-                piIndexer: state.piIndexer,
-                kimiIndexer: state.kimiIndexer,
-                grokIndexer: state.grokIndexer
+                catalog: state.catalog
             )
         case .powerTips(let content):
             OnboardingSheetView(

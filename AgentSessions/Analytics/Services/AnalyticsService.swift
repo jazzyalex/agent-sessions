@@ -12,18 +12,14 @@ final class AnalyticsService: ObservableObject {
     @Published private(set) var lastBuiltAt: Date? = nil
     @Published private(set) var isStaleSinceLastBuild: Bool = false
 
-    private let codexIndexer: SessionIndexer
-    private let claudeIndexer: ClaudeSessionIndexer
-    private let antigravityIndexer: AntigravitySessionIndexer
-    private let opencodeIndexer: OpenCodeSessionIndexer
-    private let hermesIndexer: HermesSessionIndexer
-    private let copilotIndexer: CopilotSessionIndexer
-    private let droidIndexer: DroidSessionIndexer
-    private let openclawIndexer: OpenClawSessionIndexer
-    private let cursorIndexer: CursorSessionIndexer
-    private let piIndexer: PiSessionIndexer
-    private let kimiIndexer: KimiSessionIndexer
-    private let grokIndexer: GrokSessionIndexer
+    private let catalog: SessionProviderCatalog
+
+    /// Registry-ordered runtimes. This is the whole per-source surface the service needs:
+    /// it reads sessions and launch phases through the type-erased `ProviderHandle` and
+    /// never downcasts to a concrete indexer (spike finding 2).
+    private var runtimes: [SourceRuntime] {
+        SessionSourceRegistry.ordered.map { catalog[$0.descriptor.source] }
+    }
 
     private var cancellables = Set<AnyCancellable>()
     private let repository: AnalyticsRepository?
@@ -31,30 +27,8 @@ final class AnalyticsService: ObservableObject {
     private static let analyticsSupportedSources = AnalyticsSourceSupport.sources
     private static var analyticsBackfillVersion: Int { AnalyticsIndexPhase.backfillVersion }
 
-    init(codexIndexer: SessionIndexer,
-         claudeIndexer: ClaudeSessionIndexer,
-         antigravityIndexer: AntigravitySessionIndexer,
-         opencodeIndexer: OpenCodeSessionIndexer,
-         hermesIndexer: HermesSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer,
-         openclawIndexer: OpenClawSessionIndexer,
-         cursorIndexer: CursorSessionIndexer,
-         piIndexer: PiSessionIndexer,
-         kimiIndexer: KimiSessionIndexer,
-         grokIndexer: GrokSessionIndexer) {
-        self.codexIndexer = codexIndexer
-        self.claudeIndexer = claudeIndexer
-        self.antigravityIndexer = antigravityIndexer
-        self.opencodeIndexer = opencodeIndexer
-        self.hermesIndexer = hermesIndexer
-        self.copilotIndexer = copilotIndexer
-        self.droidIndexer = droidIndexer
-        self.openclawIndexer = openclawIndexer
-        self.cursorIndexer = cursorIndexer
-        self.piIndexer = piIndexer
-        self.kimiIndexer = kimiIndexer
-        self.grokIndexer = grokIndexer
+    init(catalog: SessionProviderCatalog) {
+        self.catalog = catalog
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
@@ -94,20 +68,7 @@ final class AnalyticsService: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        // Gather all sessions
-        var allSessions: [Session] = []
-        if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: antigravityIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.openclaw) { allSessions.append(contentsOf: openclawIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.cursor) { allSessions.append(contentsOf: cursorIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
+        let allSessions = gatherEnabledSessions()
 
         // Apply filters for current period
         let filtered = filterSessions(allSessions, dateRange: dateRange, agentFilter: agentFilter, projectFilter: projectFilter)
@@ -129,22 +90,19 @@ final class AnalyticsService: ObservableObject {
         )
     }
 
+    /// Every enabled source's sessions, in registry order — which is the order the twelve
+    /// hand-written `if AgentEnablement.isEnabled(.x) { append }` lines used to produce.
+    private func gatherEnabledSessions() -> [Session] {
+        var allSessions: [Session] = []
+        for runtime in runtimes where AgentEnablement.isEnabled(runtime.source) {
+            allSessions.append(contentsOf: runtime.handle.currentSessions())
+        }
+        return allSessions
+    }
+
     /// Get list of available project names sorted by session count
     func getAvailableProjects() -> [String] {
-        // Gather all sessions
-        var allSessions: [Session] = []
-        if AgentEnablement.isEnabled(.codex) { allSessions.append(contentsOf: codexIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.claude) { allSessions.append(contentsOf: claudeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.antigravity) { allSessions.append(contentsOf: antigravityIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.opencode) { allSessions.append(contentsOf: opencodeIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.hermes) { allSessions.append(contentsOf: hermesIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.copilot) { allSessions.append(contentsOf: copilotIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.droid) { allSessions.append(contentsOf: droidIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.openclaw) { allSessions.append(contentsOf: openclawIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.cursor) { allSessions.append(contentsOf: cursorIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.pi) { allSessions.append(contentsOf: piIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.kimi) { allSessions.append(contentsOf: kimiIndexer.allSessions) }
-        if AgentEnablement.isEnabled(.grok) { allSessions.append(contentsOf: grokIndexer.allSessions) }
+        let allSessions = gatherEnabledSessions()
 
         // Apply message count filters (same as Sessions List)
         let hideZero = UserDefaults.standard.object(forKey: "HideZeroMessageSessions") as? Bool ?? true
@@ -762,11 +720,11 @@ final class AnalyticsService: ObservableObject {
         // and Kimi joined analytics, but its sink was empty — the view drives auto-refresh
         // — so it debounced nine session-list publishers on every index change to do
         // nothing. Add one back only alongside a sink that actually refreshes.
-        Publishers.CombineLatest3(
-            Publishers.CombineLatest4(codexIndexer.$launchPhase, claudeIndexer.$launchPhase, antigravityIndexer.$launchPhase, opencodeIndexer.$launchPhase),
-            Publishers.CombineLatest4(hermesIndexer.$launchPhase, copilotIndexer.$launchPhase, droidIndexer.$launchPhase, openclawIndexer.$launchPhase),
-            Publishers.CombineLatest4(cursorIndexer.$launchPhase, piIndexer.$launchPhase, kimiIndexer.$launchPhase, grokIndexer.$launchPhase)
-        )
+        // Registry-ordered array fold, semantically identical to the CombineLatest3/4
+        // pyramid it replaces: still no output until every source has published a phase,
+        // then one per emission. (`MergeMany` would NOT be equivalent — it interleaves
+        // single values instead of holding the latest of each.)
+        Publishers.combineLatestArray(runtimes.map { $0.handle.launchPhase })
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateReadiness()
@@ -779,20 +737,12 @@ final class AnalyticsService: ObservableObject {
     private func updateReadiness() {
         Task { @MainActor in
             let enabled = AgentEnablement.enabledSources()
-            let phases = [
-                (SessionSource.codex, codexIndexer.launchPhase),
-                (SessionSource.claude, claudeIndexer.launchPhase),
-                (SessionSource.antigravity, antigravityIndexer.launchPhase),
-                (SessionSource.opencode, opencodeIndexer.launchPhase),
-                (SessionSource.hermes, hermesIndexer.launchPhase),
-                (SessionSource.copilot, copilotIndexer.launchPhase),
-                (SessionSource.droid, droidIndexer.launchPhase),
-                (SessionSource.openclaw, openclawIndexer.launchPhase),
-                (SessionSource.cursor, cursorIndexer.launchPhase),
-                (SessionSource.pi, piIndexer.launchPhase),
-                (SessionSource.kimi, kimiIndexer.launchPhase),
-                (SessionSource.grok, grokIndexer.launchPhase)
-            ].filter { enabled.contains($0.0) }.map { $0.1 }
+            // Derived from the registry rather than hand-listed: a source that forgets its
+            // row here used to silently count as "ready" (SPEC §1).
+            let phases = self.runtimes
+                .map { ($0.source, $0.handle.currentLaunchPhase()) }
+                .filter { enabled.contains($0.0) }
+                .map { $0.1 }
             let phasesReady = phases.allSatisfy { phase in
                 switch phase {
                 case .ready, .idle:

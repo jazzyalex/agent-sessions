@@ -545,24 +545,13 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(unified.allowedSearchSources(), [])
     }
 
-    /// A throwaway `UnifiedSessionIndexer` over twelve throwaway provider indexers. Provider
-    /// indexer `init`s only wire Combine pipelines and read stored path overrides — none of
-    /// them scans until asked — so this is cheap and side-effect free as long as no refresh
-    /// is triggered.
+    /// A throwaway `UnifiedSessionIndexer` over a throwaway catalog — which builds one
+    /// throwaway indexer per source. Provider indexer `init`s only wire Combine pipelines
+    /// and read stored path overrides — none of them scans until asked — so this is cheap
+    /// and side-effect free as long as no refresh is triggered.
     @MainActor
     private func makeUnifiedIndexerForAllowListTests() -> UnifiedSessionIndexer {
-        UnifiedSessionIndexer(codexIndexer: SessionIndexer(),
-                              claudeIndexer: ClaudeSessionIndexer(),
-                              antigravityIndexer: AntigravitySessionIndexer(),
-                              opencodeIndexer: OpenCodeSessionIndexer(),
-                              hermesIndexer: HermesSessionIndexer(),
-                              copilotIndexer: CopilotSessionIndexer(),
-                              droidIndexer: DroidSessionIndexer(),
-                              openclawIndexer: OpenClawSessionIndexer(),
-                              cursorIndexer: CursorSessionIndexer(),
-                              piIndexer: PiSessionIndexer(),
-                              kimiIndexer: KimiSessionIndexer(),
-                              grokIndexer: GrokSessionIndexer())
+        UnifiedSessionIndexer(catalog: SessionProviderCatalog())
     }
 
     private func waitForSearchResults(_ coordinator: SearchCoordinator,

@@ -409,27 +409,8 @@ extension View {
 // MARK: - Previews
 
 #Preview("Analytics View") {
-    let codexIndexer = SessionIndexer()
-    let claudeIndexer = ClaudeSessionIndexer()
-    let antigravityIndexer = AntigravitySessionIndexer()
-    let opencodeIndexer = OpenCodeSessionIndexer()
-    let hermesIndexer = HermesSessionIndexer()
-    let copilotIndexer = CopilotSessionIndexer()
-
-    let service = AnalyticsService(
-        codexIndexer: codexIndexer,
-        claudeIndexer: claudeIndexer,
-        antigravityIndexer: antigravityIndexer,
-        opencodeIndexer: opencodeIndexer,
-        hermesIndexer: hermesIndexer,
-        copilotIndexer: copilotIndexer,
-        droidIndexer: DroidSessionIndexer(),
-        openclawIndexer: OpenClawSessionIndexer(),
-        cursorIndexer: CursorSessionIndexer(),
-        piIndexer: PiSessionIndexer(),
-        kimiIndexer: KimiSessionIndexer(),
-        grokIndexer: GrokSessionIndexer()
-    )
+    // Twelve hand-built indexers collapse into the catalog, which builds all of them.
+    let service = AnalyticsService(catalog: SessionProviderCatalog())
 
     AnalyticsView(service: service)
         .frame(width: 900, height: 650)

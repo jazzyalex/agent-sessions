@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 /// First-run setup — a single screen shown once on a fresh install. It replaces
 /// the old multi-slide tour with two blocks: "Your sessions" (an animated
@@ -9,18 +10,10 @@ import AppKit
 /// way).
 struct FirstRunSetupView: View {
     @ObservedObject var coordinator: OnboardingCoordinator
-    let codexIndexer: SessionIndexer
-    let claudeIndexer: ClaudeSessionIndexer
-    let antigravityIndexer: AntigravitySessionIndexer
-    let opencodeIndexer: OpenCodeSessionIndexer
-    let hermesIndexer: HermesSessionIndexer
-    let copilotIndexer: CopilotSessionIndexer
-    let droidIndexer: DroidSessionIndexer
-    let openclawIndexer: OpenClawSessionIndexer
-    let cursorIndexer: CursorSessionIndexer
-    let piIndexer: PiSessionIndexer
-    let kimiIndexer: KimiSessionIndexer
-    let grokIndexer: GrokSessionIndexer
+    /// Replaces twelve positional indexer parameters. This view only ever reads each
+    /// source's session list, so it goes through the type-erased handles and never needs a
+    /// concrete indexer type.
+    let catalog: SessionProviderCatalog
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,18 +88,19 @@ struct FirstRunSetupView: View {
             loadIndexedSessionsSnapshotIfNeeded()
             handleSessionDataUpdate()
         }
-        .onReceive(codexIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(claudeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(antigravityIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(opencodeIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(hermesIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(copilotIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(droidIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(openclawIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(cursorIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(piIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(kimiIndexer.$allSessions) { _ in handleSessionDataUpdate() }
-        .onReceive(grokIndexer.$allSessions) { _ in handleSessionDataUpdate() }
+        .onReceive(anySourceSessionsChanged) { _ in handleSessionDataUpdate() }
+    }
+
+    /// One subscription over every source's `allSessions`, replacing twelve hand-written
+    /// `.onReceive(xIndexer.$allSessions)` modifiers. `MergeMany` is the right fold here
+    /// (unlike readiness): the handler ignores the value and re-reads all counts, so what
+    /// matters is being woken once per emission, which is exactly what twelve separate
+    /// `onReceive`s did.
+    private var anySourceSessionsChanged: AnyPublisher<[Session], Never> {
+        Publishers.MergeMany(SessionSourceRegistry.ordered.map {
+            catalog[$0.descriptor.source].handle.allSessions
+        })
+        .eraseToAnyPublisher()
     }
 
     private var content: some View {
@@ -343,20 +337,7 @@ struct FirstRunSetupView: View {
     }
 
     private func sessionsFromIndexer(_ source: SessionSource) -> [Session] {
-        switch source {
-        case .codex: return codexIndexer.allSessions
-        case .claude: return claudeIndexer.allSessions
-        case .antigravity: return antigravityIndexer.allSessions
-        case .opencode: return opencodeIndexer.allSessions
-        case .hermes: return hermesIndexer.allSessions
-        case .copilot: return copilotIndexer.allSessions
-        case .droid: return droidIndexer.allSessions
-        case .openclaw: return openclawIndexer.allSessions
-        case .cursor: return cursorIndexer.allSessions
-        case .pi: return piIndexer.allSessions
-        case .kimi: return kimiIndexer.allSessions
-        case .grok: return grokIndexer.allSessions
-        }
+        catalog[source].handle.currentSessions()
     }
 
     private func loadIndexedSessionsSnapshotIfNeeded() {

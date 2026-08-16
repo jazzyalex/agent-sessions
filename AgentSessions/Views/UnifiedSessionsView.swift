@@ -329,18 +329,25 @@ private struct WindowKeyObserver: NSViewRepresentable {
 
 struct UnifiedSessionsView: View {
     @ObservedObject var unified: UnifiedSessionIndexer
-    let codexIndexer: SessionIndexer
-    let claudeIndexer: ClaudeSessionIndexer
+    /// Replaces twelve positional indexer properties. The concrete accessors below resolve
+    /// through it; nothing about this view's observation changed except that eleven of the
+    /// twelve indexers were never observed here to begin with (they were plain `let`s).
+    let catalog: SessionProviderCatalog
+    /// Antigravity stays an explicit `@ObservedObject`: `body` reads its
+    /// `unreadableSessionIDs` / `isPreviewStale` published state, so this view must keep
+    /// invalidating on it. Assigned from the catalog in `init`.
     @ObservedObject var antigravityIndexer: AntigravitySessionIndexer
-    let opencodeIndexer: OpenCodeSessionIndexer
-    let hermesIndexer: HermesSessionIndexer
-    let copilotIndexer: CopilotSessionIndexer
-    let droidIndexer: DroidSessionIndexer
-    let openclawIndexer: OpenClawSessionIndexer
-    let cursorIndexer: CursorSessionIndexer
-    let piIndexer: PiSessionIndexer
-    let kimiIndexer: KimiSessionIndexer
-    let grokIndexer: GrokSessionIndexer
+    private var codexIndexer: SessionIndexer { catalog.indexer(.codex, as: SessionIndexer.self) }
+    private var claudeIndexer: ClaudeSessionIndexer { catalog.indexer(.claude, as: ClaudeSessionIndexer.self) }
+    private var opencodeIndexer: OpenCodeSessionIndexer { catalog.indexer(.opencode, as: OpenCodeSessionIndexer.self) }
+    private var hermesIndexer: HermesSessionIndexer { catalog.indexer(.hermes, as: HermesSessionIndexer.self) }
+    private var copilotIndexer: CopilotSessionIndexer { catalog.indexer(.copilot, as: CopilotSessionIndexer.self) }
+    private var droidIndexer: DroidSessionIndexer { catalog.indexer(.droid, as: DroidSessionIndexer.self) }
+    private var openclawIndexer: OpenClawSessionIndexer { catalog.indexer(.openclaw, as: OpenClawSessionIndexer.self) }
+    private var cursorIndexer: CursorSessionIndexer { catalog.indexer(.cursor, as: CursorSessionIndexer.self) }
+    private var piIndexer: PiSessionIndexer { catalog.indexer(.pi, as: PiSessionIndexer.self) }
+    private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
+    private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -478,114 +485,28 @@ struct UnifiedSessionsView: View {
     }
 
     init(unified: UnifiedSessionIndexer,
-         codexIndexer: SessionIndexer,
-         claudeIndexer: ClaudeSessionIndexer,
-         antigravityIndexer: AntigravitySessionIndexer,
-         opencodeIndexer: OpenCodeSessionIndexer,
-         hermesIndexer: HermesSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer,
-         openclawIndexer: OpenClawSessionIndexer,
-         cursorIndexer: CursorSessionIndexer,
-         piIndexer: PiSessionIndexer,
-         kimiIndexer: KimiSessionIndexer,
-         grokIndexer: GrokSessionIndexer,
+         catalog: SessionProviderCatalog,
          analyticsReady: Bool,
          analyticsPhase: AnalyticsIndexPhase,
          analyticsIsStale: Bool,
          layoutMode: LayoutMode,
          onToggleLayout: @escaping () -> Void) {
         self.unified = unified
-        self.codexIndexer = codexIndexer
-        self.claudeIndexer = claudeIndexer
-        self.antigravityIndexer = antigravityIndexer
-        self.opencodeIndexer = opencodeIndexer
-        self.hermesIndexer = hermesIndexer
-        self.copilotIndexer = copilotIndexer
-        self.droidIndexer = droidIndexer
-        self.openclawIndexer = openclawIndexer
-        self.cursorIndexer = cursorIndexer
-        self.piIndexer = piIndexer
-        self.kimiIndexer = kimiIndexer
-        self.grokIndexer = grokIndexer
+        self.catalog = catalog
+        self.antigravityIndexer = catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self)
         self.analyticsReady = analyticsReady
         self.analyticsPhase = analyticsPhase
         self.analyticsIsStale = analyticsIsStale
         self.layoutMode = layoutMode
         self.onToggleLayout = onToggleLayout
-        let store = SearchSessionStore(adapters: [
-            .codex: .init(
-                transcriptCache: codexIndexer.searchTranscriptCache,
-                update: { codexIndexer.updateSession($0) },
-                parseFull: { url, forcedID in codexIndexer.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .claude: .init(
-                transcriptCache: claudeIndexer.searchTranscriptCache,
-                update: { claudeIndexer.updateSession($0) },
-                parseFull: { url, forcedID in ClaudeSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .antigravity: .init(
-                transcriptCache: antigravityIndexer.searchTranscriptCache,
-                update: { antigravityIndexer.updateSession($0) },
-                parseFull: { url, forcedID in AntigravitySessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .opencode: .init(
-                transcriptCache: opencodeIndexer.searchTranscriptCache,
-                update: { opencodeIndexer.updateSession($0) },
-                parseFull: { [opencodeIndexer] url, forcedID in
-                    if url.lastPathComponent == "opencode.db", !forcedID.isEmpty {
-                        let customRoot = opencodeIndexer.sessionsRootOverride.isEmpty ? nil : opencodeIndexer.sessionsRootOverride
-                        return OpenCodeSqliteReader.loadFullSession(customRoot: customRoot, sessionID: forcedID)
-                    }
-                    return OpenCodeSessionParser.parseFileFull(at: url)
-                }
-            ),
-            .hermes: .init(
-                transcriptCache: hermesIndexer.searchTranscriptCache,
-                update: { hermesIndexer.updateSession($0) },
-                parseFull: { url, forcedID in
-                    if url.pathExtension.lowercased() == "db", !forcedID.isEmpty {
-                        return HermesStateDBReader.loadFullSession(dbURL: url, sessionID: forcedID)
-                    }
-                    return HermesSessionParser.parseFileFull(at: url)
-                }
-            ),
-            .copilot: .init(
-                transcriptCache: copilotIndexer.searchTranscriptCache,
-                update: { copilotIndexer.updateSession($0) },
-                parseFull: { url, forcedID in CopilotSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .droid: .init(
-                transcriptCache: droidIndexer.searchTranscriptCache,
-                update: { droidIndexer.updateSession($0) },
-                parseFull: { url, forcedID in DroidSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .openclaw: .init(
-                transcriptCache: openclawIndexer.searchTranscriptCache,
-                update: { openclawIndexer.updateSession($0) },
-                parseFull: { url, forcedID in OpenClawSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .cursor: .init(
-                transcriptCache: cursorIndexer.searchTranscriptCache,
-                update: { cursorIndexer.updateSession($0) },
-                parseFull: { url, forcedID in CursorSessionParser.parseFileFull(at: url, forcedID: forcedID) }
-            ),
-            .pi: .init(
-                transcriptCache: piIndexer.searchTranscriptCache,
-                update: { piIndexer.updateSession($0) },
-                parseFull: { url, _ in PiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
-            ),
-            .kimi: .init(
-                transcriptCache: kimiIndexer.searchTranscriptCache,
-                update: { kimiIndexer.updateSession($0) },
-                parseFull: { url, _ in KimiSessionParser.parseFileFull(at: url, allowLargeFile: true) }
-            ),
-            .grok: .init(
-                transcriptCache: grokIndexer.searchTranscriptCache,
-                update: { grokIndexer.updateSession($0) },
-                parseFull: { url, _ in GrokSessionParser.parseFileFull(at: url, allowLargeFile: true) }
-            ),
-        ])
+        // Every adapter entry now lives in its own source's `makeRuntime`, transcribed
+        // verbatim; this dictionary is assembled from the registry instead of hand-listed,
+        // so a new source cannot be searchable-but-missing here.
+        let store = SearchSessionStore(adapters: Dictionary(
+            uniqueKeysWithValues: SessionSourceRegistry.ordered.map {
+                ($0.descriptor.source, catalog[$0.descriptor.source].searchAdapter)
+            }
+        ))
         _searchCoordinator = StateObject(wrappedValue: SearchCoordinator(store: store))
     }
 
@@ -1708,18 +1629,7 @@ struct UnifiedSessionsView: View {
 	            // Base host is always mounted to keep a stable split subview identity
 	            TranscriptHostView(kind: selectionSource ?? lastSelectedSource,
 	                               selection: settledSelection,
-	                               codexIndexer: codexIndexer,
-                               claudeIndexer: claudeIndexer,
-                               antigravityIndexer: antigravityIndexer,
-                               opencodeIndexer: opencodeIndexer,
-                               hermesIndexer: hermesIndexer,
-                               copilotIndexer: copilotIndexer,
-                               droidIndexer: droidIndexer,
-                               openclawIndexer: openclawIndexer,
-                               cursorIndexer: cursorIndexer,
-                               piIndexer: piIndexer,
-                               kimiIndexer: kimiIndexer,
-                               grokIndexer: grokIndexer)
+	                               catalog: catalog)
                 .environmentObject(focusCoordinator)
                 .environmentObject(searchState)
                 .id("transcript-host")
@@ -3994,18 +3904,23 @@ private struct LayoutToggleButton: View {
 struct TranscriptHostView: View {
     let kind: SessionSource
     let selection: String?
-    let codexIndexer: SessionIndexer
-    let claudeIndexer: ClaudeSessionIndexer
-    let antigravityIndexer: AntigravitySessionIndexer
-    let opencodeIndexer: OpenCodeSessionIndexer
-    let hermesIndexer: HermesSessionIndexer
-    let copilotIndexer: CopilotSessionIndexer
-    let droidIndexer: DroidSessionIndexer
-    let openclawIndexer: OpenClawSessionIndexer
-    let cursorIndexer: CursorSessionIndexer
-    let piIndexer: PiSessionIndexer
-    let kimiIndexer: KimiSessionIndexer
-    let grokIndexer: GrokSessionIndexer
+    /// Twelve positional indexer properties collapse to one catalog. This is the enumerated
+    /// concrete-type site (SPEC §6.A.6): each transcript view below is generic over its own
+    /// indexer class, so the downcasts stay, but they are now resolved in one place from the
+    /// same objects `coveredSources` is tested against.
+    let catalog: SessionProviderCatalog
+    private var codexIndexer: SessionIndexer { catalog.indexer(.codex, as: SessionIndexer.self) }
+    private var claudeIndexer: ClaudeSessionIndexer { catalog.indexer(.claude, as: ClaudeSessionIndexer.self) }
+    private var antigravityIndexer: AntigravitySessionIndexer { catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self) }
+    private var opencodeIndexer: OpenCodeSessionIndexer { catalog.indexer(.opencode, as: OpenCodeSessionIndexer.self) }
+    private var hermesIndexer: HermesSessionIndexer { catalog.indexer(.hermes, as: HermesSessionIndexer.self) }
+    private var copilotIndexer: CopilotSessionIndexer { catalog.indexer(.copilot, as: CopilotSessionIndexer.self) }
+    private var droidIndexer: DroidSessionIndexer { catalog.indexer(.droid, as: DroidSessionIndexer.self) }
+    private var openclawIndexer: OpenClawSessionIndexer { catalog.indexer(.openclaw, as: OpenClawSessionIndexer.self) }
+    private var cursorIndexer: CursorSessionIndexer { catalog.indexer(.cursor, as: CursorSessionIndexer.self) }
+    private var piIndexer: PiSessionIndexer { catalog.indexer(.pi, as: PiSessionIndexer.self) }
+    private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
+    private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset

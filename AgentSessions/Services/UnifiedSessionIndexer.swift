@@ -92,10 +92,42 @@ final class UnifiedSessionIndexer: ObservableObject {
         let filePath: String
     }
 
-    private enum FocusedReloadTrigger {
+    // Internal rather than private (SPEC §3.4 visibility amendment): `SourceRuntime` lives
+    // in another file and names this enum in `ProviderHandle.reloadFocusedSession`. Nothing
+    // depended on the privateness — every use is still inside this file.
+    enum FocusedReloadTrigger {
         case selection
         case monitor
         case manual
+    }
+
+    // MARK: - ProviderHandle (SPEC §3.4)
+    //
+    // The type-erased pipeline surface one source exposes. Built by that source's
+    // `makeRuntime` (next to its descriptor) and carried on `SourceRuntime`.
+    //
+    // RETAIN-CYCLE RULE: every closure captures the concrete indexer instance and nothing
+    // else — no `self`, no catalog, no view — so this indexer's `deinit` keeps running even
+    // though it holds the runtimes.
+    //
+    // Task 6 only lands the type and its two readers (`AnalyticsService`,
+    // `FirstRunSetupView`). This indexer's own internals stay switch-based over the twelve
+    // concrete lets until Task 7 collapses them onto these handles.
+    struct ProviderHandle {
+        let allSessions: AnyPublisher<[Session], Never>
+        let isIndexing: AnyPublisher<Bool, Never>
+        let isProcessingTranscripts: AnyPublisher<Bool, Never>
+        let filesProcessed: AnyPublisher<Int, Never>
+        let totalFiles: AnyPublisher<Int, Never>
+        let indexingError: AnyPublisher<String?, Never>
+        let launchPhase: AnyPublisher<LaunchPhase, Never>
+        let currentSessions: @MainActor () -> [Session]
+        let currentIsIndexing: @MainActor () -> Bool
+        let currentLaunchPhase: @MainActor () -> LaunchPhase
+        let refresh: @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void
+        /// Maps the trigger onto this indexer's own nominal `ReloadReason` internally.
+        /// NO enablement guard here — callers guard (SPEC §3.4).
+        let reloadFocusedSession: @MainActor (_ sessionID: String, _ force: Bool, _ trigger: FocusedReloadTrigger) -> Void
     }
 
     private struct FocusedMonitorCapability {
@@ -706,6 +738,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         didSet { recomputeNow() }
     }
 
+    /// Every source's runtime, from the catalog this indexer was built with. Task 7 folds
+    /// the pipelines and method-level switches below onto `runtimes[source].handle`; until
+    /// then the twelve concrete lets stay, assigned from the same catalog in `init`, so the
+    /// catalog adoption itself is purely mechanical.
+    private let runtimes: [SessionSource: SourceRuntime]
     private let codex: SessionIndexer
     private let claude: ClaudeSessionIndexer
     private let antigravity: AntigravitySessionIndexer
@@ -778,30 +815,21 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// otherwise a stale re-sorted snapshot could clobber correct membership.
     private var sessionsFilterGeneration: Int = 0
     
-    init(codexIndexer: SessionIndexer,
-         claudeIndexer: ClaudeSessionIndexer,
-         antigravityIndexer: AntigravitySessionIndexer,
-         opencodeIndexer: OpenCodeSessionIndexer,
-         hermesIndexer: HermesSessionIndexer,
-         copilotIndexer: CopilotSessionIndexer,
-         droidIndexer: DroidSessionIndexer,
-         openclawIndexer: OpenClawSessionIndexer,
-         cursorIndexer: CursorSessionIndexer,
-         piIndexer: PiSessionIndexer,
-         kimiIndexer: KimiSessionIndexer,
-         grokIndexer: GrokSessionIndexer) {
-        self.codex = codexIndexer
-        self.claude = claudeIndexer
-        self.antigravity = antigravityIndexer
-        self.opencode = opencodeIndexer
-        self.hermes = hermesIndexer
-        self.copilot = copilotIndexer
-        self.droid = droidIndexer
-        self.openclaw = openclawIndexer
-        self.cursor = cursorIndexer
-        self.pi = piIndexer
-        self.kimi = kimiIndexer
-        self.grok = grokIndexer
+    @MainActor
+    init(catalog: SessionProviderCatalog) {
+        self.runtimes = catalog.runtimes
+        self.codex = catalog.indexer(.codex, as: SessionIndexer.self)
+        self.claude = catalog.indexer(.claude, as: ClaudeSessionIndexer.self)
+        self.antigravity = catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self)
+        self.opencode = catalog.indexer(.opencode, as: OpenCodeSessionIndexer.self)
+        self.hermes = catalog.indexer(.hermes, as: HermesSessionIndexer.self)
+        self.copilot = catalog.indexer(.copilot, as: CopilotSessionIndexer.self)
+        self.droid = catalog.indexer(.droid, as: DroidSessionIndexer.self)
+        self.openclaw = catalog.indexer(.openclaw, as: OpenClawSessionIndexer.self)
+        self.cursor = catalog.indexer(.cursor, as: CursorSessionIndexer.self)
+        self.pi = catalog.indexer(.pi, as: PiSessionIndexer.self)
+        self.kimi = catalog.indexer(.kimi, as: KimiSessionIndexer.self)
+        self.grok = catalog.indexer(.grok, as: GrokSessionIndexer.self)
         self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
