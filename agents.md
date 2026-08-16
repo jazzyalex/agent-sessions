@@ -106,6 +106,12 @@ Suggested build steps
 - Uncertainty must be **explicitly labeled as hypothesis** (e.g., "Hypothesis: X may cause Y because Z"), never presented as verified fact.
 - Avoid probabilistic wording ("likely", "probably", "seems to") for claims that have been verified — use definitive language for verified facts and hypothesis labels for unverified ones.
 
+## Backlog (`docs/backlog.md`)
+- When work is deliberately deferred, record it in `docs/backlog.md` — follow the **How to read this file** legend at the top of that file, and give the entry a stamp line (`> **open** · sev: … · urg: … · verified …`).
+- Severity is what breaks; urgency is time pressure. They are separate fields — do not collapse them.
+- `verified` is the date the entry was last checked against the code, not the date it was filed. Re-verify before acting on an old date, and update the stamp when you do.
+- Closing an entry means collapsing it to a two-line tombstone (date, commit, test name) or deleting it when GitHub or the CHANGELOG already records it. Never move entries to a second file.
+
 ## Xcode Project Hygiene
 - When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with "Cannot find … in scope".
 

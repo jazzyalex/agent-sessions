@@ -3,11 +3,53 @@
 Deferred, non-urgent work items. Each entry: what, where, why deferred, and the
 decision if one was made. Newest on top.
 
+## How to read this file
+
+Every entry carries a stamp line directly under its heading:
+
+```
+  > **open** · sev: med · urg: low · verified 2026-08-14
+```
+(indented here only so this example does not show up in the index grep below.)
+
+- **Status** — `open` (nothing shipped) · `partial` (some instances closed, the class is
+  still live) · `done` (shipped — collapsed to a two-line tombstone) · `won't-do`.
+- **sev** (severity) — what breaks while this stays unfixed:
+  - `high` — wrong data shown, data loss, or a user-visible break with no workaround.
+  - `med` — a feature is silently absent or degraded, or recovery needs a workaround the
+    user would not guess.
+  - `low` — cosmetic, latent/unwired, dead code, or a fixture/test gap.
+- **urg** (urgency) — time pressure, which is *not* severity. A med-severity bug that a
+  relaunch clears is low urgency; anything with a date attached (a contributor waiting, a
+  vendor deprecation, a release) is high urgency even at low severity.
+- **verified** — when the entry was last checked against the code. `—` means it has not
+  been re-checked since it was filed. Entries rot: on 2026-08-14 two were found stale —
+  one already fixed in full, one describing a bypass that had since landed. Re-verify
+  before acting on an old date.
+
+**Finding the hot ones.** There is deliberately no hand-maintained index here — that is the
+same drift class the *Agent Source Plumbing* entry below is about. Derive it instead:
+
+```bash
+grep -n -B2 '^> \*\*\(open\|partial\|done\|won.t-do\)\*\*' docs/backlog.md
+```
+
+**Writing an entry.** Body fields, used as they apply: **What** · **Where** (file:line
+links) · **Fix shape** · **Why deferred** · **Risk if wrong** · **To close**. Keep **Why
+deferred** and **Risk if wrong** — they are what makes an old entry trustworthy months
+later.
+
+**Closing an entry.** Do not move it to another file. Collapse it to a two-line tombstone
+(date, commit, test name) and delete the rest, or delete it outright when GitHub or the
+CHANGELOG already records it. The `##` sections are areas of the codebase, not priorities.
+
 ---
 
 ## Cross-Surface Session Storage
 
 ### Audit and support distinct CLI, Desktop, IDE, and side-session stores
+> **open** · sev: med · urg: low · verified —
+
 - **Scope:** local session persistence only. Cloud sync, vendor backends, and remote
   account history are explicitly out of scope.
 - **Why this exists:** sharing a CLI, SDK, or base event model does not prove that two
@@ -86,6 +128,8 @@ decision if one was made. Newest on top.
 ## Marketing Surfaces
 
 ### Session-Bench needs an in-app surface, and it is not a changelog entry
+> **open** · sev: low · urg: low · verified —
+
 - **Where:** currently only the public pages — `docs/bench/` and the launch post. Nothing
   in the app references it.
 - **What:** Session-Bench is a separate research/accountability project, **not an Agent
@@ -102,6 +146,8 @@ decision if one was made. Newest on top.
 ## Agent Source Coverage
 
 ### Image extraction for Kimi, Pi, Hermes and Cursor is wired but inert
+> **open** · sev: low · urg: low · verified 2026-08-14
+
 - **Where:** the per-source gates in
   [CodexSessionImagePayload.swift](../AgentSessions/Utilities/CodexSessionImagePayload.swift)
   and [ImageBrowserIndexCache.swift](../AgentSessions/Utilities/ImageBrowserIndexCache.swift),
@@ -126,6 +172,8 @@ decision if one was made. Newest on top.
 ## Transcript UI
 
 ### Inline images lost their right-click menu everywhere
+> **open** · sev: low · urg: low · verified 2026-08-13
+
 - **Where:** the inline image row in the transcript —
   [InlineImageThumbnailGridView.swift](../AgentSessions/Views/InlineImageThumbnailGridView.swift)
   and its host [TranscriptBlockListView.swift](../AgentSessions/Views/TranscriptBlockListView.swift).
@@ -146,6 +194,8 @@ decision if one was made. Newest on top.
 ## Agent Source Plumbing
 
 ### Hand-maintained per-source lists drift every time an agent is added
+> **partial** · sev: med · urg: low · verified 2026-08-14
+
 - **Where:** the per-source sites that are *not* compiler-checked, all in
   [UnifiedSessionsView.swift](../AgentSessions/Views/UnifiedSessionsView.swift) unless
   noted —
@@ -206,6 +256,8 @@ decision if one was made. Newest on top.
 ## Kimi Code
 
 ### Fixture does not cover image / audio / video content parts
+> **open** · sev: low · urg: low · verified —
+
 - **Where:** `KimiSessionParser.textContent(from:)` —
   [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift), the
   `image_url` / `audio_url` / `video_url` arms that render `[image]` / `[audio]` /
@@ -227,6 +279,8 @@ decision if one was made. Newest on top.
   placeholder rendering plus `.meta`/`.assistant` classification.
 
 ### No `agent_watch` prebump driver for kimi
+> **open** · sev: low · urg: low · verified —
+
 - **Where:** `scripts/agent_watch_prebump_drivers.py` (`DRIVERS` registry);
   `docs/agent-support/agent-watch-config.json` → `agents.kimi` has `weekly` but no
   `prebump` block.
@@ -247,53 +301,76 @@ decision if one was made. Newest on top.
 
 ---
 
-## Contributor PRs
-
-### Check in on PR #51 / issue #53 — Claude Desktop live presence
-- **What:** Follow up on the retarget left on PR #51. Lucas Jaeger (@Krazycatt,
-  first-time contributor) built Claude Desktop chats into live presences by walking
-  `~/.claude/projects` and classifying the transcript tail. The premise was stale —
-  the Quota Meter already surfaces Desktop chats via
-  `ClaudeRunwayRecentSessionScanner`, and the Cockpit HUD he targeted is deprecated
-  — but it exposed a real bug, filed as #53. He was asked to keep the
-  presence-synthesis skeleton and source the data from the runway identities
-  instead of a second scan plus a second turn-state classifier.
-- **Where:** [PR #51](https://github.com/jazzyalex/agent-sessions/pull/51),
-  [issue #53](https://github.com/jazzyalex/agent-sessions/issues/53). The bug:
-  `isSessionLive` means "a presence exists"
-  (`AgentSessions/Views/UnifiedSessionsView.swift:3416`) and
-  `supportsLiveSessionSource` includes `.claude`
-  (`AgentSessions/Services/CodexActiveSessionsModel.swift:645`), so **Live sessions
-  only** claims Claude yet hides every Desktop chat.
-- **Check in ~2026-08-15:** if he is engaged, review the retarget. If quiet, close
-  #51 with thanks, keep #53, and do it in-house — registering
-  `ClaudeRunwaySnapshotLoader` identities as presences is close to the whole job.
-- **Why deferred (2026-08-01):** waiting on the contributor on purpose. Growing the
-  contributor base is worth more than the two weeks, and #53 is a correctness fix
-  rather than an urgent one — severity is bounded by how much the **Live sessions
-  only** toggle is actually used.
-
----
-
 ## Codex Usage Meter
 
-### Codex OAuth failure cooldown has no user-initiated bypass
+### Transient-failure cooldowns lock out both live sources with no reachable bypass
+> **open** · sev: med · urg: low · verified 2026-08-14
+
 - **What:** After a failed usage fetch, `CodexOAuthUsageFetcher` sets a 30-minute
-  failure cooldown. `refreshNow` goes through the same gate, so there is no way for
-  the user to force a retry. Wi-Fi returning 20 seconds after an offline launch can
-  leave the Codex meter dark for up to half an hour unless the CLI-RPC fallback
-  happens to rescue it.
-- **Where:** `AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift`
-  (~:141-159, the cooldown gate), `refreshNow` in `CodexStatusService.swift`.
-- **Fix shape:** bypass the failure cooldown for user-initiated refreshes, and
-  ideally reset it on a network-path change (NWPathMonitor) so recovery is
-  automatic rather than merely possible.
-- **Why deferred (2026-08-01):** pre-existing, untouched by the 2026-08-01 meter
-  work, and it deserves its own change with tests rather than an addendum to a long
-  session. **This is the largest remaining real defect in Codex cold-start
-  behaviour** — bigger than the snapshot persistence that was dropped in its favour.
+  failure cooldown, and the CLI-RPC probe it falls through to sets a **60-minute**
+  one. A single offline launch or network blip therefore locks out both authoritative
+  sources — the RPC probe for a full hour — while the ~3-minute poll keeps being
+  rejected by the gate.
+- **Where:** the cooldown gates — **two** in the OAuth fetcher, one per API:
+  [`fetchUsage`:126](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:126)
+  and [`fetchUsageResult`:177](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:177)
+  (the live polling path), sharing actor state; plus
+  [CodexCLIRPCProbe.swift:47](../AgentSessions/CodexStatus/CodexCLIRPCProbe.swift:47);
+  the fallthrough at
+  [CodexStatusService.swift:2511](../AgentSessions/CodexStatus/CodexStatusService.swift:2511);
+  `refreshNow` in `CodexStatusService.swift` and its only user-facing caller,
+  [PreferencesView+Usage.swift:77](../AgentSessions/Views/Preferences/PreferencesView+Usage.swift:77).
+
+#### Re-verified 2026-08-14 — the original entry was partly stale and partly understated
+- **A bypass has since landed, but it does not cover this case.**
+  `resetForUserRecheck()`
+  ([:95](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:95))
+  clears `lastFetchAt` / `lastFetchFailed` / `rateLimitedUntil`, reached via
+  `recheckAuthNow`. But it sits behind `AuthRemediationBanner`, which only replaces
+  the meter when the auth verdict is **alarming**. A transient network failure is not
+  alarming, so the user gets `FooterRetryChip` instead — a spinning "Codex —
+  reconnecting…" with **no Button and no gesture**
+  ([CockpitFooterView.swift:390](../AgentSessions/Views/CockpitFooterView.swift:390)).
+  The one control a user would actually reach for, Preferences → Usage → "Refresh
+  now", routes through `refreshNow` straight into the gate.
+- **The recovery path only half-clears.** `recheckAuthNow` calls
+  `resetForUserRecheck()` on the OAuth fetcher but passes the RPC probe merely
+  `cooldownSuccess: 0`
+  ([:2145](../AgentSessions/CodexStatus/CodexStatusService.swift:2145)) —
+  `lastProbeFailed` stays set, so the 60-minute *failure* cooldown still rejects it.
+  `CodexCLIRPCProbe` has no `resetForUserRecheck` equivalent. The "authoritative
+  recovery attempt" therefore cannot recover the source with the longer lockout.
+- **The silent auto-recovery does not apply.** `shouldSilentlyRecheckAuth`
+  ([:755](../AgentSessions/CodexStatus/CodexStatusService.swift:755)) fires only on
+  `.unauthorized`, never on `.transient` — correctly, since retrying a dead network
+  immediately is pointless.
+- **Severity is lower than first written.** The JSONL fallback still runs (local
+  `rate_limits` from `~/.codex/sessions`, no network, no cooldown, honestly labeled as
+  a fallback source), so the meter usually still shows something and never shows a
+  *wrong* number. All retry state is in-memory actor vars with no `UserDefaults`
+  persistence in either file, so **quit-and-reopen clears it instantly**. This is
+  recovery latency, not correctness: medium-low severity, low urgency.
+  The earlier "largest remaining real defect in Codex cold-start behaviour" framing is
+  retracted.
+- **Fix shape:** give `CodexCLIRPCProbe` a `resetForUserRecheck()` and call it beside
+  the OAuth one; make the retry chip's recovery action reachable during transient
+  failures; have `refreshNow` carry a user-initiated flag that bypasses the failure
+  gate. NWPathMonitor reset on network-path change is the nice-to-have on top.
+- **Why deferred (2026-08-01, re-confirmed 2026-08-14):** the code change is small, but
+  the **test burden is not** — that asymmetry is the whole reason this keeps sliding.
+  Verification has to cover both cooldown clocks independently, the OAuth/RPC
+  fallthrough order, the reachable-vs-alarming branch that decides which footer chip
+  renders, and the interaction with the `.idle` promotion below (which shares this code
+  path and should be fixed in the same change). Several states are only reachable by
+  seeding retry state — `seedRetryStateForTesting`
+  ([:103](../AgentSessions/CodexStatus/CodexOAuth/CodexOAuthUsageFetcher.swift:103))
+  exists for the OAuth half; the RPC probe has no equivalent yet, so the fix likely has
+  to add one before it can be tested at all. Do not ship this as a one-line bypass
+  without that suite.
 
 ### `.idle` can mislabel a cold-start transient failure
+> **open** · sev: low · urg: low · verified —
+
 - **What:** `CodexUsageModel.handleAuthFetchResult` promotes `.ok` → `.idle`
   ("No active Codex session") when a completed fetch returned nothing and nothing
   has ever been applied. `CodexUsageFetchResult.transient` covers offline, 5xx AND
@@ -314,6 +391,8 @@ decision if one was made. Newest on top.
   seen.
 
 ### Two smaller findings from the same review
+> **open** · sev: low · urg: low · verified —
+
 - `.idle` does not reset `AuthStatusNotifier`'s one-shot episode where `.ok` did
   (`AgentSessions/Shared/AuthStatusNotifier.swift:43-46`), so a second genuine
   sign-out within one run could go unnotified.
@@ -326,6 +405,8 @@ decision if one was made. Newest on top.
 ## Claude Cloud Sessions
 
 ### Reconsider the surface: presence badge instead of runway rows
+> **open** · sev: low · urg: low · verified —
+
 - **What:** Cloud sessions currently render as rows inside the Quota Meter's runway
   block, with the literal "Cloud" where a rate would be. **The owner questioned
   whether this belongs there at all, and the question is a good one.** Runway's
@@ -362,6 +443,8 @@ decision if one was made. Newest on top.
 ## Usage Tracking
 
 ### Verify the Claude Web API usage source actually works
+> **open** · sev: low · urg: low · verified —
+
 - **What:** The Web API fallback (`claudeWebApiEnabled`; "Web API only" mode) is
   implemented — `ClaudeWebUsageClient.swift` + `ClaudeWebCookieResolver.swift`
   (reads the Safari claude.ai session cookie) — but has **never been observed
@@ -381,6 +464,8 @@ decision if one was made. Newest on top.
 ## Transcript (Session view)
 
 ### Semantic filters (Plan / Code / Diff / Review) in the Session view
+> **open** · sev: low · urg: low · verified —
+
 - **First, validate demand — do NOT build on assumption.** The old Terminal view
   had semantic toggles alongside the role toggles; when Terminal was retired only
   the role filters (You/Agent/Tools/Errors) were restored (2026-07-06). Before
@@ -409,27 +494,15 @@ decision if one was made. Newest on top.
 ## QM / Runway
 
 ### Runway overflow "+X sessions" undercount (`withPendingRows`)
-- **Where:** `RunwaySnapshotAssembly.withPendingRows` —
-  [CodexRunwayModel.swift:344](../AgentSessions/CodexStatus/CodexRunwayModel.swift:344),
-  `burstSummary: existing.burstSummary ?? pendingSummary`.
-- **What:** When ≥ `maxRows` sessions are actively burning (so `snapshot()` already
-  produced a full row set + a burn `burstSummary`) *and* extra active-but-not-burning
-  sessions exist, those extras become `pendingIdentities`, get summarized, and are then
-  discarded by `??`. The drawer's "+X sessions" counts only the hidden burns, silently
-  omitting the idle actives — displayed count reads lower than the real concurrency.
-- **Verified:** pure undercount, not a double-count (`burstSummary != nil` ⟹
-  `rows.count == maxRows` ⟹ `openSlots == 0`, so no pending row overlaps the burns).
-- **Fix:** merge the counts (`existing.burstSummary.count + hiddenPendingCount`),
-  keeping the burn summary's rate/deadline (pending contributes 0 / `.unavailable`).
-- **Decision (2026-07-03):** **Fold into the single-orphan Runway change**, not shipped
-  standalone. Same function is rewritten there; needs its own test + a small
-  rate-ownership decision. Low severity, rare trigger (≥ `maxRows` burning + ≥ 1 idle in
-  one provider). Spec: [qm-runway-single-orphan-session-spec.md](qm-runway-single-orphan-session-spec.md) → Appendix A.
-- **DONE (2026-07-09):** shipped with the single-orphan promotion — `withPendingRows`
-  now merges `burnSummary.count + pendingIdentities.count` (burn summary keeps
-  rate/deadline). Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
+> **done** 2026-07-09
+
+Shipped with the single-orphan promotion: `withPendingRows` now merges
+`burnSummary.count + pendingIdentities.count`, burn summary keeping rate/deadline.
+Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ### Runway "pause impact" projection is modeled but never displayed
+> **open** · sev: low · urg: low · verified —
+
 - **Where:** [CodexRunwayModel.swift](../AgentSessions/CodexStatus/CodexRunwayModel.swift) —
   `RunwayPauseImpactRow.deadline` / `.gainedSeconds`, the `RunwayDeadline` enum
   ([:11](../AgentSessions/CodexStatus/CodexRunwayModel.swift:11)), `deadline()`
@@ -454,6 +527,8 @@ decision if one was made. Newest on top.
 ## Resume / Terminal Launch
 
 ### `runAppleScript` blocks the main thread for the Terminal / iTerm path
+> **open** · sev: low · urg: low · verified 2026-08-04
+
 - **Where:** [AgentTerminalLauncher.swift:189](../AgentSessions/Resume/AgentTerminalLauncher.swift:189)
   (`process.waitForExit()`) → [BoundedProcessWait.swift:9](../AgentSessions/Utilities/BoundedProcessWait.swift:9).
 - **What:** `waitForExit` is a busy-poll — `while isRunning { Thread.sleep(0.1) }` on the
@@ -486,6 +561,8 @@ decision if one was made. Newest on top.
   osascript's stderr, which is what surfaces "Terminal got an error…" to the user.
 
 ### Dead code: `CodexResumeSheet.launch(session:)`
+> **open** · sev: low · urg: low · verified 2026-08-04
+
 - **Where:** [CodexResumeSheet.swift:374](../AgentSessions/Resume/CodexResumeSheet.swift:374).
 - **What:** A ~30-line `@MainActor private func launch(session:)` that switches over
   `settings.launchMode` and calls the four Codex launcher entry points. A project-wide
