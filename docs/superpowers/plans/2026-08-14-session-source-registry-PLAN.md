@@ -44,12 +44,19 @@ targets), xcodebuild.
   checkpoints** — each task ends with report + approval request, never an autonomous commit.
 - Behavior changes: ONLY SPEC §8.1–8.5; §8.6–8.8 explicitly preserved.
 - Do not touch: `CodexActiveSessionsModel`, `AgentCockpitHUDView`,
-  `CodexSessionImagesGalleryView`, `Session.computeIsHousekeeping`, image-scanning
-  switches, live-session subsystem.
+  `CodexSessionImagesGalleryView`, live-session subsystem. `Session.computeIsHousekeeping`
+  and the image-scanning switches keep their SEMANTICS untouched — the only permitted
+  edit is Task 8 Step 2b's `default:`→exhaustive conversion (existing arms verbatim).
 
 ---
 
 ### Task 0: Architecture spike — prove the catalog shape with a fake 13th source
+
+> **✅ COMPLETE (2026-08-15).** Executed on branch `spike/source-catalog` (@ `fde3c215`,
+> kept as reference; worktree removed). Report: `2026-08-14-task0-spike-REPORT.md`.
+> Gate outcome: SPEC §3 NOT falsified (two amendments applied); §6 rewritten from the
+> forced-edit table; Tasks 6/7 reordered. Executing workers: do NOT re-run this task —
+> resume at Task 1.
 
 **Files (all throwaway — spike branch in an owner-approved worktree, deleted after):**
 - Create: minimal `SessionSourceAdapter`/`SourceRuntime`/`SessionProviderCatalog`
@@ -130,11 +137,16 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
     ]
     func testEverySourceKeyKeepsItsHistoricalString() {
         XCTAssertEqual(table.map(\.0), SessionSource.allCases, "table must cover every source, in order")
-        for (source, enablement, _, _, include) in table {
+        for (source, enablement, _, _, _) in table {
             XCTAssertEqual(AgentEnablement.enablementKey(for: source), enablement, "\(source)")
-            XCTAssertEqual(PreferencesKey.Include.key(for: source), include, "\(source)")
         }
-        // Root-override and CLI-available constants asserted individually:
+        // Include constants frozen DIRECTLY — no production key(for:) mapping exists or
+        // may be added (it would be a new permanent 12-arm shared switch, violating K2's
+        // "new keys stay source-local"). One assertion per constant:
+        XCTAssertEqual(PreferencesKey.Include.codex, "IncludeCodexSessions")
+        XCTAssertEqual(PreferencesKey.Include.claude, "IncludeClaudeSessions")
+        // …all 12, values from the table above.
+        // Root-override and CLI-available constants asserted individually the same way:
         XCTAssertEqual(PreferencesKey.Paths.codexSessionsRootOverride, "SessionsRootOverride")
         XCTAssertEqual(PreferencesKey.Paths.antigravitySessionsRootOverride, "AntigravitySessionsRootOverride")
         // …one line per remaining constant, values from the table above.
@@ -142,17 +154,31 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
 }
 ```
 
-  (`PreferencesKey.Include.key(for:)` is a 12-arm exhaustive switch added in Step 3 —
-  compiler-checked, logic-target-free.)
+  The `table` is the tests' shared source of truth — expose it as
+  `enum SourceKeyTable { static let include: [SessionSource: String] … }` in the test
+  target so Task 2's registry test reuses it. NO `key(for:)` switch is added to
+  production code (reviewer erratum 1); a 13th source adds one row to this table, which
+  the guide lists as a test-sentinel edit alongside `coveredSources`.
 - [ ] **Step 2: Run — FAIL** (missing constants/members).
 - [ ] **Step 3: Add the constants** (`Paths.codexSessionsRootOverride`,
-  `Paths.antigravitySessionsRootOverride`, `enum Include` with 12 statics +
-  `key(for:) -> String` exhaustive switch).
-- [ ] **Step 4: Repoint every bare literal** (values identical → zero behavior change):
-  `AgentEnablement.isAvailable` L249/252/257/260; `SessionArchiveManager` L383/395/407;
-  `PreferencesView` L200/211; `CodexStatusService`; the 12 `didSet` bodies.
-  Verify sweep: `grep -rn '"SessionsRootOverride"\|"AntigravitySessionsRootOverride"\|"ClaudeSessionsRootOverride"\|"OpenCodeSessionsRootOverride"\|"Include[A-Z].*Sessions"' AgentSessions/`
-  → hits only in `PreferencesConstants.swift`.
+  `Paths.antigravitySessionsRootOverride`, `enum Include` with 12 statics — NO
+  `key(for:)` mapping, see Step 1).
+- [ ] **Step 4: Repoint every bare literal** (values identical → zero behavior change).
+  The full file list (verified by grep 2026-08-15, reviewer erratum 2 — the original
+  four-file list was incomplete): `AgentEnablement.swift` (L249/252/257/260),
+  `SessionArchiveManager.swift` (L383/395/407), `PreferencesView.swift` (L200/211),
+  `CodexStatusService.swift`, `UnifiedSessionIndexer.swift` (**both** the init read AND
+  the `didSet` write of all 12 include properties — 24 literals, L592-663),
+  `SessionIndexer.swift`, `ClaudeSessionIndexer.swift`, `OpenCodeSessionIndexer.swift`,
+  `PresenceEngine.swift`, `CodexActiveSessionsModel.swift`.
+  **K15 guard per file:** before repointing a file, check its target membership
+  (`grep '<filename> in Sources' AgentSessions.xcodeproj/project.pbxproj`); a file also
+  compiled by `AgentSessionsLogicTests` must NOT gain a `PreferencesKey` reference —
+  leave its literal with a `// K15: literal stays; constant lives in PreferencesConstants`
+  comment and list it in the task report.
+  Verify sweep: `grep -rn '"SessionsRootOverride"\|"AntigravitySessionsRootOverride"\|"ClaudeSessionsRootOverride"\|"OpenCodeSessionsRootOverride"\|"Include[A-Z][A-Za-z]*Sessions"' AgentSessions/`
+  → hits only in `PreferencesConstants.swift` plus any K15-exempted files from the guard
+  above (each carrying its comment).
 - [ ] **Step 5: Build + tests green.**
 - [ ] **Step 6: Checkpoint** — `"refactor(prefs): name every per-source UserDefaults key; freeze strings with a stability test"`
 
@@ -215,7 +241,7 @@ func testDescriptorKeysMatchTheStabilityTable() {
     for s in SessionSource.allCases {
         let d = SessionSourceRegistry.descriptor(for: s)
         XCTAssertEqual(d.enablementKey, AgentEnablement.enablementKey(for: s), "\(s)")
-        XCTAssertEqual(d.includeKey, PreferencesKey.Include.key(for: s), "\(s)")
+        XCTAssertEqual(d.includeKey, SourceKeyTable.include[s], "\(s)")   // Task 1's test table
     }
     XCTAssertNil(SessionSourceRegistry.descriptor(for: .openclaw).cliAvailableKey)          // K4
     XCTAssertEqual(SessionSourceRegistry.descriptor(for: .droid).rootOverrideKeys,
@@ -373,9 +399,13 @@ func testAllowedSearchSourcesIsEnabledAndIncluded() {
   spike finding 1: consumers must be written against the array fold once)
 - Create: `AgentSessions/Services/SessionProviderCatalog.swift` (+ `SourceRuntime`)
 - Modify: 12 adapter files gain `makeRuntime` (each next to its descriptor)
-- Modify: 5 indexers gain `SessionIndexerProtocol` conformance (codex `SessionIndexer`,
-  Claude, Antigravity, OpenCode, OpenClaw — the other 7 already conform; the de-facto
-  surface matches, so expect near-empty extensions; spike c11 / SPEC §6.A.10)
+- NOTE (reviewer erratum 3): ALL 12 indexers already conform to `SessionIndexerProtocol`
+  — five via trailing extensions the exploration pass missed (`SessionIndexer.swift:2860`,
+  `ClaudeSessionIndexer.swift:1014`, `AntigravitySessionIndexer.swift:492`,
+  `OpenCodeSessionIndexer.swift:410`, `OpenClawSessionIndexer.swift:696`). Do NOT add
+  conformances — that is a redundant-conformance error. `SourceRuntime.indexerObject:
+  any SessionIndexerProtocol & ObservableObject` therefore needs zero indexer edits;
+  the c11 contract matters only for FUTURE sources (guide item).
 - Modify: `AgentSessions/AgentSessionsApp.swift:174-189, 277-311, 548-578`
 - Modify: `AgentSessions/Analytics/Services/AnalyticsService.swift:15-45` (init takes catalog)
 - Modify: `AgentSessions/Views/UnifiedSessionsView.swift:330+, 481+, 516+` (12 props +
@@ -412,7 +442,8 @@ func testCatalogCoversEverySourceWithWorkingRuntimes() {
   (transcriptCache/update/parseFull-with-forcedID). Adopt the spike-validated typed
   downcast helper `catalog.indexer(_:as:)` for concrete-type call sites.
   `SourceRuntime.indexerObject` is `any SessionIndexerProtocol & ObservableObject` —
-  add the 5 missing conformances now. Reference implementation: branch
+  all 12 indexers already conform (see NOTE above), so no indexer edits. Reference
+  implementation: branch
   `spike/source-catalog` (`fde3c215`), files `AgentSessions/SourceCatalog/*` — adapt,
   don't cargo-cult; it covered only codex/grok/zzfake.
 - [ ] **Step 3: Adopt.** `AgentSessionsApp`: one `@StateObject catalog`; fan-out call

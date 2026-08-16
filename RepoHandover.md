@@ -1,3 +1,28 @@
+## 2026-08-14 13:55 · release-4.8 · 4.8 shipped, then release notes corrected twice
+status: done
+
+**State:** 4.8 live and verified (`deploy verify 4.8`: 0 errors/warnings) — GitHub release, appcast on Pages, Homebrew cask, tag `v4.8`, build 67. Post-release corrections pushed through `2099ab89`. Tree clean, 1904 Swift + 172 python tests green.
+
+**Decided / don't redo:**
+- **Pre-release fixes to a feature shipping in the same release are NOT Bug Fixes.** 4.8's notes initially listed four Grok defects users never had. Removed from changelog, appcast, GitHub release body and README. Now a hard rule with a worked example in `.claude/skills/deploy/SKILL.md`.
+- **Session-Bench is not an AS feature** — the v0.3 poster was wrongly filed under Improvements. Removed; wants an in-app **chip**, backlogged.
+- Three review findings fixed pre-ship, all mutation-tested: monitoring false-clean on a lost Grok `summary.json` (worse than reported — sibling-union sampling left *zero* trace), image line-vs-event mis-placement (live but hidden by luck — the one real attachment sits in the only local Grok session with zero drift; 12 of 13 drift), and the unused authoritative Grok version (reconciles by **max**, never replace — a CLI answers only for its pinned channel).
+- The two copies of the nearest-user rule are now **one** (`ImageUserTurnResolver`); mutating it fails both surfaces. Antigravity's empty-session fallback is preserved as a flag, not smoothed away.
+- `_md_inline_html` never rendered markdown links — the panel showed raw `[@name](url)` on contributor credits. Fixed. Only 4.8 was affected in the appcast (my "every past release" claim was wrong).
+- In-app What's New needs a per-version entry; `hasContent` goes true on the auto-generated provider row alone, so a forgotten release ships one generic line. Never author a row for a new source by hand — `providerHighlights(for:)` already generates it.
+
+**Key files:**
+- `AgentSessions/Utilities/CodexSessionImagePayload.swift` — `GrokImageUserTurns` + `ImageUserTurnResolver`, both image surfaces call them
+- `.claude/skills/deploy/SKILL.md` — the "Never Announce a Bug the User Never Had" rule + What's New checklist item
+- `docs/agent-support/agent-watch-config.json` — `required_companion_files` on `discovery_path_contract`
+- `AgentSessions/Onboarding/Models/WhatsNewCatalog.swift` — 4.8 teaser + bundled entries
+
+**Next:**
+1. Manual post-release checks only I can't do: Sparkle auto-update from 4.7, clean-machine Gatekeeper, `brew upgrade agent-sessions`.
+2. Backlog, newest first: Session-Bench in-app chip; inert image extraction for Kimi/Pi/Hermes/Cursor.
+3. Optional: `f3ea6f90` swept the owner's Cross-Surface Session Storage backlog section into my commit — offered to split it out, would need a rewrite of a pushed commit.
+4. Session-source registry refactor — still the next real task, unchanged since 2026-08-13.
+
 ## 2026-08-13 15:56 · test-hermeticity · Presence seam verified, then the same defect fixed in four more tests
 status: done
 
