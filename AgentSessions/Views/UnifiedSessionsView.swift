@@ -3483,18 +3483,7 @@ struct UnifiedSessionsView: View {
                               sideChatsOnly: false)
         searchCoordinator.start(query: q,
                                 filters: filters,
-                                includeCodex: unified.includeCodex && codexAgentEnabled,
-                                includeClaude: unified.includeClaude && claudeAgentEnabled,
-                                includeAntigravity: unified.includeAntigravity && antigravityAgentEnabled,
-                                includeOpenCode: unified.includeOpenCode && openCodeAgentEnabled,
-                                includeHermes: unified.includeHermes && hermesAgentEnabled,
-                                includeCopilot: unified.includeCopilot && copilotAgentEnabled,
-                                includeDroid: unified.includeDroid && droidAgentEnabled,
-                                includeOpenClaw: unified.includeOpenClaw && openClawAgentEnabled,
-                                includeCursor: unified.includeCursor && cursorAgentEnabled,
-                                includePi: unified.includePi && piAgentEnabled,
-                                includeKimi: unified.includeKimi && kimiAgentEnabled,
-                                includeGrok: unified.includeGrok && grokAgentEnabled,
+                                allowed: unified.allowedSearchSources(),
                                 enableDeepScan: searchCoordinator.deepScanEnabled,
                                 all: unified.allSessions)
     }
@@ -4251,9 +4240,10 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var search: SearchCoordinator
     @ObservedObject var focus: WindowFocusCoordinator
     @ObservedObject var searchState: UnifiedSearchState
-    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
-    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
-    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+    // The pi/kimi/grok enablement flags this view used to AND into its two `search.start`
+    // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
+    // applies enablement to all twelve sources (SPEC §8.5). `unified` is observed, and its
+    // per-source enablement is `@Published`, so those changes still redraw this view.
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil
     @State private var focusRequestToken: Int = 0
@@ -4380,18 +4370,7 @@ private struct UnifiedSearchFiltersView: View {
                               sideChatsOnly: false)
         search.start(query: q,
                      filters: filters,
-                     includeCodex: unified.includeCodex,
-                     includeClaude: unified.includeClaude,
-                     includeAntigravity: unified.includeAntigravity,
-                     includeOpenCode: unified.includeOpenCode,
-                     includeHermes: unified.includeHermes,
-                     includeCopilot: unified.includeCopilot,
-                     includeDroid: unified.includeDroid,
-                     includeOpenClaw: unified.includeOpenClaw,
-                     includeCursor: unified.includeCursor,
-                     includePi: unified.includePi && piAgentEnabled,
-                     includeKimi: unified.includeKimi && kimiAgentEnabled,
-                     includeGrok: unified.includeGrok && grokAgentEnabled,
+                     allowed: unified.allowedSearchSources(),
                      enableDeepScan: deepScan,
                      all: unified.allSessions)
     }
@@ -4418,18 +4397,7 @@ private struct UnifiedSearchFiltersView: View {
                                   sideChatsOnly: false)
             search.start(query: q,
                          filters: filters,
-                         includeCodex: unified.includeCodex,
-                         includeClaude: unified.includeClaude,
-                         includeAntigravity: unified.includeAntigravity,
-                         includeOpenCode: unified.includeOpenCode,
-                         includeHermes: unified.includeHermes,
-                         includeCopilot: unified.includeCopilot,
-                         includeDroid: unified.includeDroid,
-                         includeOpenClaw: unified.includeOpenClaw,
-                         includeCursor: unified.includeCursor,
-                         includePi: unified.includePi && piAgentEnabled,
-                         includeKimi: unified.includeKimi && kimiAgentEnabled,
-                         includeGrok: unified.includeGrok && grokAgentEnabled,
+                         allowed: unified.allowedSearchSources(),
                          enableDeepScan: false,
                          all: unified.allSessions)
         }

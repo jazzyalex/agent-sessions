@@ -357,35 +357,13 @@ actor SearchIngestService {
     // MARK: - Parser dispatch
 
     /// Mirrors the deleted `AnalyticsIndexer.parseSession(url:source:)` dispatch
-    /// (git show 31f6a619). Each branch instantiates a throwaway parser exactly as the
-    /// deleted code did.
+    /// (git show 31f6a619). The twelve-arm switch that used to live here is now the
+    /// `parseFullByPath` closure on each source's descriptor — same throwaway-parser bodies,
+    /// arm for arm. A source whose descriptor declines path-identified parsing (`nil`, e.g. a
+    /// future DB-backed source where every session shares one path — SPEC §4) yields no
+    /// session, exactly as an unhandled source would have.
     private static func parseFileFull(url: URL, source: SessionSource) -> Session? {
-        switch source {
-        case .codex:
-            return SessionIndexer().parseFileFull(at: url)
-        case .claude:
-            return ClaudeSessionParser.parseFileFull(at: url)
-        case .opencode:
-            return OpenCodeSessionParser.parseFileFull(at: url)
-        case .copilot:
-            return CopilotSessionParser.parseFileFull(at: url)
-        case .droid:
-            return DroidSessionParser.parseFileFull(at: url)
-        case .antigravity:
-            return AntigravitySessionParser.parseFileFull(at: url)
-        case .hermes:
-            return HermesSessionParser.parseFileFull(at: url)
-        case .openclaw:
-            return OpenClawSessionParser.parseFileFull(at: url)
-        case .cursor:
-            return CursorSessionParser.parseFileFull(at: url)
-        case .pi:
-            return PiSessionParser.parseFileFull(at: url)
-        case .kimi:
-            return KimiSessionParser.parseFileFull(at: url)
-        case .grok:
-            return GrokSessionParser.parseFileFull(at: url)
-        }
+        SessionSourceRegistry.descriptor(for: source).parseFullByPath?(url)
     }
 }
 

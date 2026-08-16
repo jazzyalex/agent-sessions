@@ -162,20 +162,15 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         prewarmTasksByID[session.id] = task
     }
 
+    /// Runs a search over `all`, restricted to the sessions whose source is in `allowed`.
+    ///
+    /// `allowed` used to arrive as twelve hand-maintained `include<Provider>` Bools that this
+    /// method funnelled back into exactly this set. Callers now pass the set itself — in the
+    /// app, `UnifiedSessionIndexer.allowedSearchSources()` (SPEC §3.5/§8.5), which applies one
+    /// enabled-and-included policy to every source instead of per-call-site subsets.
     func start(query: String,
                filters: Filters,
-               includeCodex: Bool,
-               includeClaude: Bool,
-               includeAntigravity: Bool,
-               includeOpenCode: Bool,
-               includeHermes: Bool,
-               includeCopilot: Bool,
-               includeDroid: Bool,
-               includeOpenClaw: Bool,
-               includeCursor: Bool,
-               includePi: Bool,
-               includeKimi: Bool,
-               includeGrok: Bool,
+               allowed: Set<SessionSource>,
                enableDeepScan: Bool,
                all: [Session]) {
         // Cancel any in-flight search
@@ -185,23 +180,6 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
         wasCanceled = false
         let newRunID = UUID()
         runID = newRunID
-
-        let allowed: Set<SessionSource> = {
-            var set = Set<SessionSource>()
-            if includeCodex { set.insert(.codex) }
-            if includeClaude { set.insert(.claude) }
-            if includeAntigravity { set.insert(.antigravity) }
-            if includeOpenCode { set.insert(.opencode) }
-            if includeHermes { set.insert(.hermes) }
-            if includeCopilot { set.insert(.copilot) }
-            if includeDroid { set.insert(.droid) }
-            if includeOpenClaw { set.insert(.openclaw) }
-            if includeCursor { set.insert(.cursor) }
-            if includePi { set.insert(.pi) }
-            if includeKimi { set.insert(.kimi) }
-            if includeGrok { set.insert(.grok) }
-            return set
-        }()
 
         let parsedForMetadata = FilterEngine.parseOperators(filters.query)
         let metadataFreeText = parsedForMetadata.freeText.trimmingCharacters(in: .whitespacesAndNewlines)

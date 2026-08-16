@@ -410,18 +410,7 @@ final class SessionParserTests: XCTestCase {
 
         coordinator.start(query: "#side",
                           filters: Filters(query: "#side"),
-                          includeCodex: true,
-                          includeClaude: false,
-                          includeAntigravity: false,
-                          includeOpenCode: false,
-                          includeHermes: false,
-                          includeCopilot: false,
-                          includeDroid: false,
-                          includeOpenClaw: false,
-                          includeCursor: false,
-                          includePi: false,
-                          includeKimi: false,
-                          includeGrok: false,
+                          allowed: [.codex],
                           enableDeepScan: false,
                           all: [root, sideChat])
 
@@ -449,18 +438,7 @@ final class SessionParserTests: XCTestCase {
 
         coordinator.start(query: "#side",
                           filters: Filters(query: "#side", archivedCodexDesktopOnly: true),
-                          includeCodex: true,
-                          includeClaude: false,
-                          includeAntigravity: false,
-                          includeOpenCode: false,
-                          includeHermes: false,
-                          includeCopilot: false,
-                          includeDroid: false,
-                          includeOpenClaw: false,
-                          includeCursor: false,
-                          includePi: false,
-                          includeKimi: false,
-                          includeGrok: false,
+                          allowed: [.codex],
                           enableDeepScan: false,
                           all: [root, sideChat])
 
@@ -473,6 +451,12 @@ final class SessionParserTests: XCTestCase {
     /// source by hand, and Kimi was never added when it shipped as the 11th source. `.kimi`
     /// therefore never entered the allowed-source set, so Kimi sessions were silently absent
     /// from every search result while still appearing in the unfiltered list.
+    ///
+    /// The twelve Bools are now a single `allowed: Set<SessionSource>`, which is what makes
+    /// that class of omission unrepresentable: a source is gated by being absent from the
+    /// set, never by a parameter nobody remembered to pass. The assertions are unchanged —
+    /// Kimi in the set means Kimi sessions come back; Kimi subtracted from it means they
+    /// do not, without disturbing the sources that stayed in.
     func testSearchCoordinatorIncludeKimiGatesKimiSessions() async throws {
         let kimi = makeRepoSession(id: "kimi-session", source: .kimi, repoName: "kimirepo")
         let codex = makeRepoSession(id: "codex-session", source: .codex, repoName: "kimirepo")
@@ -480,18 +464,7 @@ final class SessionParserTests: XCTestCase {
         let included = SearchCoordinator(store: SearchCoordinatorTestStore())
         included.start(query: "repo:kimirepo",
                        filters: Filters(query: "repo:kimirepo"),
-                       includeCodex: false,
-                       includeClaude: false,
-                       includeAntigravity: false,
-                       includeOpenCode: false,
-                       includeHermes: false,
-                       includeCopilot: false,
-                       includeDroid: false,
-                       includeOpenClaw: false,
-                       includeCursor: false,
-                       includePi: false,
-                       includeKimi: true,
-                       includeGrok: true,
+                       allowed: Set(SessionSource.allCases),
                        enableDeepScan: false,
                        all: [kimi])
 
@@ -502,22 +475,94 @@ final class SessionParserTests: XCTestCase {
         let excluded = SearchCoordinator(store: SearchCoordinatorTestStore())
         excluded.start(query: "repo:kimirepo",
                        filters: Filters(query: "repo:kimirepo"),
-                       includeCodex: true,
-                       includeClaude: false,
-                       includeAntigravity: false,
-                       includeOpenCode: false,
-                       includeHermes: false,
-                       includeCopilot: false,
-                       includeDroid: false,
-                       includeOpenClaw: false,
-                       includeCursor: false,
-                       includePi: false,
-                       includeKimi: false,
-                       includeGrok: false,
+                       allowed: Set(SessionSource.allCases).subtracting([.kimi]),
                        enableDeepScan: false,
                        all: [kimi, codex])
 
         try await waitForSearchResults(excluded, expectedIDs: ["codex-session"])
+    }
+
+    /// Successor guard to the regression above (SPEC §8.5). The allow-list the views hand to
+    /// `SearchCoordinator.start` is now produced in one place —
+    /// `UnifiedSessionIndexer.allowedSearchSources()` — and follows one policy for all twelve
+    /// sources: a source is searchable when it is *both* globally enabled and included by the
+    /// source filter. Previously two of the three production call sites gated only pi/kimi/grok
+    /// and let the other nine through regardless.
+    ///
+    /// Asserted through the UserDefaults-backed seams the indexer already exposes: inclusion via
+    /// the published `include*` flags, enablement via `syncAgentEnablementFromDefaults(defaults:)`
+    /// against a scratch suite. Enablement is only ever driven *off* here — flipping a provider
+    /// on would make the indexer kick off a real filesystem refresh for it. The two `include`
+    /// flags this touches persist to standard defaults, so they are restored on exit. Task 7's
+    /// handle-injection harness replaces the scratch suite.
+    @MainActor
+    func testAllowedSearchSourcesIsEnabledAndIncluded() throws {
+        let unified = makeUnifiedIndexerForAllowListTests()
+
+        func expectedAllowed() -> Set<SessionSource> {
+            Set(SessionSource.allCases.filter { unified.isAgentEnabled($0) && unified.isIncluded($0) })
+        }
+
+        let savedIncludeKimi = unified.includeKimi
+        let savedIncludeGrok = unified.includeGrok
+        defer {
+            unified.includeKimi = savedIncludeKimi
+            unified.includeGrok = savedIncludeGrok
+        }
+
+        // The rule holds over all twelve, whatever this machine's stored preferences are.
+        XCTAssertEqual(unified.allowedSearchSources(), expectedAllowed())
+
+        // Inclusion seam: included sources ride on their enablement, excluded ones never
+        // appear — and excluding one leaves the other eleven exactly where they were.
+        unified.includeKimi = true
+        unified.includeGrok = true
+        XCTAssertTrue(unified.isIncluded(.kimi))
+        XCTAssertTrue(unified.isIncluded(.grok))
+        let bothIncluded = unified.allowedSearchSources()
+        XCTAssertEqual(bothIncluded, expectedAllowed())
+        XCTAssertEqual(bothIncluded.contains(.kimi), unified.isAgentEnabled(.kimi))
+        XCTAssertEqual(bothIncluded.contains(.grok), unified.isAgentEnabled(.grok))
+
+        unified.includeKimi = false
+        XCTAssertFalse(unified.isIncluded(.kimi))
+        XCTAssertFalse(unified.allowedSearchSources().contains(.kimi))
+        XCTAssertEqual(unified.allowedSearchSources(), bothIncluded.subtracting([.kimi]))
+
+        // Enablement seam: a source the user has switched off is not searchable even when the
+        // source filter includes it. Switching every enabled provider off empties the list.
+        unified.includeKimi = true
+        let suiteName = "AllowedSearchSourcesTests-\(UUID().uuidString)"
+        let scratch = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { scratch.removePersistentDomain(forName: suiteName) }
+        for source in SessionSource.allCases {
+            scratch.set(false, forKey: AgentEnablement.enablementKey(for: source))
+        }
+        unified.syncAgentEnablementFromDefaults(defaults: scratch)
+
+        XCTAssertTrue(SessionSource.allCases.allSatisfy { !unified.isAgentEnabled($0) })
+        XCTAssertTrue(unified.isIncluded(.kimi))
+        XCTAssertEqual(unified.allowedSearchSources(), [])
+    }
+
+    /// A throwaway `UnifiedSessionIndexer` over twelve throwaway provider indexers. Provider
+    /// indexer `init`s only wire Combine pipelines and read stored path overrides — none of
+    /// them scans until asked — so this is cheap and side-effect free as long as no refresh
+    /// is triggered.
+    @MainActor
+    private func makeUnifiedIndexerForAllowListTests() -> UnifiedSessionIndexer {
+        UnifiedSessionIndexer(codexIndexer: SessionIndexer(),
+                              claudeIndexer: ClaudeSessionIndexer(),
+                              antigravityIndexer: AntigravitySessionIndexer(),
+                              opencodeIndexer: OpenCodeSessionIndexer(),
+                              hermesIndexer: HermesSessionIndexer(),
+                              copilotIndexer: CopilotSessionIndexer(),
+                              droidIndexer: DroidSessionIndexer(),
+                              openclawIndexer: OpenClawSessionIndexer(),
+                              cursorIndexer: CursorSessionIndexer(),
+                              piIndexer: PiSessionIndexer(),
+                              kimiIndexer: KimiSessionIndexer(),
+                              grokIndexer: GrokSessionIndexer())
     }
 
     private func waitForSearchResults(_ coordinator: SearchCoordinator,

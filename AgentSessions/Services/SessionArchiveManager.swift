@@ -367,176 +367,30 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// `sessionID -> upstream file URL` for one source, used when IndexDB cannot resolve a
+    /// pinned session's path.
+    ///
+    /// The twelve-arm switch this replaces now lives as `archive.backfillURLs` on each
+    /// source's descriptor, sweep for sweep. `UserDefaults.standard` is passed explicitly
+    /// because the descriptor closures take their defaults as a parameter (the switch read
+    /// the singleton inline). A source that declines archiving (`archive == nil`, SPEC §4)
+    /// resolves nothing, so pin backfill for it falls through to the "unresolved" log exactly
+    /// as an unhandled source would have.
     private func resolveBackfillURLsFromFilesystem(source: SessionSource) -> [String: URL] {
-        let defaults = UserDefaults.standard
-        var map: [String: URL] = [:]
-
-        switch source {
-        case .copilot:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride)
-            let discovery = CopilotSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                let base = url.deletingPathExtension().lastPathComponent
-                if !base.isEmpty { map[base] = url }
-            }
-        case .codex:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride)
-            let discovery = CodexSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                map[sha256Hex(url.path)] = url
-            }
-        case .claude:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride)
-            let discovery = ClaudeSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                map[sha256Hex(url.path)] = url
-            }
-        case .antigravity:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride)
-            let discovery = AntigravitySessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let session = AntigravitySessionParser.parseFile(at: url), !session.id.isEmpty {
-                    map[session.id] = url
-                }
-                if let conversationID = AntigravitySessionIDHelper.conversationID(fromArtifactURL: url),
-                   map[conversationID] == nil {
-                    map[conversationID] = url
-                }
-            }
-        case .opencode:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
-            let discovery = OpenCodeSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                let base = url.deletingPathExtension().lastPathComponent
-                if base.isEmpty { continue }
-                map[base] = url
-                if base.hasPrefix("ses_") {
-                    map[String(base.dropFirst("ses_".count))] = url
-                }
-            }
-        case .hermes:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.hermesSessionsRootOverride)
-            let discovery = HermesSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let s = HermesSessionParser.parseFile(at: url), !s.id.isEmpty {
-                    map[s.id] = url
-                }
-            }
-        case .droid:
-            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride)
-            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride)
-            let discovery = DroidSessionDiscovery(customSessionsRoot: sessionsCustom?.isEmpty == false ? sessionsCustom : nil,
-                                                 customProjectsRoot: projectsCustom?.isEmpty == false ? projectsCustom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let s = DroidSessionParser.parseFile(at: url), !s.id.isEmpty {
-                    map[s.id] = url
-                }
-            }
-        case .openclaw:
-            defaults.register(defaults: [
-                PreferencesKey.Advanced.includeOpenClawDeletedSessions: true
-            ])
-            let custom = defaults.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride)
-            let includeDeleted = defaults.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions)
-            let discovery = OpenClawSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil,
-                                                     includeDeleted: includeDeleted)
-            for url in discovery.discoverSessionFiles() {
-                if let s = OpenClawSessionParser.parseFile(at: url), !s.id.isEmpty {
-                    map[s.id] = url
-                }
-            }
-        case .cursor:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.cursorSessionsRootOverride)
-            let discovery = CursorSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let s = CursorSessionParser.parseFile(at: url), !s.id.isEmpty {
-                    map[s.id] = url
-                }
-            }
-        case .pi:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.piSessionsRootOverride)
-            let discovery = PiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let s = PiSessionParser.parseFile(at: url), !s.id.isEmpty {
-                    map[s.id] = url
-                }
-            }
-        case .kimi:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.kimiSessionsRootOverride)
-            let discovery = KimiSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let id = KimiSessionDiscovery.sessionID(forWireFile: url) {
-                    map[id] = url
-                }
-            }
-        case .grok:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.grokSessionsRootOverride)
-            let discovery = GrokSessionDiscovery(customRoot: custom?.isEmpty == false ? custom : nil)
-            for url in discovery.discoverSessionFiles() {
-                if let id = GrokSessionDiscovery.sessionID(forTranscript: url) {
-                    map[id] = url
-                }
-            }
-        }
-
-        return map
+        SessionSourceRegistry.descriptor(for: source).archive?.backfillURLs(.standard) ?? [:]
     }
 
+    /// Best-effort session for a `(sessionID, upstreamURL)` pair the filesystem sweep found.
+    ///
+    /// Each source's `archive.sessionForBackfill` carries its old arm verbatim, including the
+    /// four parsers that take a `forcedID` and codex's deliberate metadata-free minimal
+    /// session. The `minimalSession` fallback is unchanged too — it just lives on
+    /// `SessionArchiveBackfill` now (one copy, formerly a private twin here). A source that
+    /// declines archiving still gets one, so a pinned session of an archive-less source is
+    /// backfilled with its upstream path rather than dropped.
     private func resolveSessionForBackfill(source: SessionSource, sessionID: String, upstreamURL: URL) -> Session? {
-        switch source {
-        case .copilot:
-            return CopilotSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .claude:
-            return ClaudeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .antigravity:
-            return AntigravitySessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .opencode:
-            return OpenCodeSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .hermes:
-            return HermesSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .codex:
-            // SessionIndexer’s lightweight parsing helpers are currently private; for backfill we only need
-            // a stable upstream path so the archive can be created. Metadata will be refreshed on later scans.
-            return minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .droid:
-            return DroidSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .openclaw:
-            return OpenClawSessionParser.parseFile(at: upstreamURL, forcedID: sessionID) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .cursor:
-            return CursorSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .pi:
-            return PiSessionParser.parseFile(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .kimi:
-            return KimiSessionParser.parseFileFull(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        case .grok:
-            return GrokSessionParser.parseFileFull(at: upstreamURL) ?? minimalSession(source: source, id: sessionID, url: upstreamURL)
-        }
-    }
-
-    private func minimalSession(source: SessionSource, id: String, url: URL) -> Session {
-        let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-        let size = (attrs[.size] as? NSNumber)?.intValue
-        let mtime = (attrs[.modificationDate] as? Date) ?? Date()
-        return Session(
-            id: id,
-            source: source,
-            startTime: mtime,
-            endTime: mtime,
-            model: nil,
-            filePath: url.path,
-            fileSizeBytes: size,
-            eventCount: 0,
-            events: [],
-            cwd: nil,
-            repoName: nil,
-            lightweightTitle: nil,
-            lightweightCommands: nil
-        )
-    }
-
-    private func sha256Hex(_ s: String) -> String {
-        let digest = SHA256.hash(data: Data(s.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
+        SessionSourceRegistry.descriptor(for: source).archive?.sessionForBackfill(sessionID, upstreamURL)
+            ?? SessionArchiveBackfill.minimalSession(source: source, id: sessionID, url: upstreamURL)
     }
 
     private func ensureArchiveExistsAndSync(session: Session, reason: String) {

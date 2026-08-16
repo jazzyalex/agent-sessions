@@ -1319,6 +1319,40 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    /// The source-filter toggle for `source`, as a function of the source rather than twelve
+    /// separately-named properties.
+    ///
+    /// Deliberately an exhaustive switch with no `default:`: it is a bridge from the twelve
+    /// `include<Provider>` stored properties to a per-source read, and while it exists the
+    /// compiler refuses to build until a newly added `SessionSource` is wired up. Task 7
+    /// replaces the twelve properties with per-source storage and deletes this.
+    func isIncluded(_ source: SessionSource) -> Bool {
+        switch source {
+        case .codex: return includeCodex
+        case .claude: return includeClaude
+        case .antigravity: return includeAntigravity
+        case .opencode: return includeOpenCode
+        case .hermes: return includeHermes
+        case .copilot: return includeCopilot
+        case .droid: return includeDroid
+        case .openclaw: return includeOpenClaw
+        case .cursor: return includeCursor
+        case .pi: return includePi
+        case .kimi: return includeKimi
+        case .grok: return includeGrok
+        }
+    }
+
+    /// Which sources a search may return results from (SPEC §3.5): globally enabled *and*
+    /// included by the source filter — the same conjunction `applyFiltersAndSort` uses for the
+    /// list, so search and list can no longer disagree about a source.
+    ///
+    /// Lives on the indexer rather than in a view because all three production call sites need
+    /// it and `UnifiedSearchFiltersView` cannot reach a helper private to `UnifiedSessionsView`.
+    func allowedSearchSources() -> Set<SessionSource> {
+        Set(SessionSource.allCases.filter { isAgentEnabled($0) && isIncluded($0) })
+    }
+
     func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
         let beforeSources = enabledAnalyticsSources()
         let previousEnablementBySource = enablementBySource
