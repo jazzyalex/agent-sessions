@@ -47,25 +47,36 @@ enum AgentEnablement {
         "~/.npm-global/bin"
     ]
 
+    /// The production `AvailabilityContext` for the descriptor detection closures.
+    ///
+    /// Built here rather than through `AvailabilityContext.live()` on purpose: `live()`
+    /// forwards `detectBinary` to the *uncached* `binaryDetectedInPATH`, while this type's
+    /// own `binaryDetectedCached` is `private` and therefore invisible to it. The cache is
+    /// load-bearing — `seedIfNeeded` asks twelve sources for availability on a cold start,
+    /// and the memo is what keeps that off repeated PATH sweeps — so the context is composed
+    /// in-file where the cached detector is in scope. `detect` stays a parameter so the
+    /// `pathOverride` seam (and the tests that use it) can route its own lookup through
+    /// unchanged.
+    private static func availabilityContext(defaults: UserDefaults,
+                                            detect: @escaping (String) -> Bool) -> AvailabilityContext {
+        AvailabilityContext(
+            defaults: defaults,
+            fileProbe: DefaultFileProbe(),
+            homeDirectory: FileManager.default.homeDirectoryForCurrentUser,
+            detectBinary: detect
+        )
+    }
+
     static func isEnabled(_ source: SessionSource, defaults: UserDefaults = .standard) -> Bool {
-        let key = enablementKey(for: source)
-        if let explicit = defaults.object(forKey: key) as? Bool { return explicit }
-        switch source {
-        case .hermes:
-            return isAvailable(.hermes, defaults: defaults)
-        case .openclaw:
-            // Default OFF unless OpenClaw/Clawdbot is actually present on disk or in PATH.
-            return isAvailable(.openclaw, defaults: defaults)
-        case .cursor:
-            return isAvailable(.cursor, defaults: defaults)
-        case .pi:
-            return isAvailable(.pi, defaults: defaults)
-        case .kimi:
-            return isAvailable(.kimi, defaults: defaults)
-        case .grok:
-            return isAvailable(.grok, defaults: defaults)
-        default:
+        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        if let explicit = defaults.object(forKey: descriptor.enablementKey) as? Bool { return explicit }
+        switch descriptor.defaultEnabled {
+        case .always:
             return true
+        case .whenAvailable:
+            // e.g. openclaw: default OFF unless OpenClaw/Clawdbot is actually present on
+            // disk or in PATH.
+            return isAvailable(source, defaults: defaults)
         }
     }
 
@@ -79,20 +90,7 @@ enum AgentEnablement {
     }
 
     static func enablementKey(for source: SessionSource) -> String {
-        switch source {
-        case .codex:    return PreferencesKey.Agents.codexEnabled
-        case .claude:   return PreferencesKey.Agents.claudeEnabled
-        case .antigravity:   return PreferencesKey.Agents.antigravityEnabled
-        case .opencode: return PreferencesKey.Agents.openCodeEnabled
-        case .hermes:   return PreferencesKey.Agents.hermesEnabled
-        case .copilot:  return PreferencesKey.Agents.copilotEnabled
-        case .droid:    return PreferencesKey.Agents.droidEnabled
-        case .openclaw: return PreferencesKey.Agents.openClawEnabled
-        case .cursor:   return PreferencesKey.Agents.cursorEnabled
-        case .pi:       return PreferencesKey.Agents.piEnabled
-        case .kimi:     return PreferencesKey.Agents.kimiEnabled
-        case .grok:     return PreferencesKey.Agents.grokEnabled
-        }
+        SessionSourceRegistry.descriptor(for: source).enablementKey
     }
 
     /// Initialises `KnownAvailableProviders` for users upgrading to the first
@@ -181,51 +179,42 @@ enum AgentEnablement {
             defaults.object(forKey: PreferencesKey.Unified.showOpenCodeToolbarFilter) != nil
 
         if hasLegacyToolbarPrefs {
-            let codex = defaults.object(forKey: PreferencesKey.Unified.showCodexToolbarFilter) as? Bool ?? true
-            let claude = defaults.object(forKey: PreferencesKey.Unified.showClaudeToolbarFilter) as? Bool ?? true
-            let antigravity = defaults.object(forKey: PreferencesKey.Unified.showAntigravityToolbarFilter) as? Bool ?? true
-            let opencode = defaults.object(forKey: PreferencesKey.Unified.showOpenCodeToolbarFilter) as? Bool ?? true
+            // Frozen migration history, not a growth surface: only the four agents that
+            // existed when enablement was still a toolbar-filter preference are read from
+            // the old keys, and copilot's seed was a literal `true` rather than a probe. A
+            // source added today inherits the availability rule below and never appears here.
+            let legacyToolbarKeys: [SessionSource: String] = [
+                .codex: PreferencesKey.Unified.showCodexToolbarFilter,
+                .claude: PreferencesKey.Unified.showClaudeToolbarFilter,
+                .antigravity: PreferencesKey.Unified.showAntigravityToolbarFilter,
+                .opencode: PreferencesKey.Unified.showOpenCodeToolbarFilter
+            ]
 
-            setEnabledInternal(.codex, enabled: codex, defaults: defaults)
-            setEnabledInternal(.claude, enabled: claude, defaults: defaults)
-            setEnabledInternal(.antigravity, enabled: antigravity, defaults: defaults)
-            setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
-            setEnabledInternal(.hermes, enabled: isAvailable(.hermes, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.copilot, enabled: true, defaults: defaults)
-            setEnabledInternal(.droid, enabled: isAvailable(.droid, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.openclaw, enabled: isAvailable(.openclaw, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.cursor, enabled: isAvailable(.cursor, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.pi, enabled: isAvailable(.pi, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.kimi, enabled: isAvailable(.kimi, defaults: defaults), defaults: defaults)
-            setEnabledInternal(.grok, enabled: isAvailable(.grok, defaults: defaults), defaults: defaults)
+            for adapter in SessionSourceRegistry.ordered {
+                let source = adapter.descriptor.source
+                let enabled: Bool
+                if let legacyKey = legacyToolbarKeys[source] {
+                    enabled = defaults.object(forKey: legacyKey) as? Bool ?? true
+                } else if source == .copilot {
+                    enabled = true
+                } else {
+                    enabled = isAvailable(source, defaults: defaults)
+                }
+                setEnabledInternal(source, enabled: enabled, defaults: defaults)
+            }
         } else {
             // Cold start: avoid spawning the user's login shell (can be slow with heavy rc files).
             // Prefer filesystem availability checks and fall back to a fast PATH/common-locations probe.
-            let codex = isAvailable(.codex, defaults: defaults)
-            let claude = isAvailable(.claude, defaults: defaults)
-            let antigravity = isAvailable(.antigravity, defaults: defaults)
-            let opencode = isAvailable(.opencode, defaults: defaults)
-            let hermes = isAvailable(.hermes, defaults: defaults)
-            let copilot = isAvailable(.copilot, defaults: defaults)
-            let droid = isAvailable(.droid, defaults: defaults)
-            let openclaw = isAvailable(.openclaw, defaults: defaults)
-            let cursor = isAvailable(.cursor, defaults: defaults)
-            let pi = isAvailable(.pi, defaults: defaults)
-            let kimi = isAvailable(.kimi, defaults: defaults)
-            let grok = isAvailable(.grok, defaults: defaults)
-
-            setEnabledInternal(.codex, enabled: codex, defaults: defaults)
-            setEnabledInternal(.claude, enabled: claude, defaults: defaults)
-            setEnabledInternal(.antigravity, enabled: antigravity, defaults: defaults)
-            setEnabledInternal(.opencode, enabled: opencode, defaults: defaults)
-            setEnabledInternal(.hermes, enabled: hermes, defaults: defaults)
-            setEnabledInternal(.copilot, enabled: copilot, defaults: defaults)
-            setEnabledInternal(.droid, enabled: droid, defaults: defaults)
-            setEnabledInternal(.openclaw, enabled: openclaw, defaults: defaults)
-            setEnabledInternal(.cursor, enabled: cursor, defaults: defaults)
-            setEnabledInternal(.pi, enabled: pi, defaults: defaults)
-            setEnabledInternal(.kimi, enabled: kimi, defaults: defaults)
-            setEnabledInternal(.grok, enabled: grok, defaults: defaults)
+            //
+            // Probed in one pass and written in a second, exactly as the unrolled form did:
+            // no availability answer may observe an enablement key this seed just wrote.
+            let seeds: [(SessionSource, Bool)] = SessionSourceRegistry.ordered.map { adapter in
+                let source = adapter.descriptor.source
+                return (source, isAvailable(source, defaults: defaults))
+            }
+            for (source, enabled) in seeds {
+                setEnabledInternal(source, enabled: enabled, defaults: defaults)
+            }
         }
 
         // Guarantee at least one enabled agent.
@@ -241,69 +230,14 @@ enum AgentEnablement {
             return storedEnabledPreference(for: source, defaults: defaults) ?? false
         }
 
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        let root: URL
-        switch source {
-        case .codex:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.codexSessionsRootOverride) ?? ""
-            root = CodexSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .claude:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.claudeSessionsRootOverride) ?? ""
-            let discovery = ClaudeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
-            if discovery.hasDiscoverableSessionsRoot() { return true }
-            root = discovery.sessionsRoot()
-        case .antigravity:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride) ?? ""
-            root = AntigravitySessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .opencode:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride) ?? ""
-            // Check opencode.db first (v1.2+ SQLite backend)
-            if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom.isEmpty ? nil : custom) { return true }
-            root = OpenCodeSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .hermes:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.hermesSessionsRootOverride) ?? ""
-            root = HermesSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .copilot:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.copilotSessionsRootOverride) ?? ""
-            root = CopilotSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .droid:
-            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride) ?? ""
-            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride) ?? ""
-            root = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
-                                         customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom).sessionsRoot()
-        case .openclaw:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.openClawSessionsRootOverride) ?? ""
-            root = OpenClawSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .cursor:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.cursorSessionsRootOverride) ?? ""
-            let disc = CursorSessionDiscovery(customRoot: custom.isEmpty ? nil : custom)
-            root = disc.sessionsRoot()
-            // Also check chats root (DB-only sessions live there)
-            var isChatsDir: ObjCBool = false
-            let chatsRoot = disc.chatsRoot()
-            if fm.fileExists(atPath: chatsRoot.path, isDirectory: &isChatsDir), isChatsDir.boolValue { return true }
-        case .pi:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.piSessionsRootOverride) ?? ""
-            root = PiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .kimi:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.kimiSessionsRootOverride) ?? ""
-            root = KimiSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        case .grok:
-            let custom = defaults.string(forKey: PreferencesKey.Paths.grokSessionsRootOverride) ?? ""
-            root = GrokSessionDiscovery(customRoot: custom.isEmpty ? nil : custom).sessionsRoot()
-        }
-        if fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue { return true }
-        if source == .droid {
-            let sessionsCustom = defaults.string(forKey: PreferencesKey.Paths.droidSessionsRootOverride) ?? ""
-            let projectsCustom = defaults.string(forKey: PreferencesKey.Paths.droidProjectsRootOverride) ?? ""
-            let disc = DroidSessionDiscovery(customSessionsRoot: sessionsCustom.isEmpty ? nil : sessionsCustom,
-                                             customProjectsRoot: projectsCustom.isEmpty ? nil : projectsCustom)
-            let projectsRoot = disc.projectsRoot()
-            var isProjectsDir: ObjCBool = false
-            if fm.fileExists(atPath: projectsRoot.path, isDirectory: &isProjectsDir), isProjectsDir.boolValue { return true }
-        }
-        return binaryInstalled(for: source)
+        // Each descriptor's `isAvailable` is the source's own arm of the switch this
+        // replaced: probe the session root(s), then fall back to the binary. The tooling
+        // gate above is *not* part of it — that is global harness policy, so it stays here.
+        //
+        // The binary fallback reads `binaryDetectedCached`, matching the old tail call to
+        // `binaryInstalled(for:)`, whose own tooling gate was already unreachable by then.
+        let context = availabilityContext(defaults: defaults, detect: binaryDetectedCached)
+        return SessionSourceRegistry.descriptor(for: source).isAvailable(context)
     }
 
     private static func storedEnabledPreference(for source: SessionSource, defaults: UserDefaults) -> Bool? {
@@ -326,7 +260,7 @@ enum AgentEnablement {
     /// `isHostedByTooling` early return above: that gate turns the no-argument
     /// form into a `UserDefaults` read under XCTest, which would make a caller
     /// that has just staged a binary on disk assert against a stored preference
-    /// instead of against the name-matching logic below. It also skips
+    /// instead of against the descriptor's name matching. It also skips
     /// `binaryDetectedCached`, since the cache is process-wide and keyed on the
     /// PATH signature.
     ///
@@ -337,36 +271,19 @@ enum AgentEnablement {
         binaryInstalled(for: source, detect: { binaryDetectedInPATH($0, pathOverride: pathOverride) })
     }
 
-    /// Which binary names count as which agent. The single source of truth for
-    /// both forms above; `detect` decides how a name is looked up.
+    /// Which binary names count as which agent — now the descriptors' own
+    /// `isBinaryInstalled`. Still the single source of truth for both forms above;
+    /// `detect` decides how a name is looked up and is threaded into the context per call
+    /// so the `pathOverride` form keeps looking only where its caller said to.
+    ///
+    /// `.standard` is the right defaults instance here because no `isBinaryInstalled`
+    /// closure reads `ctx.defaults` — the switch this replaced took no defaults at all.
+    /// `.grok`'s extra `~/.grok` check comes through the context's real home directory and
+    /// `DefaultFileProbe`, i.e. the same `FileManager.default` calls it made inline.
     private static func binaryInstalled(for source: SessionSource,
-                                        detect: (String) -> Bool) -> Bool {
-        switch source {
-        case .codex: return detect("codex")
-        case .claude: return detect("claude") || detect("claude-code")
-        case .antigravity: return detect("agy")
-        case .opencode: return detect("opencode")
-        case .hermes: return detect("hermes")
-        case .copilot: return detect("copilot")
-        case .droid: return detect("droid")
-        case .openclaw:
-            return detect("openclaw") || detect("clawdbot")
-        case .cursor:
-            return detect("agent") || detect("cursor") || detect("cursor-agent")
-        case .pi:
-            return detect("pi")
-        case .kimi:
-            return detect("kimi")
-        case .grok:
-            // Homebrew also ships an unrelated `grok` formula (jordansissel/grok,
-            // a regex utility), so a bare PATH hit is not evidence of the Grok
-            // CLI. Require the CLI's own home directory alongside the binary.
-            guard detect("grok") else { return false }
-            let grokHome = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".grok", isDirectory: true)
-            var isGrokHome: ObjCBool = false
-            return FileManager.default.fileExists(atPath: grokHome.path, isDirectory: &isGrokHome) && isGrokHome.boolValue
-        }
+                                        detect: @escaping (String) -> Bool) -> Bool {
+        let context = availabilityContext(defaults: .standard, detect: detect)
+        return SessionSourceRegistry.descriptor(for: source).isBinaryInstalled(context)
     }
 
     static func storedAvailabilityStatus(for source: SessionSource, defaults: UserDefaults = .standard) -> StoredAvailabilityStatus {
@@ -396,33 +313,12 @@ enum AgentEnablement {
         defaults.set(enabled, forKey: enablementKey(for: source))
     }
 
+    /// K4: openclaw is the one source with no persisted CLI-detection flag, modeled as a
+    /// nil `cliAvailableKey` rather than a fabricated key name — so the nil guard *is* its
+    /// old `case .openclaw: return nil` arm.
     private static func storedBinaryPresence(for source: SessionSource, defaults: UserDefaults = .standard) -> Bool? {
-        switch source {
-        case .codex:
-            return defaults.object(forKey: PreferencesKey.codexCLIAvailable) as? Bool
-        case .claude:
-            return defaults.object(forKey: PreferencesKey.claudeCLIAvailable) as? Bool
-        case .antigravity:
-            return defaults.object(forKey: PreferencesKey.antigravityCLIAvailable) as? Bool
-        case .opencode:
-            return defaults.object(forKey: PreferencesKey.openCodeCLIAvailable) as? Bool
-        case .hermes:
-            return defaults.object(forKey: PreferencesKey.hermesCLIAvailable) as? Bool
-        case .copilot:
-            return defaults.object(forKey: PreferencesKey.copilotCLIAvailable) as? Bool
-        case .droid:
-            return defaults.object(forKey: PreferencesKey.droidCLIAvailable) as? Bool
-        case .openclaw:
-            return nil
-        case .cursor:
-            return defaults.object(forKey: PreferencesKey.cursorCLIAvailable) as? Bool
-        case .pi:
-            return defaults.object(forKey: PreferencesKey.piCLIAvailable) as? Bool
-        case .kimi:
-            return defaults.object(forKey: PreferencesKey.kimiCLIAvailable) as? Bool
-        case .grok:
-            return defaults.object(forKey: PreferencesKey.grokCLIAvailable) as? Bool
-        }
+        guard let key = SessionSourceRegistry.descriptor(for: source).cliAvailableKey else { return nil }
+        return defaults.object(forKey: key) as? Bool
     }
 
     static func binaryDetectedInPATH(_ binaryName: String, pathOverride: String? = nil) -> Bool {

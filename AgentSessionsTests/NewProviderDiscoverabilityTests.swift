@@ -43,6 +43,67 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(AgentEnablement.enablementKey(for: .cursor), "AgentEnabledCursor")
     }
 
+    /// K7: droid falls into `isEnabled`'s default-ON cohort even though `seedIfNeeded`
+    /// seeds it from availability. That disagreement is deliberate, and it is the one
+    /// place where "default enabled" and "available" part company — pin it so the
+    /// registry flip cannot quietly collapse droid into the availability-gated cohort.
+    ///
+    /// Availability is deterministic here: `AppRuntime.isHostedByTooling` is true under
+    /// XCTest, so `isAvailable` degrades to a stored-preference read, which an empty
+    /// suite answers `false` for every source.
+    func testIsEnabled_droidIsOnByDefaultEvenThoughItIsNotAvailable() {
+        let suite = "test.enabled.droid.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        XCTAssertFalse(AgentEnablement.isAvailable(.droid, defaults: defaults),
+                       "precondition: nothing is available in an empty suite under test hosting")
+        XCTAssertTrue(AgentEnablement.isEnabled(.droid, defaults: defaults),
+                      "droid belongs to the default-ON cohort regardless of availability")
+    }
+
+    func testIsEnabled_availabilityGatedSourceIsOffWhenUnavailable() {
+        let suite = "test.enabled.hermes.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok] {
+            XCTAssertFalse(AgentEnablement.isEnabled(source, defaults: defaults),
+                           "\(source.rawValue) is availability-gated and must stay off when unavailable")
+        }
+    }
+
+    func testIsEnabled_defaultOnCohortIsOnWithNoStoredPreference() {
+        let suite = "test.enabled.defaulton.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        for source in [SessionSource.codex, .claude, .antigravity, .opencode, .copilot, .droid] {
+            XCTAssertTrue(AgentEnablement.isEnabled(source, defaults: defaults),
+                          "\(source.rawValue) belongs to the default-ON cohort")
+        }
+    }
+
+    func testIsEnabled_explicitPreferenceWinsOverBothCohorts() {
+        let suite = "test.enabled.explicit.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+
+        defaults.set(false, forKey: AgentEnablement.enablementKey(for: .droid))
+        defaults.set(true, forKey: AgentEnablement.enablementKey(for: .hermes))
+
+        XCTAssertFalse(AgentEnablement.isEnabled(.droid, defaults: defaults))
+        XCTAssertTrue(AgentEnablement.isEnabled(.hermes, defaults: defaults))
+    }
+
+    func testEnablementKeyMatchesRegistryDescriptorForEverySource() {
+        for source in SessionSource.allCases {
+            XCTAssertEqual(AgentEnablement.enablementKey(for: source),
+                           SessionSourceRegistry.descriptor(for: source).enablementKey,
+                           "\(source.rawValue) enablement key drifted from its descriptor")
+        }
+    }
+
     func testMigrateKnownAvailableProviders_populatesFromExplicitPreferences() {
         let suite = "test.migrate.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
