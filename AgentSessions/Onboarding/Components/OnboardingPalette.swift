@@ -254,32 +254,11 @@ struct OnboardingPalette {
         colorScheme == .dark ? .hudWindow : .sidebar
     }
 
+    /// The onboarding accent is per-source data on the descriptor. It is a closure taking
+    /// the palette rather than a plain color because three sources (claude, codex,
+    /// antigravity) resolve to `accentOrange`/`accentGreen`/`accentBlue`, which read this
+    /// palette's own `colorScheme`.
     func agentAccent(for source: SessionSource) -> Color {
-        switch source {
-        case .claude:
-            return accentOrange
-        case .codex:
-            return accentGreen
-        case .antigravity:
-            return accentBlue
-        case .opencode:
-            return Color(red: 0.62, green: 0.52, blue: 0.96)
-        case .hermes:
-            return Color.agentHermes
-        case .copilot:
-            return Color(red: 0.82, green: 0.36, blue: 0.78)
-        case .droid:
-            return Color(red: 0.26, green: 0.72, blue: 0.38)
-        case .openclaw:
-            return Color(red: 0.95, green: 0.55, blue: 0.18)
-        case .cursor:
-            return Color(red: 0.20, green: 0.60, blue: 0.70)
-        case .pi:
-            return Color.agentPi
-        case .kimi:
-            return Color.agentKimi
-        case .grok:
-            return Color.agentGrok
-        }
+        source.descriptor.onboardingAccent(self)
     }
 }

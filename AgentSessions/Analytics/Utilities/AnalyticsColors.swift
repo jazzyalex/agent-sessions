@@ -47,41 +47,21 @@ extension Color {
     static let agentKimiGray = Color(white: 0.66)
     static let agentGrokGray = Color(white: 0.62)
 
-    /// Get the brand color for a given session source
+    /// Get the brand color for a given session source.
+    ///
+    /// Reads the registry rather than re-listing the twelve `agentX` constants above: the
+    /// constants are themselves `agentBrandAccent`, which is now descriptor-driven, so a
+    /// new source picks its color up here for free.
     static func agentColor(for source: SessionSource) -> Color {
-        switch source {
-        case .codex: return .agentCodex
-        case .claude: return .agentClaude
-        case .antigravity: return .agentAntigravity
-        case .opencode: return .agentOpenCode
-        case .hermes: return .agentHermes
-        case .copilot: return .agentCopilot
-        case .droid: return .agentDroid
-        case .openclaw: return .agentOpenClaw
-        case .cursor: return .agentCursor
-        case .pi: return .agentPi
-        case .kimi: return .agentKimi
-        case .grok: return .agentGrok
-        }
+        Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: source))
     }
 
     /// Get the brand color or monochrome gray for a given session source
     static func agentColor(for source: SessionSource, monochrome: Bool) -> Color {
         if monochrome {
-            switch source {
-            case .codex: return .agentCodexGray
-            case .claude: return .agentClaudeGray
-            case .antigravity: return .agentAntigravityGray
-            case .opencode: return .agentOpenCodeGray
-            case .hermes: return .agentHermesGray
-            case .copilot: return .agentCopilotGray
-            case .droid: return .agentDroidGray
-            case .openclaw: return .agentOpenClawGray
-            case .cursor: return .agentCursorGray
-            case .pi: return .agentPiGray
-            case .kimi: return .agentKimiGray
-            case .grok: return .agentGrokGray
-            }
+            // Same shades as the `agentXGray` constants above, carried per source on the
+            // descriptor (`monochromeWhite`) and pinned by test goldens.
+            return Color(white: source.descriptor.monochromeWhite)
         } else {
             return agentColor(for: source)
         }

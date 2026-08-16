@@ -1,0 +1,106 @@
+import Foundation
+import SwiftUI
+import AppKit
+
+// MARK: - SessionSourceAdapter
+
+/// A source's entry in the registry (SPEC §3.2). Task 2 carries value data only; Task 6
+/// adds `makeRuntime: @MainActor () -> SourceRuntime` so one adapter supplies both the
+/// descriptor and the source's runtime object graph.
+struct SessionSourceAdapter {
+    let descriptor: SessionSourceDescriptor
+}
+
+// MARK: - SessionSourceRegistry
+
+/// THE one remaining hand-maintained per-source list (SPEC §3.3).
+///
+/// `ordered` must stay in `SessionSource.allCases` order — `testRegistryOrderEqualsSessionSourceAllCases`
+/// enforces exact array equality, so a new source that forgets its entry, or adds it in the
+/// wrong place, fails immediately rather than drifting invisibly through the ~35 hand lists
+/// this program replaces.
+enum SessionSourceRegistry {
+    static let ordered: [SessionSourceAdapter] = [
+        SessionSourceAdapter(descriptor: .codex),
+        SessionSourceAdapter(descriptor: .claude),
+        SessionSourceAdapter(descriptor: .antigravity),
+        SessionSourceAdapter(descriptor: .opencode),
+        SessionSourceAdapter(descriptor: .hermes),
+        SessionSourceAdapter(descriptor: .copilot),
+        SessionSourceAdapter(descriptor: .droid),
+        SessionSourceAdapter(descriptor: .openclaw),
+        SessionSourceAdapter(descriptor: .cursor),
+        SessionSourceAdapter(descriptor: .pi),
+        SessionSourceAdapter(descriptor: .kimi),
+        SessionSourceAdapter(descriptor: .grok)
+    ]
+
+    static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(
+        uniqueKeysWithValues: ordered.map { ($0.descriptor.source, $0) }
+    )
+
+    /// Non-optional by design: a missing entry is a programming error the order test
+    /// catches long before this runs.
+    static func adapter(for source: SessionSource) -> SessionSourceAdapter {
+        guard let adapter = bySource[source] else {
+            preconditionFailure("SessionSourceRegistry.ordered is missing an entry for \(source)")
+        }
+        return adapter
+    }
+
+    static func descriptor(for source: SessionSource) -> SessionSourceDescriptor {
+        adapter(for: source).descriptor
+    }
+
+    /// One `NSColor` instance per source, built once.
+    ///
+    /// The memo is not an optimization detail — it is what keeps brand colors *value-stable*.
+    /// `adaptiveBrand` mints a fresh `NSColor(name: nil) { … }` on every call, and two such
+    /// dynamic colors never compare equal even when they draw identically. Before the
+    /// registry, the row accent and the analytics palette read memoized `Color.agentX`
+    /// statics, so repeated reads returned the same instance and SwiftUI's equality checks
+    /// short-circuited. `cellSource(for:)` asks for a row accent twice per row per rebuild,
+    /// and this repo is measurably sensitive to `Table` diffing, so handing back a new
+    /// object each time would quietly defeat that. Resolving once here restores the old
+    /// identity guarantee — see `testResolvedBrandAccentIsValueStableAcrossCalls`.
+    ///
+    /// Safe with respect to the initialization cycle Task 3 hit: the only thing this
+    /// computes with is `adaptiveBrand`, which never re-enters the registry.
+    private static let resolvedBrandAccents: [SessionSource: NSColor] = Dictionary(
+        uniqueKeysWithValues: ordered.map { ($0.descriptor.source, makeBrandAccent(for: $0.descriptor)) }
+    )
+
+    /// Rebuilds exactly what `TranscriptColorSystem.agentBrandAccent(source:)` returned
+    /// before Task 3: `.system` hues pass straight through, `.calibrated` triples go through
+    /// `adaptiveBrand` (K6).
+    private static func makeBrandAccent(for descriptor: SessionSourceDescriptor) -> NSColor {
+        switch descriptor.brandHue {
+        case .system(let color):
+            return color
+        case .calibrated(let red, let green, let blue):
+            return TranscriptColorSystem.adaptiveBrand(
+                NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1.0)
+            )
+        }
+    }
+
+    /// The source's brand accent. `TranscriptColorSystem.agentBrandAccent(source:)` is this.
+    /// Repeated calls return the *same* instance (see `resolvedBrandAccents`).
+    static func resolvedBrandAccent(for source: SessionSource) -> NSColor {
+        guard let color = resolvedBrandAccents[source] else {
+            preconditionFailure("SessionSourceRegistry.ordered is missing an entry for \(source)")
+        }
+        return color
+    }
+}
+
+// MARK: - SessionSource convenience
+
+extension SessionSource {
+    /// This source's registry descriptor. App-target only — `SessionSource.swift` itself
+    /// stays free of registry dependencies so it keeps compiling into the standalone
+    /// logic-test target (K15).
+    var descriptor: SessionSourceDescriptor {
+        SessionSourceRegistry.descriptor(for: self)
+    }
+}

@@ -100,20 +100,7 @@ struct AgentBadge: View {
     }
 
     static func initials(for source: SessionSource) -> String {
-        switch source {
-        case .claude: return "CC"
-        case .codex: return "CX"
-        case .antigravity: return "AG"
-        case .opencode: return "OC"
-        case .hermes: return "HM"
-        case .copilot: return "CP"
-        case .droid: return "D"
-        case .openclaw: return "CL"
-        case .cursor: return "CR"
-        case .pi: return "PI"
-        case .kimi: return "KM"
-        case .grok: return "GK"
-        }
+        source.descriptor.badgeInitials
     }
 }
 

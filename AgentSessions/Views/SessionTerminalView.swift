@@ -295,20 +295,7 @@ struct SessionTerminalView: View {
 
     // Derived agent label for legend chips.
     private var agentLegendLabel: String {
-        switch session.source {
-        case .codex: return "Codex"
-        case .claude: return "Claude"
-        case .antigravity: return "Antigravity"
-        case .opencode: return "OpenCode"
-        case .hermes: return "Hermes"
-        case .copilot: return "Copilot"
-        case .droid: return "Droid"
-        case .openclaw: return "OpenClaw"
-        case .cursor: return "Cursor"
-        case .pi: return "Pi"
-        case .kimi: return "Kimi Code"
-        case .grok: return "Grok CLI"
-        }
+        session.source.descriptor.shortLabel
     }
 
     private var filteredLines: [TerminalLine] {

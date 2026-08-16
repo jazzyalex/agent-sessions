@@ -1729,22 +1729,7 @@ struct UnifiedSessionsView: View {
                 launchBlockingTranscriptOverlay()
             } else if let s = selectedSession {
                 if !s.isSideChat && !FileManager.default.fileExists(atPath: s.filePath) {
-                    let providerName: String = {
-                        switch s.source {
-                        case .codex: return "Codex"
-                        case .claude: return "Claude"
-                        case .antigravity: return "Antigravity"
-                        case .opencode: return "OpenCode"
-                        case .hermes: return "Hermes"
-                        case .copilot: return "Copilot"
-                        case .droid: return "Droid"
-                        case .openclaw: return "OpenClaw"
-                        case .cursor: return "Cursor"
-                        case .pi: return "Pi"
-                        case .kimi: return "Kimi Code"
-                        case .grok: return "Grok CLI"
-                        }
-                    }()
+                    let providerName: String = s.source.descriptor.shortLabel
                     let accent: Color = sourceAccent(s)
                     VStack(spacing: 12) {
                         Label("Session file not found", systemImage: "exclamationmark.triangle.fill")
@@ -2946,20 +2931,7 @@ struct UnifiedSessionsView: View {
             session: session,
             isClaudeArchived: unified.isArchivedClaudeDesktop(session)
         )
-        switch session.source {
-        case .codex: label = "Codex"
-        case .claude: label = "Claude"
-        case .antigravity: label = "Antigravity"
-        case .opencode: label = "OpenCode"
-        case .hermes: label = "Hermes"
-        case .copilot: label = "Copilot"
-        case .droid: label = "Droid"
-        case .openclaw: label = "OpenClaw"
-        case .cursor: label = "Cursor"
-        case .pi: label = "Pi"
-        case .kimi: label = "Kimi Code"
-        case .grok: label = "Grok CLI"
-        }
+        label = session.source.descriptor.shortLabel
         let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
         return HStack(spacing: 6) {
             if isSubagentRow {
@@ -3540,21 +3512,17 @@ struct UnifiedSessionsView: View {
         }
     }
 
+    /// Row accent. The ten "other agent" sources use the same color as their toolbar pill
+    /// — that was already true arm-for-arm in the switch this replaces, including
+    /// antigravity's and opencode's SwiftUI `.teal`/`.purple`. Codex and Claude have no
+    /// pill (they render as fixed segmented pills), and their old arms were
+    /// `Color.agentCodex`/`agentClaude`, which are defined as the brand accent — so the
+    /// fallback reproduces them exactly. Pinned per source and per appearance by
+    /// `SessionSourceRegistryTests`' pill and brand goldens.
     private func sourceAccent(_ s: Session) -> Color {
-        switch s.source {
-        case .codex: return Color.agentCodex
-        case .claude: return Color.agentClaude
-        case .antigravity: return Color.teal
-        case .opencode: return Color.purple
-        case .hermes: return TranscriptColorSystem.agentBrandAccent(source: .hermes)
-        case .copilot: return Color.agentCopilot
-        case .droid: return Color.agentDroid
-        case .openclaw: return Color.agentOpenClaw
-        case .cursor: return Color.agentCursor
-        case .pi: return Color.agentPi
-        case .kimi: return Color.agentKimi
-        case .grok: return Color.agentGrok
-        }
+        let descriptor = s.source.descriptor
+        return descriptor.otherAgentPill?.color
+            ?? Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: s.source))
     }
 
     private func isSessionLive(_ session: Session) -> Bool {
