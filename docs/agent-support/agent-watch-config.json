@@ -612,6 +612,20 @@
             "latest_version_key": "latestVersion"
           }
         ]
+      },
+      "prebump": {
+        "driver": "grok_single",
+        "sandbox": { "mode": "home_override", "subdir": "grok_sandbox" },
+        "prompt": "Say hi, then use your file-listing tool to list the files in the current directory.",
+        "timeout_seconds": 240,
+        "credential_files": ["~/.grok/auth.json"],
+        "_credential_note": "Grok exposes NO api-key environment variable (its only documented one is GROK_SANDBOX), so the env-var-first branch of prepare_auth can never fire and the credential-file copy is the only auth path. ~/.grok/auth.json is an OAuth record keyed by issuer URL and carries account PII (email, name, user_id, team_id) alongside the token, which is why it is declared a credential_file - strict 0600-mode hygiene gate - and never a support_file. It is copied into the throwaway sandbox HOME and torn down with it.",
+        "discover_session": {
+          "kind": "grok_session_newest",
+          "roots": [".grok/sessions"],
+          "globs": ["*/*/chat_history.jsonl"],
+          "required_types": ["user", "assistant"]
+        }
       }
     },
     "qwen": {

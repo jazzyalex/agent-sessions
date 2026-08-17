@@ -1083,3 +1083,98 @@ class KimiPromptDriver:
 
 
 DRIVERS["kimi_prompt"] = KimiPromptDriver()
+
+
+class GrokSingleDriver:
+    """Grok Build headless single-turn run.
+
+    Grok was the last actively-monitored agent with no prebump driver, which capped it
+    at `supports_installed_only` permanently: without a fresh session from the installed
+    build, `supports_latest` is structurally unclaimable no matter how clean the weekly
+    scan looks.
+
+    Two things make this driver different from the others:
+
+    1. A Grok session is a DIRECTORY, not a file. `chat_history.jsonl` is only half of
+       it — the sibling `summary.json` carries everything discovery depends on, and
+       `GrokSessionDiscovery` skips any session directory that lacks it. The driver
+       therefore returns the transcript path but VERIFIES the sidecar exists first;
+       returning a transcript whose sidecar never landed would hand the fingerprinter a
+       half-written session and report the resulting gap as schema drift.
+    2. Grok has no API-key env var (its only documented one is GROK_SANDBOX), so the
+       env-var-first branch of prepare_auth can never fire. Auth is always the
+       credential-file copy of ~/.grok/auth.json into the sandbox HOME.
+
+    The run is hermetic: HOME is the sandbox, so ~/.grok/sessions lands inside it, and
+    `--cwd` pins the working directory to a sandbox subdirectory so the percent-encoded
+    workdir bucket is predictable and no real repository is ever the session's cwd.
+    """
+
+    name = "grok_single"
+
+    def run(self, sandbox: Path, env: dict[str, str], prompt: str, timeout: int) -> DriverResult:
+        sessions_root = sandbox / ".grok" / "sessions"
+        sessions_root.mkdir(parents=True, exist_ok=True)
+        workdir = sandbox / "workspace"
+        workdir.mkdir(parents=True, exist_ok=True)
+        # A file to look at, so a tool-using prompt has something real to do. A prompt
+        # that completes without calling a tool yields the four most basic event types
+        # and a genuinely thin sample.
+        (workdir / "README.md").write_text("agent-watch prebump probe\n", encoding="utf-8")
+
+        stdout_file = sandbox / "grok.stdout.txt"
+        stderr_file = sandbox / "grok.stderr.txt"
+        session_id = str(_uuid.uuid4())
+        try:
+            proc = subprocess.run(
+                [
+                    "grok",
+                    "-p", prompt,
+                    "--session-id", session_id,
+                    "--cwd", str(workdir),
+                    "--always-approve",
+                    "--disable-web-search",
+                    "--output-format", "plain",
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            stdout_file.write_text(proc.stdout or "")
+            stderr_file.write_text(proc.stderr or "")
+            rc = proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            return _timeout_result(sandbox, "grok", timeout, exc)
+        except FileNotFoundError as exc:
+            return _not_found_result(sandbox, "grok", "grok", exc)
+
+        # Prefer the session we named; fall back to newest so a Grok that ignores
+        # --session-id still produces evidence rather than a confusing "not found".
+        pinned = list(sessions_root.glob(f"*/{session_id}/chat_history.jsonl"))
+        newest: Path | None = pinned[0] if pinned else None
+        if newest is None:
+            newest_m = -1.0
+            for p in sessions_root.glob("*/*/chat_history.jsonl"):
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m > newest_m:
+                    newest = p
+                    newest_m = m
+
+        if rc != 0 or newest is None:
+            return DriverResult(False, newest, stdout_file, stderr_file, rc,
+                                f"grok_single_failed rc={rc}")
+        if not (newest.parent / "summary.json").exists():
+            # Half a session. See the class docstring: the sidecar is a discovery
+            # precondition, so a missing one is a driver failure, not clean evidence.
+            return DriverResult(False, newest, stdout_file, stderr_file, rc,
+                                "grok_summary_json_missing")
+        return DriverResult(True, newest, stdout_file, stderr_file, rc, None)
+
+
+DRIVERS["grok_single"] = GrokSingleDriver()
