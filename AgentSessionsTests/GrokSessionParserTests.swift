@@ -250,4 +250,118 @@ final class GrokSessionParserTests: XCTestCase {
         XCTAssertEqual(session.eventCount, 0)
         XCTAssertEqual(session.messageCount, 0)
     }
+
+    // MARK: - Format drift tolerance
+    //
+    // Grok used to be the one parser that decoded its sidecar through a Codable
+    // struct, so a single vendor change to one field's type threw and took the
+    // whole sidecar with it. These pin the alert-not-crash contract the other
+    // twelve agents already had: unknown additions are ignored, and a field that
+    // goes missing or changes shape costs exactly that field.
+
+    /// A vendor adding keys — to the sidecar and to transcript records alike —
+    /// must parse byte-identically to the same session without them.
+    func testUnknownNewFieldsAreIgnored() throws {
+        let baselineTranscript = """
+        {"type":"user","content":[{"type":"text","text":"map the repo"}],"prompt_index":0}
+        {"type":"assistant","content":"Mapping.","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{\\"target_file\\":\\"/tmp/x\\"}"}]}
+        {"type":"tool_result","content":"ok","tool_call_id":"call-1"}
+        """
+        let driftedTranscript = """
+        {"type":"user","content":[{"type":"text","text":"map the repo","brand_new_part_key":1}],"prompt_index":0,"brand_new_key":{"a":[1,2]}}
+        {"type":"assistant","content":"Mapping.","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{\\"target_file\\":\\"/tmp/x\\"}","brand_new_call_key":true}],"brand_new_key":"x"}
+        {"type":"tool_result","content":"ok","tool_call_id":"call-1","brand_new_key":[]}
+        """
+        let baselineSummary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"},"generated_title":"Repo map","created_at":"2026-07-31T10:13:27.574131Z","updated_at":"2026-07-31T10:20:00.000000Z","current_model_id":"grok-4.5","num_chat_messages":3}
+        """
+        let driftedSummary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project","brand_new_info_key":7},"generated_title":"Repo map","created_at":"2026-07-31T10:13:27.574131Z","updated_at":"2026-07-31T10:20:00.000000Z","current_model_id":"grok-4.5","num_chat_messages":3,"brand_new_top_key":{"nested":"value"}}
+        """
+
+        let baseline = try XCTUnwrap(GrokSessionParser.parseFileFull(at: stage(transcript: baselineTranscript, summary: baselineSummary)))
+        let drifted = try XCTUnwrap(GrokSessionParser.parseFileFull(at: stage(transcript: driftedTranscript, summary: driftedSummary)))
+
+        XCTAssertEqual(drifted.id, baseline.id)
+        XCTAssertEqual(drifted.title, baseline.title)
+        XCTAssertEqual(drifted.model, baseline.model)
+        XCTAssertEqual(drifted.lightweightCwd, baseline.lightweightCwd)
+        XCTAssertEqual(drifted.startTime, baseline.startTime)
+        XCTAssertEqual(drifted.endTime, baseline.endTime)
+        XCTAssertEqual(drifted.eventCount, baseline.eventCount)
+        XCTAssertEqual(drifted.events.map { $0.id }, baseline.events.map { $0.id })
+        XCTAssertEqual(drifted.events.map { $0.kind }, baseline.events.map { $0.kind })
+        XCTAssertEqual(drifted.events.map { $0.text }, baseline.events.map { $0.text })
+        XCTAssertEqual(drifted.events.map { $0.toolName }, baseline.events.map { $0.toolName })
+    }
+
+    /// A sidecar field that goes missing, or arrives as a different type, costs
+    /// exactly that field. Before the Codable removal a single one of these threw
+    /// and the session lost its id, cwd, title, model and both timestamps at once.
+    func testSidecarFieldOfTheWrongTypeCostsOnlyThatField() throws {
+        let transcript = #"{"type":"user","content":[{"type":"text","text":"hi"}],"prompt_index":0}"#
+        // `created_at` is now an object, `num_chat_messages` a string, and
+        // `reasoning_effort` is gone entirely.
+        let summary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"},"generated_title":"Repo map","created_at":{"iso":"2026-07-31T10:13:27.574131Z"},"updated_at":"2026-07-31T10:20:00.000000Z","current_model_id":"grok-4.5","num_chat_messages":"3"}
+        """
+        let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: stage(transcript: transcript, summary: summary)))
+
+        // Survives: everything whose type did not change.
+        XCTAssertEqual(session.id, sessionID)
+        XCTAssertEqual(session.title, "Repo map")
+        XCTAssertEqual(session.model, "grok-4.5")
+        XCTAssertEqual(session.lightweightCwd, "/tmp/as-agent-lab/grok/project")
+        XCTAssertNotNil(session.endTime)
+        XCTAssertEqual(session.events.count, 1)
+        // Degrades to nil, and nothing else: the object-shaped `created_at`.
+        XCTAssertNil(session.startTime)
+        XCTAssertNil(session.reasoningEffort)
+    }
+
+    /// A sidecar that is unreadable, empty, or no longer a JSON object leaves the
+    /// transcript fully parseable — identity falls back to the directory name.
+    func testUnusableSidecarStillYieldsATranscriptSession() throws {
+        let transcript = #"{"type":"user","content":[{"type":"text","text":"hi"}],"prompt_index":0}"#
+        for summary in ["{}", "[]", "not json at all"] {
+            let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: stage(transcript: transcript, summary: summary)),
+                                        "sidecar \(summary) must not lose the session")
+            XCTAssertEqual(session.id, sessionID)
+            XCTAssertEqual(session.events.count, 1)
+            XCTAssertEqual(session.title, "hi", "title falls back to the first genuine prompt")
+            XCTAssertNil(session.startTime)
+        }
+    }
+
+    /// A transcript record that loses a currently-required field degrades within
+    /// the record: an untyped record is skipped, a contentless assistant still
+    /// yields its tool calls, and neither aborts the session.
+    func testTranscriptRecordsMissingRequiredFieldsDegradeInPlace() throws {
+        let transcript = """
+        {"content":[{"type":"text","text":"a record with no type at all"}],"prompt_index":0}
+        {"type":"user","content":[{"type":"text","text":"real prompt"}],"prompt_index":1}
+        {"type":"assistant","tool_calls":[{"id":"call-1","name":"read_file","arguments":"{}"}]}
+        {"type":"assistant"}
+        {"type":"tool_result","tool_call_id":"call-1"}
+        """
+        let summary = """
+        {"info":{"id":"\(sessionID)","cwd":"/tmp/as-agent-lab/grok/project"}}
+        """
+        let session = try XCTUnwrap(GrokSessionParser.parseFileFull(at: stage(transcript: transcript, summary: summary)))
+
+        // Line 0 (no `type`) contributes nothing; every later line keeps its own
+        // line index, so ids stay pinned to physical transcript lines.
+        XCTAssertEqual(session.events.map { $0.id }, ["1-u", "2-t0", "3-m", "4-r"])
+        XCTAssertEqual(session.events.map { $0.kind }, [.user, .tool_call, .meta, .tool_result])
+        // A contentless assistant carrying calls still emits the call...
+        XCTAssertEqual(session.events[1].toolName, "read_file")
+        // ...and one carrying nothing at all becomes a meta placeholder, not a drop.
+        XCTAssertNil(session.events[2].text)
+        // A tool_result with no `content` keeps its correlation id and yields no output.
+        XCTAssertEqual(session.events[3].messageID, "call-1")
+        XCTAssertNil(session.events[3].toolOutput)
+        // Non-meta count: user + tool_call + tool_result.
+        XCTAssertEqual(session.eventCount, 3)
+        XCTAssertEqual(session.title, "real prompt")
+    }
 }

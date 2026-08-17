@@ -27,8 +27,17 @@ enum GrokSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
     private static let previewLineLimit = 200
 
-    private struct Sidecar: Decodable {
-        struct Info: Decodable {
+    /// The `summary.json` sidecar, read field by field out of a plain dictionary.
+    ///
+    /// Deliberately NOT `Decodable`. Every other agent's parser reads
+    /// `JSONSerialization` dictionaries, so a vendor adding a required field or
+    /// changing one field's type degrades to an ignored key. A `JSONDecoder` decode
+    /// of this struct instead failed as a unit: one field arriving as an object
+    /// where a string was expected threw, `try?` swallowed it, and the session lost
+    /// its id, cwd, title, model and BOTH timestamps at once. Per-field reads make
+    /// that a single nil.
+    private struct Sidecar {
+        struct Info {
             let id: String?
             let cwd: String?
         }
@@ -44,18 +53,25 @@ enum GrokSessionParser {
         let parentSessionId: String?
         let gitRootDir: String?
 
-        enum CodingKeys: String, CodingKey {
-            case info
-            case sessionSummary = "session_summary"
-            case generatedTitle = "generated_title"
-            case createdAt = "created_at"
-            case updatedAt = "updated_at"
-            case lastActiveAt = "last_active_at"
-            case currentModelId = "current_model_id"
-            case numChatMessages = "num_chat_messages"
-            case reasoningEffort = "reasoning_effort"
-            case parentSessionId = "parent_session_id"
-            case gitRootDir = "git_root_dir"
+        init(object: [String: Any]) {
+            if let info = object["info"] as? [String: Any] {
+                self.info = Info(id: info["id"] as? String, cwd: info["cwd"] as? String)
+            } else {
+                self.info = nil
+            }
+            sessionSummary = object["session_summary"] as? String
+            generatedTitle = object["generated_title"] as? String
+            createdAt = object["created_at"] as? String
+            updatedAt = object["updated_at"] as? String
+            lastActiveAt = object["last_active_at"] as? String
+            currentModelId = object["current_model_id"] as? String
+            // `as? Int` alone drops a JSON number that bridged to Double; the
+            // decoder used to accept both, so go through NSNumber to match it.
+            let count = object["num_chat_messages"]
+            numChatMessages = (count is Bool) ? nil : (count as? NSNumber)?.intValue
+            reasoningEffort = object["reasoning_effort"] as? String
+            parentSessionId = object["parent_session_id"] as? String
+            gitRootDir = object["git_root_dir"] as? String
         }
     }
 
@@ -189,8 +205,9 @@ enum GrokSessionParser {
 
     private static func readSidecar(for url: URL) -> Sidecar? {
         let path = GrokSessionDiscovery.summaryFile(forTranscript: url)
-        guard let data = try? Data(contentsOf: path) else { return nil }
-        return try? JSONDecoder().decode(Sidecar.self, from: data)
+        guard let data = try? Data(contentsOf: path),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return Sidecar(object: object)
     }
 
     // MARK: - Event id ↔ transcript line

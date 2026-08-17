@@ -324,6 +324,47 @@ upstream started telling us that we are not yet using.
 
 ---
 
+## 1f  Steward Check (what a community steward runs)
+
+Each agent has a steward: a contributor who uses that agent daily and re-verifies
+its format a few times a year, or after a big vendor release. A steward is not
+expected to know any of the above. They run one command:
+
+```
+./scripts/steward_check.py <agent>       # ./scripts/steward_check.py --list-agents
+```
+
+It runs the ordinary weekly scan (§1) restricted to that one agent, against the
+steward's own local sessions, and answers in plain sentences with one of three
+exits:
+
+- **0 — all good.** `all good: <agent> format matches the baseline (N sessions
+  sampled)`, plus the matrix's verified version. If their CLI is newer than the
+  verified version and the schema still matches, it says the matrix entry can be
+  bumped — that is the §1b evidence a maintainer needs.
+- **1 — drift.** The schema diff in plain words, a **redacted** sample written to
+  `scripts/probe_scan_output/steward_check/<agent>/redacted-sample/`, and a
+  ready-to-paste GitHub issue body (also saved as `issue.md`).
+- **2 — cannot check.** The CLI is not installed, there are no sessions on disk,
+  or the repository has no baseline fixtures for that agent yet. Says which.
+
+What it deliberately does **not** do: write or rebuild any baseline fixture.
+Deciding that drift is real and rebuilding a baseline stays a maintainer job
+(`scripts/rebuild_stage0_baseline.py --agent <agent> --emit`, §5a/§7).
+
+The sample reuses `rebuild_stage0_baseline._redact` — the same trimming that
+produces committed fixtures — and then re-scans the result for home directories,
+emails, key-shaped strings, IPs and long opaque ids. **If anything survives, the
+sample is withheld entirely** and the issue body says so; a steward is never
+handed an almost-clean file to paste into a public issue.
+
+Maintainer side of the same command: when a steward's issue arrives, its sample
+is already in fixture shape, so it drops straight into
+`Resources/Fixtures/stage0/agents/<agent>/` for a baseline rebuild. Verify the
+redaction yourself anyway before committing (§7).
+
+---
+
 ## 2  Usage / Limits Drift (Codex + Claude)
 
 Usage and limits tracking can drift **independently** of session schema. Monitor both.
@@ -575,6 +616,15 @@ guard: a present-but-corrupt sidecar still lists the session but strips its id, 
 title and both timestamps. `_grok_session_schema_fingerprint()` also records a
 `summary_error` (`missing` / `unreadable` / `invalid_json` / `not_json_object`) so the
 fingerprint stops pretending it read a sidecar it could not.
+
+**Grok's parser is now tolerant like the other twelve.** `GrokSessionParser` used to
+decode `summary.json` through a `Codable` struct, so one field arriving with a new type
+threw and `try?` dropped the *whole* sidecar — id, cwd, title, model and both timestamps
+at once. It reads `JSONSerialization` dictionaries field by field now, so vendor
+additions are ignored keys and a changed field costs exactly that field. Drift is
+therefore an alert here (this scan), never a crash — pinned by
+`GrokSessionParserTests.testUnknownNewFieldsAreIgnored` and
+`testSidecarFieldOfTheWrongTypeCostsOnlyThatField`.
 
 Grok is fingerprinted **nested** (§5a). Flat would stop at `{type, content, ...}` and hide
 the content-part types (`user.content:text`, `user.content:image`) and
