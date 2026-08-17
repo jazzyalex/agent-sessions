@@ -18,7 +18,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     @MainActor
     private func makeCoordinator(
         defaults: UserDefaults,
-        version: String = "4.9",
+        version: String = "5.0",
         now: Date = OnboardingContributeCardTests.referenceNow
     ) -> OnboardingCoordinator {
         OnboardingCoordinator(
@@ -89,7 +89,7 @@ final class OnboardingContributeCardTests: XCTestCase {
         let defaults = makeDefaults("Contribute.whatsNew")
         markEligible(defaults)
         let coordinator = makeCoordinator(defaults: defaults)
-        coordinator.whatsNewMajorMinor = "4.9"
+        coordinator.whatsNewMajorMinor = "5.0"
         XCTAssertFalse(coordinator.shouldShowContributeCard())
     }
 
@@ -99,7 +99,7 @@ final class OnboardingContributeCardTests: XCTestCase {
         markEligible(defaults)
         let coordinator = OnboardingCoordinator(
             defaults: defaults,
-            currentMajorMinorProvider: { "4.9" },
+            currentMajorMinorProvider: { "5.0" },
             isFreshInstallProvider: { true },
             whatsNewAvailableProvider: { _ in false },
             now: { Self.referenceNow }
@@ -253,7 +253,7 @@ final class OnboardingContributeCardTests: XCTestCase {
 
         // What's New takes the slot from everything.
         let withWhatsNew = makeCoordinator(defaults: defaults)
-        withWhatsNew.whatsNewMajorMinor = "4.9"
+        withWhatsNew.whatsNewMajorMinor = "5.0"
         XCTAssertFalse(withWhatsNew.shouldShowContributeCard())
         XCTAssertFalse(withWhatsNew.contributeAskOutranksFeedbackCard())
     }

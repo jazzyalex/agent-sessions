@@ -65,7 +65,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .pi:               return "3.8"
         case .kimi:             return "4.7"
         case .grok:             return "4.8"
-        case .qwen:             return "4.9"
+        case .qwen:             return "5.0"
         }
     }
 

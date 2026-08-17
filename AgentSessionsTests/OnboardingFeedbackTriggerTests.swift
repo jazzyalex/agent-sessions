@@ -213,13 +213,25 @@ final class WhatsNewCatalogTests: XCTestCase {
         XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.8"))
     }
 
-    func testQwenReleaseHas49TeaserAndProviderHighlight() {
-        XCTAssertEqual(
-            WhatsNewCatalog.teaser(for: "4.9"),
-            "Qwen Code joins the lineup, with local history, search, Analytics, and active-chat resume."
-        )
-        XCTAssertTrue(WhatsNewCatalog.assemble(for: "4.9").contains {
+    func testQwenReleaseHas50TeaserAndProviderHighlight() {
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.0"))
+        XCTAssertTrue(WhatsNewCatalog.assemble(for: "5.0").contains {
             $0.kind == .highlight && $0.title == "New: Qwen Code"
         })
+    }
+
+    /// Same shape as 4.7/4.8: authored highlights lead, the auto-generated provider row
+    /// follows, the support row is last, and Qwen is never authored twice.
+    func testAuthoredHighlightsLeadProviderAndSupportRowsIn50() {
+        let items = WhatsNewCatalog.assemble(for: "5.0")
+        XCTAssertEqual(items.map(\.title), [
+            "One foundation under every agent",
+            "Add the agent you use",
+            "The agent switches reach everywhere",
+            "New: Qwen Code",
+            "Support the project"
+        ])
+        XCTAssertEqual(items.last?.kind, .support)
+        XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.0"))
     }
 }

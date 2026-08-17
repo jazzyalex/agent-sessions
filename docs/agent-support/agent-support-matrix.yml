@@ -1,4 +1,4 @@
-agent_sessions_version: "4.9-unreleased"
+agent_sessions_version: "5.0-unreleased"
 as_of_commit: "ef4e9253"
 as_of_date: 2026-08-17
 workflow_doc: "docs/agent-support/workflow.md"

@@ -4,15 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.0] - 2026-08-17
+
+### Highlights
+- **Every agent Agent Sessions reads now runs on one shared foundation.** Each of the thirteen agents was wired in by hand, surface by surface — the session list, search, the filter pills, Analytics, the Settings panes, the launch-progress state, the enablement notice — which is why an agent could appear in one place and be quietly missing from another, with nothing to report the gap. There is now a single description of what a session source is, and every one of those surfaces derives from it. The visible result is consistency: switch an agent off and it leaves all of them together, and a fix to one surface can no longer skip the rest. The result for anyone adding an agent is that the job is a documented recipe with its own tests, rather than fourteen scattered edits that had to be found first.
+- **Qwen Code joins as the thirteenth session source.** Agent Sessions discovers session-ID-named JSONL chats under Qwen's local projects store and adds them to browsing, search, filtering, Analytics, saved-session backfill, and the transcript view, including recorded reasoning and tool activity. Rewound branches are reconstructed with Qwen's active parent chain, repeated-record fragments and glued JSON objects are recovered, and current custom titles and working directories follow that chain. Settings includes binary and storage-root controls; active-chat resume actions use the installed CLI's advertised `--resume <id>` syntax, with directory-scoped `--continue` as a safe fallback, while archived histories remain browse-only. The format is verified against real 0.14.3 transcripts. The installed CLI is 0.21.13, but Qwen's free OAuth tier was withdrawn on 2026-04-15, so no fresh 0.21.13 transcript could be captured and resume is implemented from installed help and reader evidence with hermetic tests rather than an end-to-end run.
+
 ### Features
-- **Qwen Code joins as the thirteenth session source.** Agent Sessions discovers session-ID-named JSONL chats under Qwen's local projects store and adds them to browsing, search, filtering, Analytics, saved-session backfill, and the transcript view, including recorded reasoning and tool activity. Rewound branches are reconstructed with Qwen's active parent chain, repeated-record fragments and glued JSON objects are recovered, and current custom titles and working directories follow that chain. Settings includes binary and storage-root controls; active-chat resume actions use the installed CLI's advertised `--resume <id>` syntax, with directory-scoped `--continue` as a safe fallback, while archived histories remain browse-only. Resume is implemented from installed help/reader evidence and hermetic tests but remains end-to-end untested because authentication blocked a disposable 0.21.13 run.
 - **A one-time invitation to add a missing agent.** Long-time users see a single dismissible card above the session list pointing at the source-proposal form and the contributing guide, so the manual contribution path is discoverable from inside the app. It appears only after 25 opened sessions or 45 days, never on a fresh install, never above an existing card, and ends permanently on dismissal, on a second "Maybe later", or as soon as either page is opened. The card reads nothing and sends nothing — it only opens a public page.
 
-### Documentation
-- **A manual path for adding coding agents.** Contributors can now propose a local session source, provide sanitized format evidence, or give a repository-owned implementation brief to their coding agent and prepare a structured draft PR. New sources remain ordinary reviewed code rather than downloaded plugins.
-
 ### Bug Fixes
+- **Switching an agent off now keeps it out of filter-view search results.** Search inside the filtered session view ran on a hand-written allow-list that stopped short of several agents, so their sessions could still surface in results after you had disabled them. The allow-list now derives from the same enablement the rest of the app reads, for every agent.
+- **Kimi Code and Grok CLI report when their loading has finished.** Neither agent's indexing phases reached the app's launch state, so the startup progress could stay incomplete or misreport while their sessions were in fact ready. Launch state now covers all thirteen agents, and an agent you do not have installed settles to ready instead of hanging.
+- **OpenClaw no longer sets Analytics rebuilding on every launch.** OpenClaw's enable switch was mirrored into a second stored value that was never seeded from the real setting, so each launch read a change that had not happened — marking Analytics out of date and triggering a refresh nothing asked for. Both now read one setting.
+- **Every agent's switch shows the same "restart to apply" notice.** Toggling Hermes, Droid, OpenClaw, Cursor or Pi silently skipped the notice the other agents flash, so the same action gave different feedback depending on which agent you flipped.
 - **Database-backed agent sessions now enter indexed search.** OpenCode and Hermes sessions stored in SQLite shared one file path, so background search ingest could not tell their session identities apart and skipped their transcript text. The ingest path now tracks each session's identity, storage path, and content revision independently, refreshes WAL-only changes, pages past stale search hits, preserves the last healthy index on transient database failures, and reconciles moved, unpinned, deleted, or old-root sessions across search and Analytics.
+
+### Documentation
+- **A manual path for adding coding agents.** Contributors can now propose a local session source, provide sanitized format evidence, or give a repository-owned implementation brief to their coding agent and prepare a structured draft PR. New sources remain ordinary reviewed code rather than downloaded plugins. A per-agent steward program pairs each supported agent with someone who keeps its format verified as the CLI moves.
+
+<!-- Headings the release-note generator does not recognise are dropped from the
+     Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py).
+     Entries below are development history, deliberately unannounced. -->
+### Maintenance
+- Format monitoring gained a Grok prebump driver, lifting Grok to `supports_latest`, and the weekly format check gained a value pass and an install-then-session bump rule. The matrix-key map is single-sourced, and Qwen is registered in the monitored set (11 → 12 agents).
+- `scripts/steward_check.py` lets a steward check one agent's local sessions against the recorded format baseline with a single command; on drift it produces a redacted sample (withheld entirely if the leak scan finds anything) and a ready-to-paste issue body. Own test suite.
+- The session-source registry ships with test sentinels pinning registry order, the provider catalog, the full UserDefaults key table, transcript hosting, Analytics participation, the Preferences sidebar, and the search allow-list.
 
 ## [4.8] - 2026-08-14
 

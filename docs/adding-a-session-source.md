@@ -54,8 +54,8 @@ version**, not a placeholder. What's New derives its provider-highlight rows fro
 ([`WhatsNewCatalog`](../AgentSessions/Onboarding/Models/WhatsNewCatalog.swift)), so a
 wrong value either hides your source's announcement or attaches it to a release that
 already shipped. The shipped version is **4.8** (Grok), while Qwen is currently recorded
-for the upcoming **4.9** release. Confirm the intended release with the maintainer; another
-source landing in the same release can also use `"4.9"`.
+for the upcoming **5.0** release. Confirm the intended release with the maintainer; another
+source landing in the same release can also use `"5.0"`.
 
 Do **not** use `"99.0"`. `NewProviderDiscoverabilityTests.testProviderHighlights_returnsEmptyForUnknownVersion`
 pins that string as a version no provider claims; the Task-0 spike broke the suite by

@@ -108,10 +108,41 @@ enum WhatsNewCatalog {
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
-        "4.9": "Qwen Code joins the lineup, with local history, search, Analytics, and active-chat resume."
+        "5.0": "Qwen Code joins the lineup, and every agent Agent Sessions reads now runs on one shared foundation."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.0": [
+            // Qwen itself is NOT authored here: `providerHighlights(for:)` generates its
+            // row from `SessionSource.qwen.versionIntroduced == "5.0"`. Same split as 4.7
+            // and 4.8.
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "square.stack.3d.up",
+                title: "One foundation under every agent",
+                body: "Each agent Agent Sessions reads was wired in by hand, surface by surface, so a new one could land in the session list and still be missing from Analytics, the filter pills or search. All thirteen now run off one shared description of what a session source is. Adding the next agent is a documented recipe with its own tests instead of fourteen scattered edits."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "person.2.badge.plus",
+                title: "Add the agent you use",
+                body: "If your coding agent is missing, there is now a written path to change that — a proposal form, an implementation brief you can hand to your own agent, and a pull-request template. Agents that ship can pick up a steward who keeps their format verified as the CLI moves."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "switch.2",
+                title: "The agent switches reach everywhere",
+                body: "Switching an agent off could leave its sessions in filter-view search results, Kimi and Grok never reported that their loading had finished, and OpenClaw could mark Analytics out of date on every launch. Each of those came from a separate hand-written list of agents, and none of those lists remain."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "4.8": [
             // Grok itself is NOT authored here: `providerHighlights(for:)` generates its
             // row from `SessionSource.grok.versionIntroduced == "4.8"`, and authoring it
