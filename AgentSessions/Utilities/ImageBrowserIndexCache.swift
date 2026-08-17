@@ -123,7 +123,12 @@ actor ImageBrowserIndexCache {
                         return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     case .openclaw:
                         return try OpenClawBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                    default:
+                    case .antigravity, .opencode, .copilot, .droid:
+                        // Old `default: return []`. Unreachable — the enclosing arm only
+                        // admits the eight base64-scanned sources, and these four have
+                        // their own arms further down — but explicit so a thirteenth
+                        // source added to the outer arm cannot land here and silently
+                        // report "no images" instead of being wired to a scanner.
                         return []
                     }
                 } catch {
@@ -146,7 +151,11 @@ actor ImageBrowserIndexCache {
                     // Every Grok match is already an `image` content part's data URI,
                     // so there is no non-image base64 to disambiguate the way Codex has.
                     return true
-                default:
+                case .antigravity, .opencode, .copilot, .droid:
+                    // Old `default: return false`. Unreachable for the same reason as the
+                    // scanner switch above; explicit so a new source added to the outer
+                    // arm must choose between the conservative URL-context filter and
+                    // accepting every match, instead of quietly discarding all of them.
                     return false
                 }
             }

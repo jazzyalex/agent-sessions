@@ -291,7 +291,11 @@ struct PreferencesView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selectedTab) {
-                ForEach(visibleTabs.filter { $0 != .about && $0 != .codexCLI && $0 != .claudeResume && $0 != .opencode && $0 != .antigravityCLI && $0 != .hermesCLI && $0 != .copilotCLI && $0 != .droidCLI && $0 != .openClawCLI && $0 != .cursor && $0 != .pi && $0 != .kimi && $0 != .grok }, id: \.self) { tab in
+                // The app-wide panes: everything that configures no particular agent, with
+                // About pulled out below so it can carry its own top padding. The
+                // hand-listed "and not any of the twelve agent tabs" filter this replaces
+                // had to be extended for every new source.
+                ForEach(visibleTabs.filter { $0 != .about && $0.configuredSource == nil }, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -299,11 +303,9 @@ struct PreferencesView: View {
                     .padding(.top, 1)
                     .tag(PreferencesTab.about)
                 Divider()
-                ForEach([PreferencesTab.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI], id: \.self) { tab in
-                    Label(tab.title, systemImage: tab.iconName)
-                        .tag(tab)
-                }
-                ForEach([PreferencesTab.cursor, .pi, .kimi, .grok, .hermesCLI, .openClawCLI], id: \.self) { tab in
+                // Two literal ForEach groups collapsed into the frozen order they
+                // concatenated to; droid is absent because it is in `sidebarHiddenSources`.
+                ForEach(PreferencesTab.sidebarAgentTabs, id: \.self) { tab in
                     Label(tab.title, systemImage: tab.iconName)
                         .tag(tab)
                 }
@@ -1176,9 +1178,88 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Tab ↔ source mapping (K13)
+//
+// `title` and `iconName` above stay hand-written. They are *not* `source.displayName` /
+// `source.iconName`: five of the twelve panes deliberately differ ("Antigravity CLI" vs
+// "Antigravity", "GitHub Copilot CLI" vs "Copilot CLI", claude's `c.square` vs `command`,
+// openclaw's `o.circle` vs `pawprint`), and this task may not change a rendered value.
+// Both switches are already exhaustive over `PreferencesTab`, so neither can grow a silent
+// hole; what was missing — and is added here — is the link from a *source* to its pane.
+extension PreferencesTab {
+    /// The settings pane that configures `source`. One exhaustive switch: a thirteenth
+    /// source has to declare its pane here rather than silently having none.
+    init(source: SessionSource) {
+        switch source {
+        case .codex:       self = .codexCLI
+        case .claude:      self = .claudeResume
+        case .antigravity: self = .antigravityCLI
+        case .opencode:    self = .opencode
+        case .hermes:      self = .hermesCLI
+        case .copilot:     self = .copilotCLI
+        case .droid:       self = .droidCLI
+        case .openclaw:    self = .openClawCLI
+        case .cursor:      self = .cursor
+        case .pi:          self = .pi
+        case .kimi:        self = .kimi
+        case .grok:        self = .grok
+        }
+    }
+
+    /// The source this pane configures, or nil for the app-wide panes. Reverse of
+    /// `init(source:)`; `ViewRegistryDerivationTests` pins the round trip. The sidebar's
+    /// first `ForEach` filters on this instead of listing all twelve agent tabs by hand.
+    var configuredSource: SessionSource? {
+        switch self {
+        case .general, .usageTracking, .limitAlerts, .usageProbes,
+             .menuBar, .unified, .advanced, .agentCockpit, .about:
+            return nil
+        case .codexCLI:        return .codex
+        case .claudeResume:    return .claude
+        case .antigravityCLI:  return .antigravity
+        case .opencode:        return .opencode
+        case .hermesCLI:       return .hermes
+        case .copilotCLI:      return .copilot
+        case .droidCLI:        return .droid
+        case .openClawCLI:     return .openclaw
+        case .cursor:          return .cursor
+        case .pi:              return .pi
+        case .kimi:            return .kimi
+        case .grok:            return .grok
+        }
+    }
+
+    /// §8.7: Droid's pane exists and is still reachable (`selectedTab = .droidCLI`), but it
+    /// is deliberately kept out of the sidebar. This set is the single place that says so —
+    /// the sidebar used to express it by simply omitting `.droidCLI` from two literals.
+    static let sidebarHiddenSources: Set<SessionSource> = [.droid]
+
+    /// The agent panes in sidebar order. Frozen history, NOT registry order: these rows
+    /// have shipped in this sequence and reordering them would move settings under the
+    /// user. Only the *membership* is derived — `ViewRegistryDerivationTests` asserts this
+    /// is exactly `SessionSource.allCases` minus `sidebarHiddenSources`, so a new source
+    /// that forgets its row fails there instead of vanishing from Settings.
+    static let sidebarAgentSources: [SessionSource] = [
+        .codex, .claude, .opencode, .antigravity, .copilot,
+        .cursor, .pi, .kimi, .grok, .hermes, .openclaw
+    ]
+
+    static var sidebarAgentTabs: [PreferencesTab] {
+        sidebarAgentSources.map(PreferencesTab.init(source:))
+    }
+
+    /// The app-wide panes, in sidebar order.
+    static let generalSidebarTabs: [PreferencesTab] = [
+        .general, .agentCockpit, .unified, .usageTracking,
+        .limitAlerts, .usageProbes, .menuBar, .advanced, .about
+    ]
+}
+
 private extension PreferencesView {
     // Sidebar order: General → Quota Meter → Unified Window → Usage Tracking → Limit Alerts → Usage Probes → Menu Bar → Advanced → About → Agents
-    var visibleTabs: [PreferencesTab] { [.general, .agentCockpit, .unified, .usageTracking, .limitAlerts, .usageProbes, .menuBar, .advanced, .about, .codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI, .cursor, .pi, .kimi, .grok, .hermesCLI, .openClawCLI] }
+    var visibleTabs: [PreferencesTab] {
+        PreferencesTab.generalSidebarTabs + PreferencesTab.sidebarAgentTabs
+    }
 }
 
 // MARK: - Probe helpers

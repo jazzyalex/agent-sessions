@@ -354,42 +354,25 @@ final class AnalyticsService: ObservableObject {
         return f.string(from: date)
     }
 
+    /// The raw source values a filter selects, restricted to the agents the user has
+    /// enabled (SPEC §6.C).
+    ///
+    /// Derived from `AnalyticsAgentFilter.matches` rather than a thirteen-arm switch that
+    /// restated it. The switch was a pure duplicate — every `…Only` arm returned the one
+    /// source its own `matches` already recognized — so the only thing it could ever do
+    /// was disagree with `matches` for a new source. The pairing sentinel is still
+    /// `testEveryAnalyticsSupportedSourceHasADedicatedAgentFilter`, which fails when a
+    /// source has no dedicated enum case at all.
+    ///
+    /// `.all`'s old arm sorted by raw value and every other arm returned a single element,
+    /// so sorting here reproduces all thirteen orders exactly. No union is needed for
+    /// `.all`: every source participates in the analytics build, OpenClaw included.
     private func sourcesFor(_ filter: AnalyticsAgentFilter) -> [String] {
-        let enabled: Set<String> = Set(AgentEnablement.enabledSources().map { $0.rawValue })
-        let raw: [String]
-        switch filter {
-        case .all:
-            // No union needed: every source now participates in analytics build and
-            // readiness tracking, OpenClaw included. It used to be queried here but
-            // excluded from the build, so its rollup tables were never populated and
-            // it contributed nothing to "All Agents" anyway.
-            raw = AnalyticsSourceSupport.sources.map(\.rawValue).sorted()
-        case .codexOnly:
-            raw = [SessionSource.codex.rawValue]
-        case .claudeOnly:
-            raw = [SessionSource.claude.rawValue]
-        case .antigravityOnly:
-            raw = [SessionSource.antigravity.rawValue]
-        case .opencodeOnly:
-            raw = [SessionSource.opencode.rawValue]
-        case .hermesOnly:
-            raw = [SessionSource.hermes.rawValue]
-        case .copilotOnly:
-            raw = [SessionSource.copilot.rawValue]
-        case .droidOnly:
-            raw = [SessionSource.droid.rawValue]
-        case .openclawOnly:
-            raw = [SessionSource.openclaw.rawValue]
-        case .cursorOnly:
-            raw = [SessionSource.cursor.rawValue]
-        case .piOnly:
-            raw = [SessionSource.pi.rawValue]
-        case .kimiOnly:
-            raw = [SessionSource.kimi.rawValue]
-        case .grokOnly:
-            raw = [SessionSource.grok.rawValue]
-        }
-        return raw.filter { enabled.contains($0) }
+        let enabled = AgentEnablement.enabledSources()
+        return AnalyticsSourceSupport.sources
+            .filter { filter.matches($0) && enabled.contains($0) }
+            .map(\.rawValue)
+            .sorted()
     }
 
     private func isWithin(_ date: Date, bounds: (start: Date?, end: Date?)) -> Bool {

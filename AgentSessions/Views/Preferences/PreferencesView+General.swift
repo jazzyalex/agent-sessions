@@ -70,20 +70,19 @@ extension PreferencesView {
 
             sectionHeader("Active CLI agents")
             VStack(alignment: .leading, spacing: 6) {
-                let enabledCount = [codexAgentEnabled, claudeAgentEnabled, antigravityAgentEnabled, openCodeAgentEnabled, hermesAgentEnabled, copilotAgentEnabled, droidAgentEnabled, openClawAgentEnabled, cursorAgentEnabled, piAgentEnabled, kimiAgentEnabled, grokAgentEnabled].filter { $0 }.count
+                // One row per registry entry, in registry order — which is exactly the
+                // order these twelve were hand-listed in. The row label is the
+                // descriptor's `shortLabel` ("Codex", "Copilot", "Kimi Code", …), the
+                // same string the hand-written list carried, and the toggle binding comes
+                // from `agentEnablementBinding(for:)`'s exhaustive switch.
+                let enabledCount = SessionSource.allCases.filter { agentEnablementBinding(for: $0).wrappedValue }.count
 
-                agentEnableToggle(title: "Codex", source: .codex, isOn: $codexAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Claude", source: .claude, isOn: $claudeAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Antigravity", source: .antigravity, isOn: $antigravityAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "OpenCode", source: .opencode, isOn: $openCodeAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Hermes", source: .hermes, isOn: $hermesAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Copilot", source: .copilot, isOn: $copilotAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Droid", source: .droid, isOn: $droidAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "OpenClaw", source: .openclaw, isOn: $openClawAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Cursor", source: .cursor, isOn: $cursorAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Pi", source: .pi, isOn: $piAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Kimi Code", source: .kimi, isOn: $kimiAgentEnabled, enabledCount: enabledCount)
-                agentEnableToggle(title: "Grok CLI", source: .grok, isOn: $grokAgentEnabled, enabledCount: enabledCount)
+                ForEach(SessionSourceRegistry.ordered, id: \.descriptor.source) { adapter in
+                    agentEnableToggle(title: adapter.descriptor.shortLabel,
+                                      source: adapter.descriptor.source,
+                                      isOn: agentEnablementBinding(for: adapter.descriptor.source),
+                                      enabledCount: enabledCount)
+                }
 
                 Text("Disabled agents are hidden across the app and background work is paused.")
                     .font(.caption)
@@ -454,6 +453,26 @@ extension PreferencesView {
 }
 
 private extension PreferencesView {
+    /// THE one place this pane names the twelve `…AgentEnabled` `@AppStorage` properties.
+    /// Exhaustive on purpose: a thirteenth source must say which preference its row reads
+    /// instead of falling through a `default:` onto somebody else's toggle.
+    func agentEnablementBinding(for source: SessionSource) -> Binding<Bool> {
+        switch source {
+        case .codex:       return $codexAgentEnabled
+        case .claude:      return $claudeAgentEnabled
+        case .antigravity: return $antigravityAgentEnabled
+        case .opencode:    return $openCodeAgentEnabled
+        case .hermes:      return $hermesAgentEnabled
+        case .copilot:     return $copilotAgentEnabled
+        case .droid:       return $droidAgentEnabled
+        case .openclaw:    return $openClawAgentEnabled
+        case .cursor:      return $cursorAgentEnabled
+        case .pi:          return $piAgentEnabled
+        case .kimi:        return $kimiAgentEnabled
+        case .grok:        return $grokAgentEnabled
+        }
+    }
+
     func agentEnableToggle(title: String, source: SessionSource, isOn: Binding<Bool>, enabledCount: Int) -> some View {
         let availability = AgentEnablement.availabilityStatus(for: source)
         let isCurrentlyOn = isOn.wrappedValue

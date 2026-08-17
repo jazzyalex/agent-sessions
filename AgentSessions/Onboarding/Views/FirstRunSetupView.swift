@@ -423,19 +423,11 @@ struct FirstRunSetupView: View {
             if hideLowMessageSessionsPref, session.messageCount > 0, session.messageCount <= 2 { return false }
         }
 
-        if hasCommandsOnlyPref {
-            switch session.source {
-            case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok:
-                if !session.events.isEmpty {
-                    if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
-                } else {
-                    if (session.lightweightCommands ?? 0) <= 0 { return false }
-                }
-            case .claude, .antigravity:
-                if session.events.isEmpty { return false }
-                if !session.events.contains(where: { $0.kind == .tool_call }) { return false }
-            }
-        }
+        // SPEC §6.A.2: this used to be a second, hand-copied transcription of the
+        // "has commands" rule. It is the *same* rule the session list applies, so the
+        // onboarding counts now call the list's own predicate — a divergence between the
+        // two would show the user a count they could not reproduce by opening the window.
+        if hasCommandsOnlyPref, !UnifiedSessionIndexer.passesHasCommandsFilter(session) { return false }
 
         return true
     }

@@ -676,7 +676,17 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
                 return true
             }
             return !meaningfulUser
-        default:
+        case .antigravity, .opencode, .hermes, .copilot, .droid,
+             .openclaw, .cursor, .pi, .kimi, .grok:
+            // Old `default: return false`: only Codex and Claude write the preamble /
+            // local-command shapes this classifier recognizes, so no other provider has
+            // ever been marked housekeeping. Written out per source so a thirteenth one
+            // has to decide whether that is true of its format too, rather than inheriting
+            // "never housekeeping" silently.
+            //
+            // Deliberately kept dependency-free (K15): this file compiles into the
+            // standalone logic-test target, so the arms are hand-written and read nothing
+            // from the registry.
             return false
         }
     }

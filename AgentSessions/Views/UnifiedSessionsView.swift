@@ -424,18 +424,21 @@ struct UnifiedSessionsView: View {
 	/// Footer usage meters on/off. @AppStorage rather than a raw UserDefaults read so
 	/// flipping the toggle in Preferences applies to an open window immediately.
 	@AppStorage(PreferencesKey.Unified.showFooterUsage) private var showFooterUsage: Bool = true
+	// Only Codex and Claude keep a named @AppStorage mirror, because the footer usage
+	// meters are Codex/Claude-specific and read them by name. Every other per-agent
+	// enablement question in this view goes through `unified.isAgentEnabled(_:)` (whose
+	// `enablementBySource` is @Published, so the toolbar still redraws on a toggle), and
+	// the *change* notification for all twelve comes from `agentEnablementObserver`.
+	// Re-declaring the other ten as @AppStorage would only give this view a second,
+	// separately-defaulted copy of the same answer.
 	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
 	@AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
-	@AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
-	    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
-	    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
-	    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
-	    @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
-	    @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
-	    @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+	/// One receiver in place of the seven `.onChange(of: <x>AgentEnabled)` modifiers this
+	/// view used to carry (§8.4). Those covered only 7 of the 12 sources, so toggling
+	/// Hermes, Droid, OpenClaw, Cursor or Pi never flashed the "some agents are hidden"
+	/// notice; the key list is derived from `SessionSource.allCases`, so it cannot drift
+	/// again. Same pattern as `AgentSessionsApp`'s own enablement observer.
+	@State private var agentEnablementObserver = FilteredDefaultsObserver(keys: AgentEnablement.allEnablementKeys)
 	    @State private var autoSelectEnabled: Bool = true
 	    @State private var isDatasetChurning: Bool = false
 	    // Set by updateCachedRows() exactly when the canonical selection id was
@@ -653,20 +656,18 @@ struct UnifiedSessionsView: View {
 						}
 					}
 
+		// §8.4: one receiver for all twelve enablement keys. The seven `.onChange`
+		// modifiers this replaces were an ad-hoc subset (codex, claude, antigravity,
+		// opencode, copilot, kimi, grok) — the other five sources changed nothing.
+		// `updateFooterUsageVisibility()` was previously attached only to the codex and
+		// claude arms; it recomputes from `codexAgentEnabled`/`claudeAgentEnabled` and the
+		// usage toggles, so running it on any enablement write re-asserts the same two
+		// values rather than adding an effect.
 		let afterAgents = afterUsage
-			.onChange(of: codexAgentEnabled) { _, _ in
+			.onReceive(agentEnablementObserver.mainPublisher) { _ in
 				flashAgentEnablementNoticeIfNeeded()
 				updateFooterUsageVisibility()
 			}
-			.onChange(of: claudeAgentEnabled) { _, _ in
-				flashAgentEnablementNoticeIfNeeded()
-				updateFooterUsageVisibility()
-			}
-			.onChange(of: antigravityAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-			.onChange(of: openCodeAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-			.onChange(of: copilotAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-			.onChange(of: kimiAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
-			.onChange(of: grokAgentEnabled) { _, _ in flashAgentEnablementNoticeIfNeeded() }
 
 		let afterSessions = afterAgents
 			.onReceive(unified.$sessions) { sessions in
@@ -1446,7 +1447,11 @@ struct UnifiedSessionsView: View {
         return value
     }
 
+    /// Same shape as `canResumeSession`: the registry gate is a source-level pre-filter,
+    /// and the per-source arms below stay because several of them are narrower than it
+    /// (codex additionally needs a resolvable session id, antigravity a derivable one).
     private func canCopyResumeCommand(_ session: Session, antigravityCLISessionID: String? = nil) -> Bool {
+        guard session.source.descriptor.supportsResume else { return false }
         switch session.source {
         case .claude:
             return true // falls back to --continue
@@ -1475,7 +1480,9 @@ struct UnifiedSessionsView: View {
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
-        default:
+        case .droid, .openclaw:
+            // Old `default: return false` — no resume command exists to copy. Unreachable
+            // behind the `supportsResume` guard; explicit so a new source must decide.
             return false
         }
     }
@@ -1490,6 +1497,8 @@ struct UnifiedSessionsView: View {
             pasteboard.clearContents()
             pasteboard.setString(command, forType: .string)
         }
+
+        guard session.source.descriptor.supportsResume else { return }
 
         switch session.source {
         case .claude:
@@ -1619,7 +1628,10 @@ struct UnifiedSessionsView: View {
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
-        default:
+        case .droid, .openclaw:
+            // Old `default: break` — neither ships a resume command to copy. Unreachable
+            // behind the `supportsResume` guard above; explicit so a thirteenth source
+            // cannot silently become a no-op here.
             break
         }
     }
@@ -1879,51 +1891,59 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    /// Enabled agents other than Codex/Claude (which always render as segmented
-    /// pills), in the fixed order they've historically appeared in the toolbar.
+    /// Enabled agents other than Codex/Claude (which always render as segmented pills),
+    /// in the fixed order they've historically appeared in the toolbar.
+    ///
+    /// Derived from the registry (K10): a source shows an "other agent" pill exactly when
+    /// its descriptor carries a `PillSpec`, which is true for the ten non-Codex/Claude
+    /// sources and nobody else. `SessionSourceRegistry.ordered` *is* the historical toolbar
+    /// order once Codex and Claude drop out, and title / color / ⌘-shortcut all come from
+    /// the descriptor, so adding a source no longer means editing this file. The pinned
+    /// values live in `SessionSourceRegistryTests` (pill colors, shortcuts, short labels)
+    /// and `ViewRegistryDerivationTests` (the derivation itself).
     private var enabledOtherAgentSpecs: [AgentToolbarSpec] {
-        var specs: [AgentToolbarSpec] = []
-        if antigravityAgentEnabled {
-            specs.append(.init(id: "antigravity", title: "Antigravity", color: .teal, isOn: $unified.includeAntigravity, shortcut: "3"))
+        SessionSourceRegistry.ordered.compactMap { adapter -> AgentToolbarSpec? in
+            let descriptor = adapter.descriptor
+            guard let pill = descriptor.otherAgentPill else { return nil }
+            guard unified.isAgentEnabled(descriptor.source) else { return nil }
+            return AgentToolbarSpec(
+                id: descriptor.source.rawValue,
+                title: descriptor.shortLabel,
+                color: pill.color,
+                isOn: includeBinding(for: descriptor.source),
+                // ⌘3–⌘9 are frozen history and run out before hermes/kimi/grok, which is
+                // why `PillSpec.shortcut` is optional rather than derived.
+                shortcut: pill.shortcut.flatMap(\.first).map { KeyEquivalent($0) }
+            )
         }
-        if openCodeAgentEnabled {
-            specs.append(.init(id: "opencode", title: "OpenCode", color: .purple, isOn: $unified.includeOpenCode, shortcut: "4"))
+    }
+
+    /// The source-filter toggle a pill drives. THE one place this view names the twelve
+    /// `include…` properties, and exhaustive on purpose: a thirteenth source has to say
+    /// which toggle its pill flips rather than falling through a `default:`.
+    private func includeBinding(for source: SessionSource) -> Binding<Bool> {
+        switch source {
+        case .codex:       return $unified.includeCodex
+        case .claude:      return $unified.includeClaude
+        case .antigravity: return $unified.includeAntigravity
+        case .opencode:    return $unified.includeOpenCode
+        case .hermes:      return $unified.includeHermes
+        case .copilot:     return $unified.includeCopilot
+        case .droid:       return $unified.includeDroid
+        case .openclaw:    return $unified.includeOpenClaw
+        case .cursor:      return $unified.includeCursor
+        case .pi:          return $unified.includePi
+        case .kimi:        return $unified.includeKimi
+        case .grok:        return $unified.includeGrok
         }
-        if hermesAgentEnabled {
-            specs.append(.init(id: "hermes", title: "Hermes", color: TranscriptColorSystem.agentBrandAccent(source: .hermes), isOn: $unified.includeHermes, shortcut: nil))
-        }
-        if copilotAgentEnabled {
-            specs.append(.init(id: "copilot", title: "Copilot", color: Color.agentCopilot, isOn: $unified.includeCopilot, shortcut: "5"))
-        }
-        if droidAgentEnabled {
-            specs.append(.init(id: "droid", title: "Droid", color: Color.agentDroid, isOn: $unified.includeDroid, shortcut: "6"))
-        }
-        if openClawAgentEnabled {
-            specs.append(.init(id: "openclaw", title: "OpenClaw", color: Color.agentOpenClaw, isOn: $unified.includeOpenClaw, shortcut: "7"))
-        }
-        if cursorAgentEnabled {
-            specs.append(.init(id: "cursor", title: "Cursor", color: Color.agentCursor, isOn: $unified.includeCursor, shortcut: "8"))
-        }
-        if piAgentEnabled {
-            specs.append(.init(id: "pi", title: "Pi", color: Color.agentPi, isOn: $unified.includePi, shortcut: "9"))
-        }
-        if kimiAgentEnabled {
-            // ⌘1–⌘9 are fully allocated (Codex=1, Claude=2, … Pi=9), so Kimi
-            // takes no shortcut — same as Hermes.
-            specs.append(.init(id: "kimi", title: "Kimi Code", color: Color.agentKimi, isOn: $unified.includeKimi, shortcut: nil))
-        }
-        if grokAgentEnabled {
-            // ⌘1–⌘9 are fully allocated (Codex=1, Claude=2, … Pi=9), so Kimi
-            // takes no shortcut — same as Hermes.
-            specs.append(.init(id: "grok", title: "Grok CLI", color: Color.agentGrok, isOn: $unified.includeGrok, shortcut: nil))
-        }
-        return specs
     }
 
     /// Total enabled agents including Codex/Claude — drives when the other agents
     /// collapse into the overflow menu.
     private var enabledAgentCount: Int {
-        (codexAgentEnabled ? 1 : 0) + (claudeAgentEnabled ? 1 : 0) + enabledOtherAgentSpecs.count
+        (unified.isAgentEnabled(.codex) ? 1 : 0)
+            + (unified.isAgentEnabled(.claude) ? 1 : 0)
+            + enabledOtherAgentSpecs.count
     }
 
     @ViewBuilder
@@ -3104,23 +3124,22 @@ struct UnifiedSessionsView: View {
         NSWorkspace.shared.open(dir)
     }
 
+    /// The agent name shown in Resume affordances. `?? "CLI"` is the old switch's
+    /// `default:` and is load-bearing, not cosmetic: droid and openclaw carry no label
+    /// (they never resume), and any future label-less source lands here too.
     private func resumeAgentLabel(_ source: SessionSource) -> String {
-        switch source {
-        case .codex: return "Codex CLI"
-        case .opencode: return "OpenCode"
-        case .hermes: return "Hermes"
-        case .claude: return "Claude Code"
-        case .copilot: return "Copilot CLI"
-        case .cursor: return "Cursor CLI"
-        case .pi: return "Pi CLI"
-        case .kimi: return "Kimi Code"
-        case .grok: return "Grok CLI"
-        case .antigravity: return "Antigravity CLI"
-        default: return "CLI"
-        }
+        source.descriptor.resumeAgentLabel ?? "CLI"
     }
 
+    /// Whether this *session* can be resumed.
+    ///
+    /// `descriptor.supportsResume` is a source-level PRE-gate and is strictly WEAKER than
+    /// the per-session predicates below (Task 2 review I1): codex excludes side chats and
+    /// VS Code sessions, claude excludes workflow subagents, antigravity requires a
+    /// derivable conversation ID. The descriptor guard is prepended, never substituted —
+    /// substituting it would sprout broken Resume affordances on exactly those subtypes.
     private func canResumeSession(_ s: Session, antigravityCLISessionID: String? = nil) -> Bool {
+        guard s.source.descriptor.supportsResume else { return false }
         switch s.source {
         case .codex:
             return canResumeCodexInCLI(s)
@@ -3130,7 +3149,10 @@ struct UnifiedSessionsView: View {
             return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
-        default:
+        case .droid, .openclaw:
+            // Old `default: return false`. Unreachable — the descriptor guard above already
+            // refused both — but written out so a thirteenth source must declare its own
+            // per-session rule instead of silently inheriting "never resumable".
             return false
         }
     }
@@ -3141,6 +3163,7 @@ struct UnifiedSessionsView: View {
 
     private func resume(_ s: Session) {
         guard !s.isClaudeWorkflowSubagent else { return }
+        guard s.source.descriptor.supportsResume else { return }
         // Captured at click time, not at report time. A Warp cold start
         // activates Warp and deactivates us, so by the time a failure comes back
         // (3s later, more if Gatekeeper is verifying) `NSApp.keyWindow` is nil
@@ -3329,7 +3352,11 @@ struct UnifiedSessionsView: View {
                 let result = await coord.resumeInTerminal(input: input, policy: settings.fallbackPolicy, dryRun: false)
                 reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
-        default:
+        case .droid, .openclaw:
+            // Old `default: return` (SPEC §6.C). Neither has a resume path, and the
+            // `supportsResume` guard above already returned — but the arm is written out so
+            // a thirteenth source fails to compile here instead of quietly doing nothing
+            // behind a Resume menu item that its own descriptor said it supports.
             return
         }
     }
@@ -3399,7 +3426,9 @@ struct UnifiedSessionsView: View {
     }
 
     private func flashAgentEnablementNoticeIfNeeded() {
-        let anyDisabled = !(codexAgentEnabled && claudeAgentEnabled && antigravityAgentEnabled && openCodeAgentEnabled && hermesAgentEnabled && copilotAgentEnabled && droidAgentEnabled && openClawAgentEnabled && cursorAgentEnabled && piAgentEnabled && kimiAgentEnabled && grokAgentEnabled)
+        // The twelve-term `&&` chain this replaces had to be extended by hand for every
+        // new source; `allCases` cannot forget one.
+        let anyDisabled = SessionSource.allCases.contains { !unified.isAgentEnabled($0) }
         guard anyDisabled else {
             withAnimation { showAgentEnablementNotice = false }
             return
