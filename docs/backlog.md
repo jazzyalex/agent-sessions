@@ -524,6 +524,52 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ---
 
+## QM / Runway (Claude)
+
+### Claude runway rows intermittently show tokens/hour instead of weekly-share in Weekly mode
+> **open** · sev: med · urg: low · verified 2026-08-16
+
+- **Reported by owner (2026-08-16):** with the runway presentation set to Weekly, Claude
+  session rows sometimes render raw token throughput instead of the weekly-average-burn
+  share; Codex rows are correct in the same mode. **Update same day:** owner then observed
+  Weekly mode showing the correct burn-rate for Claude too, with no code change in
+  between — so this is **intermittent, not a permanent fallback.** That rules out "Claude's
+  weekly data is structurally unmeasurable on this account" as the sole cause and points
+  instead at something timing- or state-dependent: a stale/zero usage snapshot on first
+  render before the weekly fetch lands, a refresh race between the 5h and weekly polls, or
+  the `weeklyMeasurable` guard tripping only during a specific window (e.g. right after an
+  app relaunch or a weekly-window rollover). Needs reproduction with logging, not a fix,
+  before anything below is trusted as the actual cause.
+- **Where:** the presentation resolves to `.tokensPerHour` instead of
+  `.weeklyPercentPerHour` whenever `weeklyMeasurable` is false —
+  [`effectivePresentation`](../AgentSessions/Views/AgentCockpitHUDView.swift:3152) (the
+  `.weekly` case), fed by `weeklyRunout` computed via `RunwayBaselineMath.averageBurnRunout`
+  in both [`request`](../AgentSessions/Views/AgentCockpitHUDView.swift:3223) (Codex) and
+  [`claudeRequest`](../AgentSessions/Views/AgentCockpitHUDView.swift:3318). Same fallback
+  also lives one layer down in
+  [`CodexRunwayCalculator.weeklySnapshot`](../AgentSessions/CodexStatus/CodexRunwayModel.swift:947),
+  which returns `nil` (→ token snapshot) whenever `remainingPercent <= 0` or the computed
+  run-out yields `seconds <= 0`.
+- **Not yet root-caused:** the call sites for Claude
+  ([claudeRequest](../AgentSessions/Views/AgentCockpitHUDView.swift:3708)) and Codex
+  ([codexRunwayRequest](../AgentSessions/Views/AgentCockpitHUDView.swift:3685)) look
+  structurally identical, and `weekAllModelsRemainingPercent` /
+  `weekAllModelsResetText` populate the same way Codex's week fields do
+  (`ClaudeStatusService.swift:1261`, `ClaudeUsageModel.swift:530-535`). The divergence is
+  therefore either in the *values* Claude's weekly usage source actually returns (e.g.
+  `weekAllModelsRemainingPercent` reading 0% used / no run-out on this account) or in
+  something not yet traced — a live snapshot comparison (Claude vs. Codex, same account,
+  Weekly mode) is needed, not more static reading.
+- **To close:** since it's intermittent, a single breakpoint won't catch it — add
+  temporary logging of `claudeRunwayRequest`'s `resolved.rateUnit`,
+  `weekRemainingPercent`/`weekResetText`, and `weeklyRunout` on every HUD refresh cycle,
+  then correlate the tokens-mode ticks against app lifecycle (launch, wake, weekly-window
+  rollover) and against `ClaudeUsageModel`'s fetch/refresh timing to catch it live.
+- **Risk if wrong:** low blast radius — display-only, wrong unit label on a runway row,
+  no data loss. Confusing enough to mislead pacing decisions, hence med severity.
+
+---
+
 ## Resume / Terminal Launch
 
 ### `runAppleScript` blocks the main thread for the Terminal / iTerm path
