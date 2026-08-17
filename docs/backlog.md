@@ -145,6 +145,29 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
+### Grok session sidecars are neither watched nor read
+> **open** · sev: low · urg: low · verified 2026-08-17
+
+- **What:** a Grok session is a directory, and beyond `chat_history.jsonl` +
+  `summary.json` it also holds `rewind_points.jsonl`, `events.jsonl`, `updates.jsonl`,
+  `prompt_context.json`, `resources_state.json`, `signals.json` and `system_prompt.txt`.
+  No fixture covers any of them, the schema fingerprint ignores them, and no Swift reads
+  them — so upstream could restructure any one without the weekly scan noticing.
+  Surfaced 2026-08-17 from a kept prebump sandbox.
+- **Where:** [GrokSessionParser.swift](../AgentSessions/Services/GrokSessionParser.swift)
+  and [GrokSessionDiscovery.swift](../AgentSessions/Services/GrokSessionDiscovery.swift)
+  read the transcript and `summary.json` only; the weekly `local_schema` glob is
+  `*/*/chat_history.jsonl`.
+- **Two separate jobs, do not conflate:** (a) *monitoring* — decide which sidecars are
+  load-bearing and add them to the fingerprint or to `required_companion_files`, the way
+  `summary.json` already is; (b) *product* — `rewind_points.jsonl` is the interesting one,
+  since it records the session's rewind history and nothing in the app exposes that.
+- **Related, still open from 2026-08-13:** `subagents/<childId>/meta.json` (the only place
+  `parent_session_id` / `subagent_type` appear, so the hierarchy feature depends on it)
+  and the `compaction/` subtree.
+- **To close:** each sidecar is classified as watched, deliberately ignored, or a feature
+  candidate — with the ruling written down so this is not re-derived a third time.
+
 ### Image extraction for Kimi, Pi, Hermes and Cursor is wired but inert
 > **open** · sev: low · urg: low · verified 2026-08-14
 
@@ -170,6 +193,36 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Transcript UI
+
+### MCP tool calls render anonymously though Codex now names the connector
+> **open** · sev: low · urg: low · verified 2026-08-17
+
+- **What:** Codex `mcp_tool_call_end` events gained `app_name`, `connector_id`,
+  `action_name` and `link_id` (found 2026-08-17 sweeping 1209 local sessions). Every MCP
+  tool row in the transcript currently shows the raw tool name with no indication of
+  which connector ran it, even though the record now says.
+- **Where:** the Codex tool-event path in
+  [SessionTranscriptBuilder.swift](../AgentSessions/Services/SessionTranscriptBuilder.swift);
+  none of the four keys appear anywhere in `AgentSessions/`.
+- **Fix shape:** surface `app_name` (or `connector_id` when the friendly name is absent)
+  as a label or subtitle on MCP tool rows.
+- **Risk if wrong:** the keys are new, so older sessions lack them — the label must be
+  optional, never a layout requirement.
+- **To close:** an MCP tool row shows its originating connector, and a fixture covers a
+  record both with and without the keys.
+
+### Qwen reports its context window size and nothing shows it
+> **open** · sev: low · urg: low · verified 2026-08-17
+
+- **What:** Qwen assistant records carry `contextWindowSize`. There is no context-fullness
+  indicator anywhere in the app, and this is the only source that states the window
+  directly rather than requiring a per-model lookup table.
+- **Where:** [QwenSessionParser.swift](../AgentSessions/Services/QwenSessionParser.swift);
+  `contextWindowSize` appears nowhere in `AgentSessions/`.
+- **Why deferred:** only useful next to a token count, so it naturally follows the Qwen
+  usage entry under *Usage Tracking*. Do that one first.
+- **To close:** context usage is displayable for at least one source without hardcoding
+  per-model window sizes.
 
 ### Inline images lost their right-click menu everywhere
 > **open** · sev: low · urg: low · verified 2026-08-13
@@ -264,6 +317,25 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 ---
 
 ## Kimi Code
+
+### `turn.ended` carries per-turn duration that nothing reads
+> **open** · sev: low · urg: low · verified 2026-08-17
+
+- **What:** Kimi's `turn.ended` wire event carries `durationMs` and `reason`, present in
+  every session. The 2026-08-13 ledger entry already named this "the natural source of a
+  per-turn duration UI" and it has sat unused since — filed here so it stops living as an
+  aside in a ledger note.
+- **Where:** [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift) —
+  `turn.ended` falls through the `default:` branch to `.meta`, so both fields survive in
+  `rawJSON` and are never read. `durationMs` appears nowhere in `AgentSessions/`.
+- **Fix shape:** per-turn timing already has a home in
+  [TranscriptTurnTiming.swift](../AgentSessions/Services/TranscriptTurnTiming.swift),
+  which currently derives timing from timestamps; a source-reported duration is more
+  accurate where it exists.
+- **Risk if wrong:** only Kimi reports this, so any UI must degrade cleanly for the other
+  eleven sources rather than showing a gap.
+- **To close:** Kimi turns show a source-reported duration, or the field is explicitly
+  declared redundant against derived timing.
 
 ### Fixture does not cover image / audio / video content parts
 > **open** · sev: low · urg: low · verified —
@@ -451,6 +523,31 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 ---
 
 ## Usage Tracking
+
+### Qwen already reports its own token usage and we discard it
+> **open** · sev: med · urg: low · verified 2026-08-17
+
+- **What:** every Qwen transcript carries complete per-call token accounting that nothing
+  reads. The records are `type: system` / `subtype: ui_telemetry`, and
+  `systemPayload.uiEvent` holds `input_token_count`, `output_token_count`,
+  `cached_content_token_count`, `thoughts_token_count`, `tool_token_count`,
+  `total_token_count`, `duration_ms`, and `model`. Values are real and dense — one
+  ordinary local session carries **53** such records (e.g. 18022 in / 362 out / 12125
+  cached / 35 thinking, 11392 ms).
+- **Where:** [QwenSessionParser.swift](../AgentSessions/Services/QwenSessionParser.swift)
+  maps every `type: system` record straight to `.meta`, so telemetry is retained in
+  `rawJSON` and never extracted. `usageMetadata` on assistant records is touched only to
+  carry it across fragment merges — the numbers are never read out.
+- **Why this is mis-filed today:** `agent-support-matrix.yml` lists "usage/rate-limit
+  tracking" under Qwen's *unsupported surfaces*, which reads as "the data isn't there."
+  The data is there; nobody opened it. Fix the matrix wording as part of this.
+- **Fix shape:** extract the `uiEvent` counters into the existing usage/analytics path.
+  Per-call `duration_ms` + tokens is also enough for a burn-rate view without a price
+  table, which is strictly better evidence than estimating from a table that goes stale.
+- **Risk if wrong:** double-counting. `usageMetadata` and `uiEvent` may describe the same
+  call from two places; confirm which is authoritative on real records before summing.
+- **To close:** Qwen sessions show token usage in Analytics, and the matrix no longer
+  claims the surface is unavailable.
 
 ### Verify the Claude Web API usage source actually works
 > **open** · sev: low · urg: low · verified —
