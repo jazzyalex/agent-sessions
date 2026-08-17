@@ -5,7 +5,9 @@ protocol QwenCLIEnvironmentProviding {
 }
 
 /// Locates Qwen Code and verifies the resume flags advertised by the installed binary.
-/// Verified locally against Qwen Code 0.21.13: `--resume <id>` and `--continue`.
+/// The installed Qwen Code 0.21.13 `--help` advertises `--resume <id>` and `--continue`;
+/// that help surface is all that was observed at 0.21.13 — model execution was
+/// authentication-blocked, so end-to-end resume is untested (matrix pins 0.14.3).
 struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
     static let binaryName = "qwen"
 

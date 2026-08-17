@@ -59,7 +59,16 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
     init(store: SearchSessionStoring) {
         self.store = store
-        self.db = try? IndexDB()
+        // A failed open silently disables DB-backed search (the legacy scan path still
+        // runs), and schema migration failure is the way that happens. Surface it instead
+        // of swallowing it: loud in DEBUG, logged in release.
+        do {
+            self.db = try IndexDB()
+        } catch {
+            self.db = nil
+            LaunchProfiler.log("SearchCoordinator: IndexDB unavailable, falling back to legacy search — \(error)")
+            assertionFailure("SearchCoordinator could not open IndexDB: \(error)")
+        }
         self.ftsResultLimitForTesting = nil
     }
 
@@ -345,7 +354,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         query: effectiveFTSQuery,
                         includeSystemProbes: includeSystemProbes,
                         limit: dbResultLimit,
-                        eligibleSessionIDs: indexedIDs
+                        eligibleSessionIDs: indexedIDs,
+                        ineligibleSessionIDs: staleIDs
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
@@ -375,6 +385,11 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                                 currentToolIOIDs.insert(session.id)
                             }
                         }
+                        // Present-but-not-current tool I/O rows: the exact complement of the
+                        // eligible set inside the tool I/O corpus, so the SQL LIMIT can bound
+                        // the filtered ranking instead of the unfiltered one.
+                        let presentToolIOIDs = Set((try? await db.toolIOSessionIDs(sources: allowedRaw)) ?? [])
+                        let staleToolIOIDs = presentToolIOIDs.subtracting(currentToolIOIDs)
                         let toolResultLimit = dbResultLimit - mergedIDs.count
                         // Exclude ordinary hits before applying capacity; otherwise a top
                         // tool match that is already present consumes the remaining slot and
@@ -390,6 +405,7 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                             includeSystemProbes: includeSystemProbes,
                             limit: toolResultLimit,
                             eligibleSessionIDs: currentToolIOIDs,
+                            ineligibleSessionIDs: staleToolIOIDs,
                             excludingSessionIDs: mergedSet
                         )) ?? []
                         var addedAny = false

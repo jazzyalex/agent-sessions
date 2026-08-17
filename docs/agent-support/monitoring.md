@@ -17,7 +17,7 @@ This is intentionally **non-destructive**:
 
 ## Cadence
 - Daily: `codex`, `claude`, `opencode`, `openclaw` (release watch only; quiet unless there is actionable change).
-- Weekly: all 11 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok` (release watch + minimal probes + schema fingerprints).
+- Weekly: all 12 active agents — `codex`, `claude`, `opencode`, `hermes`, `antigravity`, `copilot`, `openclaw`, `cursor`, `pi`, `kimi`, `grok`, `qwen` (release watch + minimal probes + schema fingerprints).
 - Weekly also enforces `discovery_path_contract` checks from config to catch storage-layout drift that can break app discovery even when parser schema still matches.
 - A contract may declare `required_companion_files` — sidecars that must sit beside the sampled
   transcript for the app to discover the session at all. Entries are relative to the transcript's

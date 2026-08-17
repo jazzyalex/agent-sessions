@@ -112,7 +112,7 @@ extension SessionSourceAdapter {
                 searchAdapter: .init(
                     transcriptCache: indexer.searchTranscriptCache,
                     update: { indexer.updateSession($0) },
-                    parseFull: { url, _ in QwenSessionParser.parseFileFull(at: url, allowLargeFile: true) }
+                    parseFull: { url, _ in QwenSessionParser.parseFileFull(at: url) }
                 )
             )
         }

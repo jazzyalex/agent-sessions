@@ -2,7 +2,8 @@ import Foundation
 
 /// Discovers Qwen Code chat transcripts under `~/.qwen/projects`.
 ///
-/// Qwen 0.21.13's installed writer stores one `<session-id>.jsonl` file in each project's
+/// The writer read from the installed Qwen Code 0.21.13 package stores one
+/// `<session-id>.jsonl` file in each project's
 /// `chats` directory. CLI-archived transcripts live one level deeper in
 /// `chats/archive`; unrelated JSONL files elsewhere below `projects` are not
 /// sessions and are deliberately excluded.
@@ -39,7 +40,8 @@ final class QwenSessionDiscovery: SessionDiscovery {
     static func sessionID(forTranscript url: URL) -> String? {
         guard url.pathExtension.lowercased() == "jsonl" else { return nil }
         let id = url.deletingPathExtension().lastPathComponent
-        // Match Qwen 0.21.13's SESSION_FILE_PATTERN exactly: compact legacy IDs
+        // Matches the SESSION_FILE_PATTERN read from the installed 0.21.13 package
+        // source (no 0.21.13 transcript was captured; the matrix pins 0.14.3): compact legacy IDs
         // and canonical UUIDs are both accepted, while arbitrary JSONL names are not.
         let bytes = id.utf8
         guard (32...36).contains(bytes.count),

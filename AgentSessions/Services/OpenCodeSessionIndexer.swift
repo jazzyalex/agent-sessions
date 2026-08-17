@@ -189,7 +189,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                     self.allSessions = result.sessions
                     self.searchIdentitySnapshot = configuredDBExists
                         ? nil
-                        : .authoritativeEmpty(storagePath: configuredDBURL.path)
+                        : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
                     self.isIndexing = false
                     if FeatureFlags.throttleIndexingUIUpdates {
                         self.filesProcessed = self.totalFiles
@@ -208,7 +208,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                 self.allSessions = []
                 self.searchIdentitySnapshot = configuredDBExists
                     ? nil
-                    : .authoritativeEmpty(storagePath: configuredDBURL.path)
+                    : SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: configuredDBURL)
                 self.isIndexing = false
                 self.hasEmptyDirectory = true
                 self.progressText = "Ready"

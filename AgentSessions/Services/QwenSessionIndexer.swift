@@ -214,7 +214,7 @@ final class QwenSessionIndexer: ObservableObject, SessionIndexerProtocol, @unche
                 }
             }
 
-            let parsed = QwenSessionParser.parseFileFull(at: url, allowLargeFile: true)
+            let parsed = QwenSessionParser.parseFileFull(at: url)
             self.reloadLock.lock()
             if let preParseStat { self.lastFullReloadFileStatsBySessionID[id] = preParseStat }
             self.reloadLock.unlock()

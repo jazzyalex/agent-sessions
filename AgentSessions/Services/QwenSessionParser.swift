@@ -86,8 +86,6 @@ enum QwenJSONL {
 /// topology before deriving any list metadata or rendered event so dead rewind
 /// branches cannot leak into titles, counts, search, analytics, or resume cwd.
 enum QwenSessionParser {
-    static let defaultFullParseMaxBytes = 50 * 1024 * 1024
-
     private static let validRecordTypes: Set<String> = [
         "user", "assistant", "tool_result", "system"
     ]
@@ -115,11 +113,15 @@ enum QwenSessionParser {
     static func parseFile(at url: URL) -> Session? {
         // Lightweight rows still require the complete topology: the active leaf,
         // title, cwd, and counts may all be written after an arbitrary rewind.
-        build(url: url, includeEvents: false, allowLargeFile: true)
+        build(url: url, includeEvents: false)
     }
 
-    static func parseFileFull(at url: URL, allowLargeFile: Bool = false) -> Session? {
-        build(url: url, includeEvents: true, allowLargeFile: allowLargeFile)
+    /// No size ceiling: every call site (descriptor, indexer reload) deliberately parses
+    /// whatever the user has, because refusing to open a large transcript is worse than
+    /// the parse cost. The `allowLargeFile:` seam other parsers carry was dead here — no
+    /// caller ever took the guarded path — so it is not kept as decoration.
+    static func parseFileFull(at url: URL) -> Session? {
+        build(url: url, includeEvents: true)
     }
 
     static func isValidHeadObject(_ object: [String: Any], expectedSessionID: String) -> Bool {
@@ -127,10 +129,9 @@ enum QwenSessionParser {
         return record.sessionID.caseInsensitiveCompare(expectedSessionID) == .orderedSame
     }
 
-    private static func build(url: URL, includeEvents: Bool, allowLargeFile: Bool) -> Session? {
+    private static func build(url: URL, includeEvents: Bool) -> Session? {
         guard let expectedSessionID = QwenSessionDiscovery.sessionID(forTranscript: url) else { return nil }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        if !allowLargeFile, size > defaultFullParseMaxBytes { return nil }
 
         guard let allRecords = loadRecords(from: url), !allRecords.isEmpty else { return nil }
         guard allRecords.allSatisfy({
@@ -514,9 +515,11 @@ enum QwenSessionParser {
         return joined.isEmpty ? nil : joined
     }
 
-    /// Mirrors Qwen 0.21.13's display projection exactly: the reserved hook
-    /// context is removable only when it is a separate final part, uses the
-    /// writer's newline-delimited wrapper, and contains no nested wrapper tag.
+    /// Mirrors the display projection read from the installed Qwen Code 0.21.13
+    /// package source: the reserved hook context is removable only when it is a
+    /// separate final part, uses the writer's newline-delimited wrapper, and contains
+    /// no nested wrapper tag. Behaviour is claimed from reading that source, not from
+    /// an observed 0.21.13 transcript — the matrix pins `max_verified_version: 0.14.3`.
     private static func isUserPromptSubmitContextPart(_ value: Any) -> Bool {
         guard let part = value as? [String: Any],
               let text = part["text"] as? String else { return false }

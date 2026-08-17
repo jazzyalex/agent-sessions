@@ -56,7 +56,14 @@ final class HermesSessionDiscovery: SessionDiscovery {
         return items
             .filter { url in
                 let name = url.lastPathComponent
-                return name.hasPrefix("session_") && url.pathExtension.lowercased() == "json"
+                guard name.hasPrefix("session_"), url.pathExtension.lowercased() == "json" else {
+                    return false
+                }
+                // Restores the `.skipsHiddenFiles` behaviour lost when this moved to the
+                // shared probe (whose other caller needs hidden dot-directories). A
+                // dot-name cannot match "session_", so this only re-excludes an entry
+                // carrying the filesystem hidden flag.
+                return (try? url.resourceValues(forKeys: [.isHiddenKey]).isHidden) != true
             }
             .sorted {
                 let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast

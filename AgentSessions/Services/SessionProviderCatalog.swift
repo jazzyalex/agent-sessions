@@ -63,7 +63,10 @@ final class SessionProviderCatalog: ObservableObject {
             let runtime = adapter.makeRuntime()
             let descriptorUsesIdentity = adapter.descriptor.parseFullByIdentity != nil
                 && adapter.descriptor.searchUsesIdentityAtURL != nil
-            precondition(
+            // `assert`, not `precondition`: covered by
+            // `testRuntimeIdentitySnapshotCapabilityMatchesDescriptor`, so this must fail the
+            // suite rather than ship a launch trap for users.
+            assert(
                 runtime.handle.searchIdentitySnapshots.isApplicable == descriptorUsesIdentity,
                 "\(adapter.descriptor.source) runtime identity snapshot capability does not match its descriptor"
             )

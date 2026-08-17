@@ -123,7 +123,8 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                     result = SessionIndexingEngine.Result(kind: .scanned, sessions: sessions, totalFiles: sessions.count)
                 }
             } else {
-                identitySnapshot = .authoritativeEmpty(storagePath: self.discovery.stateDBURL().path)
+                identitySnapshot = SearchIngestService.IdentitySnapshot
+                    .authoritativeAbsence(ofDatabaseAt: self.discovery.stateDBURL())
                 result = await self.scanLegacyJSONSessions(token: token, executionProfile: executionProfile)
             }
             await MainActor.run {

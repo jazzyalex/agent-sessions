@@ -123,6 +123,117 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertFalse(current.contains("hot"), "stale session_search row must not count as current")
     }
 
+    // MARK: - I7: identity sources are structurally excluded from file-stat currency
+
+    /// `session_search.mtime` holds a file mtime (seconds) for file sources but a logical
+    /// content revision (millis) for identity-backed sources, so the file-stat predicate
+    /// cannot judge identity rows. Pin that they are excluded *by source*, not by luck:
+    /// the row below matches `files` on mtime/size exactly and must still be excluded.
+    func testCurrencyPredicatesExcludeIdentitySourcesStructurally() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let identitySource = try XCTUnwrap(SessionSourceRegistry.identityBackedSourceRawValues.sorted().first,
+                                           "the registry must declare at least one identity-backed source")
+
+        try await db.begin()
+        // A row whose stored stat matches the tracked file exactly — the file-stat
+        // predicate would call it current if the source were file-backed.
+        try await db.upsertFile(path: "/tmp/shared.db", mtime: 7, size: 42, source: identitySource)
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "identity-1", source: identitySource,
+                                                   path: "/tmp/shared.db", mtime: 7))
+        try await db.upsertSessionSearch(sessionID: "identity-1", source: identitySource,
+                                         mtime: 7, size: 42, text: "identity text")
+        try await db.upsertSessionToolIO(sessionID: "identity-1", source: identitySource,
+                                         mtime: 7, size: 42, refTS: 7, text: "identity tool text")
+        // Control: same shape, file-backed source.
+        try await db.upsertFile(path: "/tmp/file.jsonl", mtime: 7, size: 42, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "file-1", source: "codex",
+                                                   path: "/tmp/file.jsonl", mtime: 7))
+        try await db.upsertSessionSearch(sessionID: "file-1", source: "codex",
+                                         mtime: 7, size: 42, text: "file text")
+        try await db.upsertSessionToolIO(sessionID: "file-1", source: "codex",
+                                         mtime: 7, size: 42, refTS: 7, text: "file tool text")
+        try await db.commit()
+
+        let current = try await db.indexedSessionIDsCurrent(sources: [identitySource, "codex"])
+        XCTAssertTrue(current.contains("file-1"), "file-backed row with a matching stat is current")
+        XCTAssertFalse(current.contains("identity-1"),
+                       "identity rows carry a logical revision, not a file stat, so the predicate must exclude them")
+
+        let currentToolIO = try await db.indexedToolIOSessionIDsCurrent(sources: [identitySource, "codex"])
+        XCTAssertTrue(currentToolIO.contains("file-1"))
+        XCTAssertFalse(currentToolIO.contains("identity-1"))
+
+        // The exclusion is source-driven: told there are no identity sources, the same
+        // row comes back — proving the omission above is the NOT IN, not a stat mismatch.
+        let withoutExclusion = try await db.indexedSessionIDsCurrent(sources: [identitySource, "codex"],
+                                                                    identitySources: [])
+        XCTAssertTrue(withoutExclusion.contains("identity-1"))
+    }
+
+    // MARK: - I3: identity deletion needs corroborated absence
+
+    /// An empty `IdentitySnapshot` tells cleanup to delete every identity row for that
+    /// storage path, so "the database file is missing" must be corroborated by the
+    /// containing directory being present. An unreachable/missing parent is *unknown*.
+    func testAuthoritativeAbsenceRequiresAReadableContainer() throws {
+        let dbURL = URL(fileURLWithPath: "/tmp/as-fixture/opencode/opencode.db")
+        let container = dbURL.deletingLastPathComponent().path
+
+        // Container present, database genuinely gone → authoritative absence.
+        let gone = SearchIngestService.IdentitySnapshot.authoritativeAbsence(
+            ofDatabaseAt: dbURL,
+            fileProbe: FakeFileProbe(directories: [container])
+        )
+        XCTAssertEqual(gone, .authoritativeEmpty(storagePath: dbURL.path))
+
+        // Container itself missing (unmounted volume, bad root override) → no claim.
+        XCTAssertNil(SearchIngestService.IdentitySnapshot.authoritativeAbsence(
+            ofDatabaseAt: dbURL,
+            fileProbe: FakeFileProbe()
+        ), "an unverifiable absence must never be reported as an empty database")
+
+        // Database present → no claim from this constructor.
+        XCTAssertNil(SearchIngestService.IdentitySnapshot.authoritativeAbsence(
+            ofDatabaseAt: dbURL,
+            fileProbe: FakeFileProbe(files: [dbURL.path], directories: [container])
+        ))
+    }
+
+    // MARK: - I4: the analytics re-derive migration is one-shot
+
+    /// The `analytics_meta_revision_v3` migration wipes `session_days`/`rollups_daily` to
+    /// force a full re-derive. Reopening the same database must not re-run it.
+    func testAnalyticsRederiveMigrationRunsOnlyOnce() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+
+        let first = try IndexDB()
+        try await first.begin()
+        try await first.upsertSessionMeta(makeMetaRow(sessionID: "day-1", source: "codex",
+                                                      path: "/tmp/day.jsonl", mtime: 1))
+        try await first.insertSessionDayRows([
+            SessionDayRow(day: "2026-08-17", source: "codex", sessionID: "day-1", model: nil,
+                          messages: 3, commands: 1, durationSec: 12, metaMtime: 1, metaSize: 10)
+        ])
+        try await first.commit()
+        let countAfterWrite = try await first.countDistinctSessions(sources: ["codex"], dayStart: nil, dayEnd: nil)
+        XCTAssertEqual(countAfterWrite, 1)
+
+        // Reopening runs the migration block again; the marker must short-circuit it.
+        let second = try IndexDB()
+        let countAfterReopen = try await second.countDistinctSessions(sources: ["codex"], dayStart: nil, dayEnd: nil)
+        XCTAssertEqual(countAfterReopen, 1,
+                       "a re-run of the analytics re-derive would have wiped session_days")
+    }
+
     func testIndexedToolIOSessionIDsCurrentExcludesStaleRow() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
@@ -292,12 +403,10 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(matches.first, expectedID)
     }
 
-    /// Regression: the SQL `LIMIT` must stay bound even when `eligibleSessionIDs` is
-    /// non-nil (the production path always passes a concrete Set); it is widened by
-    /// `filteredSearchScanSlack` so the Swift-side filter can still refill the window.
-    /// Proven non-tautologically: with the slack pinned, an eligible set drawn only from
-    /// rows ranked *beyond* the bound comes back empty, which can only happen if SQLite
-    /// truncated the result set itself.
+    /// Regression (C2): the SQL `LIMIT` must reach SQLite even when the caller passes a
+    /// concrete eligible set — the production path always does. Exact mode pushes the
+    /// ineligible ids into SQL as `NOT IN`, so the LIMIT bounds the *filtered* ranking and
+    /// the top-N is exact; the Swift-side fallback keeps a widened but bounded LIMIT.
     func testSearchSessionIDsFTSAppliesSQLLimitWithEligibleIDs() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }
@@ -319,11 +428,14 @@ final class SearchIngestTests: XCTestCase {
         )
         XCTAssertEqual(progress.processed, 5)
 
-        func search(limit: Int, eligible: Set<String>?) async throws -> [String] {
+        func search(limit: Int,
+                    eligible: Set<String>?,
+                    ineligible: Set<String> = []) async throws -> [String] {
             try await db.searchSessionIDsFTS(
                 sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
                 dateFrom: nil, dateTo: nil, query: "narwhalcobalt",
-                includeSystemProbes: true, limit: limit, eligibleSessionIDs: eligible
+                includeSystemProbes: true, limit: limit,
+                eligibleSessionIDs: eligible, ineligibleSessionIDs: ineligible
             )
         }
 
@@ -333,23 +445,34 @@ final class SearchIngestTests: XCTestCase {
 
         let originalSlack = IndexDBTestHooks.filteredSearchScanSlack
         defer { IndexDBTestHooks.filteredSearchScanSlack = originalSlack }
-
-        // Cap holds with a concrete eligible set, and preserves the unbounded ordering.
+        // Pinned to 0 so any result below is the SQL LIMIT's doing, never the slack's.
         IndexDBTestHooks.filteredSearchScanSlack = 0
+
+        // Bound holds with a concrete eligible set, and preserves the unbounded ordering.
         let capped = try await search(limit: 2, eligible: allSet)
         XCTAssertEqual(capped, Array(all.prefix(2)))
 
-        // With no slack, rows ranked beyond the bound never reach the Swift-side filter.
+        // Swift-side fallback (no ineligible set supplied): rows ranked beyond the bound
+        // are truncated by SQLite before the filter ever sees them.
         let tail = Set(all.suffix(3))
-        let beyondBound = try await search(limit: 2, eligible: tail)
-        XCTAssertTrue(beyondBound.isEmpty,
-                      "SQL LIMIT must truncate before eligibility filtering; got \(beyondBound)")
+        let fallback = try await search(limit: 2, eligible: tail)
+        XCTAssertTrue(fallback.isEmpty,
+                      "SQL LIMIT must truncate before Swift-side filtering; got \(fallback)")
 
-        // Slack widens the same bound so the filter can refill the window past
-        // ineligible rows — and no further: LIMIT 2 + 1 sees only one eligible row.
-        IndexDBTestHooks.filteredSearchScanSlack = 1
-        let withSlack = try await search(limit: 2, eligible: tail)
-        XCTAssertEqual(withSlack, [all[2]])
+        // Exact mode: the same query, told which ids are ineligible, returns the true
+        // top-2 *of the eligible rows* — the LIMIT now bounds the filtered ranking.
+        let exact = try await search(limit: 2, eligible: tail, ineligible: allSet.subtracting(tail))
+        XCTAssertEqual(exact, Array(all.suffix(3).prefix(2)))
+
+        // Exactness is not "no LIMIT": the bound still caps the eligible result set.
+        let exactCapped = try await search(limit: 1, eligible: tail, ineligible: allSet.subtracting(tail))
+        XCTAssertEqual(exactCapped, [all[2]])
+
+        // Oversized ineligible sets fall back rather than blowing the bind budget.
+        let oversized = Set((0..<(IndexDB.maxPushedDownFilterIDs + 1)).map { "synthetic-\($0)" })
+        let overBudget = try await search(limit: 2, eligible: allSet, ineligible: oversized)
+        XCTAssertEqual(overBudget, Array(all.prefix(2)),
+                       "over-budget ineligible sets must degrade to the bounded Swift path")
     }
 
     func testIngestSkipsAlreadyCurrentFiles() async throws {

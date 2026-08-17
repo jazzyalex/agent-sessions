@@ -455,6 +455,11 @@ actor IndexDB {
         // message-count change still invalidates incremental analytics.
         let analyticsMetaRevision = "analytics_meta_revision_v3"
         if !migrationApplied(db, key: analyticsMetaRevision) {
+            // One-shot: the whole of `bootstrap` already runs inside one BEGIN IMMEDIATE …
+            // COMMIT (with ROLLBACK on error), so this wipe and its schema_migrations
+            // marker commit together — a crash cannot leave the corpus cleared with the
+            // migration unmarked and re-run the full analytics re-derive on next launch.
+            // Pinned by `testAnalyticsRederiveMigrationRunsOnlyOnce`.
             try exec(db, "DELETE FROM session_days;")
             try exec(db, "DELETE FROM rollups_daily;")
             try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:%';")
@@ -2153,8 +2158,18 @@ actor IndexDB {
     /// (source, path) / (source, session_id) with `idx_files_source` + PRIMARY KEYs. Runs once per
     /// search, comparable to `indexedSessionIDs` plus the join `fetchSearchReadyPaths` already pays
     /// on every ingest kick.
+    /// Identity-backed sources are *structurally excluded* from both currency predicates.
+    /// Their `session_search.mtime`/`size` hold a per-session logical revision
+    /// (`ContentRevision`: updated-millis + extent), not the storage file's stat, so
+    /// comparing them against `files.mtime`/`files.size` compares two different quantities
+    /// and can only ever say "stale". Callers that need identity currency must compare
+    /// `sessionSearchIdentityStatesByID` / `sessionToolIOIdentityStatesByID` against the
+    /// live session, as `SearchCoordinator` does. Excluding them here makes the omission
+    /// explicit rather than an accident of unit mismatch; the returned set is unchanged.
     func indexedSessionIDsCurrent(sources: [String],
-                                  formatVersion: Int = FeatureFlags.sessionSearchFormatVersion) throws -> [String] {
+                                  formatVersion: Int = FeatureFlags.sessionSearchFormatVersion,
+                                  identitySources: Set<String> = SessionSourceRegistry.identityBackedSourceRawValues)
+    throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
         var clauses: [String] = []
         var binds: [Any] = []
@@ -2162,6 +2177,12 @@ actor IndexDB {
             let qs = Array(repeating: "?", count: sources.count).joined(separator: ",")
             clauses.append("f.source IN (\(qs))")
             binds.append(contentsOf: sources)
+        }
+        if !identitySources.isEmpty {
+            let sorted = identitySources.sorted()
+            let qs = Array(repeating: "?", count: sorted.count).joined(separator: ",")
+            clauses.append("s.source NOT IN (\(qs))")
+            binds.append(contentsOf: sorted)
         }
         let sourceFilter = clauses.isEmpty ? "" : (" AND " + clauses.joined(separator: " AND "))
         let sql = """
@@ -2197,7 +2218,8 @@ actor IndexDB {
     /// revision still matches the tracked file are eligible to satisfy an FTS hit.
     func indexedToolIOSessionIDsCurrent(
         sources: [String],
-        formatVersion: Int = FeatureFlags.sessionToolIOFormatVersion
+        formatVersion: Int = FeatureFlags.sessionToolIOFormatVersion,
+        identitySources: Set<String> = SessionSourceRegistry.identityBackedSourceRawValues
     ) throws -> [String] {
         guard handle != nil else { throw DBError.openFailed("db closed") }
         var binds: [String] = []
@@ -2206,6 +2228,13 @@ actor IndexDB {
             let placeholders = Array(repeating: "?", count: sources.count).joined(separator: ",")
             sourceFilter = " AND f.source IN (\(placeholders))"
             binds = sources
+        }
+        // See `indexedSessionIDsCurrent`: a logical revision cannot be compared to a file stat.
+        if !identitySources.isEmpty {
+            let sorted = identitySources.sorted()
+            let placeholders = Array(repeating: "?", count: sorted.count).joined(separator: ",")
+            sourceFilter += " AND t.source NOT IN (\(placeholders))"
+            binds.append(contentsOf: sorted)
         }
         let sql = """
         SELECT t.session_id
@@ -2254,8 +2283,14 @@ actor IndexDB {
         return out
     }
 
-    /// Extra FTS rows a filtered search may scan past so the eligibility/exclusion
-    /// filter can refill the result window without disabling the SQL LIMIT entirely.
+    /// Largest id set pushed into SQL as a `NOT IN (...)` list. SQLite's default
+    /// `SQLITE_MAX_VARIABLE_NUMBER` is 999 on older builds, so the budget stays well under
+    /// it. Above this the filter falls back to Swift-side skipping with a bounded scan.
+    static let maxPushedDownFilterIDs = 700
+
+    /// Fallback only. When the ineligible set is too large to push into SQL the filter runs
+    /// in Swift, and the SQL LIMIT is widened by this slack so the filter can still refill
+    /// the window by scanning past ineligible rows — bounded, unlike `LIMIT -1`.
     static let defaultFilteredSearchScanSlack = 512
 
     static var filteredSearchScanSlack: Int {
@@ -2264,6 +2299,17 @@ actor IndexDB {
         #else
         return defaultFilteredSearchScanSlack
         #endif
+    }
+
+    /// Renders the exact-mode `NOT IN` clause, or nil when the set does not fit the budget.
+    /// Ids are sorted so the same inputs always produce the same SQL and bind order.
+    private static func excludedIDsClause(_ ids: Set<String>,
+                                          column: String) -> (clause: String, binds: [String])? {
+        guard !ids.isEmpty else { return (clause: "", binds: []) }
+        guard ids.count <= maxPushedDownFilterIDs else { return nil }
+        let sorted = ids.sorted()
+        let placeholders = Array(repeating: "?", count: sorted.count).joined(separator: ",")
+        return (clause: "\(column) NOT IN (\(placeholders))", binds: sorted)
     }
 
     func searchSessionIDsFTS(
@@ -2278,6 +2324,7 @@ actor IndexDB {
         limit: Int,
         offset: Int = 0,
         eligibleSessionIDs: Set<String>? = nil,
+        ineligibleSessionIDs: Set<String> = [],
         excludingSessionIDs: Set<String> = []
     ) throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
@@ -2303,6 +2350,19 @@ actor IndexDB {
             clauses.append("NOT (sm.source = 'claude' AND sm.path LIKE ?)")
             binds.append("%AgentSessions-ClaudeProbeProject%")
         }
+
+        // Exact mode: push the known-ineligible and excluded ids into SQL. The LIMIT then
+        // bounds the *filtered* ranking, so the top-N result is exact and no row can be
+        // truncated away by rows the caller was going to discard anyway. Falls back to
+        // Swift-side skipping (with a widened but still bounded LIMIT) only when the id set
+        // is too large to bind.
+        let pushedDownFilter = Self.excludedIDsClause(ineligibleSessionIDs.union(excludingSessionIDs),
+                                                      column: "sm.session_id")
+        if let pushedDownFilter, !pushedDownFilter.clause.isEmpty {
+            clauses.append(pushedDownFilter.clause)
+            binds.append(contentsOf: pushedDownFilter.binds)
+        }
+        let usesExactBound = pushedDownFilter != nil
 
         let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
         let sql = """
@@ -2332,13 +2392,13 @@ actor IndexDB {
         // stale FTS row concurrently; separate LIMIT/OFFSET statements do not.
         // The SQL LIMIT stays bound in every mode: an unbounded query forfeits SQLite's
         // top-N sorter for ORDER BY bm25(...), which must then materialize and fully sort
-        // every matching row. When Swift-side eligibility/exclusion filtering is active the
-        // bound is widened by a fixed slack so the filter can still refill the window by
-        // scanning past ineligible rows, but the scan stays bounded.
-        let isFiltered = eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty
-        let sqlLimit = isFiltered ? limit + Self.filteredSearchScanSlack : limit
+        // every matching row before the first step returns.
+        let filtersInSwift = !usesExactBound && (eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty)
+        let sqlLimit = filtersInSwift ? limit + Self.filteredSearchScanSlack : limit
         sqlite3_bind_int(stmt, idx, Int32(clamping: sqlLimit)); idx += 1
-        sqlite3_bind_int(stmt, idx, Int32(isFiltered ? 0 : offset))
+        // OFFSET is only meaningful when the SQL result set is the final one; the Swift
+        // fallback would page over rows it is about to discard.
+        sqlite3_bind_int(stmt, idx, Int32(filtersInSwift ? 0 : offset))
 
         var ids: [String] = []
         var step = sqlite3_step(stmt)
@@ -2371,6 +2431,7 @@ actor IndexDB {
         limit: Int,
         offset: Int = 0,
         eligibleSessionIDs: Set<String>? = nil,
+        ineligibleSessionIDs: Set<String> = [],
         excludingSessionIDs: Set<String> = []
     ) throws -> [String] {
         guard let db = handle else { throw DBError.openFailed("db closed") }
@@ -2395,6 +2456,19 @@ actor IndexDB {
             clauses.append("NOT (sm.source = 'claude' AND sm.path LIKE ?)")
             binds.append("%AgentSessions-ClaudeProbeProject%")
         }
+
+        // Exact mode: push the known-ineligible and excluded ids into SQL. The LIMIT then
+        // bounds the *filtered* ranking, so the top-N result is exact and no row can be
+        // truncated away by rows the caller was going to discard anyway. Falls back to
+        // Swift-side skipping (with a widened but still bounded LIMIT) only when the id set
+        // is too large to bind.
+        let pushedDownFilter = Self.excludedIDsClause(ineligibleSessionIDs.union(excludingSessionIDs),
+                                                      column: "sm.session_id")
+        if let pushedDownFilter, !pushedDownFilter.clause.isEmpty {
+            clauses.append(pushedDownFilter.clause)
+            binds.append(contentsOf: pushedDownFilter.binds)
+        }
+        let usesExactBound = pushedDownFilter != nil
 
         let whereSQL = clauses.isEmpty ? "" : (" WHERE " + clauses.joined(separator: " AND "))
         let sql = """
@@ -2421,13 +2495,13 @@ actor IndexDB {
         }
         // The SQL LIMIT stays bound in every mode: an unbounded query forfeits SQLite's
         // top-N sorter for ORDER BY bm25(...), which must then materialize and fully sort
-        // every matching row. When Swift-side eligibility/exclusion filtering is active the
-        // bound is widened by a fixed slack so the filter can still refill the window by
-        // scanning past ineligible rows, but the scan stays bounded.
-        let isFiltered = eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty
-        let sqlLimit = isFiltered ? limit + Self.filteredSearchScanSlack : limit
+        // every matching row before the first step returns.
+        let filtersInSwift = !usesExactBound && (eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty)
+        let sqlLimit = filtersInSwift ? limit + Self.filteredSearchScanSlack : limit
         sqlite3_bind_int(stmt, idx, Int32(clamping: sqlLimit)); idx += 1
-        sqlite3_bind_int(stmt, idx, Int32(isFiltered ? 0 : offset))
+        // OFFSET is only meaningful when the SQL result set is the final one; the Swift
+        // fallback would page over rows it is about to discard.
+        sqlite3_bind_int(stmt, idx, Int32(filtersInSwift ? 0 : offset))
 
         var ids: [String] = []
         var step = sqlite3_step(stmt)

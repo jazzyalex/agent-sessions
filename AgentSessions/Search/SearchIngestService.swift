@@ -27,6 +27,22 @@ actor SearchIngestService {
         static func authoritativeEmpty(storagePath: String) -> IdentitySnapshot {
             IdentitySnapshot(storagePaths: [storagePath], sessionIDs: [])
         }
+
+        /// Safe constructor for the "database is gone" case. Cleanup reads an empty
+        /// snapshot as *delete every identity row for this path*, so a bare
+        /// `fileExists == false` is not enough evidence: the same false is returned when
+        /// the enclosing directory is missing or momentarily unreachable (unmounted
+        /// volume, revoked sandbox access, a root override pointing somewhere not yet
+        /// created). Absence is only authoritative when the directory that would contain
+        /// the database is itself present. Otherwise this returns nil — unknown — and the
+        /// caller makes no claim, exactly like a failed enumeration.
+        static func authoritativeAbsence(ofDatabaseAt url: URL,
+                                         fileProbe: any FileProbing = DefaultFileProbe()) -> IdentitySnapshot? {
+            guard !fileProbe.fileExists(atPath: url.path) else { return nil }
+            let container = url.deletingLastPathComponent()
+            guard fileProbe.directoryExists(atPath: container.path) else { return nil }
+            return .authoritativeEmpty(storagePath: url.path)
+        }
     }
 
     /// Opaque per-session content revision for sources whose sessions share one storage URL.

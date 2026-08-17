@@ -613,6 +613,35 @@
           }
         ]
       }
+    },
+    "qwen": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["qwen", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.qwen_code.max_verified_version",
+      "upstream": [
+        { "kind": "github_latest_release", "repo": "QwenLM/qwen-code" }
+      ],
+      "risk_keywords": {
+        "schema": ["session", "jsonl", "format", "schema", "transcript", "storage", "migration", "chats", "archive", "uuid", "sessionid"],
+        "usage": []
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "jsonl_newest",
+          "roots": ["$QWEN_HOME/projects", "~/.qwen/projects"],
+          "glob": "**/*.jsonl",
+          "required_types": ["user", "assistant"],
+          "max_lines": 2500
+        },
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "Qwen sessions should be discovered under a projects root as <project>/chats/<id>.jsonl (active) or <project>/chats/archive/<id>.jsonl (archived); other JSONL under projects is not a session.",
+          "patterns": [
+            "/projects/[^/]+/chats/[^/]+\\.jsonl$",
+            "/projects/[^/]+/chats/archive/[^/]+\\.jsonl$"
+          ]
+        }
+      }
     }
   }
 }

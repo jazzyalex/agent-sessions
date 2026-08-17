@@ -825,8 +825,9 @@ _MIN_SAMPLE_EVENT_COUNT = 25
 # drifts unseen. Codex fingerprints flat as {payload,timestamp,type} and Copilot as
 # {data,id,parentId,timestamp,type} — almost nothing. Claude's envelope is genuinely
 # informative (18 keys), but `.message` hid its content-block types and the entire
-# `usage` struct, so it belongs here too.
-_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude", "grok"}
+# `usage` struct, so it belongs here too. Qwen has the same `.message.parts` shape as
+# Claude, so it belongs here for the same reason.
+_NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude", "grok", "qwen"}
 
 # Keys whose values are open-ended maps rather than fixed structs. Descending into
 # these turns ordinary content into permanent phantom drift — a new model name, tool
@@ -856,6 +857,14 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # exclusion is `arguments` — a tool's own parameter object, where every new tool
     # parameter would otherwise read as Grok schema drift.
     "grok": {"arguments"},
+    # Qwen's renderable surface (text, functionCall, functionResponse) sits inside
+    # `message.parts`, so flat fingerprinting would miss part-type drift the same way
+    # it did for Claude. `args` is a tool's own parameter object (functionCall.args);
+    # `response` is a tool's own output payload (functionResponse.response);
+    # `toolCallResult` is the legacy top-level tool-result struct; `usageMetadata` is
+    # the token-usage struct, which the support matrix already marks out of scope
+    # (usage/rate-limit tracking is an explicit unsupported surface for Qwen).
+    "qwen": {"args", "response", "toolCallResult", "usageMetadata"},
 }
 
 
@@ -1886,7 +1895,7 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
     filtered = [p for p in baseline_paths if isinstance(p, str) and p and "schema_drift" not in p]
     fps: list[dict[str, Any]] = []
 
-    if agent_name in ("codex", "claude", "copilot", "droid", "pi"):
+    if agent_name in ("codex", "claude", "copilot", "droid", "pi", "qwen"):
         for p in filtered:
             if not p.endswith(".jsonl"):
                 continue
@@ -3342,6 +3351,7 @@ def main(argv: list[str]) -> int:
         "pi": matrix_versions.get("pi"),
         "kimi": matrix_versions.get("kimi_code"),
         "grok": matrix_versions.get("grok_cli"),
+        "qwen": matrix_versions.get("qwen_code"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
@@ -3494,6 +3504,7 @@ def main(argv: list[str]) -> int:
                     "pi": "pi",
                     "kimi": "kimi_code",
                     "grok": "grok_cli",
+                    "qwen": "qwen_code",
                 }.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)

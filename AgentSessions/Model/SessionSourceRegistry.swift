@@ -54,7 +54,10 @@ enum SessionSourceRegistry {
             let descriptor = adapter.descriptor
             let hasParser = descriptor.parseFullByIdentity != nil
             let hasSelector = descriptor.searchUsesIdentityAtURL != nil
-            precondition(
+            // `assert`, not `precondition`: the invariant is compile-time constant and is
+            // covered by the registry tests, so a descriptor mistake must fail the suite,
+            // not trap in a shipped build (this runs inside a `static let` initializer).
+            assert(
                 hasParser == hasSelector,
                 "\(descriptor.source) must configure parseFullByIdentity and searchUsesIdentityAtURL together"
             )
@@ -64,6 +67,16 @@ enum SessionSourceRegistry {
 
     static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(
         uniqueKeysWithValues: ordered.map { ($0.descriptor.source, $0) }
+    )
+
+    /// Sources whose sessions share one storage database and are therefore keyed by
+    /// identity rather than by file path. Their search rows record a per-session logical
+    /// revision instead of the storage file's stat, so file-stat currency predicates do
+    /// not apply to them — see `IndexDB.indexedSessionIDsCurrent`.
+    static let identityBackedSourceRawValues: Set<String> = Set(
+        ordered
+            .filter { $0.descriptor.parseFullByIdentity != nil && $0.descriptor.searchUsesIdentityAtURL != nil }
+            .map { $0.descriptor.source.rawValue }
     )
 
     /// Non-optional by design: a missing entry is a programming error the order test
