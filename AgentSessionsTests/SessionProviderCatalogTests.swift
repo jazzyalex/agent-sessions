@@ -139,4 +139,113 @@ final class SessionProviderCatalogTests: XCTestCase {
         defer { token.cancel() }
         XCTAssertEqual(received, [[]])
     }
+
+    // MARK: - SPEC §10.4 / §8.1: the launch-phase pipeline covers every source
+
+    /// THE §8.1 proof. Before Task 7 the `launchPhase` pyramid combined ten of the twelve
+    /// providers — `kimi` and `grok` were never added to it — so a phase change from either
+    /// one could not move `launchState`. The unified indexer is built here over twelve fake
+    /// handles (no real indexers, no disk), `kimi`'s phase subject is pushed, and the
+    /// resulting `launchState.sourcePhases[.kimi]` must follow.
+    ///
+    /// It has to be the launch-phase pipeline that recomputes: the `include*` side-channel
+    /// also calls `updateLaunchState()`, so nothing here touches an inclusion flag after the
+    /// indexer is built.
+    func testKimiLaunchPhaseEmissionUpdatesLaunchState() throws {
+        let kimiPhase = CurrentValueSubject<LaunchPhase, Never>(.idle)
+        var handles = FakeProviderHandles.allReady()
+        handles[.kimi] = FakeProviderHandles.handle(launchPhase: kimiPhase)
+
+        let suiteName = "KimiLaunchPhaseEmission-\(UUID().uuidString)"
+        let scratch = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { scratch.removePersistentDomain(forName: suiteName) }
+        // Only kimi is enabled: every other source folds to `.ready` in `updateLaunchState`,
+        // and no source flips off→on except (possibly) kimi itself.
+        for source in SessionSource.allCases {
+            scratch.set(source == .kimi, forKey: AgentEnablement.enablementKey(for: source))
+        }
+
+        let unified = UnifiedSessionIndexer(handles: handles)
+        let savedIncludeKimi = unified.includeKimi
+        defer { unified.includeKimi = savedIncludeKimi }
+        unified.includeKimi = true
+        unified.syncAgentEnablementFromDefaults(defaults: scratch)
+
+        // Inclusion and enablement changes each recompute the launch state through their own
+        // subscriptions, so they are drained to quiescence *before* the phase is pushed —
+        // otherwise a trailing side-channel emission would pick the new phase up and this
+        // test would pass even with kimi missing from the launchPhase fold (it did, first
+        // time round). After this drain the fold is the only thing that can move it.
+        drain(seconds: 0.6)
+        XCTAssertEqual(unified.launchState.sourcePhases[.kimi], .idle,
+                       "kimi must be enabled, included and observed before the emission under test")
+
+        kimiPhase.send(.scanning)
+
+        XCTAssertTrue(waitForLaunchPhase(.scanning, source: .kimi, on: unified),
+                      "kimi's launchPhase emission never reached launchState; got \(String(describing: unified.launchState.sourcePhases[.kimi]))")
+
+        kimiPhase.send(.ready)
+        XCTAssertTrue(waitForLaunchPhase(.ready, source: .kimi, on: unified),
+                      "kimi never returned to .ready; got \(String(describing: unified.launchState.sourcePhases[.kimi]))")
+    }
+
+    /// Runs the main run loop for `seconds` so every queued Combine delivery, debounced
+    /// recompute and `publishAfterCurrentUpdate` hop lands before the next assertion.
+    private func drain(seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    /// `updateLaunchState` publishes through `publishAfterCurrentUpdate` (two main-queue
+    /// hops), so the assertion has to spin the run loop rather than read straight through.
+    private func waitForLaunchPhase(_ phase: LaunchPhase,
+                                    source: SessionSource,
+                                    on unified: UnifiedSessionIndexer,
+                                    timeout: TimeInterval = 3) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if unified.launchState.sourcePhases[source] == phase { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        return unified.launchState.sourcePhases[source] == phase
+    }
+}
+
+// MARK: - Test support
+
+/// Twelve synthetic `ProviderHandle`s, so a `UnifiedSessionIndexer` can be built without a
+/// single real provider indexer (and therefore without touching the developer's session
+/// directories). Each handle is backed by `CurrentValueSubject`s so every array fold in the
+/// indexer has a value from every source immediately — `combineLatestArray` emits nothing
+/// until all of its upstreams have produced.
+@MainActor
+enum FakeProviderHandles {
+    /// One handle per source, all idle/ready-ish and inert: `refresh` and
+    /// `reloadFocusedSession` do nothing.
+    static func allReady() -> [SessionSource: UnifiedSessionIndexer.ProviderHandle] {
+        Dictionary(uniqueKeysWithValues: SessionSource.allCases.map {
+            ($0, handle(launchPhase: CurrentValueSubject<LaunchPhase, Never>(.ready)))
+        })
+    }
+
+    static func handle(launchPhase: CurrentValueSubject<LaunchPhase, Never>)
+        -> UnifiedSessionIndexer.ProviderHandle {
+        UnifiedSessionIndexer.ProviderHandle(
+            allSessions: CurrentValueSubject<[Session], Never>([]).eraseToAnyPublisher(),
+            isIndexing: CurrentValueSubject<Bool, Never>(false).eraseToAnyPublisher(),
+            isProcessingTranscripts: CurrentValueSubject<Bool, Never>(false).eraseToAnyPublisher(),
+            filesProcessed: CurrentValueSubject<Int, Never>(0).eraseToAnyPublisher(),
+            totalFiles: CurrentValueSubject<Int, Never>(0).eraseToAnyPublisher(),
+            indexingError: CurrentValueSubject<String?, Never>(nil).eraseToAnyPublisher(),
+            launchPhase: launchPhase.eraseToAnyPublisher(),
+            currentSessions: { [] },
+            currentIsIndexing: { false },
+            currentLaunchPhase: { launchPhase.value },
+            refresh: { _, _, _ in },
+            reloadFocusedSession: { _, _, _ in }
+        )
+    }
 }

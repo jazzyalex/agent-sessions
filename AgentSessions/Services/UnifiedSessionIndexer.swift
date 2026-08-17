@@ -33,11 +33,6 @@ struct DirectorySignatureSnapshot: Equatable {
 
 /// Aggregates all agent sessions into a single list with unified filters and search.
 final class UnifiedSessionIndexer: ObservableObject {
-    private typealias IndexingErrorHead = (String?, String?, String?, String?)
-    private typealias IndexingErrorTail = (String?, (String?, String?, String?, String?))
-    private typealias AgentEnablementHead = (Bool, Bool, Bool, Bool)
-    private typealias AgentEnablementTail = (Bool, (Bool, Bool, Bool, Bool))
-
     enum CoreIndexingDisplayMode: Equatable {
         case idle
         case indexing
@@ -108,11 +103,12 @@ final class UnifiedSessionIndexer: ObservableObject {
     //
     // RETAIN-CYCLE RULE: every closure captures the concrete indexer instance and nothing
     // else — no `self`, no catalog, no view — so this indexer's `deinit` keeps running even
-    // though it holds the runtimes.
+    // though it holds the handles.
     //
-    // Task 6 only lands the type and its two readers (`AnalyticsService`,
-    // `FirstRunSetupView`). This indexer's own internals stay switch-based over the twelve
-    // concrete lets until Task 7 collapses them onto these handles.
+    // As of Task 7 this is the ONLY surface this indexer has onto a provider: there are no
+    // concrete indexer properties left, every pipeline is an array fold over
+    // `orderedSources.map { handle($0).x }`, and every former per-source switch is a
+    // handle or dictionary read.
     struct ProviderHandle {
         let allSessions: AnyPublisher<[Session], Never>
         let isIndexing: AnyPublisher<Bool, Never>
@@ -130,254 +126,6 @@ final class UnifiedSessionIndexer: ObservableObject {
         let reloadFocusedSession: @MainActor (_ sessionID: String, _ force: Bool, _ trigger: FocusedReloadTrigger) -> Void
     }
 
-    private struct FocusedMonitorCapability {
-        let supportsFocusedMonitoring: () -> Bool
-        let signatureSource: @MainActor (UnifiedSessionIndexer, FocusedSessionContext) -> String?
-        let reloadFocusedSession: @MainActor (UnifiedSessionIndexer, FocusedSessionContext, FocusedReloadTrigger) -> Void
-    }
-
-    private static let focusedMonitorCapabilityBySource: [SessionSource: FocusedMonitorCapability] = [
-        .codex: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.codexAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: SessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.codex.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .claude: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.claudeAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: ClaudeSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.claude.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .antigravity: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.antigravityAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: AntigravitySessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.antigravity.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .opencode: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.openCodeAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: OpenCodeSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.opencode.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .hermes: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.hermesAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: HermesSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.hermes.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .copilot: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.copilotAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: CopilotSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.copilot.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .droid: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.droidAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: DroidSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.droid.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .openclaw: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.openClawAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: OpenClawSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.openclaw.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .cursor: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.cursorAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: CursorSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.cursor.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .pi: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.piAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: PiSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.pi.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .kimi: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.kimiAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: KimiSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.kimi.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        ),
-        .grok: FocusedMonitorCapability(
-            supportsFocusedMonitoring: { true },
-            signatureSource: { indexer, context in
-                indexer.sourceAwareFocusedSignaturePath(for: context)
-            },
-            reloadFocusedSession: { indexer, context, trigger in
-                guard indexer.grokAgentEnabled else { return }
-                let force = (trigger != .selection)
-                let reason: GrokSessionIndexer.ReloadReason
-                switch trigger {
-                case .selection:
-                    reason = .selection
-                case .monitor:
-                    reason = .focusedSessionMonitor
-                case .manual:
-                    reason = .manualRefresh
-                }
-                indexer.grok.reloadSession(id: context.sessionID, force: force, reason: reason)
-            }
-        )
-    ]
 
     private actor ProviderRefreshCoordinator {
         enum RequestResult {
@@ -466,67 +214,31 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    /// Which providers were switched on at the instant an aggregation pass was assembled.
+    ///
+    /// Keyed by source rather than twelve named `Bool`s: the aggregation pipeline reads
+    /// enablement as a dictionary now, so a thirteenth source needs no field here at all.
+    /// An absent key reads as disabled, which is also what the empty snapshot means.
     struct AgentEnablementSnapshot {
-        let codex: Bool
-        let claude: Bool
-        let antigravity: Bool
-        let openCode: Bool
-        let hermes: Bool
-        let copilot: Bool
-        let droid: Bool
-        let openClaw: Bool
-        let cursor: Bool
-        let pi: Bool
-        let kimi: Bool
-        let grok: Bool
+        let enabled: [SessionSource: Bool]
+
+        func isEnabled(_ source: SessionSource) -> Bool { enabled[source] ?? false }
     }
 
+    /// One aggregation pass's inputs: every source's current session list, keyed by source
+    /// (registry order is re-imposed by `mergedAggregationResult`, which walks
+    /// `SessionSource.allCases`), plus the favorites overlay and the enablement snapshot.
     struct SessionAggregationWork {
-        let codexList: [Session]
-        let claudeList: [Session]
-        let antigravityList: [Session]
-        let opencodeList: [Session]
-        let hermesList: [Session]
-        let copilotList: [Session]
-        let droidList: [Session]
-        let openclawList: [Session]
-        let cursorList: [Session]
-        let piList: [Session]
-        let kimiList: [Session]
-        let grokList: [Session]
+        let lists: [SessionSource: [Session]]
         let favoritesSnapshot: FavoritesStore.Snapshot
         let favoritesVersion: UInt64
         let enablement: AgentEnablementSnapshot
 
         static let empty = SessionAggregationWork(
-            codexList: [],
-            claudeList: [],
-            antigravityList: [],
-            opencodeList: [],
-            hermesList: [],
-            copilotList: [],
-            droidList: [],
-            openclawList: [],
-            cursorList: [],
-            piList: [],
-            kimiList: [],
-            grokList: [],
+            lists: [:],
             favoritesSnapshot: FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 0,
-            enablement: AgentEnablementSnapshot(
-                codex: false,
-                claude: false,
-                antigravity: false,
-                openCode: false,
-                hermes: false,
-                copilot: false,
-                droid: false,
-                openClaw: false,
-                cursor: false,
-                pi: false,
-                kimi: false,
-                grok: false
-            )
+            enablement: AgentEnablementSnapshot(enabled: [:])
         )
     }
     struct SessionAggregationResult {
@@ -620,81 +332,83 @@ final class UnifiedSessionIndexer: ObservableObject {
         claudeArchive[key] = record
     }
 
-    // Source filters (persisted with @Published for Combine compatibility)
-    @Published var includeCodex: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.codex) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeCodex, forKey: PreferencesKey.Include.codex)
-            recomputeNow()
-        }
-    }
-    @Published var includeClaude: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.claude) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeClaude, forKey: PreferencesKey.Include.claude)
-            recomputeNow()
-        }
-    }
-    @Published var includeAntigravity: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.antigravity) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeAntigravity, forKey: PreferencesKey.Include.antigravity)
-            recomputeNow()
-        }
-    }
-    @Published var includeOpenCode: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.opencode) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeOpenCode, forKey: PreferencesKey.Include.opencode)
-            recomputeNow()
-        }
-    }
-    @Published var includeHermes: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.hermes) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeHermes, forKey: PreferencesKey.Include.hermes)
-            recomputeNow()
-        }
-    }
-    @Published var includeCopilot: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.copilot) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeCopilot, forKey: PreferencesKey.Include.copilot)
-            recomputeNow()
-        }
-    }
-    @Published var includeDroid: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.droid) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeDroid, forKey: PreferencesKey.Include.droid)
-            recomputeNow()
-        }
-    }
-    @Published var includeOpenClaw: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.openclaw) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeOpenClaw, forKey: PreferencesKey.Include.openclaw)
-            recomputeNow()
-        }
-    }
-    @Published var includeCursor: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.cursor) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeCursor, forKey: PreferencesKey.Include.cursor)
-            recomputeNow()
-        }
-    }
-    @Published var includePi: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.pi) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includePi, forKey: PreferencesKey.Include.pi)
-            recomputeNow()
-        }
-    }
-    @Published var includeKimi: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.kimi) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeKimi, forKey: PreferencesKey.Include.kimi)
-            recomputeNow()
-        }
-    }
-    @Published var includeGrok: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Include.grok) as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(includeGrok, forKey: PreferencesKey.Include.grok)
-            recomputeNow()
-        }
+    /// The source-filter state every pipeline and policy read below consults, and the one
+    /// the twelve `include…` properties write through.
+    ///
+    /// The twelve stay because views bind to them (`$unified.includeCodex` etc.); this
+    /// dictionary is their backing store, so `isIncluded(_:)` is a lookup rather than a
+    /// twelve-arm switch and the filter pipelines fold one publisher instead of a
+    /// `CombineLatest` pyramid. Complete by construction — one entry per `SessionSource`.
+    @Published private(set) var includedBySource: [SessionSource: Bool] =
+        Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, UnifiedSessionIndexer.storedInclude($0)) })
+
+    /// Every provider's current enabled state — the single source of truth for "which
+    /// providers are on right now", mirrored out to the twelve `…AgentEnabled` properties
+    /// that views bind to. Read by `isAgentEnabled`, `enabledAnalyticsSources()`, the
+    /// enablement-sync diff, and (as `$enablementBySource`) every aggregation pipeline.
+    @Published private(set) var enablementBySource: [SessionSource: Bool] =
+        Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, AgentEnablement.isEnabled($0)) })
+
+    /// K2: the persisted key is the descriptor's `includeKey`, i.e. the same
+    /// `PreferencesKey.Include.*` literal each property used to name inline.
+    private static func storedInclude(_ source: SessionSource) -> Bool {
+        let key = SessionSourceRegistry.descriptor(for: source).includeKey
+        return UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
 
-    // Global agent enablement (drives app-wide availability)
+    /// The shared body of all twelve `include…` `didSet`s: persist, update the backing
+    /// dictionary (which is what republishes the filter pipelines), recompute.
+    private func applyInclude(_ source: SessionSource, _ value: Bool) {
+        UserDefaults.standard.set(value, forKey: SessionSourceRegistry.descriptor(for: source).includeKey)
+        if includedBySource[source] != value { includedBySource[source] = value }
+        recomputeNow()
+    }
+
+    // Source filters (persisted with @Published for Combine compatibility)
+    @Published var includeCodex: Bool = UnifiedSessionIndexer.storedInclude(.codex) {
+        didSet { applyInclude(.codex, includeCodex) }
+    }
+    @Published var includeClaude: Bool = UnifiedSessionIndexer.storedInclude(.claude) {
+        didSet { applyInclude(.claude, includeClaude) }
+    }
+    @Published var includeAntigravity: Bool = UnifiedSessionIndexer.storedInclude(.antigravity) {
+        didSet { applyInclude(.antigravity, includeAntigravity) }
+    }
+    @Published var includeOpenCode: Bool = UnifiedSessionIndexer.storedInclude(.opencode) {
+        didSet { applyInclude(.opencode, includeOpenCode) }
+    }
+    @Published var includeHermes: Bool = UnifiedSessionIndexer.storedInclude(.hermes) {
+        didSet { applyInclude(.hermes, includeHermes) }
+    }
+    @Published var includeCopilot: Bool = UnifiedSessionIndexer.storedInclude(.copilot) {
+        didSet { applyInclude(.copilot, includeCopilot) }
+    }
+    @Published var includeDroid: Bool = UnifiedSessionIndexer.storedInclude(.droid) {
+        didSet { applyInclude(.droid, includeDroid) }
+    }
+    @Published var includeOpenClaw: Bool = UnifiedSessionIndexer.storedInclude(.openclaw) {
+        didSet { applyInclude(.openclaw, includeOpenClaw) }
+    }
+    @Published var includeCursor: Bool = UnifiedSessionIndexer.storedInclude(.cursor) {
+        didSet { applyInclude(.cursor, includeCursor) }
+    }
+    @Published var includePi: Bool = UnifiedSessionIndexer.storedInclude(.pi) {
+        didSet { applyInclude(.pi, includePi) }
+    }
+    @Published var includeKimi: Bool = UnifiedSessionIndexer.storedInclude(.kimi) {
+        didSet { applyInclude(.kimi, includeKimi) }
+    }
+    @Published var includeGrok: Bool = UnifiedSessionIndexer.storedInclude(.grok) {
+        didSet { applyInclude(.grok, includeGrok) }
+    }
+
+    // Global agent enablement (drives app-wide availability). These twelve are read-only
+    // mirrors of `enablementBySource` for the views that bind to them by name; the
+    // dictionary is what the pipelines and policies consult.
+    //
+    // SPEC §8.3: `openClawAgentEnabled` used to seed itself from a bespoke
+    // `object(forKey:) as? Bool ?? false` read instead of `AgentEnablement.isEnabled`,
+    // the only provider that deviated. It now follows the same rule as the other eleven.
     @Published private(set) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
     @Published private(set) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
     @Published private(set) var antigravityAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
@@ -702,7 +416,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var hermesAgentEnabled: Bool = AgentEnablement.isEnabled(.hermes)
     @Published private(set) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
     @Published private(set) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
-    @Published private(set) var openClawAgentEnabled: Bool = UserDefaults.standard.object(forKey: PreferencesKey.Agents.openClawEnabled) as? Bool ?? false
+    @Published private(set) var openClawAgentEnabled: Bool = AgentEnablement.isEnabled(.openclaw)
     @Published private(set) var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
     @Published private(set) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @Published private(set) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
@@ -738,23 +452,24 @@ final class UnifiedSessionIndexer: ObservableObject {
         didSet { recomputeNow() }
     }
 
-    /// Every source's runtime, from the catalog this indexer was built with. Task 7 folds
-    /// the pipelines and method-level switches below onto `runtimes[source].handle`; until
-    /// then the twelve concrete lets stay, assigned from the same catalog in `init`, so the
-    /// catalog adoption itself is purely mechanical.
-    private let runtimes: [SessionSource: SourceRuntime]
-    private let codex: SessionIndexer
-    private let claude: ClaudeSessionIndexer
-    private let antigravity: AntigravitySessionIndexer
-    private let opencode: OpenCodeSessionIndexer
-    private let hermes: HermesSessionIndexer
-    private let copilot: CopilotSessionIndexer
-    private let droid: DroidSessionIndexer
-    private let openclaw: OpenClawSessionIndexer
-    private let cursor: CursorSessionIndexer
-    private let pi: PiSessionIndexer
-    private let kimi: KimiSessionIndexer
-    private let grok: GrokSessionIndexer
+    /// Every source's type-erased pipeline surface, from the catalog this indexer was built
+    /// with. This replaces the twelve concrete indexer properties: nothing below names a
+    /// provider class any more, so a thirteenth source adds no line to this file.
+    private let handles: [SessionSource: ProviderHandle]
+
+    /// Registry order — the order every array fold below emits in, the order
+    /// `mergedAggregationResult` appends in, and the order `indexingError` prefers in.
+    private let orderedSources: [SessionSource] = SessionSource.allCases
+
+    /// Non-optional by design, matching `SessionProviderCatalog`'s own subscript: `init`
+    /// refuses to build without a handle for every source, so a miss here is a wiring bug.
+    private func handle(_ source: SessionSource) -> ProviderHandle {
+        guard let handle = handles[source] else {
+            preconditionFailure("UnifiedSessionIndexer has no handle for \(source)")
+        }
+        return handle
+    }
+
     private static let aggregationQueue = DispatchQueue(label: "UnifiedSessionIndexer.Aggregation", qos: .userInitiated)
     private var cancellables = Set<AnyCancellable>()
     private var notificationObserverTokens: [NSObjectProtocol] = []
@@ -815,21 +530,23 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// otherwise a stale re-sorted snapshot could clobber correct membership.
     private var sessionsFilterGeneration: Int = 0
     
+    /// Production entry point: every handle comes from the catalog's runtimes, unchanged.
     @MainActor
-    init(catalog: SessionProviderCatalog) {
-        self.runtimes = catalog.runtimes
-        self.codex = catalog.indexer(.codex, as: SessionIndexer.self)
-        self.claude = catalog.indexer(.claude, as: ClaudeSessionIndexer.self)
-        self.antigravity = catalog.indexer(.antigravity, as: AntigravitySessionIndexer.self)
-        self.opencode = catalog.indexer(.opencode, as: OpenCodeSessionIndexer.self)
-        self.hermes = catalog.indexer(.hermes, as: HermesSessionIndexer.self)
-        self.copilot = catalog.indexer(.copilot, as: CopilotSessionIndexer.self)
-        self.droid = catalog.indexer(.droid, as: DroidSessionIndexer.self)
-        self.openclaw = catalog.indexer(.openclaw, as: OpenClawSessionIndexer.self)
-        self.cursor = catalog.indexer(.cursor, as: CursorSessionIndexer.self)
-        self.pi = catalog.indexer(.pi, as: PiSessionIndexer.self)
-        self.kimi = catalog.indexer(.kimi, as: KimiSessionIndexer.self)
-        self.grok = catalog.indexer(.grok, as: GrokSessionIndexer.self)
+    convenience init(catalog: SessionProviderCatalog) {
+        self.init(handles: catalog.runtimes.mapValues(\.handle))
+    }
+
+    /// Designated init over the type-erased handles alone (SPEC §3.4).
+    ///
+    /// Internal rather than private so tests can build an indexer over synthetic handles —
+    /// no provider indexers, no session directories, no `AvailabilityContext.live()`. It is
+    /// not a weaker path than `init(catalog:)`: that convenience init feeds this one the
+    /// catalog's own handles, and the completeness precondition below holds for both.
+    @MainActor
+    init(handles: [SessionSource: ProviderHandle]) {
+        precondition(Set(handles.keys) == Set(SessionSource.allCases),
+                     "UnifiedSessionIndexer needs a handle for every SessionSource; missing \(Set(SessionSource.allCases).subtracting(handles.keys))")
+        self.handles = handles
         self.searchIngestService = (try? IndexDB()).map { SearchIngestService(db: $0) }
         self.analyticsLastBuiltAt = UserDefaults.standard.object(forKey: Self.analyticsLastBuiltAtDefaultsKey) as? Date
 
@@ -855,75 +572,28 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        let agentEnabledFlags = Publishers.CombineLatest(
-            Publishers.CombineLatest4($codexAgentEnabled, $claudeAgentEnabled, $antigravityAgentEnabled, $openCodeAgentEnabled),
-            Publishers.CombineLatest(
-                $hermesAgentEnabled,
-                Publishers.CombineLatest4($copilotAgentEnabled, $droidAgentEnabled, $openClawAgentEnabled, $cursorAgentEnabled)
-            )
-        )
-        .combineLatest($piAgentEnabled)
-        .combineLatest($kimiAgentEnabled)
-        .combineLatest($grokAgentEnabled)
+        // Registry-ordered locals. Every fold below maps over these two, so the pipelines
+        // carry no per-source names at all and the emitted arrays zip back against
+        // `sources` positionally. Captured as locals rather than through `self` so the
+        // stored closures never retain this indexer (SPEC §3.4 retain-cycle rule).
+        // (the force-unwrap is what the completeness precondition above buys)
+        let sources = orderedSources
+        let ordered = sources.map { handles[$0]! }
+        // One publisher instead of the twelve-way `CombineLatest` pyramid: the twelve
+        // `…AgentEnabled` properties are mirrors of this dictionary now.
+        let agentEnabledFlags = $enablementBySource
 
         // Merge underlying allSessions whenever any changes
-        Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$allSessions, claude.$allSessions, antigravity.$allSessions, opencode.$allSessions),
-            Publishers.CombineLatest(
-                hermes.$allSessions,
-                Publishers.CombineLatest4(copilot.$allSessions, droid.$allSessions, openclaw.$allSessions, cursor.$allSessions)
-            )
-        )
-            .combineLatest(pi.$allSessions)
-            .combineLatest(kimi.$allSessions)
-            .combineLatest(grok.$allSessions)
+        Publishers.combineLatestArray(ordered.map(\.allSessions))
             .combineLatest(agentEnabledFlags, favoritesAggregationVersion)
             .receive(on: DispatchQueue.main)
-            .map { [weak self] sourceLists, flags, favoritesVersion -> SessionAggregationWork in
+            .map { [weak self] sourceLists, enabled, favoritesVersion -> SessionAggregationWork in
                 guard let self else { return .empty }
-                let (sourceListsWithKimi, grokList) = sourceLists
-                let (sourceListsWithPi, kimiList) = sourceListsWithKimi
-                let (sourceListsBase, piList) = sourceListsWithPi
-                let (combined, tail) = sourceListsBase
-                let (codexList, claudeList, antigravityList, opencodeList) = combined
-                let (hermesList, tailLists) = tail
-                let (copilotList, droidList, openclawList, cursorList) = tailLists
-                let (baseFlagsWithKimi, grokEnabled) = flags
-                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
-                let (baseFlags, piEnabled) = baseFlagsWithPi
-                let (enabled4, enabledTail) = baseFlags
-                let (codexEnabled, claudeEnabled, antigravityEnabled, openCodeEnabled) = enabled4
-                let (hermesEnabled, tailEnabled) = enabledTail
-                let (copilotEnabled, droidEnabled, openClawEnabled, cursorEnabled) = tailEnabled
                 return SessionAggregationWork(
-                    codexList: codexList,
-                    claudeList: claudeList,
-                    antigravityList: antigravityList,
-                    opencodeList: opencodeList,
-                    hermesList: hermesList,
-                    copilotList: copilotList,
-                    droidList: droidList,
-                    openclawList: openclawList,
-                    cursorList: cursorList,
-                    piList: piList,
-                    kimiList: kimiList,
-                    grokList: grokList,
+                    lists: Dictionary(uniqueKeysWithValues: zip(sources, sourceLists)),
                     favoritesSnapshot: self.favorites.snapshot(),
                     favoritesVersion: favoritesVersion,
-                    enablement: AgentEnablementSnapshot(
-                        codex: codexEnabled,
-                        claude: claudeEnabled,
-                        antigravity: antigravityEnabled,
-                        openCode: openCodeEnabled,
-                        hermes: hermesEnabled,
-                        copilot: copilotEnabled,
-                        droid: droidEnabled,
-                        openClaw: openClawEnabled,
-                        cursor: cursorEnabled,
-                        pi: piEnabled,
-                        kimi: kimiEnabled,
-                        grok: grokEnabled
-                    )
+                    enablement: AgentEnablementSnapshot(enabled: enabled)
                 )
             }
             .receive(on: Self.aggregationQueue)
@@ -942,33 +612,10 @@ final class UnifiedSessionIndexer: ObservableObject {
             .store(in: &cancellables)
 
         // isIndexing reflects any enabled indexer working
-        Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, antigravity.$isIndexing, opencode.$isIndexing),
-            Publishers.CombineLatest(
-                hermes.$isIndexing,
-                Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
-            )
-        )
-            .combineLatest(pi.$isIndexing)
-            .combineLatest(kimi.$isIndexing)
-        .combineLatest(grok.$isIndexing)
+        Publishers.combineLatestArray(ordered.map(\.isIndexing))
             .combineLatest(agentEnabledFlags)
-            .map { states, flags in
-                let (statesWithKimi, grokState) = states
-                let (statesWithPi, kimiState) = statesWithKimi
-                let (baseStates, piState) = statesWithPi
-                let (s4, statesTail) = baseStates
-                let (c, cl, g, o) = s4
-                let (hermesState, tailStates) = statesTail
-                let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (baseFlagsWithKimi, grokEnabled) = flags
-                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
-                let (baseFlags, piEnabled) = baseFlagsWithPi
-                let (f4, flagsTail) = baseFlags
-                let (ec, ecl, eg, eo) = f4
-                let (eHermes, tailFlags) = flagsTail
-                let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState) || (grokEnabled && grokState)
+            .map { states, enabled in
+                zip(sources, states).contains { source, indexing in (enabled[source] ?? false) && indexing }
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -981,44 +628,25 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Aggregate core indexing progress across enabled providers.
-        // Provider tuple order is fixed: codex, claude, antigravity, opencode, hermes, copilot, droid, openclaw, cursor.
+        // Aggregate core indexing progress across every provider, in registry order
+        // (K14): three parallel folds — processed, totals, indexing — zipped back against
+        // `sources` into one `CoreProviderSnapshot` row per provider. `aggregateProgress`
+        // then ignores the disabled rows exactly as before.
         Publishers.CombineLatest3(
-            Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$filesProcessed, claude.$filesProcessed, antigravity.$filesProcessed, opencode.$filesProcessed),
-                Publishers.CombineLatest(
-                    hermes.$filesProcessed,
-                    Publishers.CombineLatest4(copilot.$filesProcessed, droid.$filesProcessed, openclaw.$filesProcessed, cursor.$filesProcessed)
-                )
-            ).combineLatest(pi.$filesProcessed).combineLatest(kimi.$filesProcessed).combineLatest(grok.$filesProcessed),
-            Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$totalFiles, claude.$totalFiles, antigravity.$totalFiles, opencode.$totalFiles),
-                Publishers.CombineLatest(
-                    hermes.$totalFiles,
-                    Publishers.CombineLatest4(copilot.$totalFiles, droid.$totalFiles, openclaw.$totalFiles, cursor.$totalFiles)
-                )
-            ).combineLatest(pi.$totalFiles).combineLatest(kimi.$totalFiles).combineLatest(grok.$totalFiles),
-            Publishers.CombineLatest(
-                Publishers.CombineLatest4(codex.$isIndexing, claude.$isIndexing, antigravity.$isIndexing, opencode.$isIndexing),
-                Publishers.CombineLatest(
-                    hermes.$isIndexing,
-                    Publishers.CombineLatest4(copilot.$isIndexing, droid.$isIndexing, openclaw.$isIndexing, cursor.$isIndexing)
-                )
-            ).combineLatest(pi.$isIndexing).combineLatest(kimi.$isIndexing).combineLatest(grok.$isIndexing)
+            Publishers.combineLatestArray(ordered.map(\.filesProcessed)),
+            Publishers.combineLatestArray(ordered.map(\.totalFiles)),
+            Publishers.combineLatestArray(ordered.map(\.isIndexing))
         )
         .combineLatest(agentEnabledFlags)
-        .map { metrics, flags in
-            let (baseFlagsWithKimi, grokEnabled) = flags
-            let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
-            let (baseFlags, piEnabled) = baseFlagsWithPi
+        .map { metrics, enabled in
             let (processed, totals, indexing) = metrics
-            let (((processedBase, piProcessed), kimiProcessed), grokProcessed) = processed
-            let (((totalsBase, piTotal), kimiTotal), grokTotal) = totals
-            let (((indexingBase, piIndexing), kimiIndexing), grokIndexing) = indexing
-            var snapshots = Self.coreProviderSnapshots(metrics: (processedBase, totalsBase, indexingBase), flags: baseFlags)
-            snapshots.append(CoreProviderSnapshot(source: .pi, enabled: piEnabled, indexing: piIndexing, processed: piProcessed, total: piTotal))
-            snapshots.append(CoreProviderSnapshot(source: .kimi, enabled: kimiEnabled, indexing: kimiIndexing, processed: kimiProcessed, total: kimiTotal))
-            snapshots.append(CoreProviderSnapshot(source: .grok, enabled: grokEnabled, indexing: grokIndexing, processed: grokProcessed, total: grokTotal))
+            let snapshots = sources.enumerated().map { index, source in
+                CoreProviderSnapshot(source: source,
+                                     enabled: enabled[source] ?? false,
+                                     indexing: indexing[index],
+                                     processed: processed[index],
+                                     total: totals[index])
+            }
             return Self.aggregateProgress(from: snapshots)
         }
         .receive(on: DispatchQueue.main)
@@ -1030,33 +658,10 @@ final class UnifiedSessionIndexer: ObservableObject {
         .store(in: &cancellables)
 
         // isProcessingTranscripts reflects any enabled indexer processing transcripts
-        Publishers.CombineLatest(
-            Publishers.CombineLatest4(codex.$isProcessingTranscripts, claude.$isProcessingTranscripts, antigravity.$isProcessingTranscripts, opencode.$isProcessingTranscripts),
-            Publishers.CombineLatest(
-                hermes.$isProcessingTranscripts,
-                Publishers.CombineLatest4(copilot.$isProcessingTranscripts, droid.$isProcessingTranscripts, openclaw.$isProcessingTranscripts, cursor.$isProcessingTranscripts)
-            )
-        )
-            .combineLatest(pi.$isProcessingTranscripts)
-            .combineLatest(kimi.$isProcessingTranscripts)
-        .combineLatest(grok.$isProcessingTranscripts)
+        Publishers.combineLatestArray(ordered.map(\.isProcessingTranscripts))
             .combineLatest(agentEnabledFlags)
-            .map { states, flags in
-                let (statesWithKimi, grokState) = states
-                let (statesWithPi, kimiState) = statesWithKimi
-                let (baseStates, piState) = statesWithPi
-                let (s4, statesTail) = baseStates
-                let (c, cl, g, o) = s4
-                let (hermesState, tailStates) = statesTail
-                let (copilotState, droidState, openclawState, cursorState) = tailStates
-                let (baseFlagsWithKimi, grokEnabled) = flags
-                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
-                let (baseFlags, piEnabled) = baseFlagsWithPi
-                let (f4, flagsTail) = baseFlags
-                let (ec, ecl, eg, eo) = f4
-                let (eHermes, tailFlags) = flagsTail
-                let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-                return (ec && c) || (ecl && cl) || (eg && g) || (eo && o) || (eHermes && hermesState) || (eCopilot && copilotState) || (eDroid && droidState) || (eOpenClaw && openclawState) || (eCursor && cursorState) || (piEnabled && piState) || (kimiEnabled && kimiState) || (grokEnabled && grokState)
+            .map { states, enabled in
+                zip(sources, states).contains { source, processing in (enabled[source] ?? false) && processing }
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -1066,47 +671,15 @@ final class UnifiedSessionIndexer: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Forward errors (preference order codex → claude → antigravity → opencode → hermes → copilot), ignoring disabled agents.
-        let indexingErrorHead = Publishers.CombineLatest4(
-            codex.$indexingError,
-            claude.$indexingError,
-            antigravity.$indexingError,
-            opencode.$indexingError
-        )
-        let indexingErrorTail = Publishers.CombineLatest(
-            hermes.$indexingError,
-            Publishers.CombineLatest4(
-                copilot.$indexingError,
-                droid.$indexingError,
-                openclaw.$indexingError,
-                cursor.$indexingError
-            )
-        )
-        let indexingErrors = Publishers.CombineLatest(
-            indexingErrorHead.eraseToAnyPublisher(),
-            indexingErrorTail.eraseToAnyPublisher()
-        )
-        .combineLatest(pi.$indexingError)
-        .combineLatest(kimi.$indexingError)
-        .combineLatest(grok.$indexingError)
-        let indexingErrorFlags = agentEnabledFlags.eraseToAnyPublisher()
-        indexingErrors
-            .combineLatest(indexingErrorFlags)
-            .map { errs, flags in
-                let (errorsWithKimi, grokError) = errs
-                let (errorsWithPi, kimiError) = errorsWithKimi
-                let (baseErrors, piError) = errorsWithPi
-                let (errs4, errsTail) = baseErrors
-                let (baseFlagsWithKimi, grokEnabled) = flags
-                let (baseFlagsWithPi, kimiEnabled) = baseFlagsWithKimi
-                let (baseFlags, piEnabled) = baseFlagsWithPi
-                let (f4, flagsTail) = baseFlags
-                return Self.firstEnabledIndexingError(
-                    headErrors: errs4,
-                    tailErrors: errsTail,
-                    headFlags: f4,
-                    tailFlags: flagsTail
-                ) ?? (piEnabled ? piError : nil) ?? (kimiEnabled ? kimiError : nil) ?? (grokEnabled ? grokError : nil)
+        // Forward the first error a still-enabled provider is reporting, in registry
+        // order (K14) — the same preference the hand-nested `firstEnabledIndexingError`
+        // chain expressed, minus the tuple surgery.
+        Publishers.combineLatestArray(ordered.map(\.indexingError))
+            .combineLatest(agentEnabledFlags)
+            .map { errors, enabled in
+                zip(sources, errors)
+                    .compactMap { source, error in (enabled[source] ?? false) ? error : nil }
+                    .first
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
@@ -1123,67 +696,24 @@ final class UnifiedSessionIndexer: ObservableObject {
             $dateTo.removeDuplicates(by: OptionalDateEquality.eq),
             $selectedModel.removeDuplicates()
         )
-        let includes = Publishers.CombineLatest(
-            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeAntigravity, $includeOpenCode),
-            Publishers.CombineLatest(
-                $includeHermes,
-                Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
-            )
-        )
-        .combineLatest($includePi)
-        .combineLatest($includeKimi)
-        .combineLatest($includeGrok)
+        let includes = $includedBySource
         Publishers.CombineLatest4(inputs, $selectedKinds.removeDuplicates(), $allSessions, includes.combineLatest(agentEnabledFlags))
             .receive(on: FeatureFlags.backgroundIngestQueue)
             .map { [weak self] combined -> [Session] in
                 guard let self else { return [] }
                 let (input, kinds, all, combinedFlags) = combined
                 let (q, from, to, model) = input
-                let (sources, enabledFlags) = combinedFlags
-                let (sourcesWithKimi, incGrok) = sources
-                let (sourcesWithPi, incKimi) = sourcesWithKimi
-                let (baseSources, incPi) = sourcesWithPi
-                let (src4, tailSources) = baseSources
-                let (incCodex, incClaude, incAntigravity, incOpenCode) = src4
-                let (incHermes, sourcesTail) = tailSources
-                let (incCopilot, incDroid, incOpenClaw, incCursor) = sourcesTail
-                let (baseEnabledWithKimi, enGrok) = enabledFlags
-                let (baseEnabledWithPi, enKimi) = baseEnabledWithKimi
-                let (baseEnabled, enPi) = baseEnabledWithPi
-                let (en4, enabledTail) = baseEnabled
-                let (enCodex, enClaude, enAntigravity, enOpenCode) = en4
-                let (enHermes, tailEnabled) = enabledTail
-                let (enCopilot, enDroid, enOpenClaw, enCursor) = tailEnabled
-                let effectiveCodex = incCodex && enCodex
-                let effectiveClaude = incClaude && enClaude
-                let effectiveAntigravity = incAntigravity && enAntigravity
-                let effectiveOpenCode = incOpenCode && enOpenCode
-                let effectiveHermes = incHermes && enHermes
-                let effectiveCopilot = incCopilot && enCopilot
-                let effectiveDroid = incDroid && enDroid
-                let effectiveOpenClaw = incOpenClaw && enOpenClaw
-                let effectiveCursor = incCursor && enCursor
-                let effectivePi = incPi && enPi
-                let effectiveKimi = incKimi && enKimi
-                let effectiveGrok = incGrok && enGrok
+                let (included, enabled) = combinedFlags
+                // One policy, one place: `activeSources` is the same enabled-AND-included
+                // conjunction `applyFiltersAndSort`, `updateLaunchState` and
+                // `allowedSearchSources()` read, so list, launch state and search can no
+                // longer disagree about a source.
+                let active = Self.activeSources(included: included, enabled: enabled)
 
                 // Start from all sessions, then apply the same filters we use elsewhere.
                 var base = all
-                if !(effectiveCodex && effectiveClaude && effectiveAntigravity && effectiveOpenCode && effectiveHermes && effectiveCopilot && effectiveDroid && effectiveOpenClaw && effectiveCursor && effectivePi && effectiveKimi && effectiveGrok) {
-                    base = base.filter { s in
-                        (s.source == .codex && effectiveCodex) ||
-                        (s.source == .claude && effectiveClaude) ||
-                        (s.source == .antigravity && effectiveAntigravity) ||
-                        (s.source == .opencode && effectiveOpenCode) ||
-                        (s.source == .hermes && effectiveHermes) ||
-                        (s.source == .copilot && effectiveCopilot) ||
-                        (s.source == .droid && effectiveDroid) ||
-                        (s.source == .openclaw && effectiveOpenClaw) ||
-                        (s.source == .cursor && effectiveCursor) ||
-                        (s.source == .pi && effectivePi) ||
-                        (s.source == .kimi && effectiveKimi) ||
-                        (s.source == .grok && effectiveGrok)
-                    }
+                if active.count < SessionSource.allCases.count {
+                    base = base.filter { active.contains($0.source) }
                 }
 
                 let filters = Filters(query: q,
@@ -1267,28 +797,19 @@ final class UnifiedSessionIndexer: ObservableObject {
             .sink { [weak self] in self?.recomputeNow() }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest(Publishers.CombineLatest4(codex.$launchPhase, claude.$launchPhase, antigravity.$launchPhase, opencode.$launchPhase),
-                                Publishers.CombineLatest(
-                                    hermes.$launchPhase,
-                                    Publishers.CombineLatest4(copilot.$launchPhase, droid.$launchPhase, openclaw.$launchPhase, cursor.$launchPhase)
-                                ))
-            .combineLatest(pi.$launchPhase)
+        // SPEC §8.1: this fold covers all twelve providers. The pyramid it replaces combined
+        // ten — `kimi` and `grok` were never added to it — so their launch phases could not
+        // move `launchState` at all.
+        Publishers.combineLatestArray(ordered.map(\.launchPhase))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateLaunchState()
             }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest(
-            Publishers.CombineLatest4($includeCodex, $includeClaude, $includeAntigravity, $includeOpenCode),
-            Publishers.CombineLatest(
-                $includeHermes,
-                Publishers.CombineLatest4($includeCopilot, $includeDroid, $includeOpenClaw, $includeCursor)
-            )
-        )
-            .combineLatest($includePi)
-            .combineLatest($includeKimi)
-        .combineLatest($includeGrok)
+        // The source-filter side-channel: a source excluded from the list is not allowed to
+        // block launch readiness, so `updateLaunchState` re-runs when inclusion changes.
+        $includedBySource
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateLaunchState()
@@ -1320,106 +841,79 @@ final class UnifiedSessionIndexer: ObservableObject {
         rebuildClaudeArchiveOverlay()
     }
 
-    /// Every provider's current enabled state, mirrored from `AgentEnablement` into the
-    /// published properties. Single source of truth for "which providers are on right
-    /// now" — read by both the enablement-sync diff below and `enabledAnalyticsSources()`.
-    /// Built from `allCases` over an exhaustive switch rather than written out as a
-    /// dictionary literal: a literal can silently omit a provider, whereas the switch
-    /// below will not compile until a newly added `SessionSource` is handled.
-    var enablementBySource: [SessionSource: Bool] {
-        Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, isAgentEnabled($0)) })
-    }
-
     func isAgentEnabled(_ source: SessionSource) -> Bool {
-        switch source {
-        case .codex: return codexAgentEnabled
-        case .claude: return claudeAgentEnabled
-        case .antigravity: return antigravityAgentEnabled
-        case .opencode: return openCodeAgentEnabled
-        case .hermes: return hermesAgentEnabled
-        case .copilot: return copilotAgentEnabled
-        case .droid: return droidAgentEnabled
-        case .openclaw: return openClawAgentEnabled
-        case .cursor: return cursorAgentEnabled
-        case .pi: return piAgentEnabled
-        case .kimi: return kimiAgentEnabled
-        case .grok: return grokAgentEnabled
-        }
+        enablementBySource[source] ?? false
     }
 
     /// The source-filter toggle for `source`, as a function of the source rather than twelve
-    /// separately-named properties.
-    ///
-    /// Deliberately an exhaustive switch with no `default:`: it is a bridge from the twelve
-    /// `include<Provider>` stored properties to a per-source read, and while it exists the
-    /// compiler refuses to build until a newly added `SessionSource` is wired up. Task 7
-    /// replaces the twelve properties with per-source storage and deletes this.
+    /// separately-named properties. A dictionary read since Task 7 — the twelve-arm switch
+    /// that bridged to the `include<Provider>` properties is gone, and those properties now
+    /// write through `includedBySource`.
     func isIncluded(_ source: SessionSource) -> Bool {
-        switch source {
-        case .codex: return includeCodex
-        case .claude: return includeClaude
-        case .antigravity: return includeAntigravity
-        case .opencode: return includeOpenCode
-        case .hermes: return includeHermes
-        case .copilot: return includeCopilot
-        case .droid: return includeDroid
-        case .openclaw: return includeOpenClaw
-        case .cursor: return includeCursor
-        case .pi: return includePi
-        case .kimi: return includeKimi
-        case .grok: return includeGrok
-        }
+        includedBySource[source] ?? true
+    }
+
+    /// THE enabled-AND-included conjunction (SPEC §3.5). Everything that needs "is this
+    /// source contributing right now" derives from this one place: the list filter
+    /// (`applyFiltersAndSort` and its pipeline twin), launch readiness
+    /// (`updateLaunchState`) and the search allow-list. It used to be written out three
+    /// separate times, which is how the list and search drifted apart.
+    static func activeSources(included: [SessionSource: Bool],
+                              enabled: [SessionSource: Bool]) -> Set<SessionSource> {
+        Set(SessionSource.allCases.filter { (enabled[$0] ?? false) && (included[$0] ?? true) })
+    }
+
+    /// Instance form of `activeSources`, over the current dictionaries.
+    func isSourceActive(_ source: SessionSource) -> Bool {
+        isAgentEnabled(source) && isIncluded(source)
     }
 
     /// Which sources a search may return results from (SPEC §3.5): globally enabled *and*
-    /// included by the source filter — the same conjunction `applyFiltersAndSort` uses for the
-    /// list, so search and list can no longer disagree about a source.
+    /// included by the source filter — the same conjunction the list and the launch state
+    /// use, so they can no longer disagree about a source.
     ///
     /// Lives on the indexer rather than in a view because all three production call sites need
     /// it and `UnifiedSearchFiltersView` cannot reach a helper private to `UnifiedSessionsView`.
     func allowedSearchSources() -> Set<SessionSource> {
-        Set(SessionSource.allCases.filter { isAgentEnabled($0) && isIncluded($0) })
+        Self.activeSources(included: includedBySource, enabled: enablementBySource)
     }
 
     func syncAgentEnablementFromDefaults(defaults: UserDefaults = .standard) {
         let beforeSources = enabledAnalyticsSources()
-        let previousEnablementBySource = enablementBySource
-        let c1 = AgentEnablement.isEnabled(.codex, defaults: defaults)
-        let c2 = AgentEnablement.isEnabled(.claude, defaults: defaults)
-        let c3 = AgentEnablement.isEnabled(.antigravity, defaults: defaults)
-        let c4 = AgentEnablement.isEnabled(.opencode, defaults: defaults)
-        let c5 = AgentEnablement.isEnabled(.hermes, defaults: defaults)
-        let c6 = AgentEnablement.isEnabled(.copilot, defaults: defaults)
-        let c7 = AgentEnablement.isEnabled(.droid, defaults: defaults)
-        let c8 = AgentEnablement.isEnabled(.openclaw, defaults: defaults)
-        let c9 = AgentEnablement.isEnabled(.cursor, defaults: defaults)
-        let c10 = AgentEnablement.isEnabled(.pi, defaults: defaults)
-        let c11 = AgentEnablement.isEnabled(.kimi, defaults: defaults)
-        let c12 = AgentEnablement.isEnabled(.grok, defaults: defaults)
-        if c1 != codexAgentEnabled { codexAgentEnabled = c1 }
-        if c2 != claudeAgentEnabled { claudeAgentEnabled = c2 }
-        if c3 != antigravityAgentEnabled { antigravityAgentEnabled = c3 }
-        if c4 != openCodeAgentEnabled { openCodeAgentEnabled = c4 }
-        if c5 != hermesAgentEnabled { hermesAgentEnabled = c5 }
-        if c6 != copilotAgentEnabled { copilotAgentEnabled = c6 }
-        if c7 != droidAgentEnabled { droidAgentEnabled = c7 }
-        if c8 != openClawAgentEnabled { openClawAgentEnabled = c8 }
-        if c9 != cursorAgentEnabled { cursorAgentEnabled = c9 }
-        if c10 != piAgentEnabled { piAgentEnabled = c10 }
-        if c11 != kimiAgentEnabled { kimiAgentEnabled = c11 }
-        if c12 != grokAgentEnabled { grokAgentEnabled = c12 }
+        let previous = enablementBySource
+        let next = Dictionary(uniqueKeysWithValues: SessionSource.allCases.map {
+            ($0, AgentEnablement.isEnabled($0, defaults: defaults))
+        })
+        applyEnablement(next)
 
         let afterSources = enabledAnalyticsSources()
         if analyticsLastBuiltAt != nil && !afterSources.subtracting(beforeSources).isEmpty {
             analyticsIsStale = true
         }
 
-        let refreshedSources: [SessionSource] = SessionSource.allCases.filter { source in
-            previousEnablementBySource[source] == false && AgentEnablement.isEnabled(source, defaults: defaults)
-        }
-        for source in refreshedSources {
+        for source in orderedSources where previous[source] == false && next[source] == true {
             requestProviderRefresh(source: source, reason: "provider-enabled", trigger: .providerEnabled)
         }
+    }
+
+    /// Publishes a new enablement map and mirrors it out to the twelve named properties the
+    /// views bind to. The dictionary is the value the pipelines observe; the twelve are a
+    /// read-only projection of it.
+    private func applyEnablement(_ next: [SessionSource: Bool]) {
+        if next != enablementBySource { enablementBySource = next }
+        func value(_ source: SessionSource) -> Bool { next[source] ?? false }
+        if value(.codex) != codexAgentEnabled { codexAgentEnabled = value(.codex) }
+        if value(.claude) != claudeAgentEnabled { claudeAgentEnabled = value(.claude) }
+        if value(.antigravity) != antigravityAgentEnabled { antigravityAgentEnabled = value(.antigravity) }
+        if value(.opencode) != openCodeAgentEnabled { openCodeAgentEnabled = value(.opencode) }
+        if value(.hermes) != hermesAgentEnabled { hermesAgentEnabled = value(.hermes) }
+        if value(.copilot) != copilotAgentEnabled { copilotAgentEnabled = value(.copilot) }
+        if value(.droid) != droidAgentEnabled { droidAgentEnabled = value(.droid) }
+        if value(.openclaw) != openClawAgentEnabled { openClawAgentEnabled = value(.openclaw) }
+        if value(.cursor) != cursorAgentEnabled { cursorAgentEnabled = value(.cursor) }
+        if value(.pi) != piAgentEnabled { piAgentEnabled = value(.pi) }
+        if value(.kimi) != kimiAgentEnabled { kimiAgentEnabled = value(.kimi) }
+        if value(.grok) != grokAgentEnabled { grokAgentEnabled = value(.grok) }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -1449,21 +943,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     func refresh(trigger: IndexRefreshTrigger = .manual) {
         LaunchProfiler.log("Unified.refresh: request enqueued")
-        let sources: [SessionSource] = [
-            codexAgentEnabled ? .codex : nil,
-            claudeAgentEnabled ? .claude : nil,
-            antigravityAgentEnabled ? .antigravity : nil,
-            openCodeAgentEnabled ? .opencode : nil,
-            hermesAgentEnabled ? .hermes : nil,
-            copilotAgentEnabled ? .copilot : nil,
-            droidAgentEnabled ? .droid : nil,
-            openClawAgentEnabled ? .openclaw : nil,
-            cursorAgentEnabled ? .cursor : nil,
-            piAgentEnabled ? .pi : nil,
-            kimiAgentEnabled ? .kimi : nil,
-            grokAgentEnabled ? .grok : nil
-        ].compactMap { $0 }
-        for source in sources {
+        for source in orderedSources where isAgentEnabled(source) {
             requestProviderRefresh(source: source, reason: "unified-refresh", trigger: trigger)
         }
     }
@@ -1496,84 +976,6 @@ final class UnifiedSessionIndexer: ObservableObject {
             activeSources: activeRows.count,
             totalSources: enabledRows.count
         )
-    }
-
-    private static func firstEnabledIndexingError(
-        headErrors: IndexingErrorHead,
-        tailErrors: IndexingErrorTail,
-        headFlags: AgentEnablementHead,
-        tailFlags: AgentEnablementTail
-    ) -> String? {
-        let (codexErr, claudeErr, antigravityErr, opencodeErr) = headErrors
-        let (hermesErr, tailErrValues) = tailErrors
-        let (copilotErr, droidErr, openclawErr, cursorErr) = tailErrValues
-        let (codexEnabled, claudeEnabled, antigravityEnabled, openCodeEnabled) = headFlags
-        let (hermesEnabled, tailFlagValues) = tailFlags
-        let (copilotEnabled, droidEnabled, openClawEnabled, cursorEnabled) = tailFlagValues
-
-        let errors: [String?] = [
-            codexEnabled ? codexErr : nil,
-            claudeEnabled ? claudeErr : nil,
-            antigravityEnabled ? antigravityErr : nil,
-            openCodeEnabled ? opencodeErr : nil,
-            hermesEnabled ? hermesErr : nil,
-            copilotEnabled ? copilotErr : nil,
-            droidEnabled ? droidErr : nil,
-            openClawEnabled ? openclawErr : nil,
-            cursorEnabled ? cursorErr : nil
-        ]
-        return errors.compactMap { $0 }.first
-    }
-
-    private static func coreProviderSnapshots(
-        metrics: (
-            (
-                (Int, Int, Int, Int),
-                (Int, (Int, Int, Int, Int))
-            ),
-            (
-                (Int, Int, Int, Int),
-                (Int, (Int, Int, Int, Int))
-            ),
-            (
-                (Bool, Bool, Bool, Bool),
-                (Bool, (Bool, Bool, Bool, Bool))
-            )
-        ),
-        flags: (
-            (Bool, Bool, Bool, Bool),
-            (Bool, (Bool, Bool, Bool, Bool))
-        )
-    ) -> [CoreProviderSnapshot] {
-        let (processedTuple, totalsTuple, indexingTuple) = metrics
-        let (processed4, processedTail) = processedTuple
-        let (pCodex, pClaude, pAntigravity, pOpenCode) = processed4
-        let (pHermes, processedTail4) = processedTail
-        let (pCopilot, pDroid, pOpenClaw, pCursor) = processedTail4
-        let (totals4, totalsTail) = totalsTuple
-        let (tCodex, tClaude, tAntigravity, tOpenCode) = totals4
-        let (tHermes, totalsTail4) = totalsTail
-        let (tCopilot, tDroid, tOpenClaw, tCursor) = totalsTail4
-        let (index4, indexTail) = indexingTuple
-        let (iCodex, iClaude, iAntigravity, iOpenCode) = index4
-        let (iHermes, indexTail4) = indexTail
-        let (iCopilot, iDroid, iOpenClaw, iCursor) = indexTail4
-        let (f4, flagsTail) = flags
-        let (eCodex, eClaude, eAntigravity, eOpenCode) = f4
-        let (eHermes, tailFlags) = flagsTail
-        let (eCopilot, eDroid, eOpenClaw, eCursor) = tailFlags
-
-        return [
-            CoreProviderSnapshot(source: .codex, enabled: eCodex, indexing: iCodex, processed: pCodex, total: tCodex),
-            CoreProviderSnapshot(source: .claude, enabled: eClaude, indexing: iClaude, processed: pClaude, total: tClaude),
-            CoreProviderSnapshot(source: .antigravity, enabled: eAntigravity, indexing: iAntigravity, processed: pAntigravity, total: tAntigravity),
-            CoreProviderSnapshot(source: .opencode, enabled: eOpenCode, indexing: iOpenCode, processed: pOpenCode, total: tOpenCode),
-            CoreProviderSnapshot(source: .hermes, enabled: eHermes, indexing: iHermes, processed: pHermes, total: tHermes),
-            CoreProviderSnapshot(source: .copilot, enabled: eCopilot, indexing: iCopilot, processed: pCopilot, total: tCopilot),
-            CoreProviderSnapshot(source: .droid, enabled: eDroid, indexing: iDroid, processed: pDroid, total: tDroid),
-            CoreProviderSnapshot(source: .openclaw, enabled: eOpenClaw, indexing: iOpenClaw, processed: pOpenClaw, total: tOpenClaw),
-            CoreProviderSnapshot(source: .cursor, enabled: eCursor, indexing: iCursor, processed: pCursor, total: tCursor)
-        ]
     }
 
     func rebuildCoreIndex() {
@@ -2264,20 +1666,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// session-list filters (housekeeping, archived, etc.) applied to the UI-facing list.
     @MainActor
     private func currentSessions(for source: SessionSource) -> [Session] {
-        switch source {
-        case .codex: return codex.allSessions
-        case .claude: return claude.allSessions
-        case .antigravity: return antigravity.allSessions
-        case .opencode: return opencode.allSessions
-        case .hermes: return hermes.allSessions
-        case .copilot: return copilot.allSessions
-        case .droid: return droid.allSessions
-        case .openclaw: return openclaw.allSessions
-        case .cursor: return cursor.allSessions
-        case .pi: return pi.allSessions
-        case .kimi: return kimi.allSessions
-        case .grok: return grok.allSessions
-        }
+        handle(source).currentSessions()
     }
 
     /// Cheap "did this source's discovered session list change at all" signal, built
@@ -2311,20 +1700,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func shouldRefreshSource(_ source: SessionSource) -> Bool {
-        switch source {
-        case .codex: return codexAgentEnabled && !codex.isIndexing
-        case .claude: return claudeAgentEnabled && !claude.isIndexing
-        case .antigravity: return antigravityAgentEnabled && !antigravity.isIndexing
-        case .opencode: return openCodeAgentEnabled && !opencode.isIndexing
-        case .hermes: return hermesAgentEnabled && !hermes.isIndexing
-        case .copilot: return copilotAgentEnabled && !copilot.isIndexing
-        case .droid: return droidAgentEnabled && !droid.isIndexing
-        case .openclaw: return openClawAgentEnabled && !openclaw.isIndexing
-        case .cursor: return cursorAgentEnabled && !cursor.isIndexing
-        case .pi: return piAgentEnabled && !pi.isIndexing
-        case .kimi: return kimiAgentEnabled && !kimi.isIndexing
-        case .grok: return grokAgentEnabled && !grok.isIndexing
-        }
+        isAgentEnabled(source) && !handle(source).currentIsIndexing()
     }
 
     @MainActor
@@ -2390,26 +1766,22 @@ final class UnifiedSessionIndexer: ObservableObject {
         return min(120, max(10, base * multiplier))
     }
 
-    @MainActor
-    private func focusedMonitorCapability(for source: SessionSource) -> FocusedMonitorCapability? {
-        Self.focusedMonitorCapabilityBySource[source]
-    }
-
+    /// The handle's `reloadFocusedSession` carries no enablement guard (SPEC §3.4) — this
+    /// is the call site that owns it, exactly as the twelve deleted capability closures each
+    /// opened with `guard indexer.<x>AgentEnabled else { return }`.
     @MainActor
     private func refreshFocusedSession(context: FocusedSessionContext, trigger: FocusedReloadTrigger) {
         guard focusedSessionContext == context else { return }
-        guard let capability = focusedMonitorCapability(for: context.source),
-              capability.supportsFocusedMonitoring() else {
-            return
-        }
-        capability.reloadFocusedSession(self, context, trigger)
+        guard Self.supportsFocusedSessionMonitoring(source: context.source) else { return }
+        guard isAgentEnabled(context.source) else { return }
+        let force = (trigger != .selection)
+        handle(context.source).reloadFocusedSession(context.sessionID, force, trigger)
     }
 
     @MainActor
     private func focusedFileSignature(for context: FocusedSessionContext) -> FileSignature? {
-        guard let capability = focusedMonitorCapability(for: context.source),
-              capability.supportsFocusedMonitoring(),
-              let path = capability.signatureSource(self, context) else {
+        guard Self.supportsFocusedSessionMonitoring(source: context.source),
+              let path = sourceAwareFocusedSignaturePath(for: context) else {
             return nil
         }
         return fileSignature(atPath: path)
@@ -2417,33 +1789,10 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     @MainActor
     private func sourceAwareFocusedSignaturePath(for context: FocusedSessionContext) -> String? {
-        let livePath: String?
-        switch context.source {
-        case .codex:
-            livePath = codex.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .claude:
-            livePath = claude.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .antigravity:
-            livePath = antigravity.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .opencode:
-            livePath = opencode.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .hermes:
-            livePath = hermes.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .copilot:
-            livePath = copilot.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .droid:
-            livePath = droid.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .openclaw:
-            livePath = openclaw.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .cursor:
-            livePath = cursor.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .pi:
-            livePath = pi.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .kimi:
-            livePath = kimi.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        case .grok:
-            livePath = grok.allSessions.first(where: { $0.id == context.sessionID })?.filePath
-        }
+        let livePath = handle(context.source)
+            .currentSessions()
+            .first(where: { $0.id == context.sessionID })?
+            .filePath
         if let livePath, !livePath.isEmpty { return livePath }
         return context.filePath
     }
@@ -2519,52 +1868,31 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
+    /// Every registered source supports focused-session monitoring: its handle carries a
+    /// `reloadFocusedSession`, which is what the twelve deleted capability rows each said
+    /// with a literal `supportsFocusedMonitoring: { true }`.
     static func focusedSessionMonitoringSupported(for source: SessionSource) -> Bool {
-        guard let capability = focusedMonitorCapabilityBySource[source] else { return false }
-        return capability.supportsFocusedMonitoring()
+        SessionSourceRegistry.bySource[source] != nil
     }
 
     private static func supportsFocusedSessionMonitoring(source: SessionSource) -> Bool {
         focusedSessionMonitoringSupported(for: source)
     }
 
+    /// SPEC §8.6 lives in the handles, not here: OpenCode's `refresh` takes no arguments,
+    /// so its adapter's wrapper drops mode/trigger/profile — the same thing this switch's
+    /// `case .opencode: opencode.refresh()` arm used to do.
     @MainActor
     private func triggerRefresh(for source: SessionSource,
                                 mode: IndexRefreshMode,
                                 trigger: IndexRefreshTrigger,
                                 executionProfile: IndexRefreshExecutionProfile) {
-        switch source {
-        case .codex: codex.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .claude: claude.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .antigravity: antigravity.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .opencode: opencode.refresh()
-        case .hermes: hermes.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .copilot: copilot.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .droid: droid.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .openclaw: openclaw.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .cursor: cursor.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .pi: pi.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .kimi: kimi.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        case .grok: grok.refresh(mode: mode, trigger: trigger, executionProfile: executionProfile)
-        }
+        handle(source).refresh(mode, trigger, executionProfile)
     }
 
     @MainActor
     private func isSourceIndexing(_ source: SessionSource) -> Bool {
-        switch source {
-        case .codex: return codex.isIndexing
-        case .claude: return claude.isIndexing
-        case .antigravity: return antigravity.isIndexing
-        case .opencode: return opencode.isIndexing
-        case .hermes: return hermes.isIndexing
-        case .copilot: return copilot.isIndexing
-        case .droid: return droid.isIndexing
-        case .openclaw: return openclaw.isIndexing
-        case .cursor: return cursor.isIndexing
-        case .pi: return pi.isIndexing
-        case .kimi: return kimi.isIndexing
-        case .grok: return grok.isIndexing
-        }
+        handle(source).currentIsIndexing()
     }
 
     /// Returns the subset of currently enabled agents that support analytics.
@@ -2766,20 +2094,15 @@ final class UnifiedSessionIndexer: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    /// One row per source, from the same enabled-AND-included policy the list filter uses
+    /// (`isSourceActive`): a source that is switched off or filtered out is reported `.ready`
+    /// so it never blocks launch readiness.
+    @MainActor
     private func updateLaunchState() {
         var phases: [SessionSource: LaunchPhase] = [:]
-        phases[.codex] = (codexAgentEnabled && includeCodex) ? codex.launchPhase : .ready
-        phases[.claude] = (claudeAgentEnabled && includeClaude) ? claude.launchPhase : .ready
-        phases[.antigravity] = (antigravityAgentEnabled && includeAntigravity) ? antigravity.launchPhase : .ready
-        phases[.opencode] = (openCodeAgentEnabled && includeOpenCode) ? opencode.launchPhase : .ready
-        phases[.hermes] = (hermesAgentEnabled && includeHermes) ? hermes.launchPhase : .ready
-        phases[.copilot] = (copilotAgentEnabled && includeCopilot) ? copilot.launchPhase : .ready
-        phases[.droid] = (droidAgentEnabled && includeDroid) ? droid.launchPhase : .ready
-        phases[.openclaw] = (openClawAgentEnabled && includeOpenClaw) ? openclaw.launchPhase : .ready
-        phases[.cursor] = (cursorAgentEnabled && includeCursor) ? cursor.launchPhase : .ready
-        phases[.pi] = (piAgentEnabled && includePi) ? pi.launchPhase : .ready
-        phases[.kimi] = (kimiAgentEnabled && includeKimi) ? kimi.launchPhase : .ready
-        phases[.grok] = (grokAgentEnabled && includeGrok) ? grok.launchPhase : .ready
+        for source in orderedSources {
+            phases[source] = isSourceActive(source) ? handle(source).currentLaunchPhase() : .ready
+        }
 
         let overall: LaunchPhase
         if phases.values.contains(.error) {
@@ -2817,18 +2140,11 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     static func mergedAggregationResult(from work: SessionAggregationWork) -> SessionAggregationResult {
         var merged: [Session] = []
-        if work.enablement.codex { merged.append(contentsOf: work.codexList) }
-        if work.enablement.claude { merged.append(contentsOf: work.claudeList) }
-        if work.enablement.antigravity { merged.append(contentsOf: work.antigravityList) }
-        if work.enablement.openCode { merged.append(contentsOf: work.opencodeList) }
-        if work.enablement.hermes { merged.append(contentsOf: work.hermesList) }
-        if work.enablement.copilot { merged.append(contentsOf: work.copilotList) }
-        if work.enablement.droid { merged.append(contentsOf: work.droidList) }
-        if work.enablement.openClaw { merged.append(contentsOf: work.openclawList) }
-        if work.enablement.cursor { merged.append(contentsOf: work.cursorList) }
-        if work.enablement.pi { merged.append(contentsOf: work.piList) }
-        if work.enablement.kimi { merged.append(contentsOf: work.kimiList) }
-        if work.enablement.grok { merged.append(contentsOf: work.grokList) }
+        // Registry order, which is the order the twelve `if enablement.x { append }` lines
+        // this replaces ran in. The final sort is by modifiedAt, so this only fixes ties.
+        for source in SessionSource.allCases where work.enablement.isEnabled(source) {
+            merged.append(contentsOf: work.lists[source] ?? [])
+        }
         for index in merged.indices {
             merged[index].isFavorite = work.favoritesSnapshot.contains(id: merged[index].id, source: merged[index].source)
         }
@@ -2885,23 +2201,10 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// Apply current UI filters and sort preferences to a list of sessions.
     /// Used for both unified.sessions and search results to ensure consistent filtering/sorting.
     func applyFiltersAndSort(to sessions: [Session]) -> [Session] {
-        // Filter by source (Codex/Claude/Antigravity/OpenCode toggles) and global agent enablement.
-        let base = sessions.filter { s in
-            switch s.source {
-            case .codex:    return codexAgentEnabled && includeCodex
-            case .claude:   return claudeAgentEnabled && includeClaude
-            case .antigravity:   return antigravityAgentEnabled && includeAntigravity
-            case .opencode: return openCodeAgentEnabled && includeOpenCode
-            case .hermes:   return hermesAgentEnabled && includeHermes
-            case .copilot:  return copilotAgentEnabled && includeCopilot
-            case .droid:    return droidAgentEnabled && includeDroid
-            case .openclaw: return openClawAgentEnabled && includeOpenClaw
-            case .cursor:   return cursorAgentEnabled && includeCursor
-            case .pi:       return piAgentEnabled && includePi
-            case .kimi:     return kimiAgentEnabled && includeKimi
-            case .grok:     return grokAgentEnabled && includeGrok
-            }
-        }
+        // Filter by source toggle AND global agent enablement — the one policy, read from
+        // `activeSources` rather than written out a third time.
+        let active = allowedSearchSources()
+        let base = sessions.filter { active.contains($0.source) }
 
         // Apply FilterEngine (query, date, model, kinds, project, path)
         let filters = Filters(query: query,
@@ -3055,8 +2358,11 @@ final class UnifiedSessionIndexer: ObservableObject {
         let blockingSources: [SessionSource]
         let hasDisplayedSessions: Bool
 
+        /// SPEC §8.2: seeded from `SessionSource.allCases`. The hand-written literal this
+        /// replaces named eight of the twelve sources, so `sourcePhases` started life
+        /// missing four providers.
         static let idle = LaunchState(
-            sourcePhases: [.codex: .idle, .claude: .idle, .antigravity: .idle, .opencode: .idle, .copilot: .idle, .droid: .idle, .openclaw: .idle, .cursor: .idle],
+            sourcePhases: Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, LaunchPhase.idle) }),
             overallPhase: .idle,
             blockingSources: SessionSource.allCases,
             hasDisplayedSessions: false

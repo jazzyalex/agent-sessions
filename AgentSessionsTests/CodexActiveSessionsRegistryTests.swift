@@ -3766,33 +3766,11 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let hiddenAntigravity = makeFallbackSession(id: "gemini-hidden", source: .antigravity, cwd: nil, modifiedAt: now.addingTimeInterval(-60))
         let favoriteKey = StarredSessionKey(source: .claude, id: claude.id)
         let work = UnifiedSessionIndexer.SessionAggregationWork(
-            codexList: [codex],
-            claudeList: [claude],
-            antigravityList: [hiddenAntigravity],
-            opencodeList: [],
-            hermesList: [],
-            copilotList: [],
-            droidList: [],
-            openclawList: [],
-            cursorList: [],
-            piList: [],
-            kimiList: [],
-            grokList: [],
+            lists: [.codex: [codex], .claude: [claude], .antigravity: [hiddenAntigravity]],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: [favoriteKey]),
             favoritesVersion: 1,
             enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
-                codex: true,
-                claude: true,
-                antigravity: false,
-                openCode: false,
-                hermes: false,
-                copilot: false,
-                droid: false,
-                openClaw: false,
-                cursor: false,
-                pi: false,
-                kimi: false,
-                grok: false
+                enabled: [.codex: true, .claude: true, .antigravity: false]
             )
         )
 
@@ -3806,34 +3784,10 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         let now = Date()
         let session = makeFallbackSession(id: "codex-a", source: .codex, cwd: nil, modifiedAt: now)
         let work = UnifiedSessionIndexer.SessionAggregationWork(
-            codexList: [session],
-            claudeList: [],
-            antigravityList: [],
-            opencodeList: [],
-            hermesList: [],
-            copilotList: [],
-            droidList: [],
-            openclawList: [],
-            cursorList: [],
-            piList: [],
-            kimiList: [],
-            grokList: [],
+            lists: [.codex: [session]],
             favoritesSnapshot: UnifiedSessionIndexer.FavoritesStore.Snapshot(legacyIDs: [], scopedKeys: []),
             favoritesVersion: 3,
-            enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(
-                codex: true,
-                claude: false,
-                antigravity: false,
-                openCode: false,
-                hermes: false,
-                copilot: false,
-                droid: false,
-                openClaw: false,
-                cursor: false,
-                pi: false,
-                kimi: false,
-                grok: false
-            )
+            enablement: UnifiedSessionIndexer.AgentEnablementSnapshot(enabled: [.codex: true])
         )
 
         let result = UnifiedSessionIndexer.mergedAggregationResult(from: work)

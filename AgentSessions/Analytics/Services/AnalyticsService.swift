@@ -17,9 +17,9 @@ final class AnalyticsService: ObservableObject {
     /// Registry-ordered runtimes. This is the whole per-source surface the service needs:
     /// it reads sessions and launch phases through the type-erased `ProviderHandle` and
     /// never downcasts to a concrete indexer (spike finding 2).
-    private var runtimes: [SourceRuntime] {
-        SessionSourceRegistry.ordered.map { catalog[$0.descriptor.source] }
-    }
+    /// Resolved once: the catalog is immutable after `init`, so rebuilding this twelve-row
+    /// array on every read (as a computed property) bought nothing.
+    private let runtimes: [SourceRuntime]
 
     private var cancellables = Set<AnyCancellable>()
     private let repository: AnalyticsRepository?
@@ -29,6 +29,7 @@ final class AnalyticsService: ObservableObject {
 
     init(catalog: SessionProviderCatalog) {
         self.catalog = catalog
+        self.runtimes = SessionSourceRegistry.ordered.map { catalog[$0.descriptor.source] }
         if let db = try? IndexDB() {
             self.repository = AnalyticsRepository(db: db)
         } else {
