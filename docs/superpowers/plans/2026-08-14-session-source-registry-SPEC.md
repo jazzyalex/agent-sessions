@@ -192,7 +192,10 @@ writing one of these, not editing five wiring sites.
 
 ```swift
 enum SessionSourceRegistry {
-    /// THE one remaining hand-maintained list. Order == SessionSource.allCases order.
+    /// The primary hand-maintained list. Order == SessionSource.allCases order.
+    /// (Amended 2026-08-16: not the *only* one — `PreferencesTab.sidebarAgentSources`
+    /// is a second, and cannot be derived from this because its order is frozen
+    /// shipped sidebar history. See §6.A′ item 16.)
     static let ordered: [SessionSourceAdapter]
     static let bySource: [SessionSource: SessionSourceAdapter]
     static func adapter(for source: SessionSource) -> SessionSourceAdapter   // precondition on gap
@@ -385,6 +388,67 @@ directions: it missed eleven forced sites and named three that are actually sile
     `UnifiedTranscriptView` is generic over it. Declared statically on `SourceRuntime`
     (§3.2) so the failure surfaces at `makeRuntime`, not deep in the transcript layer.
 
+### 6.A′ Amendment 2026-08-16 (post-Task-8, verified at `760382ed`)
+
+Tasks 4–8 landed after the Task-0 spike, so the 6.A list above describes the code as the
+spike found it. **Seven further sites** (items 11–17) were not enumerated anywhere; the six
+that force an edit are 11–16, and item 17 is recorded as convention-forced rather than
+enforced. Without them §2's "zero unenumerated shared edits" is false. Added here so the
+acceptance criterion is true of the SPEC and not only of the guide. All seven are
+reproduced in `docs/adding-a-session-source.md` §6.
+
+**Compiler-forced (directly):**
+
+11. `UnifiedSessionsView.canResumeSession` (`:3141`, switch at `:3143`) — the third member
+    of the resume family. `descriptor.supportsResume` guards it but does not replace it:
+    the per-session predicates are strictly narrower. Task 8 removed its `default: return
+    false`, so droid/openclaw now spell out an unreachable arm rather than let a thirteenth
+    source inherit "never resumable". Items 6.A.5's two dispatchers are written against it.
+12. `Analytics/Views/AnalyticsView.swift:19, 43` — one `@AppStorage` property plus an arm
+    in `isEnabled(_:)`, exhaustive with no `default:`.
+13. `Onboarding/Views/FirstRunSetupView.swift:31, 369` — the same shape in
+    `isAgentEnabled(_:)`. Note this is a *different* switch from the
+    `FirstRunSetupView.isVisibleSession` copy named in 6.A.2, which Task 8 deduplicated.
+14. `Views/PreferencesView.swift:~81` + `Views/Preferences/PreferencesView+General.swift:459`
+    — one `@AppStorage` property on `PreferencesView` plus an arm in
+    `agentEnablementBinding(for:)`, exhaustive with no `default:`.
+
+    12–14 are one irreducible shape repeated three times: `@AppStorage` is a property
+    wrapper, so the twelve declarations cannot collapse into an array fold. Each consuming
+    switch was deliberately made exhaustive by Task 8 so the compiler, rather than a later
+    bug report, catches the omission. This residue looks structural, not fixable.
+
+**Compiler-forced (transitively):**
+
+15. `UnifiedSessionIndexer` `@Published var include<Source>` (~`:372-402`) — reachable only
+    by name from `includeBinding(for:)` (`:1924`) and
+    `ensureSourceIncludedForCockpitNavigation` (`:2427`), both exhaustive.
+
+**Test-forced:**
+
+16. `PreferencesTab.sidebarAgentSources` (`Views/PreferencesView.swift:1242`) — **the second
+    hand-maintained per-source list in the codebase**, after `SessionSourceRegistry.ordered`.
+    It cannot be registry-derived: the sequence is frozen shipped sidebar order, and
+    reordering it would move settings under the user. Membership is pinned by
+    `testSidebarAgentSourcesAreEveryRegistrySourceExceptTheHiddenOnes`; the exact ordered
+    result is pinned by `testSidebarAgentTabOrderIsFrozen`, whose expectation literal
+    (`ViewRegistryDerivationTests.swift:131-133`) must also be updated.
+
+    **Consequence for the rest of this SPEC:** §3.3's sketched doc comment and §9's
+    definition of done both called the registry the *only* remaining hand list. Both are
+    corrected in place (2026-08-16) to name this array as the second.
+    `SessionSourceRegistry.swift`'s own header comment in the shipped code still carries
+    the stale claim — a Swift edit, so it is a follow-up rather than part of this
+    amendment.
+
+**Convention-forced (documented, not enforced):**
+
+17. `UnifiedSessionIndexer` `@Published private(set) var <source>AgentEnabled` (~`:412-423`)
+    and its line in `applyEnablement` (`:902`). `isAgentEnabled(_:)` is dictionary-backed,
+    so the build succeeds without them — but every existing arm of `reloadSessionForSource`
+    (`:2477`) reads the named mirror, so a source that skips it is out of step with all
+    twelve. Recorded rather than enforced.
+
 ### 6.B Test-forced (sentinels that fire instead of the compiler)
 
 - `TranscriptHostView.coveredSources` — `testTranscriptHostCoversEverySource`.
@@ -476,8 +540,9 @@ Everything else is bit-for-bit, enforced by the §10 test set.
 - Increments 0–9 complete; `./scripts/xcode_test_stable.sh` green throughout.
 - Acceptance criterion (§2) proven twice: fake-source spike report + #56 dry-run rebase
   showing only enumerated edits.
-- Zero remaining hand lists in the census except: the registry, §6 semantic switches,
-  and the out-of-scope subsystems.
+- Zero remaining hand lists in the census except: `SessionSourceRegistry.ordered`,
+  `PreferencesTab.sidebarAgentSources` (amended 2026-08-16 — see §6.A′ item 16; both are
+  test-enforced), §6 semantic switches, and the out-of-scope subsystems.
 - `docs/adding-a-session-source.md` accurate; backlog entry updated.
 
 ## 10. Test contracts (strengthened per rev-1 P2)

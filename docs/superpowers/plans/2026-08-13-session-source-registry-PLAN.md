@@ -1,7 +1,9 @@
 # Session Source Registry — collapsing the per-source integration tax
 
+> Superseded 2026-08-14 by `2026-08-14-session-source-registry-SPEC.md` (rev 2) + `2026-08-14-session-source-registry-PLAN.md`.
+
 Date: 2026-08-13
-Status: in progress
+Status: superseded (historical record — see the notice above)
 Trigger: PR #55 (Grok) merged as `0da1075a`; PR #56 (Devin) open and colliding.
 
 ## Why

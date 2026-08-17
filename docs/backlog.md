@@ -194,62 +194,41 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ## Agent Source Plumbing
 
 ### Hand-maintained per-source lists drift every time an agent is added
-> **partial** · sev: med · urg: low · verified 2026-08-14
+> **done** 2026-08-16
 
-- **Where:** the per-source sites that are *not* compiler-checked, all in
-  [UnifiedSessionsView.swift](../AgentSessions/Views/UnifiedSessionsView.swift) unless
-  noted —
-  - `flashAgentEnablementNoticeIfNeeded()` — an 11-term `&&` chain over
-    `<provider>AgentEnabled`
-  - the `.onChange(of: <provider>AgentEnabled)` block that drives that notice
-  - `enabledOtherAgentSpecs` — the filter-pill / overflow-menu spec array
-  - `SearchCoordinator.start(...)` — one `include<Provider>: Bool` parameter per source,
-    unpacked into an `allowed: Set<SessionSource>`
-    ([SearchCoordinator.swift](../AgentSessions/Search/SearchCoordinator.swift))
-  - the `@AppStorage(PreferencesKey.Agents.<provider>Enabled)` blocks duplicated across
-    `UnifiedSessionsView`, `UnifiedSearchFiltersView`, `PreferencesView`, and
-    `FirstRunSetupView`
-- **What:** Kimi shipped as the 11th source in `47a50106` and was missed at four of
-  these; Pi and the other late arrivals are missed at some of the same ones. The split is
-  clean and predictable: **every site the compiler forces to be exhaustive was correct**
-  (`switch` over `SessionSource`, `SessionSource.allCases` drivers such as the
-  search-ingest kick and `AgentEnablement`), and **every hand-maintained list had
-  drifted**. Nothing here is caught by a type error, and none of it is covered by tests,
-  so each omission surfaces later as "provider X is invisible in feature Y".
-- **Live instances still open** (found 2026-08-03, deliberately not bundled into the Kimi
-  fix): the enablement notice is observed for only 6 of 11 agents — `hermes`, `droid`,
-  `openClaw`, `cursor`, and `pi` have no `.onChange`, so disabling any of them alone still
-  flashes nothing.
-- **Closed 2026-08-03 (`747fcfaa`):** `enabledOtherAgentSpecs` now has its Kimi entry, with
-  `shortcut: nil` like Hermes exactly as predicted above, so the pill, the overflow-menu
-  item, and the `enabledAgentCount` contribution all exist. Two more instances of this same
-  class turned up while fixing it and were closed with it: `PreferencesTab` had no `.kimi`
-  case at all — leaving `KimiSessionsRootOverride` with three readers and no writer — and
-  the has-commands quick filter's provider list omitted `.kimi`, so every Kimi session
-  passed that filter with zero tool calls. That last one is now
-  `UnifiedSessionIndexer.passesHasCommandsFilter`, an exhaustive `switch`, so it has left
-  this drift class for good. The array and the notice chain below have not.
-- **Direction:** make the shapes source-enumerated rather than hand-listed — derive the
-  notice predicate and the pill specs from `SessionSource.allCases` filtered by
-  `AgentEnablement.isEnabled`, and replace `start`'s parallel `Bool` parameters with the
-  `Set<SessionSource>` it already builds internally. A single shared observable for
-  enablement would also collapse the four duplicated `@AppStorage` blocks.
-- **Why deferred:** it crosses view state, search, and preferences, and each has its own
-  constraint — the pill array carries per-source colors and keyboard shortcuts, `start`'s
-  signature is load-bearing for two test call sites, and the `@AppStorage` blocks feed
-  SwiftUI invalidation, so collapsing them changes redraw behavior. That is a design pass,
-  not a mechanical rename, and it should not ride along with a one-provider bug fix.
-- **Risk if wrong:** medium blast radius, low severity per instance. A mistake here makes
-  a provider silently absent from a filter or a notice — annoying and hard to notice,
-  which is exactly the failure mode already observed, but it cannot corrupt data or break
-  parsing.
-- **To close:** convert at least the notice predicate and the pill specs to
-  `SessionSource.allCases`, add the five missing `.onChange` observers (or delete them in
-  favor of a derived value), and add one test that asserts every `SessionSource.allCases`
-  member reaches the search allow-list — the drift class that
-  `testSearchCoordinatorIncludeKimiGatesKimiSessions` only covers for Kimi. Kimi's own pill
-  is done, but by hand, which is the point: the array is still hand-listed and the twelfth
-  source will drift again.
+Closed by the Session Source Registry program (Tasks 0-9, `main` at `760382ed`):
+descriptors, `SessionSourceRegistry` and `SessionProviderCatalog` replaced the hand lists,
+and the four silent `default:` holes named in SPEC §6.C (`resume(_:)`,
+`Session.computeIsHousekeeping`, the two inner `ImageBrowserIndexCache` switches) became
+exhaustive along with several others. Two hand-maintained lists
+survive on purpose, both test-enforced: `SessionSourceRegistry.ordered` and
+`PreferencesTab.sidebarAgentSources` (frozen sidebar order, so it cannot be registry-derived).
+Spec: [2026-08-14-session-source-registry-SPEC.md](superpowers/plans/2026-08-14-session-source-registry-SPEC.md).
+The remaining cost of a new source, and the PR #56 dry-run that measured it, are in
+[adding-a-session-source.md](adding-a-session-source.md).
+Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
+`testSidebarAgentSourcesAreEveryRegistrySourceExceptTheHiddenOnes`.
+
+### Three per-source behaviors the registry refactor deliberately preserved
+> **open** · sev: low · urg: low · verified 2026-08-16
+
+- **Where / what:** SPEC §8 items 6–8, each found during the refactor and left as-is so the
+  program stayed behavior-preserving —
+  - `UnifiedSessionIndexer.triggerRefresh` drops `mode` / `trigger` / `executionProfile`
+    for OpenCode only (now inside that source's `ProviderHandle` wrapper,
+    [OpenCodeSourceDescriptor.swift:88](../AgentSessions/OpenCode/OpenCodeSourceDescriptor.swift:88)).
+  - Droid's Preferences pane is implemented and reachable but hidden from the sidebar
+    (`PreferencesTab.sidebarHiddenSources = [.droid]`,
+    [PreferencesView.swift:1232](../AgentSessions/Views/PreferencesView.swift:1232)).
+  - `effectiveWorkingDirectoryURL(for:)` has no kimi/grok arm, so both fall to the generic
+    `session.cwd` via its `default:`.
+- **Why deferred:** each is an owner decision, not a defect — the refactor's whole
+  correctness argument was bit-for-bit preservation, so changing any of them there would
+  have been unreviewable.
+- **Risk if wrong:** low — all three are the pre-refactor behaviors, unchanged; the risk is
+  only that they stay unexamined (droid's finished pane stays invisible, OpenCode refresh
+  triggers stay coarser than the other eleven) because nothing but this entry tracks them.
+- **To close:** an owner ruling on each. Droid's is the only user-visible one.
 
 ---
 
