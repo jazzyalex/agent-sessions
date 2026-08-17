@@ -1,3 +1,24 @@
+## 2026-08-16 20:28 · session-source-registry · Registry program complete, approved for owner QA
+status: done
+
+**State:** All 10 tasks (0–9) of the session-source registry refactor are implemented, task-reviewed, and committed on `main` (`0e2cb747..48276c72`, 11 commits, 57 files, +4662/−2411). Final whole-branch review (Fable): **approved for QA, 0 must-fix**. Suite: 1949 + 55 logic tests, 0 failures. Proof: PR #56 dry-run — 26 shared files → 12 (shared Swift 22 → 8, wiring-tax 14 → 0).
+
+**Decided / don't redo:**
+- Two behavior widenings accepted pending owner sign-off: §8.3 also removes the launch-time `analyticsIsStale` flag (phantom openclaw flip, strictly corrective); Task 8's enablement reads converge upgrade installs on the registry rule (views were the last holdout; pills were already inert for that cohort).
+- PreferencesTab title/icon stay hand-written on purpose — deriving changes 4 rendered values; needs a new descriptor field + goldens if ever wanted.
+- Two hand lists survive by design, test-enforced: `SessionSourceRegistry.ordered`, `PreferencesTab.sidebarAgentSources`.
+- Six follow-up residues filed in `docs/backlog.md` → "Registry program follow-ups"; three preserved behaviors (OpenCode refresh, hidden droid pane, kimi/grok cwd) filed as their own entry awaiting owner rulings.
+
+**Key files:**
+- `docs/adding-a-session-source.md` — THE contributor guide (29 edit rows, 10 sentinels), review-verified against code
+- `docs/superpowers/plans/2026-08-14-session-source-registry-SPEC.md` — K1–K16 + dated §6.A′ amendment
+- `AgentSessions/Services/SessionProviderCatalog.swift` — the one lifecycle owner (K16: publishes nothing)
+
+**Next:**
+1. Owner batched visual QA: source toggles + "Sources ready" indicator (§8.1–8.3), onboarding "N sessions found", column toggle, Antigravity stale/unreadable affordances, pills/colors/shortcuts, sidebar (droid hidden), droid/openclaw resume menus, launch-time feel (eager 12-runtime init).
+2. Owner sign-off on the two accepted widenings above.
+3. At next `deploy bump`: §8.1–8.5 are user-visible fixes — they belong in the CHANGELOG/What's New then (nothing owed on-branch).
+
 ## 2026-08-14 13:55 · release-4.8 · 4.8 shipped, then release notes corrected twice
 status: done
 
