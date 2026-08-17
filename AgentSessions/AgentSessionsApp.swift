@@ -171,7 +171,7 @@ enum CockpitNavigationBridge {
 @main
 struct AgentSessionsApp: App {
     @NSApplicationDelegateAdaptor(AgentSessionsApplicationDelegate.self) private var appDelegate
-    /// One lifecycle owner for all twelve providers, replacing the twelve `@StateObject`
+    /// One lifecycle owner for every registered provider, replacing the twelve `@StateObject`
     /// indexers that used to be declared here and threaded positionally into every
     /// downstream consumer (SPEC §3.3).
     ///

@@ -348,6 +348,7 @@ struct UnifiedSessionsView: View {
     private var piIndexer: PiSessionIndexer { catalog.indexer(.pi, as: PiSessionIndexer.self) }
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
+    private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -428,7 +429,7 @@ struct UnifiedSessionsView: View {
 	// meters are Codex/Claude-specific and read them by name. Every other per-agent
 	// enablement question in this view goes through `unified.isAgentEnabled(_:)` (whose
 	// `enablementBySource` is @Published, so the toolbar still redraws on a toggle), and
-	// the *change* notification for all twelve comes from `agentEnablementObserver`.
+	// the *change* notification for every registered source comes from `agentEnablementObserver`.
 	// Re-declaring the other ten as @AppStorage would only give this view a second,
 	// separately-defaulted copy of the same answer.
 	@AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
@@ -615,8 +616,10 @@ struct UnifiedSessionsView: View {
             .onChange(of: unified.includeKimi) { _, _ in restartSearchIfRunning() }
         let afterGrok = afterKimi
             .onChange(of: unified.includeGrok) { _, _ in restartSearchIfRunning() }
+        let afterQwen = afterGrok
+            .onChange(of: unified.includeQwen) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterGrok
+        let afterActiveOnly = afterQwen
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -656,7 +659,7 @@ struct UnifiedSessionsView: View {
 						}
 					}
 
-		// §8.4: one receiver for all twelve enablement keys. The seven `.onChange`
+		// §8.4: one receiver for every registered enablement key. The seven `.onChange`
 		// modifiers this replaces were an ad-hoc subset (codex, claude, antigravity,
 		// opencode, copilot, kimi, grok) — the other five sources changed nothing.
 		// `updateFooterUsageVisibility()` was previously attached only to the codex and
@@ -1478,6 +1481,9 @@ struct UnifiedSessionsView: View {
             // `--continue` is only a valid fallback when the working directory
             // is known, so copyResumeCommand may still decline; see its .grok arm.
             return true
+        case .qwen:
+            // The installed CLI resolves IDs only from active `chats`.
+            return QwenResumeEligibility.canCopyResumeCommand(session)
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
@@ -1616,6 +1622,23 @@ struct UnifiedSessionsView: View {
             guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
                                                           binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            write(command)
+
+        case .qwen:
+            let storageContext = QwenResumeEligibility.configuredStorageContext()
+            guard QwenResumeEligibility.canCopyResumeCommand(
+                session,
+                storageContext: storageContext
+            ) else { return }
+            let settings = QwenSettings.shared
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
+            let builder = QwenResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary,
+                                                          storageEnvironmentOverride: storageContext.environmentOverride) else { return }
+            let command = wd.map { "cd \(ShellQuoting.quoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
         case .antigravity:
@@ -1918,7 +1941,7 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    /// The source-filter toggle a pill drives. THE one place this view names the twelve
+    /// The source-filter toggle a pill drives. THE one place this view names the registered
     /// `include…` properties, and exhaustive on purpose: a thirteenth source has to say
     /// which toggle its pill flips rather than falling through a `default:`.
     private func includeBinding(for source: SessionSource) -> Binding<Bool> {
@@ -1935,6 +1958,7 @@ struct UnifiedSessionsView: View {
         case .pi:          return $unified.includePi
         case .kimi:        return $unified.includeKimi
         case .grok:        return $unified.includeGrok
+        case .qwen:        return $unified.includeQwen
         }
     }
 
@@ -2450,6 +2474,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeKimi { unified.includeKimi = true }
         case .grok:
             if !unified.includeGrok { unified.includeGrok = true }
+        case .qwen:
+            if !unified.includeQwen { unified.includeQwen = true }
         }
     }
 
@@ -2510,6 +2536,8 @@ struct UnifiedSessionsView: View {
             if unified.kimiAgentEnabled, let e = kimiIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { kimiIndexer.reloadSession(id: id); return true }
         case .grok:
             if unified.grokAgentEnabled, let e = grokIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { grokIndexer.reloadSession(id: id); return true }
+        case .qwen:
+            if unified.qwenAgentEnabled, let e = qwenIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { qwenIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -3147,6 +3175,8 @@ struct UnifiedSessionsView: View {
             return !s.isClaudeWorkflowSubagent
         case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok:
             return true
+        case .qwen:
+            return QwenResumeEligibility.canResume(s)
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
         case .droid, .openclaw:
@@ -3313,6 +3343,34 @@ struct UnifiedSessionsView: View {
                 let coord = GrokResumeCoordinator(env: GrokCLIEnvironment(), builder: GrokResumeCommandBuilder(), launcher: launcher)
                 let result = await coord.resumeInTerminal(input: input, dryRun: false)
                 reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
+            }
+        case .qwen:
+            let storageContext = QwenResumeEligibility.configuredStorageContext()
+            guard QwenResumeEligibility.canResume(s, storageContext: storageContext) else { return }
+            let settings = QwenSettings.shared
+            let input = QwenResumeInput(
+                sessionID: s.id,
+                workingDirectory: effectiveWorkingDirectoryURL(for: s),
+                binaryOverride: settings.binaryPath.isEmpty ? nil : settings.binaryPath,
+                storageEnvironmentOverride: storageContext.environmentOverride
+            )
+            Task { @MainActor in
+                let launcher: QwenTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                return QwenITermLauncher()
+                    case .warp:                  return QwenWarpLauncher()
+                    case .warpPreview:           return QwenWarpPreviewLauncher()
+                    case .terminalApp, .unknown: return QwenTerminalLauncher()
+                    }
+                }()
+                let coordinator = QwenResumeCoordinator(
+                    environment: QwenCLIEnvironment(),
+                    builder: QwenResumeCommandBuilder(),
+                    launcher: launcher
+                )
+                let result = await coordinator.resumeInTerminal(input: input)
+                reportResumeFailure(launched: result.launched, error: result.error,
+                                    source: s.source, in: presentingWindow)
             }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
@@ -3950,6 +4008,7 @@ struct TranscriptHostView: View {
     private var piIndexer: PiSessionIndexer { catalog.indexer(.pi, as: PiSessionIndexer.self) }
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
+    private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -3996,6 +4055,14 @@ struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .grok ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: qwenIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "Qwen Code",
+                enableCaching: false
+            )
+            .opacity(kind == .qwen ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -4010,7 +4077,7 @@ struct TranscriptHostView: View {
     /// compares this set against `SessionSource.allCases`.
     static let coveredSources: Set<SessionSource> = [
         .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen
     ]
 }
 
@@ -4186,7 +4253,7 @@ private struct UnifiedSearchFiltersView: View {
     @ObservedObject var searchState: UnifiedSearchState
     // The pi/kimi/grok enablement flags this view used to AND into its two `search.start`
     // calls are gone: the allow-list now comes from `unified.allowedSearchSources()`, which
-    // applies enablement to all twelve sources (SPEC §8.5). `unified` is observed, and its
+    // applies enablement to every registered source (SPEC §8.5). `unified` is observed, and its
     // per-source enablement is `@Published`, so those changes still redraw this view.
     @FocusState private var searchFocus: SearchFocusTarget?
     @State private var searchDebouncer: DispatchWorkItem? = nil

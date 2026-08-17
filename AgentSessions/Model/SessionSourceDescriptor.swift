@@ -77,8 +77,8 @@ struct PillSpec {
 // MARK: - ArchiveCapability
 
 /// A source's participation in pin/archive backfill. Optional on the descriptor because a
-/// DB-backed source can decline it outright (SPEC §4) — all twelve of today's sources are
-/// file-based and supply one.
+/// DB-backed source can decline it outright (SPEC §4) — every currently registered source
+/// supplies one.
 struct ArchiveCapability {
     /// Filesystem sweep producing `sessionID -> upstream file URL`, transcribed from
     /// `SessionArchiveManager.resolveBackfillURLsFromFilesystem(source:)`.
@@ -99,15 +99,18 @@ struct AvailabilityContext {
     let defaults: UserDefaults
     let fileProbe: any FileProbing
     let homeDirectory: URL
+    let environment: [String: String]
     let detectBinary: (String) -> Bool
 
     init(defaults: UserDefaults,
          fileProbe: any FileProbing,
          homeDirectory: URL,
+         environment: [String: String] = [:],
          detectBinary: @escaping (String) -> Bool) {
         self.defaults = defaults
         self.fileProbe = fileProbe
         self.homeDirectory = homeDirectory
+        self.environment = environment
         self.detectBinary = detectBinary
     }
 
@@ -124,6 +127,7 @@ struct AvailabilityContext {
             defaults: defaults,
             fileProbe: DefaultFileProbe(),
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser,
+            environment: ProcessInfo.processInfo.environment,
             detectBinary: { AgentEnablement.binaryDetectedInPATH($0) }
         )
     }
@@ -201,6 +205,14 @@ struct SessionSourceDescriptor {
     /// path-identified parsing because every one of its sessions shares one database path
     /// (SPEC §4).
     let parseFullByPath: ((URL) -> Session?)?
+    /// Full parse of a session identified by both its storage URL and stable session ID.
+    /// DB-backed sources use this because many sessions can share the same database path.
+    /// File-backed sources leave it nil and continue through `parseFullByPath`.
+    let parseFullByIdentity: ((URL, String) -> Session?)?
+    /// Selects the storage URLs for which search freshness and parsing are session-ID based.
+    /// This stays separate because a source such as Hermes can support both JSON files and
+    /// a shared SQLite database.
+    let searchUsesIdentityAtURL: ((URL) -> Bool)?
 
     // MARK: Archive
 

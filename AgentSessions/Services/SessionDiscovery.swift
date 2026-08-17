@@ -416,20 +416,26 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
     private let includeDesktopRoots: Bool
     private let desktopLocalAgentRoot: URL?
+    private let fileProbe: any FileProbing
+    private let homeDirectory: URL
 
     init(customRoot: String? = nil,
          includeDesktopRoots: Bool = true,
-         desktopLocalAgentRoot: URL? = nil) {
+         desktopLocalAgentRoot: URL? = nil,
+         fileProbe: any FileProbing = DefaultFileProbe(),
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
         self.customRoot = customRoot
         self.includeDesktopRoots = includeDesktopRoots
         self.desktopLocalAgentRoot = desktopLocalAgentRoot
+        self.fileProbe = fileProbe
+        self.homeDirectory = homeDirectory
     }
 
     func sessionsRoot() -> URL {
         if let custom = customRoot, !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude")
+        return homeDirectory.appendingPathComponent(".claude")
     }
 
     func sessionScanRoots() -> [URL] {
@@ -510,7 +516,6 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
     }
 
     private func candidateRoots() -> [ClaudeDiscoveryRoot] {
-        let fm = FileManager.default
         var roots: [ClaudeDiscoveryRoot] = []
 
         for configRoot in standardConfigRootCandidates() {
@@ -521,11 +526,13 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             roots.append(ClaudeDiscoveryRoot(configRoot: configRoot, scanRoot: scanRoot, kind: .standardConfig))
         }
 
-        let defaultDesktopRoot = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+        let defaultDesktopRoot = homeDirectory
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
             .appendingPathComponent("Claude", isDirectory: true)
             .appendingPathComponent("local-agent-mode-sessions", isDirectory: true)
+        let desktopRoot = desktopLocalAgentRoot ?? defaultDesktopRoot
         if includeDesktopRoots,
-           let desktopRoot = desktopLocalAgentRoot ?? defaultDesktopRoot,
            directoryExists(desktopRoot) {
             roots.append(contentsOf: desktopLocalAgentRoots(under: desktopRoot))
         }
@@ -547,41 +554,27 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
             roots.append(expandPath(single))
         }
 
-        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let home = homeDirectory
         roots.append(home.appendingPathComponent(".claude", isDirectory: true))
 
-        if let siblings = try? FileManager.default.contentsOfDirectory(at: home,
-                                                                       includingPropertiesForKeys: [.isDirectoryKey],
-                                                                       options: []) {
-            roots.append(contentsOf: siblings.filter { $0.lastPathComponent.hasPrefix(".claude") })
-        }
+        let siblings = fileProbe.contentsOfDirectory(atPath: home.path)
+        roots.append(contentsOf: siblings.filter { $0.lastPathComponent.hasPrefix(".claude") })
 
         return roots
     }
 
     private func desktopLocalAgentRoots(under root: URL) -> [ClaudeDiscoveryRoot] {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: root,
-                                             includingPropertiesForKeys: [.isDirectoryKey],
-                                             options: []) else {
-            return []
-        }
-
+        let skippedComponents: Set<String> = ["uploads", "outputs", "cowork_plugins", "skills-plugin"]
         var roots: [ClaudeDiscoveryRoot] = []
-        for case let url as URL in enumerator {
-            let name = url.lastPathComponent
-            if name == "uploads" || name == "outputs" || name == "cowork_plugins" || name == "skills-plugin" {
-                enumerator.skipDescendants()
-                continue
-            }
-            guard name == "projects",
-                  url.deletingLastPathComponent().lastPathComponent == ".claude",
+        for url in fileProbe.descendantDirectories(named: "projects",
+                                                   atPath: root.path,
+                                                   skippingSubtreesNamed: skippedComponents) {
+            guard url.deletingLastPathComponent().lastPathComponent == ".claude",
                   url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent.hasPrefix("local_") else {
                 continue
             }
             let configRoot = url.deletingLastPathComponent()
             roots.append(ClaudeDiscoveryRoot(configRoot: configRoot, scanRoot: url, kind: .desktopLocalAgent))
-            enumerator.skipDescendants()
         }
         return roots
     }
@@ -732,18 +725,17 @@ final class ClaudeSessionDiscovery: SessionDiscovery {
 
     private func isValidClaudeRoot(_ root: URL) -> Bool {
         directoryExists(root.appendingPathComponent("projects", isDirectory: true)) ||
-        FileManager.default.fileExists(atPath: root.appendingPathComponent("settings.json").path) ||
-        FileManager.default.fileExists(atPath: root.appendingPathComponent("history.jsonl").path) ||
+        fileProbe.fileExists(atPath: root.appendingPathComponent("settings.json").path) ||
+        fileProbe.fileExists(atPath: root.appendingPathComponent("history.jsonl").path) ||
         directoryExists(root.appendingPathComponent("todos", isDirectory: true))
     }
 
     private func directoryExists(_ url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+        fileProbe.directoryExists(atPath: url.path)
     }
 
     private func expandPath(_ raw: String) -> URL {
-        let expanded = NSString(string: raw).expandingTildeInPath
+        let expanded = UserPathExpansion.expand(raw, relativeTo: homeDirectory)
         return URL(fileURLWithPath: expanded, isDirectory: true)
     }
 }

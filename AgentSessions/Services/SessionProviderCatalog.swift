@@ -17,9 +17,9 @@ import SwiftUI
 @MainActor
 struct SourceRuntime {
     let source: SessionSource
-    /// The retained concrete indexer, type-erased so the catalog can hold all twelve in one
-    /// dictionary. All twelve indexers already conform to `SessionIndexerProtocol` (five via
-    /// trailing extensions), so no indexer needed an edit to fit here.
+    /// The retained concrete indexer, type-erased so the catalog can hold every registered
+    /// provider in one dictionary. The indexers conform to `SessionIndexerProtocol`, so no
+    /// provider-specific storage is needed here.
     let indexerObject: any SessionIndexerProtocol & ObservableObject
     /// Type-erased pipeline surface. Declared nested in `UnifiedSessionIndexer` so it can
     /// name that type's `FocusedReloadTrigger`.
@@ -43,7 +43,7 @@ struct SourceRuntime {
 /// (no `@Published` members; zero emissions under indexer churn).
 ///
 /// It is an `ObservableObject` only so `AgentSessionsApp` can hold it in a `@StateObject`
-/// and get SwiftUI's once-per-scene lifetime guarantee for the twelve indexers.
+/// and get SwiftUI's once-per-scene lifetime guarantee for every registered indexer.
 @MainActor
 final class SessionProviderCatalog: ObservableObject {
     let runtimes: [SessionSource: SourceRuntime]
@@ -55,12 +55,19 @@ final class SessionProviderCatalog: ObservableObject {
     /// Builds every runtime the registry declares, in registry order.
     ///
     /// Registry order is `SessionSource.allCases` order (enforced by
-    /// `testRegistryOrderEqualsSessionSourceAllCases`), so indexer construction order is
-    /// identical to the old `@StateObject` declaration order in `AgentSessionsApp`.
+    /// `testRegistryOrderEqualsSessionSourceAllCases`), giving construction a stable,
+    /// explicit order independent of the former `@StateObject` declaration layout.
     convenience init(adapters: [SessionSourceAdapter] = SessionSourceRegistry.ordered) {
         var built: [SessionSource: SourceRuntime] = [:]
         for adapter in adapters {
-            built[adapter.descriptor.source] = adapter.makeRuntime()
+            let runtime = adapter.makeRuntime()
+            let descriptorUsesIdentity = adapter.descriptor.parseFullByIdentity != nil
+                && adapter.descriptor.searchUsesIdentityAtURL != nil
+            precondition(
+                runtime.handle.searchIdentitySnapshots.isApplicable == descriptorUsesIdentity,
+                "\(adapter.descriptor.source) runtime identity snapshot capability does not match its descriptor"
+            )
+            built[adapter.descriptor.source] = runtime
         }
         self.init(runtimes: built)
     }

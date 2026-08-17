@@ -11,11 +11,16 @@ struct OpenCodeSqliteReader {
 
     /// Returns all non-archived sessions ordered by time_updated descending.
     static func listSessions(customRoot: String?) -> [Session] {
+        listSessionsIfReadable(customRoot: customRoot) ?? []
+    }
+
+    /// nil distinguishes an open/prepare/step failure from an authoritative empty list.
+    static func listSessionsIfReadable(customRoot: String?) -> [Session]? {
         let url = OpenCodeBackendDetector.dbURL(customRoot: customRoot)
         var db: OpaquePointer?
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return []
+            return nil
         }
         defer { sqlite3_close(db) }
         return querySessionList(db: db, dbPath: url.path)
@@ -37,7 +42,7 @@ struct OpenCodeSqliteReader {
 
     // MARK: - Internal query helpers
 
-    private static func querySessionList(db: OpaquePointer?, dbPath: String) -> [Session] {
+    private static func querySessionList(db: OpaquePointer?, dbPath: String) -> [Session]? {
         let hasParent = tableHasColumn(db, table: "session", column: "parent_id")
         let sql: String
         if hasParent {
@@ -56,13 +61,17 @@ struct OpenCodeSqliteReader {
                 """
         }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
         var sessions: [Session] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             let id = text(stmt, 0)
-            guard !id.isEmpty else { continue }
+            if id.isEmpty {
+                step = sqlite3_step(stmt)
+                continue
+            }
             let title = text(stmt, 1)
             let directory = text(stmt, 2)
             let timeCreated = sqlite3_column_int64(stmt, 3)
@@ -95,7 +104,9 @@ struct OpenCodeSqliteReader {
                 subagentType: subagentType,
                 customTitle: sessionTitle
             ))
+            step = sqlite3_step(stmt)
         }
+        guard step == SQLITE_DONE else { return nil }
         return sessions
     }
 

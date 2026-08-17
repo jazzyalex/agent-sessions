@@ -39,6 +39,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    private(set) var searchIdentitySnapshot: SearchIngestService.IdentitySnapshot?
 
     init() {
         let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.hermesSessionsRootOverride) ?? ""
@@ -107,19 +108,28 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             guard let self else { return }
 
             let result: SessionIndexingEngine.Result
+            let identitySnapshot: SearchIngestService.IdentitySnapshot?
             if self.discovery.hasStateDB() {
-                let sessions = HermesStateDBReader.listSessions(dbURL: self.discovery.stateDBURL())
+                let dbURL = self.discovery.stateDBURL()
+                let readResult = HermesStateDBReader.listSessionsIfReadable(dbURL: dbURL)
+                let sessions = readResult ?? []
+                identitySnapshot = readResult.map {
+                    SearchIngestService.IdentitySnapshot(storagePaths: [dbURL.path],
+                                                         sessionIDs: Set($0.map(\.id)))
+                }
                 if sessions.isEmpty {
                     result = await self.scanLegacyJSONSessions(token: token, executionProfile: executionProfile)
                 } else {
                     result = SessionIndexingEngine.Result(kind: .scanned, sessions: sessions, totalFiles: sessions.count)
                 }
             } else {
+                identitySnapshot = .authoritativeEmpty(storagePath: self.discovery.stateDBURL().path)
                 result = await self.scanLegacyJSONSessions(token: token, executionProfile: executionProfile)
             }
             await MainActor.run {
                 guard self.refreshToken == token else { return }
                 self.allSessions = result.sessions
+                self.searchIdentitySnapshot = identitySnapshot
                 self.isIndexing = false
                 self.totalFiles = result.totalFiles
                 self.filesProcessed = result.totalFiles

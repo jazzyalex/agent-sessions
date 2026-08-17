@@ -10,6 +10,7 @@
     { "id": "hermes", "public_name": "Hermes" },
     { "id": "openclaw", "public_name": "OpenClaw" },
     { "id": "kimi", "public_name": "Kimi Code" },
-    { "id": "grok", "public_name": "Grok CLI" }
+    { "id": "grok", "public_name": "Grok CLI" },
+    { "id": "qwen", "public_name": "Qwen Code" }
   ]
 }

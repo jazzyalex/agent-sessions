@@ -1,0 +1,91 @@
+name: New agent source
+description: Propose support for a coding agent that stores readable local session history.
+title: "[Agent source]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping Agent Sessions read another local agent history. This issue is public. Do not attach a real transcript, credentials, tokens, account identifiers, a production database, expanded home/private paths, private repository names, or private remote URLs. Use `~` and neutral placeholders for local paths.
+
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and tested version
+      description: Name the agent and the exact version you inspected.
+      placeholder: Example Agent 1.2.3
+    validations:
+      required: true
+
+  - type: input
+    id: upstream
+    attributes:
+      label: Official upstream project
+      placeholder: https://github.com/owner/project
+    validations:
+      required: true
+
+  - type: textarea
+    id: storage
+    attributes:
+      label: Local session storage
+      description: Give the default macOS path, file or database type, and any supported override. Use `~` and neutral placeholders; do not paste an expanded `/Users/...` path, a private project/repository name, a private remote URL, or record contents.
+      placeholder: Sessions are JSONL files under ~/.example/sessions; the CLI supports a custom root through...
+    validations:
+      required: true
+
+  - type: textarea
+    id: producer_surface
+    attributes:
+      label: Session producer and scope
+      description: State whether the records come from the CLI, IDE extension, desktop app, daemon, or a shared store, and how you distinguished that surface.
+      placeholder: The CLI and IDE share this database; records carry a surface field... / This path is CLI-only because...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence available
+      options:
+        - I can provide a synthetic or fully sanitized fixture
+        - I can privately verify the format but cannot publish a fixture yet
+        - I know the storage path but have not inspected the format
+    validations:
+      required: true
+
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Verified capabilities
+      description: For transcript, tools, reasoning, images, subagents, project metadata, deleted-session recovery, and resume, state verified, unsupported, or untested.
+    validations:
+      required: true
+
+  - type: textarea
+    id: resume
+    attributes:
+      label: Resume evidence
+      description: If resume is supported, provide the exact help-documented syntax, how it was verified, which active/archive path shapes it accepts, and whether it resolves default and custom storage roots. Otherwise write unsupported or untested.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: How would you like to help?
+      options:
+        - I want to implement and test the source
+        - I can contribute format evidence and fixtures
+        - I am requesting support and can test a future build
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I will not post real session content, credentials, tokens, account identifiers, expanded home/private paths, private repository names, private remote URLs, or other private project information.
+          required: true
+        - label: I understand that an installed binary alone is not evidence of readable local session history.
+          required: true

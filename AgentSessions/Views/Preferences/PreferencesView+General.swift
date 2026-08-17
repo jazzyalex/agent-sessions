@@ -453,7 +453,7 @@ extension PreferencesView {
 }
 
 private extension PreferencesView {
-    /// THE one place this pane names the twelve `…AgentEnabled` `@AppStorage` properties.
+    /// THE one place this pane names the `…AgentEnabled` `@AppStorage` properties.
     /// Exhaustive on purpose: a thirteenth source must say which preference its row reads
     /// instead of falling through a `default:` onto somebody else's toggle.
     func agentEnablementBinding(for source: SessionSource) -> Binding<Bool> {
@@ -470,6 +470,7 @@ private extension PreferencesView {
         case .pi:          return $piAgentEnabled
         case .kimi:        return $kimiAgentEnabled
         case .grok:        return $grokAgentEnabled
+        case .qwen:        return $qwenAgentEnabled
         }
     }
 

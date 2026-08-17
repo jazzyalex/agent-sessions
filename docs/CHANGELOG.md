@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Qwen Code joins as the thirteenth session source.** Agent Sessions discovers session-ID-named JSONL chats under Qwen's local projects store and adds them to browsing, search, filtering, Analytics, saved-session backfill, and the transcript view, including recorded reasoning and tool activity. Rewound branches are reconstructed with Qwen's active parent chain, repeated-record fragments and glued JSON objects are recovered, and current custom titles and working directories follow that chain. Settings includes binary and storage-root controls; active-chat resume actions use the installed CLI's advertised `--resume <id>` syntax, with directory-scoped `--continue` as a safe fallback, while archived histories remain browse-only. Resume is implemented from installed help/reader evidence and hermetic tests but remains end-to-end untested because authentication blocked a disposable 0.21.13 run.
+
+### Documentation
+- **A manual path for adding coding agents.** Contributors can now propose a local session source, provide sanitized format evidence, or give a repository-owned implementation brief to their coding agent and prepare a structured draft PR. New sources remain ordinary reviewed code rather than downloaded plugins.
+
+### Bug Fixes
+- **Database-backed agent sessions now enter indexed search.** OpenCode and Hermes sessions stored in SQLite shared one file path, so background search ingest could not tell their session identities apart and skipped their transcript text. The ingest path now tracks each session's identity, storage path, and content revision independently, refreshes WAL-only changes, pages past stale search hits, preserves the last healthy index on transient database failures, and reconciles moved, unpinned, deleted, or old-root sessions across search and Analytics.
+
 ## [4.8] - 2026-08-14
 
 ### Highlights

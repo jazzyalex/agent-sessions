@@ -64,17 +64,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             activeOnBattery: 10,
             inactiveOnAC: 25,
             inactiveOnBattery: 60
-        ),
-        .antigravity: defaultFocusedSessionRefreshIntervals,
-        .opencode: defaultFocusedSessionRefreshIntervals,
-        .hermes: defaultFocusedSessionRefreshIntervals,
-        .copilot: defaultFocusedSessionRefreshIntervals,
-        .droid: defaultFocusedSessionRefreshIntervals,
-        .openclaw: defaultFocusedSessionRefreshIntervals,
-        .cursor: defaultFocusedSessionRefreshIntervals,
-        .pi: defaultFocusedSessionRefreshIntervals,
-        .kimi: defaultFocusedSessionRefreshIntervals,
-        .grok: defaultFocusedSessionRefreshIntervals
+        )
     ]
     private struct FileSignature: Equatable {
         let path: String
@@ -110,6 +100,22 @@ final class UnifiedSessionIndexer: ObservableObject {
     // `orderedSources.map { handle($0).x }`, and every former per-source switch is a
     // handle or dictionary read.
     struct ProviderHandle {
+        enum SearchIdentitySnapshots {
+            case notApplicable
+            case provider(@MainActor () -> SearchIngestService.IdentitySnapshot?)
+
+            var isApplicable: Bool {
+                if case .provider = self { return true }
+                return false
+            }
+
+            @MainActor
+            func current() -> SearchIngestService.IdentitySnapshot? {
+                guard case .provider(let snapshot) = self else { return nil }
+                return snapshot()
+            }
+        }
+
         let allSessions: AnyPublisher<[Session], Never>
         let isIndexing: AnyPublisher<Bool, Never>
         let isProcessingTranscripts: AnyPublisher<Bool, Never>
@@ -120,10 +126,39 @@ final class UnifiedSessionIndexer: ObservableObject {
         let currentSessions: @MainActor () -> [Session]
         let currentIsIndexing: @MainActor () -> Bool
         let currentLaunchPhase: @MainActor () -> LaunchPhase
+        let searchIdentitySnapshots: SearchIdentitySnapshots
         let refresh: @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void
         /// Maps the trigger onto this indexer's own nominal `ReloadReason` internally.
         /// NO enablement guard here — callers guard (SPEC §3.4).
         let reloadFocusedSession: @MainActor (_ sessionID: String, _ force: Bool, _ trigger: FocusedReloadTrigger) -> Void
+
+        init(allSessions: AnyPublisher<[Session], Never>,
+             isIndexing: AnyPublisher<Bool, Never>,
+             isProcessingTranscripts: AnyPublisher<Bool, Never>,
+             filesProcessed: AnyPublisher<Int, Never>,
+             totalFiles: AnyPublisher<Int, Never>,
+             indexingError: AnyPublisher<String?, Never>,
+             launchPhase: AnyPublisher<LaunchPhase, Never>,
+             currentSessions: @escaping @MainActor () -> [Session],
+             currentIsIndexing: @escaping @MainActor () -> Bool,
+             currentLaunchPhase: @escaping @MainActor () -> LaunchPhase,
+             searchIdentitySnapshots: SearchIdentitySnapshots,
+             refresh: @escaping @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void,
+             reloadFocusedSession: @escaping @MainActor (String, Bool, FocusedReloadTrigger) -> Void) {
+            self.allSessions = allSessions
+            self.isIndexing = isIndexing
+            self.isProcessingTranscripts = isProcessingTranscripts
+            self.filesProcessed = filesProcessed
+            self.totalFiles = totalFiles
+            self.indexingError = indexingError
+            self.launchPhase = launchPhase
+            self.currentSessions = currentSessions
+            self.currentIsIndexing = currentIsIndexing
+            self.currentLaunchPhase = currentLaunchPhase
+            self.searchIdentitySnapshots = searchIdentitySnapshots
+            self.refresh = refresh
+            self.reloadFocusedSession = reloadFocusedSession
+        }
     }
 
 
@@ -333,9 +368,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     }
 
     /// The source-filter state every pipeline and policy read below consults, and the one
-    /// the twelve `include…` properties write through.
+    /// the named `include…` properties write through.
     ///
-    /// The twelve stay because views bind to them (`$unified.includeCodex` etc.); this
+    /// The named properties stay because views bind to them (`$unified.includeCodex` etc.); this
     /// dictionary is their backing store, so `isIncluded(_:)` is a lookup rather than a
     /// twelve-arm switch and the filter pipelines fold one publisher instead of a
     /// `CombineLatest` pyramid. Complete by construction — one entry per `SessionSource`.
@@ -343,7 +378,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         Dictionary(uniqueKeysWithValues: SessionSource.allCases.map { ($0, UnifiedSessionIndexer.storedInclude($0)) })
 
     /// Every provider's current enabled state — the single source of truth for "which
-    /// providers are on right now", mirrored out to the twelve `…AgentEnabled` properties
+    /// providers are on right now", mirrored out to the named `…AgentEnabled` properties
     /// that views bind to. Read by `isAgentEnabled`, `enabledAnalyticsSources()`, the
     /// enablement-sync diff, and (as `$enablementBySource`) every aggregation pipeline.
     @Published private(set) var enablementBySource: [SessionSource: Bool] =
@@ -356,7 +391,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         return UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
 
-    /// The shared body of all twelve `include…` `didSet`s: persist, update the backing
+    /// The shared body of all named `include…` `didSet`s: persist, update the backing
     /// dictionary (which is what republishes the filter pipelines), recompute.
     private func applyInclude(_ source: SessionSource, _ value: Bool) {
         UserDefaults.standard.set(value, forKey: SessionSourceRegistry.descriptor(for: source).includeKey)
@@ -401,6 +436,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeGrok: Bool = UnifiedSessionIndexer.storedInclude(.grok) {
         didSet { applyInclude(.grok, includeGrok) }
     }
+    @Published var includeQwen: Bool = UnifiedSessionIndexer.storedInclude(.qwen) {
+        didSet { applyInclude(.qwen, includeQwen) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -421,6 +459,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @Published private(set) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @Published private(set) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+    @Published private(set) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -579,8 +618,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         // (the force-unwrap is what the completeness precondition above buys)
         let sources = orderedSources
         let ordered = sources.map { handles[$0]! }
-        // One publisher instead of the twelve-way `CombineLatest` pyramid: the twelve
-        // `…AgentEnabled` properties are mirrors of this dictionary now.
+        // One publisher instead of the legacy twelve-way `CombineLatest` pyramid: the
+        // named `…AgentEnabled` properties are mirrors of this dictionary now.
         let agentEnabledFlags = $enablementBySource
 
         // Merge underlying allSessions whenever any changes
@@ -797,7 +836,7 @@ final class UnifiedSessionIndexer: ObservableObject {
             .sink { [weak self] in self?.recomputeNow() }
             .store(in: &cancellables)
 
-        // SPEC §8.1: this fold covers all twelve providers. The pyramid it replaces combined
+        // SPEC §8.1: this fold covers every registered provider. The pyramid it replaces combined
         // ten — `kimi` and `grok` were never added to it — so their launch phases could not
         // move `launchState` at all.
         Publishers.combineLatestArray(ordered.map(\.launchPhase))
@@ -896,8 +935,8 @@ final class UnifiedSessionIndexer: ObservableObject {
         }
     }
 
-    /// Publishes a new enablement map and mirrors it out to the twelve named properties the
-    /// views bind to. The dictionary is the value the pipelines observe; the twelve are a
+    /// Publishes a new enablement map and mirrors it out to the named properties the
+    /// views bind to. The dictionary is the value the pipelines observe; those properties are a
     /// read-only projection of it.
     private func applyEnablement(_ next: [SessionSource: Bool]) {
         if next != enablementBySource { enablementBySource = next }
@@ -914,6 +953,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.pi) != piAgentEnabled { piAgentEnabled = value(.pi) }
         if value(.kimi) != kimiAgentEnabled { kimiAgentEnabled = value(.kimi) }
         if value(.grok) != grokAgentEnabled { grokAgentEnabled = value(.grok) }
+        if value(.qwen) != qwenAgentEnabled { qwenAgentEnabled = value(.qwen) }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -1595,23 +1635,20 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// running, this request coalesces into one pending re-run rather than starting a
     /// second overlapping ingest or being dropped.
     private func kickSearchIngest(source: SessionSource) {
-        guard searchIngestService != nil else { return }
+        guard let service = searchIngestService else { return }
         let coordinator = searchIngestCoordinator
-        // The coordinator creates and tracks the ingest task in one actor-isolated step
-        // (see `SearchIngestCoordinatorBox.startTracked`). This preserves the invariant
-        // that a `deinit`-time `cancelAll()` can never race ahead of tracking — there is no
-        // window where the task is running but absent from `tasksBySource` — without the
-        // ingest body needing a reference to its own `Task`. A prior version assigned the
-        // detached task to a `var task: Task! = Task { track(task) }` and read that
-        // implicitly-unwrapped optional as the task's first statement; the detached body
-        // could run before the assignment landed, read a nil `task`, and trap on the
-        // force-unwrap (EXC_BREAKPOINT).
-        Task { [weak self] in
-            await coordinator.startTracked(source: source) {
-                guard let self else { return }
-                let decision = await coordinator.request(source: source)
-                guard decision == .startNow else { return }
-                await self.runSearchIngestLoop(source: source)
+        let providerHandle = handle(source)
+        // Resolve every dependency before creating the caller-side request task. Neither
+        // that task nor the tracked ingest captures `self`, so an active ingest cannot keep
+        // UnifiedSessionIndexer alive and prevent its deinit-time cancellation. The actor
+        // atomically decides whether to start and installs only the winning task; if deinit's
+        // `cancelAll()` reaches it first, the request is rejected after teardown.
+        Task {
+            await coordinator.requestTracked(source: source) {
+                await Self.runSearchIngestLoop(source: source,
+                                               service: service,
+                                               coordinator: coordinator,
+                                               providerHandle: providerHandle)
             }
         }
     }
@@ -1621,20 +1658,25 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// `.utility` QoS is load-bearing here: `SearchIngestService.ingest` does not
     /// downgrade its own priority (see its doc comment), so this wrapper is what keeps
     /// full-parse work off higher QoS.
-    private func runSearchIngestLoop(source: SessionSource) async {
-        guard let service = searchIngestService else { return }
+    private static func runSearchIngestLoop(source: SessionSource,
+                                            service: SearchIngestService,
+                                            coordinator: SearchIngestCoordinatorBox,
+                                            providerHandle: ProviderHandle) async {
         var runAgain = true
         while runAgain {
             if Task.isCancelled { break }
-            await performSearchIngestOnce(source: source, service: service)
-            runAgain = await searchIngestCoordinator.finish(source: source)
+            await performSearchIngestOnce(source: source,
+                                          service: service,
+                                          providerHandle: providerHandle)
+            runAgain = await coordinator.finish(source: source)
         }
     }
 
-    private func performSearchIngestOnce(source: SessionSource, service: SearchIngestService) async {
-        let files = await MainActor.run { [weak self] () -> [SearchIngestService.FileRef] in
-            guard let self else { return [] }
-            return self.currentSessions(for: source).compactMap { session -> SearchIngestService.FileRef? in
+    private static func performSearchIngestOnce(source: SessionSource,
+                                                service: SearchIngestService,
+                                                providerHandle: ProviderHandle) async {
+        let input = await MainActor.run { () -> ([SearchIngestService.FileRef], SearchIngestService.IdentitySnapshot?) in
+            let files = providerHandle.currentSessions().compactMap { session -> SearchIngestService.FileRef? in
                 // Cursor DB-only sessions (filePath points at store.db, not a .jsonl
                 // transcript) have no content for CursorSessionParser.parseFileFull to
                 // read: JSONLReader silently yields zero events on a non-JSONL file, so
@@ -1642,16 +1684,34 @@ final class UnifiedSessionIndexer: ObservableObject {
                 // upserted as search-ready and never revisited. Skip them here, same
                 // detection idiom as CursorSessionIndexer.isDBOnlySession.
                 if CursorSessionIndexer.isDBOnlySession(session) { return nil }
-                guard let stat = SessionFileStat.from(URL(fileURLWithPath: session.filePath)) else { return nil }
-                return SearchIngestService.FileRef(path: session.filePath, mtime: stat.mtime, size: stat.size)
+                let url = URL(fileURLWithPath: session.filePath)
+                guard let stat = SessionFileStat.from(url) else { return nil }
+                let descriptor = session.source.descriptor
+                let usesIdentity = descriptor.parseFullByIdentity != nil
+                    && descriptor.searchUsesIdentityAtURL?(url) == true
+                return SearchIngestService.FileRef(path: session.filePath,
+                                                   mtime: stat.mtime,
+                                                   size: stat.size,
+                                                   sessionID: usesIdentity ? session.id : nil,
+                                                   contentRevision: usesIdentity
+                                                       ? SearchIngestService.contentRevision(for: session)
+                                                       : nil)
             }
+            return (files, providerHandle.searchIdentitySnapshots.current())
         }
-        guard !files.isEmpty else { return }
+        let files = input.0
+        let identitySnapshot = input.1
+        // Identity-backed sources must run even with no current sessions so the
+        // ingest service can remove the final archived/deleted database identity.
+        if files.isEmpty, source.descriptor.searchUsesIdentityAtURL == nil { return }
 
-        let toolIOEnabled = Self.recentToolIOIndexEnabled()
+        let toolIOEnabled = recentToolIOIndexEnabled()
         Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? start")
         do {
-            let progress = try await service.ingest(source: source, files: files, toolIOEnabled: toolIOEnabled)
+            let progress = try await service.ingest(source: source,
+                                                    files: files,
+                                                    toolIOEnabled: toolIOEnabled,
+                                                    identitySnapshot: identitySnapshot)
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(progress.total) skipped=\(progress.skipped) processed=\(progress.processed) end")
         } catch is CancellationError {
             Perf.event("searchIngest", "source=\(source.rawValue) files=\(files.count) skipped=? cancelled")
@@ -1677,17 +1737,32 @@ final class UnifiedSessionIndexer: ObservableObject {
         let count: Int
         let totalSizeBytes: Int
         let newestEndTime: Date?
+        let identityRevisions: [String]
+        let identitySnapshot: SearchIngestService.IdentitySnapshot?
 
-        init(sessions: [Session]) {
+        init(sessions: [Session],
+             identitySnapshot: SearchIngestService.IdentitySnapshot? = nil) {
             count = sessions.count
             totalSizeBytes = sessions.reduce(0) { $0 + ($1.fileSizeBytes ?? 0) }
             newestEndTime = sessions.compactMap(\.endTime).max()
+            identityRevisions = sessions.compactMap { session in
+                let url = URL(fileURLWithPath: session.filePath)
+                let descriptor = session.source.descriptor
+                guard descriptor.parseFullByIdentity != nil,
+                      descriptor.searchUsesIdentityAtURL?(url) == true else { return nil }
+                let revision = SearchIngestService.contentRevision(for: session)
+                return "\(session.id):\(revision.updatedMillis):\(revision.extent)"
+            }.sorted()
+            self.identitySnapshot = identitySnapshot
         }
     }
 
     @MainActor
     private func currentSearchIngestFingerprint(for source: SessionSource) -> SessionListFingerprint {
-        SessionListFingerprint(sessions: currentSessions(for: source))
+        SessionListFingerprint(
+            sessions: currentSessions(for: source),
+            identitySnapshot: handle(source).searchIdentitySnapshots.current()
+        )
     }
 
     private static func recentToolIOIndexEnabled() -> Bool {
@@ -2171,7 +2246,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// because their lightweight pass does not populate `lightweightCommands`.
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.

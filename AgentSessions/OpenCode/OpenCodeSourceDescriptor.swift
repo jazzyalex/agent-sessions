@@ -24,16 +24,26 @@ extension SessionSourceDescriptor {
             isBinaryInstalled: isBinaryInstalled,
             isAvailable: { ctx in
                 let custom = ctx.customRoot(PreferencesKey.Paths.opencodeSessionsRootOverride)
-                // Check opencode.db first (v1.2+ SQLite backend). This probe opens a
-                // database, so it stays a call into OpenCodeBackendDetector rather than
-                // going through `ctx.fileProbe` — see the task report.
-                if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom) { return true }
-                let root = OpenCodeSessionDiscovery(customRoot: custom).sessionsRoot()
+                // Check opencode.db first (v1.2+ SQLite backend), through the same injected
+                // environment as the legacy JSON-root probe.
+                if OpenCodeBackendDetector.isSQLiteAvailable(customRoot: custom,
+                                                             fileProbe: ctx.fileProbe,
+                                                             homeDirectory: ctx.homeDirectory) { return true }
+                let root = OpenCodeSessionDiscovery(customRoot: custom,
+                                                    fileProbe: ctx.fileProbe,
+                                                    homeDirectory: ctx.homeDirectory).sessionsRoot()
                 if ctx.directoryExists(root) { return true }
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .always,
             parseFullByPath: { url in OpenCodeSessionParser.parseFileFull(at: url) },
+            parseFullByIdentity: { url, sessionID in
+                guard url.lastPathComponent == "opencode.db" else {
+                    return OpenCodeSessionParser.parseFileFull(at: url)
+                }
+                return OpenCodeSqliteReader.loadFullSession(customRoot: url.path, sessionID: sessionID)
+            },
+            searchUsesIdentityAtURL: { $0.lastPathComponent == "opencode.db" },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -85,6 +95,7 @@ extension SessionSourceAdapter {
                     currentSessions: { indexer.allSessions },
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
+                    searchIdentitySnapshots: .provider { indexer.searchIdentitySnapshot },
                     refresh: { _, _, _ in
                         // SPEC §8.6: OpenCode's refresh takes no arguments; the unified
                         // indexer has always dropped mode/trigger/profile for this source.

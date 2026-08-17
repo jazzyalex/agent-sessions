@@ -52,7 +52,7 @@ enum AgentEnablement {
     /// Built here rather than through `AvailabilityContext.live()` on purpose: `live()`
     /// forwards `detectBinary` to the *uncached* `binaryDetectedInPATH`, while this type's
     /// own `binaryDetectedCached` is `private` and therefore invisible to it. The cache is
-    /// load-bearing — `seedIfNeeded` asks twelve sources for availability on a cold start,
+    /// load-bearing — `seedIfNeeded` asks every registered source for availability on a cold start,
     /// and the memo is what keeps that off repeated PATH sweeps — so the context is composed
     /// in-file where the cached detector is in scope. `detect` stays a parameter so the
     /// `pathOverride` seam (and the tests that use it) can route its own lookup through
@@ -63,6 +63,7 @@ enum AgentEnablement {
             defaults: defaults,
             fileProbe: DefaultFileProbe(),
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser,
+            environment: ProcessInfo.processInfo.environment,
             detectBinary: detect
         )
     }

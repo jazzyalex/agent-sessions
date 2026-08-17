@@ -1,6 +1,30 @@
 import XCTest
 @testable import AgentSessions
 
+private final class SearchIngestLifecycleTestOwner {
+    let coordinator: SearchIngestCoordinatorBox
+    private let onDeinit: () -> Void
+
+    init(coordinator: SearchIngestCoordinatorBox, onDeinit: @escaping () -> Void) {
+        self.coordinator = coordinator
+        self.onDeinit = onDeinit
+    }
+
+    func kick(source: SessionSource,
+              operation: @escaping @Sendable () async -> Void) -> Task<SearchIngestCoordinator.RequestDecision?, Never> {
+        let coordinator = coordinator
+        return Task {
+            await coordinator.requestTracked(source: source, operation)
+        }
+    }
+
+    deinit {
+        onDeinit()
+        let coordinator = coordinator
+        Task { await coordinator.cancelAll() }
+    }
+}
+
 /// Hosts all W2 (search-ingest) tests.
 final class SearchIngestTests: XCTestCase {
 
@@ -97,6 +121,25 @@ final class SearchIngestTests: XCTestCase {
 
         let current = try await db.indexedSessionIDsCurrent(sources: ["codex"])
         XCTAssertFalse(current.contains("hot"), "stale session_search row must not count as current")
+    }
+
+    func testIndexedToolIOSessionIDsCurrentExcludesStaleRow() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        try await db.begin()
+        try await db.upsertFile(path: "/tmp/hot-tool.jsonl", mtime: 5, size: 99, source: "codex")
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "hot-tool", source: "codex",
+                                                   path: "/tmp/hot-tool.jsonl", mtime: 5))
+        try await db.upsertSessionToolIO(sessionID: "hot-tool", source: "codex",
+                                         mtime: 1, size: 10, refTS: 5, text: "stale tool text")
+        try await db.commit()
+
+        let present = try await db.toolIOSessionIDs(sources: ["codex"])
+        let current = try await db.indexedToolIOSessionIDsCurrent(sources: ["codex"])
+        XCTAssertTrue(present.contains("hot-tool"))
+        XCTAssertFalse(current.contains("hot-tool"),
+                       "stale tool-I/O FTS rows must not be eligible for publication")
     }
 
     /// A session whose session_search row matches the file's current mtime/size IS current and
@@ -847,12 +890,53 @@ final class SearchIngestTests: XCTestCase {
         }
 
         XCTAssertTrue(coordinator.finish(source: .codex), "a coalesced request must trigger exactly one follow-up run")
-        XCTAssertFalse(coordinator.isInFlight(source: .codex), "finish() reports the follow-up is owed; it does not itself re-enter in-flight state")
+        XCTAssertTrue(coordinator.isInFlight(source: .codex), "the same tracked task owns the follow-up, so the source must remain in flight")
 
-        // Simulate the caller starting that one follow-up run, then finishing with no
-        // further requests: no second follow-up should be reported.
-        XCTAssertEqual(coordinator.request(source: .codex), .startNow)
+        // A request during that follow-up must coalesce into the same tracked task rather
+        // than opening an overlap window and replacing its cancellation handle.
+        XCTAssertEqual(coordinator.request(source: .codex), .coalesced)
+        XCTAssertTrue(coordinator.finish(source: .codex), "a request during the follow-up schedules one final pass on the same task")
         XCTAssertFalse(coordinator.finish(source: .codex), "no further requests arrived during the follow-up run")
+    }
+
+    func testTrackedCoordinatorCancelsOriginalTaskAfterCoalescedKickAndOwnerDeinit() async throws {
+        let ownerDeallocated = expectation(description: "owner deallocated")
+        let originalStarted = expectation(description: "original operation started")
+        let originalCancelled = expectation(description: "original operation cancelled")
+        let followerStarted = expectation(description: "coalesced follower did not start")
+        followerStarted.isInverted = true
+
+        let coordinator = SearchIngestCoordinatorBox()
+        var owner: SearchIngestLifecycleTestOwner? = SearchIngestLifecycleTestOwner(
+            coordinator: coordinator,
+            onDeinit: { ownerDeallocated.fulfill() }
+        )
+        weak var weakOwner = owner
+
+        let firstKick = try XCTUnwrap(owner).kick(source: .codex) {
+            originalStarted.fulfill()
+            do {
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            } catch is CancellationError {
+                originalCancelled.fulfill()
+            } catch {
+                // Task.sleep only throws CancellationError; leave the cancellation
+                // expectation unfulfilled so the test reports the lifecycle failure.
+            }
+        }
+        let firstDecision = await firstKick.value
+        XCTAssertEqual(firstDecision, .startNow)
+        await fulfillment(of: [originalStarted], timeout: 2)
+
+        let followerKick = try XCTUnwrap(owner).kick(source: .codex) {
+            followerStarted.fulfill()
+        }
+        let followerDecision = await followerKick.value
+        XCTAssertEqual(followerDecision, .coalesced)
+
+        owner = nil
+        XCTAssertNil(weakOwner, "the blocked ingest must not retain its lifecycle owner")
+        await fulfillment(of: [ownerDeallocated, originalCancelled, followerStarted], timeout: 2)
     }
 
     func testCoordinatorFinishWithoutPendingReportsNoFollowUp() {
@@ -884,13 +968,18 @@ final class SearchIngestTests: XCTestCase {
     /// `performProviderRefresh` gates `kickSearchIngest` on this fingerprint being
     /// unchanged before vs. after a refresh's wait loop (see
     /// `UnifiedSessionIndexer.performProviderRefresh`). The indexer itself is not
-    /// practically unit-testable in isolation (it owns and drives 10 live provider
-    /// indexers), so these tests exercise the actual decision-bearing unit directly:
+    /// practically unit-testable in isolation (it owns and drives the provider catalog),
+    /// so these tests exercise the actual decision-bearing unit directly:
     /// the fingerprint's equality semantics over `Session` fixtures built the same way
     /// `currentSessions(for:)` would see them.
-    private func makeFingerprintSession(id: String, endTime: Date?, sizeBytes: Int?) -> Session {
-        Session(id: id, source: .codex, startTime: nil, endTime: endTime, model: nil,
-                filePath: "/tmp/\(id).jsonl", fileSizeBytes: sizeBytes, eventCount: 1, events: [],
+    private func makeFingerprintSession(id: String,
+                                        source: SessionSource = .codex,
+                                        endTime: Date?,
+                                        sizeBytes: Int?,
+                                        eventCount: Int = 1) -> Session {
+        let path = source == .opencode ? "/tmp/opencode.db" : "/tmp/\(id).jsonl"
+        return Session(id: id, source: source, startTime: nil, endTime: endTime, model: nil,
+                filePath: path, fileSizeBytes: sizeBytes, eventCount: eventCount, events: [],
                 cwd: nil, repoName: nil, lightweightTitle: id)
     }
 
@@ -935,6 +1024,25 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertNotEqual(fpBefore, fpAfter, "a grown/updated session must change the fingerprint so kickSearchIngest is NOT skipped")
     }
 
+    func testFingerprintChangesWhenOlderSharedDatabaseSessionUpdates() {
+        let newest = makeFingerprintSession(id: "newest", source: .opencode,
+                                            endTime: Date(timeIntervalSince1970: 2_000),
+                                            sizeBytes: nil)
+        let older = makeFingerprintSession(id: "older", source: .opencode,
+                                           endTime: Date(timeIntervalSince1970: 1_000),
+                                           sizeBytes: nil)
+        let changedOlder = makeFingerprintSession(id: "older", source: .opencode,
+                                                  endTime: Date(timeIntervalSince1970: 1_100),
+                                                  sizeBytes: nil,
+                                                  eventCount: 2)
+
+        XCTAssertNotEqual(
+            UnifiedSessionIndexer.SessionListFingerprint(sessions: [newest, older]),
+            UnifiedSessionIndexer.SessionListFingerprint(sessions: [newest, changedOlder]),
+            "a non-newest identity revision must kick ingest even when count, file sizes, and max end time are unchanged"
+        )
+    }
+
     func testFingerprintStableAcrossSessionOrdering() {
         // `currentSessions(for:)` ordering is not guaranteed to be stable across two
         // reads of the same underlying `allSessions` array in every provider indexer;
@@ -951,5 +1059,19 @@ final class SearchIngestTests: XCTestCase {
         let fpBefore = UnifiedSessionIndexer.SessionListFingerprint(sessions: [])
         let fpAfter = UnifiedSessionIndexer.SessionListFingerprint(sessions: [])
         XCTAssertEqual(fpBefore, fpAfter, "two empty session lists (e.g. a disabled/never-populated source) must compare equal")
+    }
+
+    func testFingerprintChangesWhenIdentityReadRecoversToAuthoritativeEmpty() {
+        let failedRead = UnifiedSessionIndexer.SessionListFingerprint(
+            sessions: [],
+            identitySnapshot: nil
+        )
+        let authoritativeEmpty = UnifiedSessionIndexer.SessionListFingerprint(
+            sessions: [],
+            identitySnapshot: .empty
+        )
+
+        XCTAssertNotEqual(failedRead, authoritativeEmpty,
+                          "nil-to-empty identity recovery must kick ingest so stale rows are reconciled")
     }
 }

@@ -677,7 +677,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
             }
             return !meaningfulUser
         case .antigravity, .opencode, .hermes, .copilot, .droid,
-             .openclaw, .cursor, .pi, .kimi, .grok:
+             .openclaw, .cursor, .pi, .kimi, .grok, .qwen:
             // Old `default: return false`: only Codex and Claude write the preamble /
             // local-command shapes this classifier recognizes, so no other provider has
             // ever been marked housekeeping. Written out per source so a thirteenth one
@@ -775,7 +775,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     private var storesAuthoritativeLightweightCwd: Bool {
         switch source {
         case .antigravity, .opencode, .copilot, .openclaw, .hermes,
-             .pi, .kimi, .grok, .cursor, .claude, .droid:
+             .pi, .kimi, .grok, .qwen, .cursor, .claude, .droid:
             return true
         case .codex:
             return false
@@ -800,7 +800,7 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
         case .grok:
             return true
         case .codex, .claude, .antigravity, .opencode, .hermes,
-             .copilot, .droid, .openclaw, .cursor, .pi, .kimi:
+             .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .qwen:
             return false
         }
     }

@@ -1,8 +1,9 @@
-agent_sessions_version: 4.7
-as_of_commit: b6fe38d6
-as_of_date: 2026-08-13
+agent_sessions_version: "4.9-unreleased"
+as_of_commit: "uncommitted working tree (base 7da5aca7)"
+as_of_date: 2026-08-17
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
+  - "This working-tree snapshot includes unreleased Qwen Code support. It is not a release-ledger entry; replace the uncommitted base with the actual integration commit when the source is committed."
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
   - "Droid is retained for legacy imports and fixtures, but it is excluded from the active session-format monitoring set."
@@ -189,3 +190,33 @@ agents:
       - "AgentSessionsTests/GrokSessionDiscoveryTests.swift"
     evidence_tools:
       - "scripts/grok_chat_schema_probe.py"
+  qwen_code:
+    max_verified_version: "0.14.3"
+    version_field: "record.version"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, and analytics"
+    unsupported_surfaces:
+      - "live/active status"
+      - "usage/rate-limit tracking"
+      - "images"
+      - "subagent hierarchy"
+      - "automatic QWEN_RUNTIME_DIR discovery (choose that runtime directory's projects folder in Settings)"
+      - "resume from an arbitrarily renamed copied projects root (those transcripts remain browseable and searchable)"
+      - "fresh authenticated 0.21.13 transcript and live resume validation"
+      - "weekly session-format monitoring"
+    notes:
+      - "The installed Qwen Code CLI is 0.21.13. Its local package writer still uses projects/<project>/chats/<session-id>.jsonl and chats/archive; its own filename predicate accepts 32-36 hexadecimal-or-hyphen IDs. The user/assistant/tool_result record families are represented by synthetic fixtures. The installed help advertises --resume <id> and --continue, but its loader resolves active chats only, so archived histories are deliberately not offered resume. Model execution was authentication-blocked, so no fresh 0.21.13 transcript or end-to-end resume is claimed."
+      - "The retained local transcript has 32 records and logs version 0.14.3. It was inspected only for keys, types, counts, and non-sensitive metadata; no production prompt, output, account identifier, project path, URL, credential, or record was copied."
+      - "QWEN_HOME is honored automatically by both discovery and availability. QWEN_RUNTIME_DIR can relocate session output but is intentionally not read from the app process environment because it may be scoped only to the launched CLI; users must select its literal projects folder as the custom storage root. Copy and launch commands then carry the shell-quoted runtime parent through QWEN_RUNTIME_DIR; default-root commands remain unchanged. Arbitrarily renamed copied roots are browse-only."
+      - "Current-writer systemPayload.displayText takes precedence over hook context appended to message.parts. For retained payload-less records, the current reader's exact final-part wrapper validation removes only a well-formed qwen:user-prompt-submit-context block; malformed or nested lookalikes remain visible. goal_runtime, cron, and notification user-role envelopes remain metadata rather than inflating user-turn counts or titles."
+      - "Discovery and resume share an exact root-relative location invariant: only projectsRoot/<project>/chats/<id>.jsonl is active and projectsRoot/<project>/chats/archive/<id>.jsonl is archived. Nested chats lookalikes and Agent Sessions archive fallback copies are never offered resume."
+      - "Current-reader compatibility reconstructs the last non-artifact parent chain, aggregates repeated-UUID fragments in physical order, recovers multiple complete JSON objects glued on one physical line, and derives the latest active-chain cwd and custom_title. Dead rewind branches and trailing artifacts do not enter the transcript, title, counts, search metadata, or resume directory."
+    evidence_captures:
+      - "one retained local 0.14.3 transcript (schema-only inspection; 32 records)"
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000001.jsonl"
+      - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000002.jsonl"
+      - "Resources/Fixtures/stage0/agents/qwen/019f0000000070008000000000000003.jsonl"
+      - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000004.jsonl"
+      - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000005.jsonl"
+    evidence_tests:
+      - "AgentSessionsTests/QwenIntegrationTests.swift"

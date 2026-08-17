@@ -18,7 +18,8 @@ struct SessionSourceAdapter {
 
 // MARK: - SessionSourceRegistry
 
-/// THE one remaining hand-maintained per-source list (SPEC §3.3).
+/// The canonical runtime registry. Preferences keeps one separate, test-pinned sidebar
+/// ordering because that sequence follows UI history rather than registry order.
 ///
 /// `ordered` must stay in `SessionSource.allCases` order — `testRegistryOrderEqualsSessionSourceAllCases`
 /// enforces exact array equality, so a new source that forgets its entry, or adds it in the
@@ -27,7 +28,7 @@ struct SessionSourceAdapter {
 enum SessionSourceRegistry {
     /// Each entry is a `static let` declared in that source's own descriptor file, next to
     /// the descriptor it wraps.
-    static let ordered: [SessionSourceAdapter] = [
+    static let ordered: [SessionSourceAdapter] = validateIdentityConfigurations([
         .codex,
         .claude,
         .antigravity,
@@ -39,8 +40,27 @@ enum SessionSourceRegistry {
         .cursor,
         .pi,
         .kimi,
-        .grok
-    ]
+        .grok,
+        .qwen
+    ])
+
+    /// Identity parsing and URL classification are one capability. Keeping the closures
+    /// separate lets hybrid providers such as Hermes select only their database URLs, but
+    /// configuring just one side would silently drop search ingest for those identities.
+    private static func validateIdentityConfigurations(
+        _ adapters: [SessionSourceAdapter]
+    ) -> [SessionSourceAdapter] {
+        for adapter in adapters {
+            let descriptor = adapter.descriptor
+            let hasParser = descriptor.parseFullByIdentity != nil
+            let hasSelector = descriptor.searchUsesIdentityAtURL != nil
+            precondition(
+                hasParser == hasSelector,
+                "\(descriptor.source) must configure parseFullByIdentity and searchUsesIdentityAtURL together"
+            )
+        }
+        return adapters
+    }
 
     static let bySource: [SessionSource: SessionSourceAdapter] = Dictionary(
         uniqueKeysWithValues: ordered.map { ($0.descriptor.source, $0) }

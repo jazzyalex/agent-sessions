@@ -1,0 +1,1 @@
+{"uuid":"019f0000-0000-7000-8000-000000000021","parentUuid":null,"sessionId":"019f0000-0000-7000-8000-000000000099","timestamp":"2026-08-17T12:00:00.000Z","type":"user","cwd":"/tmp/as-qwen-fixture/project","version":"0.21.13","message":{"role":"user","parts":[{"text":"This record deliberately carries the wrong session ID."}]}}

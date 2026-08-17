@@ -6,7 +6,7 @@ import SwiftUI
 /// SPEC §10.1/10.2/10.3/10.5 — the registry's structural contracts.
 ///
 /// Every assertion here compares the registry against an *independent* source of truth:
-/// the enum's own `allCases`, `AgentEnablement`'s live key switch, Task 1's frozen
+/// the enum's own `allCases`, Task 1's frozen
 /// `SourceKeyTable`, or a table written out by hand. Nothing asserts a registry value
 /// against itself — which is why Task 3 replaced the palette *parity* test with pinned
 /// goldens the moment `TranscriptColorSystem` started reading the registry.
@@ -33,8 +33,14 @@ final class SessionSourceRegistryTests: XCTestCase {
     func testDescriptorKeysMatchTheStabilityTable() {
         for s in SessionSource.allCases {
             let d = SessionSourceRegistry.descriptor(for: s)
-            XCTAssertEqual(d.enablementKey, AgentEnablement.enablementKey(for: s), "\(s)")
-            XCTAssertEqual(d.includeKey, SourceKeyTable.include[s], "\(s)")   // Task 1's test table
+            guard let expected = SourceKeyTable.row(for: s) else {
+                XCTFail("missing frozen key row for \(s)")
+                continue
+            }
+            XCTAssertEqual(d.enablementKey, expected.enablement, "\(s)")
+            XCTAssertEqual(d.cliAvailableKey, expected.cliAvailable, "\(s)")
+            XCTAssertEqual(d.rootOverrideKeys, expected.rootOverrides, "\(s)")
+            XCTAssertEqual(d.includeKey, expected.include, "\(s)")
         }
         XCTAssertNil(SessionSourceRegistry.descriptor(for: .openclaw).cliAvailableKey)          // K4
         XCTAssertEqual(SessionSourceRegistry.descriptor(for: .droid).rootOverrideKeys,
@@ -52,6 +58,99 @@ final class SessionSourceRegistryTests: XCTestCase {
             XCTAssertEqual(d.rootOverrideKeys.count, s == .droid ? 2 : 1, "\(s)")
             XCTAssertEqual(d.cliAvailableKey == nil, s == .openclaw, "\(s)")
         }
+    }
+
+    func testAvailabilityUsesInjectedFilesystemAndHomeDirectory() {
+        let suiteName = "SessionSourceRegistryTests-Availability-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("failed to create isolated defaults")
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let home = URL(fileURLWithPath: "/virtual/home", isDirectory: true)
+
+        let emptyContext = AvailabilityContext(defaults: defaults,
+                                               fileProbe: FakeFileProbe(),
+                                               homeDirectory: home,
+                                               detectBinary: { _ in false })
+        XCTAssertFalse(SessionSource.claude.descriptor.isAvailable(emptyContext),
+                       "Claude availability must not read the developer's real home")
+        XCTAssertFalse(SessionSource.opencode.descriptor.isAvailable(emptyContext),
+                       "OpenCode availability must not read the developer's real home")
+        XCTAssertFalse(SessionSource.hermes.descriptor.isAvailable(emptyContext),
+                       "Hermes availability must not read the developer's real home")
+
+        let claudeProbe = FakeFileProbe(directories: [
+            "/virtual/home/.claude",
+            "/virtual/home/.claude/projects"
+        ])
+        let claudeContext = AvailabilityContext(defaults: defaults,
+                                                fileProbe: claudeProbe,
+                                                homeDirectory: home,
+                                                detectBinary: { _ in false })
+        XCTAssertTrue(SessionSource.claude.descriptor.isAvailable(claudeContext))
+
+        defaults.set("/virtual/opencode.db", forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+        let openCodeProbe = FakeFileProbe(sqliteTablesByPath: [
+            "/virtual/opencode.db": ["session"]
+        ])
+        let openCodeContext = AvailabilityContext(defaults: defaults,
+                                                  fileProbe: openCodeProbe,
+                                                  homeDirectory: home,
+                                                  detectBinary: { _ in false })
+        XCTAssertTrue(SessionSource.opencode.descriptor.isAvailable(openCodeContext))
+
+        defaults.removeObject(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride)
+        let hermesProbe = FakeFileProbe(directories: [
+            "/virtual/home/.hermes",
+            "/virtual/home/.hermes/sessions"
+        ])
+        let hermesContext = AvailabilityContext(defaults: defaults,
+                                                fileProbe: hermesProbe,
+                                                homeDirectory: home,
+                                                detectBinary: { _ in false })
+        XCTAssertTrue(SessionSource.hermes.descriptor.isAvailable(hermesContext))
+
+        let stateDBOnlyProbe = FakeFileProbe(files: [
+            "/virtual/home/.hermes/state.db"
+        ])
+        let stateDBOnlyContext = AvailabilityContext(defaults: defaults,
+                                                     fileProbe: stateDBOnlyProbe,
+                                                     homeDirectory: home,
+                                                     detectBinary: { _ in false })
+        XCTAssertFalse(SessionSource.hermes.descriptor.isAvailable(stateDBOnlyContext),
+                       "state.db alone was not a pre-registry Hermes enablement signal")
+    }
+
+    func testInjectedHomeExpansionPreservesNamedUserPaths() {
+        let injectedHome = URL(fileURLWithPath: "/virtual/home", isDirectory: true)
+        XCTAssertEqual(UserPathExpansion.expand("~/sessions", relativeTo: injectedHome),
+                       "/virtual/home/sessions")
+
+        let namedUserPath = "~\(NSUserName())/sessions"
+        XCTAssertEqual(UserPathExpansion.expand(namedUserPath, relativeTo: injectedHome),
+                       (namedUserPath as NSString).expandingTildeInPath,
+                       "named-user roots must retain the pre-injection Foundation behavior")
+    }
+
+    func testHermesDiscoveryUsesInjectedFilesystemAndHomeDirectory() {
+        let home = URL(fileURLWithPath: "/virtual/home", isDirectory: true)
+        let probe = FakeFileProbe(
+            files: [
+                "/virtual/home/.hermes/state.db",
+                "/virtual/home/.hermes/sessions/session_virtual.json"
+            ],
+            directories: [
+                "/virtual/home/.hermes",
+                "/virtual/home/.hermes/sessions"
+            ]
+        )
+        let discovery = HermesSessionDiscovery(fileProbe: probe, homeDirectory: home)
+
+        XCTAssertEqual(discovery.sessionsRoot().path, "/virtual/home/.hermes/sessions")
+        XCTAssertEqual(discovery.stateDBURL().path, "/virtual/home/.hermes/state.db")
+        XCTAssertTrue(discovery.hasStateDB())
+        XCTAssertEqual(discovery.discoverSessionFiles().map(\.lastPathComponent),
+                       ["session_virtual.json"])
     }
 
     // MARK: - Palette + label goldens (SPEC §10.3)
@@ -84,7 +183,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .cursor: (aqua: [0.239265, 0.662337, 0.753023, 1.000000], darkAqua: [0.300916, 0.673220, 0.753023, 1.000000]),
         .pi: (aqua: [0.000000, 0.672455, 0.553618, 1.000000], darkAqua: [0.088800, 0.740000, 0.624919, 1.000000]),
         .kimi: (aqua: [0.537587, 0.441176, 0.854966, 1.000000], darkAqua: [0.575672, 0.490830, 0.854966, 1.000000]),
-        .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000])
+        .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000]),
+        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000])
     ]
 
     /// The ten toolbar pill colors, recorded from the same pre-flip palette. These also
@@ -102,7 +202,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .cursor: (aqua: [0.239265, 0.662337, 0.753023, 1.000000], darkAqua: [0.300916, 0.673220, 0.753023, 1.000000]),
         .pi: (aqua: [0.000000, 0.672455, 0.553618, 1.000000], darkAqua: [0.088800, 0.740000, 0.624919, 1.000000]),
         .kimi: (aqua: [0.537587, 0.441176, 0.854966, 1.000000], darkAqua: [0.575672, 0.490830, 0.854966, 1.000000]),
-        .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000])
+        .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000]),
+        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000])
     ]
 
     /// The row/legend label the three deleted label switches produced (`SessionTerminalView`'s
@@ -119,7 +220,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .cursor: "Cursor",
         .pi: "Pi",
         .kimi: "Kimi Code",
-        .grok: "Grok CLI"
+        .grok: "Grok CLI",
+        .qwen: "Qwen Code"
     ]
 
     func testBrandAccentMatchesPinnedGoldens() {
@@ -156,6 +258,21 @@ final class SessionSourceRegistryTests: XCTestCase {
             XCTAssertEqual(Color.agentColor(for: s), Color.agentColor(for: s),
                            "\(s): analytics brand color must compare equal across calls")
         }
+    }
+
+    func testPersistedRawSourceStringsResolveThroughRegistryColors() {
+        for source in SessionSource.allCases {
+            XCTAssertEqual(Color.agentColor(for: source.rawValue),
+                           Color.agentColor(for: source), "brand \(source)")
+            XCTAssertEqual(Color.agentColor(for: source.rawValue, monochrome: true),
+                           Color.agentColor(for: source, monochrome: true), "monochrome \(source)")
+        }
+
+        // Keep pre-enum aliases working after exact persisted values take the
+        // registry path.
+        XCTAssertEqual(Color.agentColor(for: "gemini"), Color.agentColor(for: .antigravity))
+        XCTAssertEqual(Color.agentColor(for: "clawdbot"), Color.agentColor(for: .openclaw))
+        XCTAssertEqual(Color.agentColor(for: "pi coding agent"), Color.agentColor(for: .pi))
     }
 
     /// Pill colors are read through a closure (that is what breaks the initialization
@@ -198,7 +315,7 @@ final class SessionSourceRegistryTests: XCTestCase {
         let goldens: [SessionSource: String] = [
             .codex: "CX", .claude: "CC", .antigravity: "AG", .opencode: "OC",
             .hermes: "HM", .copilot: "CP", .droid: "D", .openclaw: "CL",
-            .cursor: "CR", .pi: "PI", .kimi: "KM", .grok: "GK"
+            .cursor: "CR", .pi: "PI", .kimi: "KM", .grok: "GK", .qwen: "QW"
         ]
         for s in SessionSource.allCases {
             XCTAssertEqual(SessionSourceRegistry.descriptor(for: s).badgeInitials, goldens[s], "\(s)")
@@ -211,7 +328,7 @@ final class SessionSourceRegistryTests: XCTestCase {
         let goldens: [SessionSource: Double] = [
             .codex: 0.4, .claude: 0.5, .antigravity: 0.6, .opencode: 0.7,
             .hermes: 0.72, .copilot: 0.75, .droid: 0.8, .openclaw: 0.85,
-            .cursor: 0.9, .pi: 0.68, .kimi: 0.66, .grok: 0.62
+            .cursor: 0.9, .pi: 0.68, .kimi: 0.66, .grok: 0.62, .qwen: 0.61
         ]
         for s in SessionSource.allCases {
             XCTAssertEqual(SessionSourceRegistry.descriptor(for: s).monochromeWhite,
@@ -276,8 +393,12 @@ final class SessionSourceRegistryTests: XCTestCase {
             .cursor: "8",
             .pi: "9",
             .kimi: nil,
-            .grok: nil
+            .grok: nil,
+            .qwen: nil
         ]
+        XCTAssertEqual(Set(expectedShortcuts.keys),
+                       Set(SessionSource.allCases.filter { $0 != .codex && $0 != .claude }),
+                       "shortcut golden must name every other-agent pill explicitly")
         for s in SessionSource.allCases {
             let pill = SessionSourceRegistry.descriptor(for: s).otherAgentPill
             if s == .codex || s == .claude {
@@ -294,16 +415,32 @@ final class SessionSourceRegistryTests: XCTestCase {
 
     // MARK: - Capabilities present where the legacy switches had arms
 
-    /// All twelve of today's sources are file-based, so every one supplies both a
-    /// path-identified parser and an archive capability. The optionality exists for
-    /// DB-backed sources (SPEC §4) — a future source may legitimately decline.
+    /// Every source must expose at least one full-parse route. Current sources also retain
+    /// archive support, while a future DB-only source may legitimately decline it.
     func testEveryCurrentSourceSuppliesParsingAndArchiving() {
+        let sourcesWithFrozenArchiveSupport: Set<SessionSource> = [
+            .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
+            .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen
+        ]
         for s in SessionSource.allCases {
             let d = SessionSourceRegistry.descriptor(for: s)
-            XCTAssertNotNil(d.parseFullByPath, "\(s)")
-            XCTAssertNotNil(d.archive, "\(s)")
+            XCTAssertTrue(d.parseFullByPath != nil || d.parseFullByIdentity != nil, "\(s)")
+            XCTAssertEqual(d.parseFullByIdentity != nil,
+                           d.searchUsesIdentityAtURL != nil,
+                           "\(s) must configure identity parsing and URL selection together")
+            if sourcesWithFrozenArchiveSupport.contains(s) {
+                XCTAssertNotNil(d.archive, "\(s)")
+            }
             XCTAssertFalse(d.binaryNames.isEmpty, "\(s)")
         }
+        XCTAssertNotNil(SessionSource.opencode.descriptor.parseFullByIdentity)
+        XCTAssertNotNil(SessionSource.hermes.descriptor.parseFullByIdentity)
+        XCTAssertTrue(SessionSource.opencode.descriptor.searchUsesIdentityAtURL?(
+            URL(fileURLWithPath: "/tmp/opencode.db")) == true)
+        XCTAssertTrue(SessionSource.hermes.descriptor.searchUsesIdentityAtURL?(
+            URL(fileURLWithPath: "/tmp/state.db")) == true)
+        XCTAssertFalse(SessionSource.hermes.descriptor.searchUsesIdentityAtURL?(
+            URL(fileURLWithPath: "/tmp/session.json")) == true)
     }
 
     // MARK: - Helpers

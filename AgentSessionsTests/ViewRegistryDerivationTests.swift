@@ -32,7 +32,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
         XCTAssertEqual(withPill, SessionSource.allCases.filter { $0 != .codex && $0 != .claude })
     }
 
-    /// The derived pill sequence, in full: order preserved, Hermes/Kimi/Grok shortcut-less
+    /// The derived pill sequence, in full: order preserved, Hermes/Kimi/Grok/Qwen shortcut-less
     /// because ⌘3–⌘9 ran out, Antigravity first at ⌘3.
     func testDerivedPillSequenceMatchesTheFrozenToolbar() {
         let derived: [(SessionSource, String, String?)] = SessionSourceRegistry.ordered
@@ -51,7 +51,8 @@ final class ViewRegistryDerivationTests: XCTestCase {
             (.cursor, "Cursor", "8"),
             (.pi, "Pi", "9"),
             (.kimi, "Kimi Code", nil),
-            (.grok, "Grok CLI", nil)
+            (.grok, "Grok CLI", nil),
+            (.qwen, "Qwen Code", nil)
         ]
 
         XCTAssertEqual(derived.count, expected.count)
@@ -130,7 +131,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
     func testSidebarAgentTabOrderIsFrozen() {
         XCTAssertEqual(PreferencesTab.sidebarAgentTabs,
                        [.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI,
-                        .cursor, .pi, .kimi, .grok, .hermesCLI, .openClawCLI])
+                        .cursor, .pi, .kimi, .grok, .qwen, .hermesCLI, .openClawCLI])
     }
 
     /// Every pane a source maps to must have a non-empty title and icon: the sidebar rows

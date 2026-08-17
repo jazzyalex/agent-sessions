@@ -24,16 +24,20 @@ extension SessionSourceDescriptor {
             isBinaryInstalled: isBinaryInstalled,
             isAvailable: { ctx in
                 let custom = ctx.customRoot(PreferencesKey.Paths.claudeSessionsRootOverride)
-                let discovery = ClaudeSessionDiscovery(customRoot: custom)
-                // Claude's own multi-root probe, which knows about project folders the
-                // plain sessions-root check would miss. It reads the filesystem directly
-                // (not through `ctx.fileProbe`) — see the task report.
+                let discovery = ClaudeSessionDiscovery(customRoot: custom,
+                                                       fileProbe: ctx.fileProbe,
+                                                       homeDirectory: ctx.homeDirectory)
+                // Claude's multi-root probe knows about project folders the plain
+                // sessions-root check would miss, while still honoring the injected
+                // filesystem and home-directory seams.
                 if discovery.hasDiscoverableSessionsRoot() { return true }
                 if ctx.directoryExists(discovery.sessionsRoot()) { return true }
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .always,
             parseFullByPath: { url in ClaudeSessionParser.parseFileFull(at: url) },
+            parseFullByIdentity: nil,
+            searchUsesIdentityAtURL: nil,
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -80,6 +84,7 @@ extension SessionSourceAdapter {
                     currentSessions: { indexer.allSessions },
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
+                    searchIdentitySnapshots: .notApplicable,
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },

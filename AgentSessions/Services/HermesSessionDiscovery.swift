@@ -3,24 +3,30 @@ import Foundation
 /// Discovery for Hermes canonical session JSON files under ~/.hermes/sessions.
 final class HermesSessionDiscovery: SessionDiscovery {
     private let customRoot: String?
+    private let fileProbe: any FileProbing
+    private let homeDirectory: URL
 
-    init(customRoot: String? = nil) {
+    init(customRoot: String? = nil,
+         fileProbe: any FileProbing = DefaultFileProbe(),
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
         self.customRoot = customRoot
+        self.fileProbe = fileProbe
+        self.homeDirectory = homeDirectory
     }
 
     func sessionsRoot() -> URL {
         if let customRoot, !customRoot.isEmpty {
-            let expanded = (customRoot as NSString).expandingTildeInPath
+            let expanded = UserPathExpansion.expand(customRoot, relativeTo: homeDirectory)
             return URL(fileURLWithPath: expanded, isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser
+        return homeDirectory
             .appendingPathComponent(".hermes", isDirectory: true)
             .appendingPathComponent("sessions", isDirectory: true)
     }
 
     func stateDBURL() -> URL {
         if let customRoot, !customRoot.isEmpty {
-            let expanded = (customRoot as NSString).expandingTildeInPath
+            let expanded = UserPathExpansion.expand(customRoot, relativeTo: homeDirectory)
             let url = URL(fileURLWithPath: expanded)
             if url.pathExtension.lowercased() == "db" {
                 return url
@@ -30,28 +36,22 @@ final class HermesSessionDiscovery: SessionDiscovery {
             }
             return url.appendingPathComponent("state.db")
         }
-        return FileManager.default.homeDirectoryForCurrentUser
+        return homeDirectory
             .appendingPathComponent(".hermes", isDirectory: true)
             .appendingPathComponent("state.db")
     }
 
     func hasStateDB() -> Bool {
-        FileManager.default.fileExists(atPath: stateDBURL().path)
+        fileProbe.fileExists(atPath: stateDBURL().path)
     }
 
     func discoverSessionFiles() -> [URL] {
         let root = sessionsRoot()
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
+        guard fileProbe.directoryExists(atPath: root.path) else {
             return []
         }
 
-        guard let items = try? fm.contentsOfDirectory(at: root,
-                                                      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
-                                                      options: [.skipsHiddenFiles]) else {
-            return []
-        }
+        let items = fileProbe.contentsOfDirectory(atPath: root.path)
 
         return items
             .filter { url in

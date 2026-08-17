@@ -212,4 +212,14 @@ final class WhatsNewCatalogTests: XCTestCase {
     func testTeaserPresentFor48() {
         XCTAssertNotNil(WhatsNewCatalog.teaser(for: "4.8"))
     }
+
+    func testQwenReleaseHas49TeaserAndProviderHighlight() {
+        XCTAssertEqual(
+            WhatsNewCatalog.teaser(for: "4.9"),
+            "Qwen Code joins the lineup, with local history, search, Analytics, and active-chat resume."
+        )
+        XCTAssertTrue(WhatsNewCatalog.assemble(for: "4.9").contains {
+            $0.kind == .highlight && $0.title == "New: Qwen Code"
+        })
+    }
 }

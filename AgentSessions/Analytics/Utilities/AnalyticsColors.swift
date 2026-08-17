@@ -70,7 +70,9 @@ extension Color {
     /// Get the brand color for a session source string
     static func agentColor(for sourceString: String) -> Color {
         let lower = sourceString.lowercased()
-        if lower.contains("codex") {
+        if let source = SessionSource(rawValue: lower) {
+            return agentColor(for: source)
+        } else if lower.contains("codex") {
             return .agentCodex
         } else if lower.contains("claude") {
             return .agentClaude
@@ -103,7 +105,9 @@ extension Color {
     static func agentColor(for sourceString: String, monochrome: Bool) -> Color {
         if monochrome {
             let lower = sourceString.lowercased()
-            if lower.contains("codex") {
+            if let source = SessionSource(rawValue: lower) {
+                return agentColor(for: source, monochrome: true)
+            } else if lower.contains("codex") {
                 return .agentCodexGray
             } else if lower.contains("claude") {
                 return .agentClaudeGray

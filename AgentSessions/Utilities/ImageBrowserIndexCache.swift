@@ -123,7 +123,7 @@ actor ImageBrowserIndexCache {
                         return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     case .openclaw:
                         return try OpenClawBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                    case .antigravity, .opencode, .copilot, .droid:
+                    case .antigravity, .opencode, .copilot, .droid, .qwen:
                         // Old `default: return []`. Unreachable — the enclosing arm only
                         // admits the eight base64-scanned sources, and these four have
                         // their own arms further down — but explicit so a thirteenth
@@ -151,7 +151,7 @@ actor ImageBrowserIndexCache {
                     // Every Grok match is already an `image` content part's data URI,
                     // so there is no non-image base64 to disambiguate the way Codex has.
                     return true
-                case .antigravity, .opencode, .copilot, .droid:
+                case .antigravity, .opencode, .copilot, .droid, .qwen:
                     // Old `default: return false`. Unreachable for the same reason as the
                     // scanner switch above; explicit so a new source added to the outer
                     // arm must choose between the conservative URL-context filter and
@@ -270,7 +270,7 @@ actor ImageBrowserIndexCache {
             saveIndex(built, forPath: session.filePath)
             return built
 
-        case .droid:
+        case .droid, .qwen:
             // Deliberately no image extraction. Exhaustive on purpose — this used to be
             // a `default:`, which silently gave every unlisted provider an empty index:
             // Grok, Kimi, Pi, Hermes and Cursor all landed here and showed no images,

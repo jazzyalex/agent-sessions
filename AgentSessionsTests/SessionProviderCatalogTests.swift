@@ -4,7 +4,7 @@ import Combine
 
 /// SPEC §10.7 + K16. Two obligations:
 ///
-/// 1. **Completeness** — the catalog builds a working runtime for every `SessionSource`,
+/// 1. **Completeness** — the catalog builds a correctly typed runtime for every `SessionSource`,
 ///    so a thirteenth source that forgets its adapter fails here rather than crashing at
 ///    the first `catalog[.newSource]`.
 /// 2. **Silence (K16)** — the catalog publishes nothing that changes after init. Every
@@ -18,12 +18,12 @@ final class SessionProviderCatalogTests: XCTestCase {
 
     // MARK: - Completeness
 
-    func testCatalogCoversEverySourceWithWorkingRuntimes() {
+    func testCatalogCoversEverySourceWithRuntimes() {
         let catalog = SessionProviderCatalog()
         XCTAssertEqual(Set(catalog.runtimes.keys), Set(SessionSource.allCases))
         for s in SessionSource.allCases {
             XCTAssertEqual(catalog[s].source, s)
-            _ = catalog[s].searchAdapter   // constructing must not crash / not be a stub
+            _ = catalog[s].searchAdapter
         }
     }
 
@@ -31,12 +31,19 @@ final class SessionProviderCatalogTests: XCTestCase {
     /// typed downcast helper agrees with the type-erased `indexerObject`.
     func testTypedIndexerLookupMatchesRuntimeObject() {
         let catalog = SessionProviderCatalog()
-        XCTAssertTrue(catalog.indexer(.codex, as: SessionIndexer.self)
-            === (catalog[.codex].indexerObject as? SessionIndexer))
-        XCTAssertTrue(catalog.indexer(.claude, as: ClaudeSessionIndexer.self)
-            === (catalog[.claude].indexerObject as? ClaudeSessionIndexer))
-        XCTAssertTrue(catalog.indexer(.grok, as: GrokSessionIndexer.self)
-            === (catalog[.grok].indexerObject as? GrokSessionIndexer))
+        assertIndexer(catalog, source: .codex, is: SessionIndexer.self)
+        assertIndexer(catalog, source: .claude, is: ClaudeSessionIndexer.self)
+        assertIndexer(catalog, source: .antigravity, is: AntigravitySessionIndexer.self)
+        assertIndexer(catalog, source: .opencode, is: OpenCodeSessionIndexer.self)
+        assertIndexer(catalog, source: .hermes, is: HermesSessionIndexer.self)
+        assertIndexer(catalog, source: .copilot, is: CopilotSessionIndexer.self)
+        assertIndexer(catalog, source: .droid, is: DroidSessionIndexer.self)
+        assertIndexer(catalog, source: .openclaw, is: OpenClawSessionIndexer.self)
+        assertIndexer(catalog, source: .cursor, is: CursorSessionIndexer.self)
+        assertIndexer(catalog, source: .pi, is: PiSessionIndexer.self)
+        assertIndexer(catalog, source: .kimi, is: KimiSessionIndexer.self)
+        assertIndexer(catalog, source: .grok, is: GrokSessionIndexer.self)
+        assertIndexer(catalog, source: .qwen, is: QwenSessionIndexer.self)
     }
 
     /// Registry order must mirror `SessionSource.allCases` order (SPEC §10.1) — the catalog
@@ -48,14 +55,36 @@ final class SessionProviderCatalogTests: XCTestCase {
     }
 
     /// Every registered adapter produces a runtime whose `source` matches the descriptor it
-    /// was declared under — catches a copy-paste `makeRuntime` that builds the wrong
-    /// provider's indexer.
+    /// was declared under. Concrete indexer-class pairing is checked independently above.
     func testEveryAdapterRuntimeReportsItsOwnSource() {
         let catalog = SessionProviderCatalog()
         for adapter in SessionSourceRegistry.ordered {
             let source = adapter.descriptor.source
             XCTAssertEqual(catalog[source].source, source)
         }
+    }
+
+    func testRuntimeIdentitySnapshotCapabilityMatchesDescriptor() {
+        let catalog = SessionProviderCatalog()
+        for adapter in SessionSourceRegistry.ordered {
+            let source = adapter.descriptor.source
+            let descriptorUsesIdentity = adapter.descriptor.parseFullByIdentity != nil
+                && adapter.descriptor.searchUsesIdentityAtURL != nil
+            XCTAssertEqual(catalog[source].handle.searchIdentitySnapshots.isApplicable,
+                           descriptorUsesIdentity,
+                           "\(source)")
+        }
+    }
+
+    private func assertIndexer<T: ObservableObject>(_ catalog: SessionProviderCatalog,
+                                                     source: SessionSource,
+                                                     is type: T.Type,
+                                                     file: StaticString = #filePath,
+                                                     line: UInt = #line) {
+        guard let erased = catalog[source].indexerObject as? T else {
+            return XCTFail("Runtime for \(source) is not \(T.self)", file: file, line: line)
+        }
+        XCTAssertTrue(catalog.indexer(source, as: type) === erased, file: file, line: line)
     }
 
     // MARK: - K16: the catalog publishes nothing
@@ -244,6 +273,7 @@ enum FakeProviderHandles {
             currentSessions: { [] },
             currentIsIndexing: { false },
             currentLaunchPhase: { launchPhase.value },
+            searchIdentitySnapshots: .notApplicable,
             refresh: { _, _, _ in },
             reloadFocusedSession: { _, _, _ in }
         )

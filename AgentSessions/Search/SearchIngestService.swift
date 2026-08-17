@@ -12,10 +12,57 @@ import Foundation
 /// Skip-gated by `fetchSearchReadyPaths` (mtime+size+format_version), so steady-state
 /// incremental runs touch only new/changed files.
 actor SearchIngestService {
+    /// Authoritative identity view produced by the provider's just-completed refresh.
+    /// nil at the call site means enumeration failed, which must never be interpreted
+    /// as an empty database.
+    struct IdentitySnapshot: Equatable, Sendable {
+        let storagePaths: Set<String>
+        let sessionIDs: Set<String>
+
+        static let empty = IdentitySnapshot(storagePaths: [], sessionIDs: [])
+
+        /// Authoritative absence of identities at a provider-owned live database path.
+        /// Keeping the path is what lets cleanup remove rows from a database that was
+        /// deleted or replaced by a legacy backend without claiming archive copies.
+        static func authoritativeEmpty(storagePath: String) -> IdentitySnapshot {
+            IdentitySnapshot(storagePaths: [storagePath], sessionIDs: [])
+        }
+    }
+
+    /// Opaque per-session content revision for sources whose sessions share one storage URL.
+    /// `updatedMillis` comes from the lightweight session row; `extent` catches
+    /// same-timestamp message-count changes.
+    struct ContentRevision: Equatable, Hashable, Sendable {
+        let updatedMillis: Int64
+        let extent: Int64
+    }
+
     struct FileRef {
         let path: String
         let mtime: Int64
         let size: Int64
+        /// Stable identity for sources where multiple sessions share one storage path.
+        /// nil preserves the path-identified behavior used by ordinary transcript files.
+        let sessionID: String?
+        let contentRevision: ContentRevision?
+
+        init(path: String,
+             mtime: Int64,
+             size: Int64,
+             sessionID: String? = nil,
+             contentRevision: ContentRevision? = nil) {
+            self.path = path
+            self.mtime = mtime
+            self.size = size
+            self.sessionID = sessionID
+            self.contentRevision = contentRevision
+        }
+
+        var searchMtime: Int64 { contentRevision?.updatedMillis ?? mtime }
+        var searchSize: Int64 { contentRevision?.extent ?? size }
+        var activityTimestamp: TimeInterval {
+            contentRevision.map { TimeInterval($0.updatedMillis) / 1_000.0 } ?? TimeInterval(mtime)
+        }
     }
 
     struct Progress {
@@ -30,20 +77,59 @@ actor SearchIngestService {
     /// fast early-out for the common steady-state kick where the caller's freshly
     /// re-stat'd file list is byte-for-byte identical to what it was last time.
     private struct IngestAggregate: Equatable {
-        let fileCount: Int
-        let maxMtime: Int64
-        let totalSize: Int64
+        struct FileIdentity: Equatable {
+            let path: String
+            let mtime: Int64
+            let size: Int64
+            let sessionID: String?
+            let contentRevision: ContentRevision?
+        }
+
+        /// Preserve the caller's complete ordered input. In particular, a shared-DB
+        /// identity can move from a live database to a pinned archive with the exact
+        /// same revision and caller-supplied stat; its path is still lifecycle state.
+        let files: [FileIdentity]
+        /// nil is a failed provider read, while an empty/non-empty value is authoritative.
+        /// That distinction must participate in the early-out just like the file refs.
+        let identitySnapshot: IdentitySnapshot?
         // Included so toggling the tool-IO preference between calls (same files,
         // same mtimes/sizes) busts the early-out and falls through to the real
         // per-file gate, which is what actually backfills the missing toolIO rows.
         let toolIOEnabled: Bool
 
-        init(files: [FileRef], toolIOEnabled: Bool) {
-            fileCount = files.count
-            maxMtime = files.map(\.mtime).max() ?? 0
-            totalSize = files.reduce(0) { $0 + $1.size }
+        init(files: [FileRef], identitySnapshot: IdentitySnapshot?, toolIOEnabled: Bool) {
+            self.files = files.map { file in
+                FileIdentity(path: file.path,
+                             mtime: file.mtime,
+                             size: file.size,
+                             sessionID: file.sessionID,
+                             contentRevision: file.contentRevision)
+            }
+            self.identitySnapshot = identitySnapshot
             self.toolIOEnabled = toolIOEnabled
         }
+    }
+
+    private struct CleanIngestState {
+        let aggregate: IngestAggregate
+        let dbGeneration: Int64
+    }
+
+    nonisolated static func contentRevision(for session: Session) -> ContentRevision {
+        let updated = session.endTime ?? session.startTime ?? Date(timeIntervalSince1970: 0)
+        return ContentRevision(updatedMillis: Int64((updated.timeIntervalSince1970 * 1_000.0).rounded()),
+                               extent: Int64(session.eventCount))
+    }
+
+    /// Hydration replaces a DB-backed lightweight session's provider message count with
+    /// a rendered event count. The latter is not the identity revision's logical extent,
+    /// so compare it only while the session is still lightweight. The provider refresh
+    /// replaces hydrated rows with fresh lightweight rows, restoring the full two-part
+    /// comparison whenever the authoritative database snapshot changes.
+    nonisolated static func contentRevision(_ stored: ContentRevision, matches session: Session) -> Bool {
+        let current = contentRevision(for: session)
+        guard stored.updatedMillis == current.updatedMillis else { return false }
+        return !session.events.isEmpty || stored.extent == current.extent
     }
 
     private let db: IndexDB
@@ -54,11 +140,12 @@ actor SearchIngestService {
     /// never being set for a source that has never completed a clean pass, which is
     /// exactly the "never ingested / last pass was interrupted" case that must always
     /// fall through to the full check rather than early-out.
-    private var lastCleanAggregateBySource: [String: IngestAggregate] = [:]
+    private var lastCleanAggregateBySource: [String: CleanIngestState] = [:]
 
     /// Test-only observability: incremented each time the aggregate early-out fires
-    /// (i.e. `ingest` returned before touching `fetchIndexedFiles`/`fetchSearchReadyPaths`
-    /// /`sessionSearchUpdatedAt`/toolIO map reads). Harmless in production — just a
+    /// (i.e. `ingest` returned after the cheap generation check but before touching
+    /// `fetchIndexedFiles`/`fetchSearchReadyPaths`/`sessionSearchUpdatedAt`/toolIO
+    /// maps). Harmless in production — just a
     /// counter nobody else reads — but gives tests a way to prove the early-out path
     /// was actually taken rather than inferring it indirectly from `Progress` alone.
     private(set) var earlyOutHitCountForTesting = 0
@@ -100,6 +187,7 @@ actor SearchIngestService {
     func ingest(source: SessionSource,
                 files: [FileRef],
                 toolIOEnabled: Bool,
+                identitySnapshot: IdentitySnapshot? = nil,
                 yieldNanoseconds: UInt64 = 40_000_000,
                 toolIOOldBytesCap: Int64 = FeatureFlags.toolIOIndexOldBytesCap,
                 quietSeconds: TimeInterval = 120,
@@ -125,11 +213,19 @@ actor SearchIngestService {
         // a gate — before trusting "identical aggregate" to mean "nothing to do".
         let nowTS = Date().timeIntervalSince1970
         let widestGateWindow = max(quietSeconds, reingestCooldownOverride ?? Self.reingestCooldown(forFileSize: .max))
-        let noFileInDangerZone = files.allSatisfy { nowTS - Double($0.mtime) >= widestGateWindow }
-        let incomingAggregate = IngestAggregate(files: files, toolIOEnabled: toolIOEnabled)
+        let noFileInDangerZone = files.allSatisfy { nowTS - $0.activityTimestamp >= widestGateWindow }
+        let incomingAggregate = IngestAggregate(files: files,
+                                                identitySnapshot: identitySnapshot,
+                                                toolIOEnabled: toolIOEnabled)
+        // Rebuild Core Index advances this DB-backed token in the purge transaction.
+        // A read failure disables the optimization for this pass; it is never treated
+        // as a matching generation.
+        let dbGenerationAtStart = try? await db.searchIngestGeneration(source: sourceRaw)
         if noFileInDangerZone,
            let lastClean = lastCleanAggregateBySource[sourceRaw],
-           lastClean == incomingAggregate {
+           let dbGenerationAtStart,
+           lastClean.dbGeneration == dbGenerationAtStart,
+           lastClean.aggregate == incomingAggregate {
             earlyOutHitCountForTesting += 1
             return Progress(processed: 0, total: files.count, skipped: files.count)
         }
@@ -146,9 +242,18 @@ actor SearchIngestService {
             for row in rows { indexedByPath[row.path] = row }
         }
         let searchReadyPaths = (try? await db.fetchSearchReadyPaths(for: sourceRaw)) ?? []
+        let descriptor = source.descriptor
+        let usesSessionIdentity = descriptor.parseFullByIdentity != nil
+            && descriptor.searchUsesIdentityAtURL != nil
+        let searchIdentityStatesBySessionID = usesSessionIdentity
+            ? ((try? await db.sessionSearchIdentityStatesByID(for: sourceRaw)) ?? [:])
+            : [:]
         let toolIOReadyPaths = toolIOEnabled
             ? ((try? await db.fetchToolIOReadyPaths(for: sourceRaw)) ?? [])
             : []
+        let toolIOIdentityStatesBySessionID = toolIOEnabled && usesSessionIdentity
+            ? ((try? await db.sessionToolIOIdentityStatesByID(for: sourceRaw)) ?? [:])
+            : [:]
         // Persistent re-ingest cooldown source of truth: `session_search.updated_at`,
         // keyed by path. Replaces the old in-memory `lastReingestAt` map (which forgot
         // on every relaunch, so the first kick after a restart re-parsed every changed
@@ -156,6 +261,9 @@ actor SearchIngestService {
         // absent from this map has no `session_search` row yet — same never-ingested
         // exemption as before, just backed by the DB instead of process memory.
         let updatedAtByPath = (try? await db.sessionSearchUpdatedAt(for: sourceRaw)) ?? [:]
+        let updatedAtBySessionID = usesSessionIdentity
+            ? ((try? await db.sessionSearchUpdatedAtByID(for: sourceRaw)) ?? [:])
+            : [:]
         let toolIOCutoffTS = Int64(Date().addingTimeInterval(-Double(FeatureFlags.toolIOIndexRecentDays) * 24 * 60 * 60).timeIntervalSince1970)
         // refTS (COALESCE(end_ts, mtime)) per path, fetched once per ingest call — mirrors
         // the deleted `AnalyticsIndexer.indexFileIfNeeded`'s per-file `sessionRefTSForPath`
@@ -165,16 +273,28 @@ actor SearchIngestService {
         // window (see its `refTS >= toolIOCutoffTS` guard), so the gate must not demand one
         // for such a file either — otherwise it can never be skipped again.
         let refTSByPath = toolIOEnabled ? ((try? await db.sessionRefTSByPath(for: sourceRaw)) ?? [:]) : [:]
+        let refTSBySessionID = toolIOEnabled && usesSessionIdentity
+            ? ((try? await db.sessionRefTSByID(for: sourceRaw)) ?? [:])
+            : [:]
 
         var processed = 0
         var skipped = 0
+        var hadIngestFailure = false
         let total = files.count
 
         for (idx, file) in files.enumerated() {
             try Task.checkCancellation()
 
-            let isCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
-            if isCurrent, searchReadyPaths.contains(file.path) {
+            let pathIsCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
+            let identityIsCurrent = file.sessionID.flatMap { id in
+                file.contentRevision.map {
+                    searchIdentityStatesBySessionID[id]?.storagePath == file.path
+                        && searchIdentityStatesBySessionID[id]?.revision == $0
+                }
+            }
+            let isCurrent = identityIsCurrent ?? pathIsCurrent
+            let searchIsReady = identityIsCurrent ?? searchReadyPaths.contains(file.path)
+            if isCurrent, searchIsReady {
                 // toolIO readiness is only a requirement for files that would actually
                 // receive a toolIO row. A file whose refTS is older than the toolIO
                 // recency window (`toolIOCutoffTS`) never gets one — `ingestFile` skips
@@ -184,9 +304,17 @@ actor SearchIngestService {
                 // when the path has no `session_meta` row yet (refTSByPath lookup miss);
                 // `isCurrent`/`searchReadyPaths` already guarantee a row exists in that
                 // case in practice, but the fallback keeps this branch safe regardless.
-                let refTS = refTSByPath[file.path] ?? file.mtime
+                let refTS = file.sessionID.flatMap { refTSBySessionID[$0] }
+                    ?? refTSByPath[file.path]
+                    ?? file.mtime
                 let outsideToolIOWindow = refTS < toolIOCutoffTS
-                if !toolIOEnabled || toolIOReadyPaths.contains(file.path) || outsideToolIOWindow {
+                let toolIOIsReady = file.sessionID.flatMap { id in
+                    file.contentRevision.map {
+                        toolIOIdentityStatesBySessionID[id]?.storagePath == file.path
+                            && toolIOIdentityStatesBySessionID[id]?.revision == $0
+                    }
+                } ?? toolIOReadyPaths.contains(file.path)
+                if !toolIOEnabled || toolIOIsReady || outsideToolIOWindow {
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
@@ -218,12 +346,16 @@ actor SearchIngestService {
             // the legacy full-scan (SearchCoordinator.shouldIncludeUnindexedCandidate, which
             // bypasses the size gate for such stale rows) reads it directly and returns fresh
             // results until this service catches up.
-            let hasExistingRow = indexedByPath[file.path] != nil || searchReadyPaths.contains(file.path)
+            let hasExistingRow = file.sessionID.map {
+                searchIdentityStatesBySessionID[$0]?.storagePath == file.path
+                    && updatedAtBySessionID[$0] != nil
+            }
+                ?? (indexedByPath[file.path] != nil || searchReadyPaths.contains(file.path))
             if hasExistingRow {
                 // Clamp to zero: a future mtime (clock skew, or a test/fixture that
                 // deliberately sets mtime slightly ahead of "now") is "as hot as it
                 // gets", not exempt from the gate via a spuriously-negative age.
-                let age = max(0, nowTS - Double(file.mtime))
+                let age = max(0, nowTS - file.activityTimestamp)
                 if age < quietSeconds {
                     skipped += 1
                     if idx < files.count - 1 {
@@ -242,7 +374,9 @@ actor SearchIngestService {
                 // cooldown survives app relaunch: same never-ingested exemption as the quiet
                 // gate — a path with no row (nil lookup) always proceeds.
                 let cooldown = reingestCooldownOverride ?? Self.reingestCooldown(forFileSize: file.size)
-                if cooldown > 0, let lastTS = updatedAtByPath[file.path], nowTS - Double(lastTS) < cooldown {
+                let lastTS = file.sessionID.flatMap { updatedAtBySessionID[$0] }
+                    ?? updatedAtByPath[file.path]
+                if cooldown > 0, let lastTS, nowTS - Double(lastTS) < cooldown {
                     skipped += 1
                     if idx < files.count - 1 {
                         try? await Task.sleep(nanoseconds: yieldNanoseconds)
@@ -257,6 +391,7 @@ actor SearchIngestService {
                 processed += 1
             } else {
                 skipped += 1
+                hadIngestFailure = true
             }
 
             if idx < files.count - 1 {
@@ -278,10 +413,66 @@ actor SearchIngestService {
             try? await db.pruneOldToolIO(cutoffTS: toolIOCutoffTS, oldBytesCap: toolIOOldBytesCap)
         }
 
+        // A shared database can lose every session while its storage path remains. Reconcile
+        // identities per explicitly owned path: current identity FileRefs cover both live and
+        // pinned archive databases, while the provider snapshot keeps its configured live path
+        // authoritative even when empty. Previously owned paths are loaded from index_state so
+        // a root override or unpinned archive is retired on the next authoritative pass. Never use
+        // arbitrary paths from session_meta/files as ownership evidence.
+        if usesSessionIdentity {
+            if let identitySnapshot {
+                do {
+                    var currentIDsByPath: [String: Set<String>] = [:]
+                    for file in files {
+                        if let sessionID = file.sessionID {
+                            currentIDsByPath[file.path, default: []].insert(sessionID)
+                        }
+                    }
+                    for path in identitySnapshot.storagePaths {
+                        currentIDsByPath[path, default: []].formUnion(identitySnapshot.sessionIDs)
+                    }
+                    try await db.reconcileSearchIdentityStorage(
+                        source: sourceRaw,
+                        currentIDsByPath: currentIDsByPath
+                    )
+                } catch {
+                    hadIngestFailure = true
+                }
+            } else {
+                // A failed provider-live read cannot authorize deletion or retirement.
+                // Current identity FileRefs (notably pinned archives) are still trustworthy
+                // path ownership, so persist those additions for a later authoritative pass.
+                let currentPaths = Set(files.compactMap { file in
+                    file.sessionID == nil ? nil : file.path
+                })
+                do {
+                    try await db.preserveSearchIdentityStoragePaths(
+                        source: sourceRaw,
+                        additionalPaths: currentPaths
+                    )
+                } catch {
+                    hadIngestFailure = true
+                }
+                // Keep retrying after a provider read failure. Remembering this aggregate
+                // as clean would strand the persisted corpus indefinitely.
+                hadIngestFailure = true
+            }
+        }
+
         // Reaching here means the pass ran to completion (no throw/cancellation
         // propagated out of the loop above) — safe to remember this source's
         // aggregate as the early-out baseline for the next kick.
-        lastCleanAggregateBySource[sourceRaw] = incomingAggregate
+        if !hadIngestFailure,
+           let dbGenerationAtStart,
+           let dbGenerationAtEnd = try? await db.searchIngestGeneration(source: sourceRaw),
+           dbGenerationAtStart == dbGenerationAtEnd {
+            lastCleanAggregateBySource[sourceRaw] = CleanIngestState(
+                aggregate: incomingAggregate,
+                dbGeneration: dbGenerationAtEnd
+            )
+        } else {
+            lastCleanAggregateBySource[sourceRaw] = nil
+        }
 
         return Progress(processed: processed, total: total, skipped: skipped)
     }
@@ -301,7 +492,9 @@ actor SearchIngestService {
         let _span = Perf.begin("searchIngestFile", thresholdMs: 200, "path=\(url.lastPathComponent)")
         defer { Perf.end(_span) }
 
-        guard let session = Self.parseFileFull(url: url, source: source) else { return false }
+        guard let session = Self.parseFileFull(url: url,
+                                               source: source,
+                                               sessionID: file.sessionID) else { return false }
 
         let times = session.events.compactMap { $0.timestamp }
         let start = session.startTime ?? times.min() ?? Date(timeIntervalSince1970: TimeInterval(file.mtime))
@@ -314,8 +507,12 @@ actor SearchIngestService {
             sessionID: session.id,
             source: sourceRaw,
             path: session.filePath,
-            mtime: file.mtime,
-            size: file.size,
+            // For shared SQLite storage, analytics freshness must follow the logical
+            // session revision rather than the database file stat (which can remain
+            // unchanged while writes live in the WAL). Ordinary files still resolve
+            // these accessors to their physical mtime/size.
+            mtime: file.searchMtime,
+            size: file.searchSize,
             startTS: Int64(start.timeIntervalSince1970),
             endTS: Int64(end.timeIntervalSince1970),
             model: session.model,
@@ -342,9 +539,18 @@ actor SearchIngestService {
             try await db.begin()
             try await db.upsertFile(path: session.filePath, mtime: file.mtime, size: file.size, source: sourceRaw)
             try await db.upsertSessionMeta(meta)
-            try await db.upsertSessionSearch(sessionID: session.id, source: sourceRaw, mtime: file.mtime, size: file.size, text: searchText)
+            try await db.upsertSessionSearch(sessionID: session.id,
+                                             source: sourceRaw,
+                                             mtime: file.searchMtime,
+                                             size: file.searchSize,
+                                             text: searchText)
             if let toolIOText {
-                try await db.upsertSessionToolIO(sessionID: session.id, source: sourceRaw, mtime: file.mtime, size: file.size, refTS: refTS, text: toolIOText)
+                try await db.upsertSessionToolIO(sessionID: session.id,
+                                                 source: sourceRaw,
+                                                 mtime: file.searchMtime,
+                                                 size: file.searchSize,
+                                                 refTS: refTS,
+                                                 text: toolIOText)
             }
             try await db.commit()
             return true
@@ -362,8 +568,14 @@ actor SearchIngestService {
     /// arm for arm. A source whose descriptor declines path-identified parsing (`nil`, e.g. a
     /// future DB-backed source where every session shares one path — SPEC §4) yields no
     /// session, exactly as an unhandled source would have.
-    private static func parseFileFull(url: URL, source: SessionSource) -> Session? {
-        SessionSourceRegistry.descriptor(for: source).parseFullByPath?(url)
+    private static func parseFileFull(url: URL,
+                                      source: SessionSource,
+                                      sessionID: String?) -> Session? {
+        let descriptor = SessionSourceRegistry.descriptor(for: source)
+        if let sessionID, let parseFullByIdentity = descriptor.parseFullByIdentity {
+            return parseFullByIdentity(url, sessionID)
+        }
+        return descriptor.parseFullByPath?(url)
     }
 }
 
@@ -410,16 +622,21 @@ struct SearchIngestCoordinator {
         return .startNow
     }
 
-    /// Call when an in-flight ingest for `source` finishes (success, failure, or
-    /// cancellation). Returns `true` if a request coalesced while it was running,
-    /// meaning the caller should immediately start exactly one follow-up run.
+    /// Call when an in-flight ingest pass for `source` finishes. Returns `true` if a
+    /// request coalesced while it was running, meaning the same tracked task should
+    /// immediately perform exactly one follow-up pass. `inFlight` stays true across
+    /// that hand-off so another kick cannot start an overlapping task in the gap.
     mutating func finish(source: SessionSource) -> Bool {
         var state = states[source] ?? State()
-        state.inFlight = false
         let shouldRunAgain = state.pending
+        state.inFlight = shouldRunAgain
         state.pending = false
         states[source] = state
         return shouldRunAgain
+    }
+
+    mutating func cancelAll() {
+        states.removeAll()
     }
 
     /// True if `source` currently has an ingest running (test/debug convenience).
@@ -435,10 +652,7 @@ struct SearchIngestCoordinator {
 actor SearchIngestCoordinatorBox {
     private var coordinator = SearchIngestCoordinator()
     private var tasksBySource: [SessionSource: Task<Void, Never>] = [:]
-
-    func request(source: SessionSource) -> SearchIngestCoordinator.RequestDecision {
-        coordinator.request(source: source)
-    }
+    private var acceptsRequests = true
 
     func finish(source: SessionSource) -> Bool {
         let shouldRunAgain = coordinator.finish(source: source)
@@ -448,25 +662,33 @@ actor SearchIngestCoordinatorBox {
         return shouldRunAgain
     }
 
-    /// Creates the ingest task for `source` at `.utility` and records it under
-    /// `tasksBySource` in one actor-isolated step, so `cancelAll()` can never observe a
-    /// running-but-untracked task. Creation and storage have no suspension point between
-    /// them, so any later actor method (`cancelAll`, `finish`) is guaranteed to see the
-    /// task. Crucially, `operation` needs no reference to its own `Task`: this removes the
-    /// self-reference race a caller-side `var task: Task! = Task { track(task) }` hits, where
-    /// the detached body can read the still-nil implicitly-unwrapped optional before the
-    /// assignment lands and trap on the force-unwrap.
-    func startTracked(source: SessionSource, _ operation: @escaping @Sendable () async -> Void) {
+    /// Makes the single-flight decision and, only for `.startNow`, creates and records the
+    /// ingest task in one actor-isolated step. A coalesced kick therefore cannot replace
+    /// the handle of the task that is actually ingesting. Creation and storage have no
+    /// suspension point between them, so a later `cancelAll()` always sees that task.
+    ///
+    /// `nil` means teardown won the race with a caller-side request task. Once teardown
+    /// starts this box never accepts another ingest, preventing a request that was queued
+    /// just before owner deinitialization from installing work after `cancelAll()`.
+    @discardableResult
+    func requestTracked(source: SessionSource,
+                        _ operation: @escaping @Sendable () async -> Void) -> SearchIngestCoordinator.RequestDecision? {
+        guard acceptsRequests else { return nil }
+        let decision = coordinator.request(source: source)
+        guard decision == .startNow else { return decision }
         let task = Task.detached(priority: .utility) {
             await operation()
         }
         tasksBySource[source] = task
+        return decision
     }
 
     /// Cancels every in-flight (and any not-yet-started coalesced) ingest task. Call from
     /// the owning indexer's `deinit` / app-quit path for DB/process-teardown safety.
     func cancelAll() {
+        acceptsRequests = false
         for task in tasksBySource.values { task.cancel() }
         tasksBySource.removeAll()
+        coordinator.cancelAll()
     }
 }

@@ -20,6 +20,7 @@ struct PreferencesView: View {
     @ObservedObject var piSettings = PiSettings.shared
     @ObservedObject var kimiSettings = KimiSettings.shared
     @ObservedObject var grokSettings = GrokSettings.shared
+    @ObservedObject var qwenSettings = QwenSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -67,6 +68,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.piCLIAvailable) var piCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.kimiCLIAvailable) var kimiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.grokCLIAvailable) var grokCLIAvailable: Bool = true
+    @AppStorage(QwenPreferencesKey.cliAvailable) var qwenCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -80,6 +82,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.piEnabled) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @AppStorage(PreferencesKey.Agents.grokEnabled) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+    @AppStorage(QwenPreferencesKey.enabled) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -242,6 +245,11 @@ struct PreferencesView: View {
     @State var grokVersionString: String? = nil
     @State var grokResolvedPath: String? = nil
     @State var grokProbeDebounce: DispatchWorkItem? = nil
+    @State var qwenProbeState: ProbeState = .idle
+    @State var qwenVersionString: String? = nil
+    @State var qwenResolvedPath: String? = nil
+    @State var qwenProbeDebounce: DispatchWorkItem? = nil
+    @State var qwenActiveProbeRequest: QwenProbeRequest? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -284,6 +292,9 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Paths.grokSessionsRootOverride) var grokSessionsPath: String = ""
     @State var grokSessionsPathValid: Bool = true
     @State var grokSessionsPathDebounce: DispatchWorkItem? = nil
+    @AppStorage(QwenPreferencesKey.sessionsRootOverride) var qwenSessionsPath: String = ""
+    @State var qwenSessionsPathValid: Bool = true
+    @State var qwenSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -434,6 +445,8 @@ struct PreferencesView: View {
                 kimiTab
             case .grok:
                 grokTab
+            case .qwen:
+                qwenTab
             case .about:
                 aboutTab
             }
@@ -753,6 +766,8 @@ struct PreferencesView: View {
         kimiSettings.setResolvedBinaryPath(nil)
         grokSettings.setBinaryPath("")
         grokSettings.setResolvedBinaryPath(nil)
+        qwenSettings.setBinaryPath("")
+        qwenSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -765,12 +780,14 @@ struct PreferencesView: View {
         piSessionsPath = ""
         kimiSessionsPath = ""
         grokSessionsPath = ""
+        qwenSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
         validatePiSessionsPath()
         validateKimiSessionsPath()
         validateGrokSessionsPath()
+        validateQwenSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -792,6 +809,7 @@ struct PreferencesView: View {
         scheduleDroidProbe()
         scheduleOpenClawProbe()
         schedulePiProbe()
+        scheduleQwenProbe()
     }
 
     func closeWindow() {
@@ -915,6 +933,7 @@ struct PreferencesView: View {
         case .pi: schedulePiProbe()
         case .kimi: scheduleKimiProbe()
         case .grok: scheduleGrokProbe()
+        case .qwen: scheduleQwenProbe()
         }
     }
 
@@ -944,6 +963,8 @@ struct PreferencesView: View {
             return kimiResolvedPath
         case .grok:
             return grokResolvedPath
+        case .qwen:
+            return qwenResolvedPath
         }
     }
 
@@ -984,6 +1005,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .grok:
             let value = grokSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .qwen:
+            let value = qwenSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1121,6 +1145,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case pi
     case kimi
     case grok
+    case qwen
     case about
 
     var id: String { rawValue }
@@ -1147,6 +1172,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .pi: return "Pi"
         case .kimi: return "Kimi Code"
         case .grok: return "Grok CLI"
+        case .qwen: return "Qwen Code"
         case .about: return "About"
         }
     }
@@ -1173,6 +1199,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .pi: return "p.circle"
         case .kimi: return "k.circle"
         case .grok: return "g.circle"
+        case .qwen: return "q.circle"
         case .about: return "info.circle"
         }
     }
@@ -1181,7 +1208,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
 // MARK: - Tab ↔ source mapping (K13)
 //
 // `title` and `iconName` above stay hand-written. They are *not* `source.displayName` /
-// `source.iconName`: five of the twelve panes deliberately differ ("Antigravity CLI" vs
+// `source.iconName`: several panes deliberately differ ("Antigravity CLI" vs
 // "Antigravity", "GitHub Copilot CLI" vs "Copilot CLI", claude's `c.square` vs `command`,
 // openclaw's `o.circle` vs `pawprint`), and this task may not change a rendered value.
 // Both switches are already exhaustive over `PreferencesTab`, so neither can grow a silent
@@ -1203,12 +1230,13 @@ extension PreferencesTab {
         case .pi:          self = .pi
         case .kimi:        self = .kimi
         case .grok:        self = .grok
+        case .qwen:        self = .qwen
         }
     }
 
     /// The source this pane configures, or nil for the app-wide panes. Reverse of
     /// `init(source:)`; `ViewRegistryDerivationTests` pins the round trip. The sidebar's
-    /// first `ForEach` filters on this instead of listing all twelve agent tabs by hand.
+    /// first `ForEach` filters on this instead of listing every agent tab by hand.
     var configuredSource: SessionSource? {
         switch self {
         case .general, .usageTracking, .limitAlerts, .usageProbes,
@@ -1226,6 +1254,7 @@ extension PreferencesTab {
         case .pi:              return .pi
         case .kimi:            return .kimi
         case .grok:            return .grok
+        case .qwen:            return .qwen
         }
     }
 
@@ -1241,7 +1270,7 @@ extension PreferencesTab {
     /// that forgets its row fails there instead of vanishing from Settings.
     static let sidebarAgentSources: [SessionSource] = [
         .codex, .claude, .opencode, .antigravity, .copilot,
-        .cursor, .pi, .kimi, .grok, .hermes, .openclaw
+        .cursor, .pi, .kimi, .grok, .qwen, .hermes, .openclaw
     ]
 
     static var sidebarAgentTabs: [PreferencesTab] {
@@ -1509,6 +1538,48 @@ extension PreferencesView {
         }
     }
 
+    func probeQwen() {
+        guard qwenActiveProbeRequest == nil else { return }
+        startQwenProbe(qwenSettings.currentProbeRequest(), resetPresentation: true)
+    }
+
+    private func startQwenProbe(_ request: QwenProbeRequest, resetPresentation: Bool) {
+        qwenActiveProbeRequest = request
+        if resetPresentation {
+            qwenProbeState = .probing
+            qwenVersionString = nil
+            qwenResolvedPath = nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = QwenCLIEnvironment().probe(customPath: request.binaryOverride)
+            DispatchQueue.main.async {
+                guard self.qwenActiveProbeRequest == request else { return }
+                switch self.qwenSettings.acceptProbeCompletion(result, for: request) {
+                case .stale(let currentRequest):
+                    // Keep the presentation in its existing probing state. The stale
+                    // result must not flash success/failure or change persisted flags.
+                    self.startQwenProbe(currentRequest, resetPresentation: false)
+                    return
+                case .accepted:
+                    self.qwenActiveProbeRequest = nil
+                }
+
+                switch result {
+                case .success(let resolved):
+                    self.qwenVersionString = resolved.versionString
+                    self.qwenResolvedPath = resolved.binaryURL.path
+                    self.qwenProbeState = .success
+                    self.qwenCLIAvailable = true
+                case .failure:
+                    self.qwenVersionString = nil
+                    self.qwenResolvedPath = nil
+                    self.qwenProbeState = .failure
+                    self.qwenCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1559,6 +1630,8 @@ extension PreferencesView {
             if kimiVersionString == nil && kimiProbeState != .probing { probeKimi() }
         case .grok:
             if grokVersionString == nil && grokProbeState != .probing { probeGrok() }
+        case .qwen:
+            if qwenVersionString == nil && qwenProbeState != .probing { probeQwen() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1624,6 +1697,13 @@ extension PreferencesView {
         grokProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeGrok() }
         grokProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleQwenProbe() {
+        qwenProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeQwen() }
+        qwenProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

@@ -10,7 +10,7 @@
 <td>
 
 **Live per-session quota burn for Codex and Claude — see *which* session is eating your 5-hour and weekly limits, priced per model.**
-Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [OpenCode](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Antigravity CLI, [Hermes](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide), and [OpenClaw](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide) — transcripts, images, and one-click resume. macOS, local-only.
+Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [OpenCode](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, Antigravity CLI, [Hermes](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide), and [OpenClaw](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide), with image browsing and one-click resume where the source supports them. macOS, local-only.
 
 [**Session-Bench**](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme): how ten agents' session formats score — 19 pass/fail gates, evidence behind every cell.
 
@@ -42,7 +42,7 @@ Plus a searchable history across [Codex](https://jazzyalex.github.io/agent-sessi
 
 Run three agents at once and a normal quota meter tells you "60% used" — not which one spent it. Agent Sessions attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows. Pick the lens you want (5-hour, weekly, tokens/hour, or dollars); the `$` lens prices each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended into one number.
 
-It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, and Grok CLI histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
+It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, and Qwen Code histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Session Runway — live per-session quota burn-rate</em></p>
@@ -97,8 +97,9 @@ New in 4.8:
 - Browse [Claude CLI and Claude Desktop sessions](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide) with consistent labels and project context.
 - Browse [Cursor Agent transcripts](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide) from Cursor's local storage, enriched with Cursor chat metadata when available.
 - [Hermes Agent sessions](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
-- [OpenClaw sessions](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, deleted-session visibility, and resume workflows while ignoring trajectory traces.
+- [OpenClaw sessions](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, image browsing, and deleted-session visibility while ignoring trajectory traces. OpenClaw resume is not supported.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
+- Qwen Code sessions participate in browsing, search, filtering, and Analytics, including active-chain tool calls and reasoning recorded in local JSONL history. Active-chat resume actions are implemented from the installed CLI's help and reader behavior, but remain end-to-end untested because authentication blocked a disposable 0.21.13 run; archived Qwen histories remain browse-only. Qwen image extraction is not yet supported.
 - Unified browsing across supported agents, with strict filtering, saved sessions, and a single session list.
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
@@ -217,7 +218,14 @@ xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessionsTests -destinat
 ```
 
 Contributing:
-- `CONTRIBUTING.md`
+- [Contribution guide](docs/CONTRIBUTING.md)
+- [Add a session source](docs/adding-a-session-source.md)
+- [Brief your coding agent to prepare a source PR](docs/prompts/add-an-agent-source.md)
+
+Don’t see your coding agent? You can propose it, contribute a sanitized format fixture,
+or use the AI-agent brief to prepare a draft integration PR. Every source remains ordinary
+reviewed code; Agent Sessions does not download provider plugins or infer support from an
+installed binary.
 
 ## License
 

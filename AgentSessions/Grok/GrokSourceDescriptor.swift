@@ -36,6 +36,8 @@ extension SessionSourceDescriptor {
             },
             defaultEnabled: .whenAvailable,
             parseFullByPath: { url in GrokSessionParser.parseFileFull(at: url) },
+            parseFullByIdentity: nil,
+            searchUsesIdentityAtURL: nil,
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -85,6 +87,7 @@ extension SessionSourceAdapter {
                     currentSessions: { indexer.allSessions },
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
+                    searchIdentitySnapshots: .notApplicable,
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },

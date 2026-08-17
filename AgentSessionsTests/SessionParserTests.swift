@@ -185,6 +185,22 @@ final class SessionParserTests: XCTestCase {
         """)
     }
 
+    private func executeSQLite(_ sql: String, at url: URL) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            sqlite3_close(db)
+            return XCTFail("failed to open SQLite fixture")
+        }
+        defer { sqlite3_close(db) }
+        var error: UnsafeMutablePointer<Int8>?
+        guard sqlite3_exec(db, sql, nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? "unknown sqlite error"
+            sqlite3_free(error)
+            throw NSError(domain: "SQLiteFixture", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
     private func createHermesStateDBFixture(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -482,9 +498,209 @@ final class SessionParserTests: XCTestCase {
         try await waitForSearchResults(excluded, expectedIDs: ["codex-session"])
     }
 
+    func testSearchCoordinatorScansPastStaleIdentityFTSHit() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let path = "/tmp/opencode.db"
+        let session = Session(
+            id: "shared-db-session",
+            source: .opencode,
+            startTime: Date(timeIntervalSince1970: 1_900),
+            endTime: Date(timeIntervalSince1970: 2_000),
+            model: nil,
+            filePath: path,
+            fileSizeBytes: nil,
+            eventCount: 1,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Shared DB session"
+        )
+        let currentSession = Session(
+            id: "current-shared-db-session",
+            source: .opencode,
+            startTime: Date(timeIntervalSince1970: 2_100),
+            endTime: Date(timeIntervalSince1970: 2_200),
+            model: nil,
+            filePath: path,
+            fileSizeBytes: nil,
+            eventCount: 1,
+            events: [],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Current shared DB session"
+        )
+
+        try await db.begin()
+        try await db.upsertFile(path: path, mtime: 10, size: 20, source: "opencode")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: session.id, source: "opencode", path: path, mtime: 10, size: 20,
+            startTS: 1_900, endTS: 2_000, model: nil, cwd: "/tmp/repo", repo: "repo",
+            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        try await db.upsertSessionSearch(sessionID: session.id, source: "opencode",
+                                         mtime: 1, size: 1, text: "staleonly")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: currentSession.id, source: "opencode", path: path, mtime: 10, size: 20,
+            startTS: 2_100, endTS: 2_200, model: nil, cwd: "/tmp/repo", repo: "repo",
+            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        let currentRevision = SearchIngestService.contentRevision(for: currentSession)
+        try await db.upsertSessionSearch(sessionID: currentSession.id, source: "opencode",
+                                         mtime: currentRevision.updatedMillis,
+                                         size: currentRevision.extent,
+                                         text: "staleonly " + String(repeating: "filler ", count: 200))
+        try await db.commit()
+
+        // Hydration changes the rendered event count, but not the provider's logical
+        // message-count revision. Search must keep the current FTS row eligible.
+        let hydratedCurrentSession = Session(
+            id: currentSession.id,
+            source: currentSession.source,
+            startTime: currentSession.startTime,
+            endTime: currentSession.endTime,
+            model: currentSession.model,
+            filePath: currentSession.filePath,
+            fileSizeBytes: currentSession.fileSizeBytes,
+            eventCount: 2,
+            events: [SessionEvent(id: "hydrated-event", timestamp: currentSession.endTime,
+                                  kind: .assistant, role: "assistant", text: "hydrated",
+                                  toolName: nil, toolInput: nil, toolOutput: nil,
+                                  messageID: "message", parentID: nil, isDelta: false,
+                                  rawJSON: "{}")],
+            cwd: currentSession.cwd,
+            repoName: currentSession.repoName,
+            lightweightTitle: currentSession.lightweightTitle
+        )
+
+        let firstPage = try await db.searchSessionIDsFTS(
+            sources: ["opencode"], model: nil, repoSubstr: nil, pathSubstr: nil,
+            dateFrom: nil, dateTo: nil, query: "staleonly", includeSystemProbes: true,
+            limit: 1
+        )
+        XCTAssertEqual(firstPage, [session.id], "fixture must put the stale row ahead of the current hit")
+
+        let store = SearchCoordinatorTestStore()
+        let coordinator = SearchCoordinator(store: store, db: db, ftsResultLimitForTesting: 1)
+        coordinator.start(query: "staleonly",
+                          filters: Filters(query: "staleonly"),
+                          allowed: [.opencode],
+                          enableDeepScan: false,
+                          all: [session, hydratedCurrentSession])
+
+        try await waitForSearchResults(coordinator, expectedIDs: [currentSession.id])
+        XCTAssertFalse(coordinator.results.contains(where: { $0.id == session.id }),
+                       "stale FTS text must never publish")
+    }
+
+    func testSearchCoordinatorTreatsSameRevisionAtDifferentIdentityPathAsUnindexed() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let livePath = "/tmp/live/opencode.db"
+        let archivePath = "/tmp/archive/opencode.db"
+        let endTime = Date(timeIntervalSince1970: 2_000)
+        let session = Session(
+            id: "moved-shared-db-session",
+            source: .opencode,
+            startTime: Date(timeIntervalSince1970: 1_900),
+            endTime: endTime,
+            model: nil,
+            filePath: archivePath,
+            fileSizeBytes: nil,
+            eventCount: 1,
+            events: [
+                SessionEvent(id: "fresh-archive-event", timestamp: endTime,
+                             kind: .assistant, role: "assistant",
+                             text: "fresh archive marker", toolName: nil,
+                             toolInput: nil, toolOutput: nil, messageID: "message",
+                             parentID: nil, isDelta: false, rawJSON: "{}")
+            ],
+            cwd: "/tmp/repo",
+            repoName: "repo",
+            lightweightTitle: "Moved shared DB session"
+        )
+        let revision = SearchIngestService.contentRevision(for: session)
+
+        try await db.begin()
+        try await db.upsertFile(path: livePath, mtime: revision.updatedMillis,
+                                size: revision.extent, source: "opencode")
+        try await db.upsertSessionMeta(SessionMetaRow(
+            sessionID: session.id, source: "opencode", path: livePath,
+            mtime: revision.updatedMillis, size: revision.extent,
+            startTS: 1_900, endTS: 2_000, model: nil, cwd: "/tmp/repo", repo: "repo",
+            title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+            messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+        ))
+        try await db.upsertSessionSearch(sessionID: session.id, source: "opencode",
+                                         mtime: revision.updatedMillis,
+                                         size: revision.extent,
+                                         text: "old live marker")
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(), db: db)
+        coordinator.start(query: "fresh archive marker",
+                          filters: Filters(query: "fresh archive marker"),
+                          allowed: [.opencode],
+                          enableDeepScan: false,
+                          all: [session])
+
+        try await waitForSearchResults(coordinator, expectedIDs: [session.id])
+    }
+
+    func testSearchCoordinatorToolCapacityExcludesOrdinaryDuplicatesBeforeLimit() async throws {
+        let defaults = UserDefaults.standard
+        let key = PreferencesKey.Advanced.enableRecentToolIOIndex
+        let previous = defaults.object(forKey: key)
+        defaults.set(true, forKey: key)
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let ordinaryAndTool = makeRepoSession(id: "a-ordinary-and-tool", source: .codex, repoName: "repo")
+        let toolOnly = makeRepoSession(id: "b-tool-only", source: .codex, repoName: "repo")
+
+        try await db.begin()
+        for session in [ordinaryAndTool, toolOnly] {
+            try await db.upsertFile(path: session.filePath, mtime: 10, size: 20, source: "codex")
+            try await db.upsertSessionMeta(SessionMetaRow(
+                sessionID: session.id, source: "codex", path: session.filePath, mtime: 10, size: 20,
+                startTS: 1, endTS: 2, model: nil, cwd: "/tmp/repo", repo: "repo",
+                title: nil, codexInternalSessionID: nil, isHousekeeping: false,
+                messages: 1, commands: 0, parentSessionID: nil, subagentType: nil, customTitle: nil
+            ))
+            try await db.upsertSessionSearch(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20,
+                                             text: session.id == ordinaryAndTool.id ? "dualmatch" : "ordinary-only")
+            try await db.upsertSessionToolIO(sessionID: session.id, source: "codex",
+                                             mtime: 10, size: 20, refTS: 2,
+                                             text: "dualmatch")
+        }
+        try await db.commit()
+
+        let coordinator = SearchCoordinator(store: SearchCoordinatorTestStore(),
+                                            db: db,
+                                            ftsResultLimitForTesting: 2)
+        coordinator.start(query: "dualmatch",
+                          filters: Filters(query: "dualmatch"),
+                          allowed: [.codex],
+                          enableDeepScan: false,
+                          all: [ordinaryAndTool, toolOnly])
+
+        try await waitForSearchResults(coordinator,
+                                       expectedIDs: [ordinaryAndTool.id, toolOnly.id])
+    }
+
     /// Successor guard to the regression above (SPEC §8.5). The allow-list the views hand to
     /// `SearchCoordinator.start` is now produced in one place —
-    /// `UnifiedSessionIndexer.allowedSearchSources()` — and follows one policy for all twelve
+    /// `UnifiedSessionIndexer.allowedSearchSources()` — and follows one policy for every registered
     /// sources: a source is searchable when it is *both* globally enabled and included by the
     /// source filter. Previously two of the three production call sites gated only pi/kimi/grok
     /// and let the other nine through regardless.
@@ -510,7 +726,7 @@ final class SessionParserTests: XCTestCase {
             unified.includeGrok = savedIncludeGrok
         }
 
-        // The rule holds over all twelve, whatever this machine's stored preferences are.
+        // The rule holds over every registered source, whatever this machine's stored preferences are.
         XCTAssertEqual(unified.allowedSearchSources(), expectedAllowed())
 
         // Inclusion seam: included sources ride on their enablement, excluded ones never
@@ -2626,6 +2842,769 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("SQLite response") })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "grep" })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_result && ($0.toolOutput ?? "").contains("Found 1 match") })
+    }
+
+    func testOpenCodeSQLiteSearchIngestTracksIdentityUpdatesAndRemoval() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-SearchIngest-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let dbURL = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: dbURL)
+        try executeSQLite("""
+        INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived)
+        VALUES ('ses_sqlite_second', 'proj_sqlite', NULL, 'sqlite-second', '/tmp/repo', 'SQLite second', '1.4.6', 1776370010000, 1776370012000, NULL);
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_second', 'ses_sqlite_second', 1776370010000, 1776370012000, '{"role":"assistant","modelID":"big-pickle","providerID":"opencode"}');
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES ('prt_second', 'msg_second', 'ses_sqlite_second', 1776370010000, 1776370012000, '{"type":"text","text":"Second identity marker","time":{"start":1776370010000,"end":1776370012000}}');
+        """, at: dbURL)
+
+        let baselineStat = try XCTUnwrap(SessionFileStat.from(dbURL))
+        func refs() -> [SearchIngestService.FileRef] {
+            OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).map { session in
+                SearchIngestService.FileRef(
+                    path: dbURL.path,
+                    mtime: baselineStat.mtime,
+                    size: baselineStat.size,
+                    sessionID: session.id,
+                    contentRevision: SearchIngestService.contentRevision(for: session)
+                )
+            }
+        }
+        func identitySnapshot() -> SearchIngestService.IdentitySnapshot {
+            SearchIngestService.IdentitySnapshot(
+                storagePaths: [dbURL.path],
+                sessionIDs: Set(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).map(\.id))
+            )
+        }
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let service = SearchIngestService(db: indexDB)
+        let progress = try await service.ingest(source: .opencode,
+                                                files: refs(),
+                                                toolIOEnabled: false,
+                                                identitySnapshot: identitySnapshot(),
+                                                quietSeconds: 0,
+                                                reingestCooldownOverride: 0)
+        XCTAssertEqual(progress.processed, 2)
+        try await indexDB.begin()
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+        let initialAnalyticsUpdates = try await indexDB.findSessionsNeedingDayUpdate(
+            source: SessionSource.opencode.rawValue
+        )
+        XCTAssertTrue(initialAnalyticsUpdates.isEmpty)
+
+        // The logical extent is the second half of the identity revision. Change it
+        // without changing the session timestamp or the caller-supplied shared DB stat.
+        try executeSQLite("""
+        INSERT INTO message (id, session_id, time_created, time_updated, data)
+        VALUES ('msg_second_same_time', 'ses_sqlite_second', 1776370011000, 1776370012000, '{"role":"assistant","modelID":"big-pickle","providerID":"opencode"}');
+        INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+        VALUES ('prt_second_same_time', 'msg_second_same_time', 'ses_sqlite_second', 1776370011000, 1776370012000, '{"type":"text","text":"Same timestamp extent marker","time":{"start":1776370011000,"end":1776370012000}}');
+        """, at: dbURL)
+        let extentProgress = try await service.ingest(source: .opencode,
+                                                      files: refs(),
+                                                      toolIOEnabled: false,
+                                                      identitySnapshot: identitySnapshot(),
+                                                      quietSeconds: 0,
+                                                      reingestCooldownOverride: 0)
+        XCTAssertEqual(extentProgress.processed, 1)
+        XCTAssertEqual(extentProgress.skipped, 1)
+        let extentAnalyticsUpdates = try await indexDB.findSessionsNeedingDayUpdate(source: SessionSource.opencode.rawValue)
+        XCTAssertEqual(extentAnalyticsUpdates, ["ses_sqlite_second"])
+        try await indexDB.begin()
+        let extentDays = try await indexDB.populateSessionDaysFromMetaIncremental(
+            sessionIDs: extentAnalyticsUpdates,
+            source: SessionSource.opencode.rawValue
+        )
+        try await indexDB.recomputeRollupsForDays(extentDays, source: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+
+        // A provider read failure is represented by a nil snapshot. Empty current
+        // files in that state must preserve the last healthy corpus.
+        _ = try await service.ingest(source: .opencode,
+                                     files: [],
+                                     toolIOEnabled: false,
+                                     identitySnapshot: nil,
+                                     quietSeconds: 0,
+                                     reingestCooldownOverride: 0)
+        let rowsAfterFailedRead = try await indexDB.rowCountForTesting(table: "session_search",
+                                                                       source: "opencode")
+        XCTAssertEqual(rowsAfterFailedRead, 2)
+
+        var matches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue],
+            model: nil,
+            repoSubstr: nil,
+            pathSubstr: nil,
+            dateFrom: nil,
+            dateTo: nil,
+            query: "SQLite response",
+            includeSystemProbes: true,
+            limit: 10
+        )
+        XCTAssertEqual(matches, ["ses_sqlite_demo"])
+
+        matches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue], model: nil, repoSubstr: nil,
+            pathSubstr: nil, dateFrom: nil, dateTo: nil, query: "Second identity marker",
+            includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(matches, ["ses_sqlite_second"])
+
+        // Change only one logical session while continuing to report the exact same
+        // shared-database file stat, as can happen while SQLite changes live in the WAL.
+        try executeSQLite("""
+        UPDATE session SET time_updated = 1776370022000 WHERE id = 'ses_sqlite_demo';
+        UPDATE part SET data = '{"type":"text","text":"Updated response","time":{"start":1776370001000,"end":1776370022000}}',
+                        time_updated = 1776370022000
+        WHERE id = 'prt_assistant_text_sqlite';
+        """, at: dbURL)
+        let updateProgress = try await service.ingest(source: .opencode,
+                                                      files: refs(),
+                                                      toolIOEnabled: false,
+                                                      identitySnapshot: identitySnapshot(),
+                                                      quietSeconds: 0,
+                                                      reingestCooldownOverride: 0)
+        XCTAssertEqual(updateProgress.processed, 1)
+        XCTAssertEqual(updateProgress.skipped, 1)
+        let analyticsUpdates = try await indexDB.findSessionsNeedingDayUpdate(source: SessionSource.opencode.rawValue)
+        XCTAssertEqual(analyticsUpdates, ["ses_sqlite_demo"],
+                       "a per-session revision must invalidate analytics even when the shared DB stat is unchanged")
+        matches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue], model: nil, repoSubstr: nil,
+            pathSubstr: nil, dateFrom: nil, dateTo: nil, query: "Updated response",
+            includeSystemProbes: true, limit: 10
+        )
+        XCTAssertEqual(matches, ["ses_sqlite_demo"])
+
+        // Archive one identity without removing the shared database path. Its FTS row
+        // must be pruned so it cannot consume the SQL result limit ahead of live rows.
+        try executeSQLite("UPDATE session SET time_archived = 1776370030000 WHERE id = 'ses_sqlite_second';",
+                          at: dbURL)
+        _ = try await service.ingest(source: .opencode,
+                                     files: refs(),
+                                     toolIOEnabled: false,
+                                     identitySnapshot: identitySnapshot(),
+                                     quietSeconds: 0,
+                                     reingestCooldownOverride: 0)
+        matches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue], model: nil, repoSubstr: nil,
+            pathSubstr: nil, dateFrom: nil, dateTo: nil, query: "Second identity marker",
+            includeSystemProbes: true, limit: 10
+        )
+        XCTAssertTrue(matches.isEmpty)
+
+        // Exercise the empty-input reconciliation used when the final DB identity
+        // disappears. Seed derived analytics first so the assertion covers the whole
+        // identity lifecycle, not only the FTS tables.
+        try await indexDB.begin()
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+        try executeSQLite("UPDATE session SET time_archived = 1776370040000 WHERE id = 'ses_sqlite_demo';",
+                          at: dbURL)
+        _ = try await service.ingest(source: .opencode,
+                                     files: [],
+                                     toolIOEnabled: false,
+                                     identitySnapshot: .authoritativeEmpty(storagePath: dbURL.path),
+                                     quietSeconds: 0,
+                                     reingestCooldownOverride: 0)
+
+        let searchRows = try await indexDB.rowCountForTesting(table: "session_search", source: "opencode")
+        let metaRows = try await indexDB.rowCountForTesting(table: "session_meta", source: "opencode")
+        let dayRows = try await indexDB.rowCountForTesting(table: "session_days", source: "opencode")
+        let rollupRows = try await indexDB.rowCountForTesting(table: "rollups_daily", source: "opencode")
+        XCTAssertEqual(searchRows, 0)
+        XCTAssertEqual(metaRows, 0)
+        XCTAssertEqual(dayRows, 0)
+        XCTAssertEqual(rollupRows, 0)
+    }
+
+    func testOpenCodeSQLiteSearchIngestMovesSameRevisionToPinnedArchiveThenRetiresIt() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenCode-PinnedArchive-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+
+        let liveRoot = root.appendingPathComponent("live", isDirectory: true)
+        let archiveRoot = root.appendingPathComponent("archive", isDirectory: true)
+        try fm.createDirectory(at: liveRoot, withIntermediateDirectories: true)
+        try fm.createDirectory(at: archiveRoot, withIntermediateDirectories: true)
+        let liveDBURL = liveRoot.appendingPathComponent("opencode.db")
+        let archiveDBURL = archiveRoot.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: liveDBURL)
+        try fm.copyItem(at: liveDBURL, to: archiveDBURL)
+
+        let liveSession = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: liveDBURL.path).first)
+        let sharedStat = try XCTUnwrap(SessionFileStat.from(liveDBURL))
+        let liveRef = SearchIngestService.FileRef(
+            path: liveDBURL.path,
+            mtime: sharedStat.mtime,
+            size: sharedStat.size,
+            sessionID: liveSession.id,
+            contentRevision: SearchIngestService.contentRevision(for: liveSession)
+        )
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let service = SearchIngestService(db: indexDB)
+
+        let liveProgress = try await service.ingest(
+            source: .opencode,
+            files: [liveRef],
+            toolIOEnabled: false,
+            identitySnapshot: SearchIngestService.IdentitySnapshot(
+                storagePaths: [liveDBURL.path],
+                sessionIDs: [liveSession.id]
+            ),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(liveProgress.processed, 1)
+
+        // The same identity and revision moves to a pinned archive while the provider's
+        // live database becomes authoritatively empty. Supply the exact same physical
+        // stat so only FileRef path + snapshot authority can invalidate the clean pass.
+        try executeSQLite(
+            "UPDATE session SET time_archived = 1776370040000 WHERE id = 'ses_sqlite_demo';",
+            at: liveDBURL
+        )
+        let archivedSession = try XCTUnwrap(
+            OpenCodeSqliteReader.listSessions(customRoot: archiveDBURL.path).first
+        )
+        let archiveRevision = SearchIngestService.contentRevision(for: archivedSession)
+        let liveRevision = try XCTUnwrap(liveRef.contentRevision)
+        XCTAssertEqual(archiveRevision, liveRevision)
+        let archiveRef = SearchIngestService.FileRef(
+            path: archiveDBURL.path,
+            mtime: sharedStat.mtime,
+            size: sharedStat.size,
+            sessionID: archivedSession.id,
+            contentRevision: archiveRevision
+        )
+        let archiveProgress = try await service.ingest(
+            source: .opencode,
+            files: [archiveRef],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(archiveProgress.processed, 1,
+                       "same-revision path moves must re-ingest instead of aggregate/readiness skipping")
+
+        let matches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue],
+            model: nil,
+            repoSubstr: nil,
+            pathSubstr: nil,
+            dateFrom: nil,
+            dateTo: nil,
+            query: "SQLite response",
+            includeSystemProbes: true,
+            limit: 10
+        )
+        XCTAssertEqual(matches, ["ses_sqlite_demo"],
+                       "live identity cleanup must preserve a pinned archive DB fallback")
+        let persistedPaths = try await indexDB.fetchSessionMetaPaths(for: SessionSource.opencode.rawValue)
+        XCTAssertEqual(persistedPaths, [archiveDBURL.path])
+        let ownedPaths = try await indexDB.searchIdentityStoragePaths(source: SessionSource.opencode.rawValue)
+        XCTAssertEqual(ownedPaths, [liveDBURL.path, archiveDBURL.path])
+
+        // Seed every identity-dependent surface, then unpin the archive. The previous
+        // owned-path marker must retire it even though it is absent from current FileRefs.
+        try await indexDB.begin()
+        try await indexDB.upsertSessionToolIO(
+            sessionID: archivedSession.id,
+            source: SessionSource.opencode.rawValue,
+            mtime: archiveRevision.updatedMillis,
+            size: archiveRevision.extent,
+            refTS: Int64(Date().timeIntervalSince1970),
+            text: "archived tool marker"
+        )
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+
+        _ = try await service.ingest(
+            source: .opencode,
+            files: [],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+
+        for table in ["session_search", "session_meta", "session_tool_io",
+                      "session_days", "rollups_daily"] {
+            let count = try await indexDB.rowCountForTesting(table: table, source: "opencode")
+            XCTAssertEqual(count, 0, "unpinning the archive must clear \(table)")
+        }
+        let retainedFiles = try await indexDB.rowCountForTesting(table: "files", source: "opencode")
+        XCTAssertEqual(retainedFiles, 2, "identity cleanup must retain both shared database file rows")
+        let finalOwnedPaths = try await indexDB.searchIdentityStoragePaths(source: SessionSource.opencode.rawValue)
+        XCTAssertEqual(finalOwnedPaths, [liveDBURL.path])
+    }
+
+    func testOpenCodeSQLiteSearchIngestRootOverrideRetiresPreviouslyOwnedDifferentIdentity() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenCode-RootOverride-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let oldDBURL = root.appendingPathComponent("old/opencode.db")
+        let newDBURL = root.appendingPathComponent("new/opencode.db")
+        try fm.createDirectory(at: oldDBURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: newDBURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenCodeSQLiteFixture(at: oldDBURL)
+        try createOpenCodeSQLiteFixture(at: newDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET data = replace(data, 'SQLite response', 'Old root unique marker');
+        """, at: oldDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET session_id = 'ses_sqlite_new_root',
+            data = replace(data, 'SQLite response', 'New root unique marker');
+        UPDATE message SET session_id = 'ses_sqlite_new_root';
+        UPDATE session SET id = 'ses_sqlite_new_root', title = 'New root';
+        """, at: newDBURL)
+
+        func ref(for session: Session, at url: URL) throws -> SearchIngestService.FileRef {
+            let stat = try XCTUnwrap(SessionFileStat.from(url))
+            return SearchIngestService.FileRef(
+                path: url.path,
+                mtime: stat.mtime,
+                size: stat.size,
+                sessionID: session.id,
+                contentRevision: SearchIngestService.contentRevision(for: session)
+            )
+        }
+
+        let oldSession = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: oldDBURL.path).first)
+        let newSession = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: newDBURL.path).first)
+        XCTAssertNotEqual(oldSession.id, newSession.id)
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let firstService = SearchIngestService(db: indexDB)
+        let oldProgress = try await firstService.ingest(
+            source: .opencode,
+            files: [try ref(for: oldSession, at: oldDBURL)],
+            toolIOEnabled: false,
+            identitySnapshot: SearchIngestService.IdentitySnapshot(
+                storagePaths: [oldDBURL.path], sessionIDs: [oldSession.id]
+            ),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(oldProgress.processed, 1)
+
+        let oldRevision = SearchIngestService.contentRevision(for: oldSession)
+        try await indexDB.begin()
+        try await indexDB.upsertSessionToolIO(
+            sessionID: oldSession.id,
+            source: SessionSource.opencode.rawValue,
+            mtime: oldRevision.updatedMillis,
+            size: oldRevision.extent,
+            refTS: Int64(Date().timeIntervalSince1970),
+            text: "old root tool marker"
+        )
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+
+        // A fresh service proves the old root comes from persisted authority, not actor memory.
+        let secondService = SearchIngestService(db: indexDB)
+        let newProgress = try await secondService.ingest(
+            source: .opencode,
+            files: [try ref(for: newSession, at: newDBURL)],
+            toolIOEnabled: false,
+            identitySnapshot: SearchIngestService.IdentitySnapshot(
+                storagePaths: [newDBURL.path], sessionIDs: [newSession.id]
+            ),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(newProgress.processed, 1)
+
+        let searchIDs = Set(try await indexDB.indexedSessionIDs(sources: [SessionSource.opencode.rawValue]))
+        XCTAssertEqual(searchIDs, [newSession.id])
+        let oldMetaIDs = try await indexDB.sessionIDs(
+            source: SessionSource.opencode.rawValue,
+            storagePaths: [oldDBURL.path]
+        )
+        let newMetaIDs = try await indexDB.sessionIDs(
+            source: SessionSource.opencode.rawValue,
+            storagePaths: [newDBURL.path]
+        )
+        XCTAssertTrue(oldMetaIDs.isEmpty)
+        XCTAssertEqual(newMetaIDs, [newSession.id])
+        let toolIDs = try await indexDB.toolIOSessionIDs(sources: [SessionSource.opencode.rawValue])
+        XCTAssertFalse(toolIDs.contains(oldSession.id))
+        let clearedDayCount = try await indexDB.rowCountForTesting(table: "session_days", source: "opencode")
+        let clearedRollupCount = try await indexDB.rowCountForTesting(table: "rollups_daily", source: "opencode")
+        XCTAssertEqual(clearedDayCount, 0)
+        XCTAssertEqual(clearedRollupCount, 0)
+
+        let oldMatches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue], model: nil, repoSubstr: nil,
+            pathSubstr: nil, dateFrom: nil, dateTo: nil, query: "Old root unique marker",
+            includeSystemProbes: true, limit: 10
+        )
+        let newMatches = try await indexDB.searchSessionIDsFTS(
+            sources: [SessionSource.opencode.rawValue], model: nil, repoSubstr: nil,
+            pathSubstr: nil, dateFrom: nil, dateTo: nil, query: "New root unique marker",
+            includeSystemProbes: true, limit: 10
+        )
+        XCTAssertTrue(oldMatches.isEmpty)
+        XCTAssertEqual(newMatches, [newSession.id])
+
+        try await indexDB.begin()
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+        let rebuiltDayCount = try await indexDB.rowCountForTesting(table: "session_days", source: "opencode")
+        let rebuiltRollupCount = try await indexDB.rowCountForTesting(table: "rollups_daily", source: "opencode")
+        let finalOwnedPaths = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        let retainedFileCount = try await indexDB.rowCountForTesting(table: "files", source: "opencode")
+        XCTAssertEqual(rebuiltDayCount, 1)
+        XCTAssertEqual(rebuiltRollupCount, 1)
+        XCTAssertEqual(finalOwnedPaths, [newDBURL.path])
+        XCTAssertEqual(retainedFileCount, 2)
+    }
+
+    func testOpenCodeSQLiteFailedLiveReadPersistsArchiveAuthorityWithoutDeletingLiveRows() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenCode-FailedLiveRead-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+        let liveDBURL = root.appendingPathComponent("live/opencode.db")
+        let archiveDBURL = root.appendingPathComponent("archive/opencode.db")
+        let corruptArchiveDBURL = root.appendingPathComponent("corrupt-archive/opencode.db")
+        try fm.createDirectory(at: liveDBURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: archiveDBURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: corruptArchiveDBURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try createOpenCodeSQLiteFixture(at: liveDBURL)
+        try createOpenCodeSQLiteFixture(at: archiveDBURL)
+        try writeText("not a sqlite database", to: corruptArchiveDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET session_id = 'ses_sqlite_archive_only',
+            data = replace(data, 'SQLite response', 'Archive-only response');
+        UPDATE message SET session_id = 'ses_sqlite_archive_only';
+        UPDATE session SET id = 'ses_sqlite_archive_only', title = 'Archive only';
+        """, at: archiveDBURL)
+
+        func ref(for session: Session, at url: URL) throws -> SearchIngestService.FileRef {
+            let stat = try XCTUnwrap(SessionFileStat.from(url))
+            return SearchIngestService.FileRef(
+                path: url.path, mtime: stat.mtime, size: stat.size,
+                sessionID: session.id,
+                contentRevision: SearchIngestService.contentRevision(for: session)
+            )
+        }
+        let liveSession = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: liveDBURL.path).first)
+        let archiveSession = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: archiveDBURL.path).first)
+        let corruptStat = try XCTUnwrap(SessionFileStat.from(corruptArchiveDBURL))
+        let corruptArchiveRef = SearchIngestService.FileRef(
+            path: corruptArchiveDBURL.path,
+            mtime: corruptStat.mtime,
+            size: corruptStat.size,
+            sessionID: "ses_corrupt_archive",
+            contentRevision: SearchIngestService.ContentRevision(
+                updatedMillis: SearchIngestService.contentRevision(for: archiveSession).updatedMillis,
+                extent: 1
+            )
+        )
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let firstService = SearchIngestService(db: indexDB)
+        _ = try await firstService.ingest(
+            source: .opencode,
+            files: [try ref(for: liveSession, at: liveDBURL)],
+            toolIOEnabled: false,
+            identitySnapshot: SearchIngestService.IdentitySnapshot(
+                storagePaths: [liveDBURL.path], sessionIDs: [liveSession.id]
+            ),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+
+        // nil represents a failed live enumeration. The pinned archive remains a
+        // trustworthy FileRef, but the prior live path must not be reconciled away.
+        let failedReadProgress = try await firstService.ingest(
+            source: .opencode,
+            files: [try ref(for: archiveSession, at: archiveDBURL), corruptArchiveRef],
+            toolIOEnabled: false,
+            identitySnapshot: nil,
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(failedReadProgress.processed, 1)
+        XCTAssertEqual(failedReadProgress.skipped, 1)
+        let IDsAfterFailure = Set(try await indexDB.indexedSessionIDs(sources: ["opencode"]))
+        let pathsAfterFailure = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(IDsAfterFailure, [liveSession.id, archiveSession.id],
+                       "failed live reads must not delete the prior healthy live corpus")
+        XCTAssertEqual(pathsAfterFailure,
+                       [liveDBURL.path, archiveDBURL.path, corruptArchiveDBURL.path],
+                       "every current archive FileRef path must survive a sibling parse failure and service restart")
+
+        // After restart, a healthy authoritative-empty live read plus no archive FileRef
+        // retires both the now-empty live identity and the no-longer-pinned archive.
+        let restartedService = SearchIngestService(db: indexDB)
+        _ = try await restartedService.ingest(
+            source: .opencode,
+            files: [],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        let remainingSearch = try await indexDB.rowCountForTesting(table: "session_search", source: "opencode")
+        let remainingMeta = try await indexDB.rowCountForTesting(table: "session_meta", source: "opencode")
+        let finalOwnedPaths = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(remainingSearch, 0)
+        XCTAssertEqual(remainingMeta, 0)
+        XCTAssertEqual(finalOwnedPaths, [liveDBURL.path])
+    }
+
+    func testOpenCodeSQLiteHealthySnapshotReconcilesUnrelatedArchiveDespiteMovedIdentityParseFailure() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenCode-MixedArchiveFailure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+        let liveDBURL = root.appendingPathComponent("live/opencode.db")
+        let oldMovedDBURL = root.appendingPathComponent("old-moved/opencode.db")
+        let staleArchiveDBURL = root.appendingPathComponent("stale-archive/opencode.db")
+        let currentValidDBURL = root.appendingPathComponent("current-valid/opencode.db")
+        let failedMovedDBURL = root.appendingPathComponent("failed-moved/opencode.db")
+        for directory in [liveDBURL, oldMovedDBURL, staleArchiveDBURL,
+                          currentValidDBURL, failedMovedDBURL].map({ $0.deletingLastPathComponent() }) {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        try createOpenCodeSQLiteFixture(at: oldMovedDBURL)
+        try createOpenCodeSQLiteFixture(at: staleArchiveDBURL)
+        try createOpenCodeSQLiteFixture(at: currentValidDBURL)
+        try writeText("not a sqlite database", to: failedMovedDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET session_id = 'ses_moved_current',
+            data = replace(data, 'SQLite response', 'Protected moved marker');
+        UPDATE message SET session_id = 'ses_moved_current';
+        UPDATE session SET id = 'ses_moved_current', title = 'Moved current';
+        """, at: oldMovedDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET session_id = 'ses_unrelated_stale',
+            data = replace(data, 'SQLite response', 'Unrelated stale marker');
+        UPDATE message SET session_id = 'ses_unrelated_stale';
+        UPDATE session SET id = 'ses_unrelated_stale', title = 'Unrelated stale';
+        """, at: staleArchiveDBURL)
+        try executeSQLite("""
+        UPDATE part
+        SET session_id = 'ses_current_valid',
+            data = replace(data, 'SQLite response', 'Current valid marker');
+        UPDATE message SET session_id = 'ses_current_valid';
+        UPDATE session SET id = 'ses_current_valid', title = 'Current valid';
+        """, at: currentValidDBURL)
+
+        func ref(for session: Session, at url: URL) throws -> SearchIngestService.FileRef {
+            let stat = try XCTUnwrap(SessionFileStat.from(url))
+            return SearchIngestService.FileRef(
+                path: url.path, mtime: stat.mtime, size: stat.size,
+                sessionID: session.id,
+                contentRevision: SearchIngestService.contentRevision(for: session)
+            )
+        }
+
+        let oldMovedSession = try XCTUnwrap(
+            OpenCodeSqliteReader.listSessions(customRoot: oldMovedDBURL.path).first
+        )
+        let staleSession = try XCTUnwrap(
+            OpenCodeSqliteReader.listSessions(customRoot: staleArchiveDBURL.path).first
+        )
+        let currentValidSession = try XCTUnwrap(
+            OpenCodeSqliteReader.listSessions(customRoot: currentValidDBURL.path).first
+        )
+        let failedMovedStat = try XCTUnwrap(SessionFileStat.from(failedMovedDBURL))
+        let failedMovedRef = SearchIngestService.FileRef(
+            path: failedMovedDBURL.path,
+            mtime: failedMovedStat.mtime,
+            size: failedMovedStat.size,
+            sessionID: oldMovedSession.id,
+            contentRevision: SearchIngestService.contentRevision(for: oldMovedSession)
+        )
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let service = SearchIngestService(db: indexDB)
+
+        let initialProgress = try await service.ingest(
+            source: .opencode,
+            files: [try ref(for: oldMovedSession, at: oldMovedDBURL),
+                    try ref(for: staleSession, at: staleArchiveDBURL)],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(initialProgress.processed, 2)
+
+        let staleRevision = SearchIngestService.contentRevision(for: staleSession)
+        try await indexDB.begin()
+        try await indexDB.upsertSessionToolIO(
+            sessionID: staleSession.id,
+            source: SessionSource.opencode.rawValue,
+            mtime: staleRevision.updatedMillis,
+            size: staleRevision.extent,
+            refTS: Int64(Date().timeIntervalSince1970),
+            text: "unrelated stale tool marker"
+        )
+        _ = try await indexDB.populateSessionDaysFromMeta(for: SessionSource.opencode.rawValue)
+        try await indexDB.recomputeAllRollups(for: SessionSource.opencode.rawValue)
+        try await indexDB.commit()
+
+        // The provider snapshot is authoritative even though one current archive fails
+        // to parse. X moved from oldMovedDBURL to failedMovedDBURL, so its last good row
+        // and old path must remain protected. The absent unrelated stale archive is safe
+        // to retire, while the current valid sibling still ingests normally.
+        let mixedProgress = try await service.ingest(
+            source: .opencode,
+            files: [try ref(for: currentValidSession, at: currentValidDBURL), failedMovedRef],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(mixedProgress.processed, 1)
+        XCTAssertEqual(mixedProgress.skipped, 1)
+        let indexedAfterFailure = Set(try await indexDB.indexedSessionIDs(sources: ["opencode"]))
+        XCTAssertEqual(indexedAfterFailure, [oldMovedSession.id, currentValidSession.id])
+        let oldMovedIDs = try await indexDB.sessionIDs(
+            source: "opencode", storagePaths: [oldMovedDBURL.path]
+        )
+        let staleIDs = try await indexDB.sessionIDs(
+            source: "opencode", storagePaths: [staleArchiveDBURL.path]
+        )
+        let failedMovedIDs = try await indexDB.sessionIDs(
+            source: "opencode", storagePaths: [failedMovedDBURL.path]
+        )
+        XCTAssertEqual(oldMovedIDs, [oldMovedSession.id],
+                       "a failed moved identity must retain its last good persisted row")
+        XCTAssertTrue(staleIDs.isEmpty,
+                      "a sibling parse failure must not preserve an unrelated absent identity")
+        XCTAssertTrue(failedMovedIDs.isEmpty,
+                      "the failed destination must not claim a metadata row before a successful parse")
+        let ownedAfterFailure = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(ownedAfterFailure,
+                       [liveDBURL.path, oldMovedDBURL.path,
+                        currentValidDBURL.path, failedMovedDBURL.path])
+        XCTAssertFalse(ownedAfterFailure.contains(staleArchiveDBURL.path))
+        let toolIDs = try await indexDB.toolIOSessionIDs(sources: ["opencode"])
+        XCTAssertFalse(toolIDs.contains(staleSession.id))
+        let remainingDayCount = try await indexDB.rowCountForTesting(
+            table: "session_days", source: "opencode"
+        )
+        let remainingRollupCount = try await indexDB.rowCountForTesting(
+            table: "rollups_daily", source: "opencode"
+        )
+        XCTAssertEqual(remainingDayCount, 1)
+        XCTAssertEqual(remainingRollupCount, 1)
+
+        let restartedService = SearchIngestService(db: indexDB)
+        _ = try await restartedService.ingest(
+            source: .opencode,
+            files: [],
+            toolIOEnabled: false,
+            identitySnapshot: .authoritativeEmpty(storagePath: liveDBURL.path),
+            quietSeconds: 0,
+            reingestCooldownOverride: 0
+        )
+        let remainingSearch = try await indexDB.rowCountForTesting(table: "session_search", source: "opencode")
+        let remainingMeta = try await indexDB.rowCountForTesting(table: "session_meta", source: "opencode")
+        let remainingDays = try await indexDB.rowCountForTesting(table: "session_days", source: "opencode")
+        let remainingRollups = try await indexDB.rowCountForTesting(table: "rollups_daily", source: "opencode")
+        let finalOwnedPaths = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(remainingSearch, 0)
+        XCTAssertEqual(remainingMeta, 0)
+        XCTAssertEqual(remainingDays, 0)
+        XCTAssertEqual(remainingRollups, 0)
+        XCTAssertEqual(finalOwnedPaths, [liveDBURL.path])
+    }
+
+    func testOpenCodeSQLiteSearchIngestRebuildPurgeInvalidatesCleanAggregate() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(
+            "AgentSessions-OpenCode-PurgeGeneration-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let dbURL = root.appendingPathComponent("opencode.db")
+        try createOpenCodeSQLiteFixture(at: dbURL)
+        let session = try XCTUnwrap(OpenCodeSqliteReader.listSessions(customRoot: dbURL.path).first)
+        let stat = try XCTUnwrap(SessionFileStat.from(dbURL))
+        let fileRef = SearchIngestService.FileRef(
+            path: dbURL.path, mtime: stat.mtime, size: stat.size,
+            sessionID: session.id,
+            contentRevision: SearchIngestService.contentRevision(for: session)
+        )
+        let snapshot = SearchIngestService.IdentitySnapshot(
+            storagePaths: [dbURL.path], sessionIDs: [session.id]
+        )
+
+        let (indexDB, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+        let service = SearchIngestService(db: indexDB)
+        let initial = try await service.ingest(
+            source: .opencode, files: [fileRef], toolIOEnabled: false,
+            identitySnapshot: snapshot, quietSeconds: 0, reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(initial.processed, 1)
+
+        try await indexDB.purgeSource(SessionSource.opencode.rawValue)
+        let purgedSearchCount = try await indexDB.rowCountForTesting(table: "session_search", source: "opencode")
+        let purgedAuthority = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(purgedSearchCount, 0)
+        XCTAssertTrue(purgedAuthority.isEmpty)
+
+        let rebuilt = try await service.ingest(
+            source: .opencode, files: [fileRef], toolIOEnabled: false,
+            identitySnapshot: snapshot, quietSeconds: 0, reingestCooldownOverride: 0
+        )
+        XCTAssertEqual(rebuilt.processed, 1,
+                       "the real purge path must invalidate the in-memory clean aggregate")
+        let rebuiltSearchCount = try await indexDB.rowCountForTesting(table: "session_search", source: "opencode")
+        let rebuiltAuthority = try await indexDB.searchIdentityStoragePaths(source: "opencode")
+        XCTAssertEqual(rebuiltSearchCount, 1)
+        XCTAssertEqual(rebuiltAuthority, [dbURL.path])
+
+        let steadyState = try await service.ingest(
+            source: .opencode, files: [fileRef], toolIOEnabled: false,
+            identitySnapshot: snapshot, quietSeconds: 0, reingestCooldownOverride: 0
+        )
+        let earlyOutCount = await service.earlyOutHitCountForTesting
+        XCTAssertEqual(steadyState.processed, 0)
+        XCTAssertEqual(steadyState.skipped, 1)
+        XCTAssertEqual(earlyOutCount, 1,
+                       "the rebuilt corpus should restore the normal unchanged-input early-out")
     }
 
     func testCodexDiscoveryFindsRolloutFilesInDateHierarchy() throws {

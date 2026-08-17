@@ -49,6 +49,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
     private var detectedBackend: OpenCodeStorageBackend = .none
+    private(set) var searchIdentitySnapshot: SearchIngestService.IdentitySnapshot?
 
     init() {
         let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.opencodeSessionsRootOverride) ?? ""
@@ -95,6 +96,8 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
 
         let customRoot = sessionsRootOverride.isEmpty ? nil : sessionsRootOverride
         let backend = OpenCodeBackendDetector.detect(customRoot: customRoot)
+        let configuredDBURL = OpenCodeBackendDetector.dbURL(customRoot: customRoot)
+        let configuredDBExists = FileManager.default.fileExists(atPath: configuredDBURL.path)
         detectedBackend = backend
 
         #if DEBUG
@@ -134,13 +137,20 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             Task.detached(priority: prio) { [weak self, token] in
                 guard let self else { return }
                 LaunchProfiler.log("OpenCode.refresh: reading SQLite sessions")
-                let sessions = OpenCodeSqliteReader.listSessions(customRoot: capturedCustomRoot)
+                let readResult = OpenCodeSqliteReader.listSessionsIfReadable(customRoot: capturedCustomRoot)
+                let sessions = readResult ?? []
                 let sorted = sessions.sorted { $0.modifiedAt > $1.modifiedAt }
                 let merged = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sorted, source: .opencode)
+                let dbPath = configuredDBURL.path
+                let identitySnapshot = readResult.map {
+                    SearchIngestService.IdentitySnapshot(storagePaths: [dbPath],
+                                                         sessionIDs: Set($0.map(\.id)))
+                }
                 await MainActor.run {
                     guard self.refreshToken == token else { return }
                     LaunchProfiler.log("OpenCode.refresh: SQLite sessions loaded (total=\(merged.count))")
                     self.allSessions = merged
+                    self.searchIdentitySnapshot = identitySnapshot
                     self.isIndexing = false
                     self.hasEmptyDirectory = merged.isEmpty
                     self.progressText = "Ready"
@@ -177,6 +187,9 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
                     guard self.refreshToken == token else { return }
                     LaunchProfiler.log("OpenCode.refresh: JSON sessions merged (total=\(result.sessions.count))")
                     self.allSessions = result.sessions
+                    self.searchIdentitySnapshot = configuredDBExists
+                        ? nil
+                        : .authoritativeEmpty(storagePath: configuredDBURL.path)
                     self.isIndexing = false
                     if FeatureFlags.throttleIndexingUIUpdates {
                         self.filesProcessed = self.totalFiles
@@ -193,6 +206,9 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             Task { @MainActor [weak self, token] in
                 guard let self, self.refreshToken == token else { return }
                 self.allSessions = []
+                self.searchIdentitySnapshot = configuredDBExists
+                    ? nil
+                    : .authoritativeEmpty(storagePath: configuredDBURL.path)
                 self.isIndexing = false
                 self.hasEmptyDirectory = true
                 self.progressText = "Ready"

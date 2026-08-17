@@ -30,6 +30,7 @@ struct FirstRunSetupView: View {
     @AppStorage(PreferencesKey.Agents.piEnabled) private var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) private var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @AppStorage(PreferencesKey.Agents.grokEnabled) private var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
+    @AppStorage(QwenPreferencesKey.enabled) private var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
 
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
@@ -380,6 +381,7 @@ struct FirstRunSetupView: View {
         case .pi: return piAgentEnabled
         case .kimi: return kimiAgentEnabled
         case .grok: return grokAgentEnabled
+        case .qwen: return qwenAgentEnabled
         }
     }
 

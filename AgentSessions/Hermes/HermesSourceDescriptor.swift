@@ -24,12 +24,26 @@ extension SessionSourceDescriptor {
             isBinaryInstalled: isBinaryInstalled,
             isAvailable: { ctx in
                 let custom = ctx.customRoot(PreferencesKey.Paths.hermesSessionsRootOverride)
-                let root = HermesSessionDiscovery(customRoot: custom).sessionsRoot()
-                if ctx.directoryExists(root) { return true }
+                let discovery = HermesSessionDiscovery(customRoot: custom,
+                                                       fileProbe: ctx.fileProbe,
+                                                       homeDirectory: ctx.homeDirectory)
+                // Preserve the pre-registry enablement policy: a legacy sessions directory
+                // or the CLI binary enables Hermes. The current state.db is indexed when
+                // Hermes is enabled, but state.db alone was not an availability signal.
+                if ctx.directoryExists(discovery.sessionsRoot()) {
+                    return true
+                }
                 return isBinaryInstalled(ctx)
             },
             defaultEnabled: .whenAvailable,
             parseFullByPath: { url in HermesSessionParser.parseFileFull(at: url) },
+            parseFullByIdentity: { url, sessionID in
+                guard url.pathExtension.lowercased() == "db" else {
+                    return HermesSessionParser.parseFileFull(at: url)
+                }
+                return HermesStateDBReader.loadFullSession(dbURL: url, sessionID: sessionID)
+            },
+            searchUsesIdentityAtURL: { $0.pathExtension.lowercased() == "db" },
             archive: ArchiveCapability(
                 backfillURLs: { defaults in
                     var map: [String: URL] = [:]
@@ -80,6 +94,7 @@ extension SessionSourceAdapter {
                     currentSessions: { indexer.allSessions },
                     currentIsIndexing: { indexer.isIndexing },
                     currentLaunchPhase: { indexer.launchPhase },
+                    searchIdentitySnapshots: .provider { indexer.searchIdentitySnapshot },
                     refresh: { mode, trigger, profile in
                         indexer.refresh(mode: mode, trigger: trigger, executionProfile: profile)
                     },

@@ -107,7 +107,8 @@ enum WhatsNewCatalog {
     private static let teasers: [String: String] = [
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
-        "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled."
+        "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
+        "4.9": "Qwen Code joins the lineup, with local history, search, Analytics, and active-chat resume."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [

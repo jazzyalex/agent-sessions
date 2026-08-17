@@ -45,7 +45,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
     private var currentTask: Task<Void, Never>? = nil
     private var deepScanTask: Task<Void, Never>? = nil
     private let store: SearchSessionStoring
-    private let db: IndexDB? = try? IndexDB()
+    private let db: IndexDB?
+    private let ftsResultLimitForTesting: Int?
     // Promotion support for large-queue preemption
     private let promotionState = PromotionState()
     // Generation token to ignore stale appends after cancel/restart
@@ -58,6 +59,16 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
     init(store: SearchSessionStoring) {
         self.store = store
+        self.db = try? IndexDB()
+        self.ftsResultLimitForTesting = nil
+    }
+
+    /// Test seam for exercising the actual FTS/fallback coordinator against an
+    /// isolated database rather than the user's application index.
+    init(store: SearchSessionStoring, db: IndexDB?, ftsResultLimitForTesting: Int? = nil) {
+        self.store = store
+        self.db = db
+        self.ftsResultLimitForTesting = ftsResultLimitForTesting
     }
 
     deinit {
@@ -279,7 +290,29 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                     // actively-appending file whose re-ingest is throttled (quiet gate + size cooldown in
                     // SearchIngestService) drops out of this set, so shouldIncludeUnindexedCandidate lets
                     // the legacy full-scan pick it up and return FRESH text instead of stale FTS rows.
-                    let indexedIDs = Set((try? await db.indexedSessionIDsCurrent(sources: allowedRaw)) ?? [])
+                    var indexedIDs = Set((try? await db.indexedSessionIDsCurrent(sources: allowedRaw)) ?? [])
+                    // Shared-database sessions use their lightweight per-session update
+                    // revision instead of the database file's global stat. Overlay those
+                    // identities onto the path-current set so a WAL-only update becomes
+                    // stale immediately without invalidating every sibling session.
+                    let identitySessions = all.filter { session in
+                        guard allowed.contains(session.source) else { return false }
+                        let url = URL(fileURLWithPath: session.filePath)
+                        let descriptor = session.source.descriptor
+                        return descriptor.parseFullByIdentity != nil
+                            && descriptor.searchUsesIdentityAtURL?(url) == true
+                    }
+                    for session in identitySessions { indexedIDs.remove(session.id) }
+                    for group in Dictionary(grouping: identitySessions, by: \.source) {
+                        let states = (try? await db.sessionSearchIdentityStatesByID(for: group.key.rawValue)) ?? [:]
+                        for session in group.value
+                        where states[session.id]?.storagePath == session.filePath
+                            && states[session.id].map({
+                                SearchIngestService.contentRevision($0.revision, matches: session)
+                            }) == true {
+                            indexedIDs.insert(session.id)
+                        }
+                    }
                     // Present-but-not-current: sessions with a session_search row whose stored mtime/size
                     // no longer matches the file (re-ingest throttled). These have stale/no FTS coverage and
                     // must be scanned regardless of size (see shouldIncludeUnindexedCandidate).
@@ -295,9 +328,13 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         return
                     }
 
-                    let dbResultLimit = Self.ftsResultLimit(filters: filters,
-                                                            effectiveRepo: effectiveRepo,
-                                                            totalSessionCount: all.count)
+                    let dbResultLimit = self.ftsResultLimitForTesting
+                        ?? Self.ftsResultLimit(filters: filters,
+                                               effectiveRepo: effectiveRepo,
+                                               totalSessionCount: all.count)
+                    // Filter currency while stepping one SQLite statement. This both fills
+                    // the post-filter result window and keeps the scan on one read snapshot,
+                    // so concurrent identity cleanup cannot shift an OFFSET between pages.
                     let ids = (try? await db.searchSessionIDsFTS(
                         sources: allowedRaw,
                         model: filters.model,
@@ -307,7 +344,8 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                         dateTo: filters.dateTo,
                         query: effectiveFTSQuery,
                         includeSystemProbes: includeSystemProbes,
-                        limit: dbResultLimit
+                        limit: dbResultLimit,
+                        eligibleSessionIDs: indexedIDs
                     )) ?? []
                     if Task.isCancelled { await self.finishCanceled(runID: newRunID); return }
 
@@ -325,6 +363,22 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
 
                     // Append tool I/O FTS hits after the initial UI update to keep Instant responsive.
                     if self.toolIOIndexEnabled(), mergedIDs.count < dbResultLimit {
+                        var currentToolIOIDs = Set((try? await db.indexedToolIOSessionIDsCurrent(sources: allowedRaw)) ?? [])
+                        for session in identitySessions { currentToolIOIDs.remove(session.id) }
+                        for group in Dictionary(grouping: identitySessions, by: \.source) {
+                            let states = (try? await db.sessionToolIOIdentityStatesByID(for: group.key.rawValue)) ?? [:]
+                            for session in group.value
+                            where states[session.id]?.storagePath == session.filePath
+                                && states[session.id].map({
+                                    SearchIngestService.contentRevision($0.revision, matches: session)
+                                }) == true {
+                                currentToolIOIDs.insert(session.id)
+                            }
+                        }
+                        let toolResultLimit = dbResultLimit - mergedIDs.count
+                        // Exclude ordinary hits before applying capacity; otherwise a top
+                        // tool match that is already present consumes the remaining slot and
+                        // hides the next unique tool-only result.
                         let toolIDs = (try? await db.searchSessionIDsToolIOFTS(
                             sources: allowedRaw,
                             model: filters.model,
@@ -334,7 +388,9 @@ final class SearchCoordinator: ObservableObject, @unchecked Sendable {
                             dateTo: filters.dateTo,
                             query: effectiveFTSQuery,
                             includeSystemProbes: includeSystemProbes,
-                            limit: dbResultLimit
+                            limit: toolResultLimit,
+                            eligibleSessionIDs: currentToolIOIDs,
+                            excludingSessionIDs: mergedSet
                         )) ?? []
                         var addedAny = false
                         for id in toolIDs {

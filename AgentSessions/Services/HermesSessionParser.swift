@@ -376,10 +376,15 @@ final class HermesSessionParser {
 
 struct HermesStateDBReader {
     static func listSessions(dbURL: URL) -> [Session] {
+        listSessionsIfReadable(dbURL: dbURL) ?? []
+    }
+
+    /// nil distinguishes a database/query failure from an authoritative empty table.
+    static func listSessionsIfReadable(dbURL: URL) -> [Session]? {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return []
+            return nil
         }
         defer { sqlite3_close(db) }
 
@@ -389,13 +394,17 @@ struct HermesStateDBReader {
             ORDER BY started_at DESC;
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
         var sessions: [Session] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             let id = text(stmt, 0)
-            guard !id.isEmpty else { continue }
+            if id.isEmpty {
+                step = sqlite3_step(stmt)
+                continue
+            }
             let source = text(stmt, 1)
             let model = optionalText(stmt, 2)
             let modelConfig = optionalText(stmt, 3)
@@ -421,7 +430,9 @@ struct HermesStateDBReader {
                 lightweightCommands: toolCount > 0 ? toolCount : nil,
                 customTitle: title
             ))
+            step = sqlite3_step(stmt)
         }
+        guard step == SQLITE_DONE else { return nil }
         return sessions
     }
 

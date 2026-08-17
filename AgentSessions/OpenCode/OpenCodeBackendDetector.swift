@@ -1,5 +1,4 @@
 import Foundation
-import SQLite3
 
 /// Which storage backend is available for OpenCode sessions.
 enum OpenCodeStorageBackend: String {
@@ -16,11 +15,12 @@ struct OpenCodeBackendDetector {
     /// Resolves the top-level OpenCode data directory.
     /// Default: ~/.local/share/opencode
     /// If customRoot points at the storage root or session root, we walk up to the opencode dir.
-    static func openCodeRoot(customRoot: String?) -> URL {
+    static func openCodeRoot(customRoot: String?,
+                             fileProbe: any FileProbing = DefaultFileProbe(),
+                             homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         if let custom = customRoot, !custom.isEmpty {
-            let expanded = (custom as NSString).expandingTildeInPath
+            let expanded = expand(custom, relativeTo: homeDirectory)
             let url = URL(fileURLWithPath: expanded)
-            let fm = FileManager.default
 
             // Allow advanced users/tests to point directly at opencode.db.
             if url.lastPathComponent == "opencode.db" {
@@ -29,12 +29,12 @@ struct OpenCodeBackendDetector {
 
             // If the user pointed at storage/ or storage/session/, walk up to opencode/
             let migrationFile = url.appendingPathComponent("migration")
-            if fm.fileExists(atPath: migrationFile.path) {
+            if fileProbe.fileExists(atPath: migrationFile.path) {
                 // url is storage/ — parent is opencode/
                 return url.deletingLastPathComponent()
             }
             let parentMigration = url.deletingLastPathComponent().appendingPathComponent("migration")
-            if fm.fileExists(atPath: parentMigration.path) {
+            if fileProbe.fileExists(atPath: parentMigration.path) {
                 // url is storage/session/ — grandparent is opencode/
                 return url.deletingLastPathComponent().deletingLastPathComponent()
             }
@@ -42,10 +42,8 @@ struct OpenCodeBackendDetector {
             // Check if url contains both session/ and message/ subdirs → it's storage/
             let sessionSubdir = url.appendingPathComponent("session", isDirectory: true)
             let messageSubdir = url.appendingPathComponent("message", isDirectory: true)
-            var isDirA: ObjCBool = false
-            var isDirB: ObjCBool = false
-            if fm.fileExists(atPath: sessionSubdir.path, isDirectory: &isDirA), isDirA.boolValue,
-               fm.fileExists(atPath: messageSubdir.path, isDirectory: &isDirB), isDirB.boolValue {
+            if fileProbe.directoryExists(atPath: sessionSubdir.path),
+               fileProbe.directoryExists(atPath: messageSubdir.path) {
                 // url is storage/ — parent is opencode/
                 return url.deletingLastPathComponent()
             }
@@ -53,33 +51,34 @@ struct OpenCodeBackendDetector {
             let parentURL = url.deletingLastPathComponent()
             let parentSession = parentURL.appendingPathComponent("session", isDirectory: true)
             let parentMessage = parentURL.appendingPathComponent("message", isDirectory: true)
-            var isDirC: ObjCBool = false
-            var isDirD: ObjCBool = false
-            if fm.fileExists(atPath: parentSession.path, isDirectory: &isDirC), isDirC.boolValue,
-               fm.fileExists(atPath: parentMessage.path, isDirectory: &isDirD), isDirD.boolValue {
+            if fileProbe.directoryExists(atPath: parentSession.path),
+               fileProbe.directoryExists(atPath: parentMessage.path) {
                 // url is storage/session/ — grandparent is opencode/
                 return parentURL.deletingLastPathComponent()
             }
             // Assume the user pointed at opencode/ directly
             return url
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home
+        return homeDirectory
             .appendingPathComponent(".local", isDirectory: true)
             .appendingPathComponent("share", isDirectory: true)
             .appendingPathComponent("opencode", isDirectory: true)
     }
 
     /// Returns the URL for opencode.db within the given opencode root.
-    static func dbURL(customRoot: String?) -> URL {
+    static func dbURL(customRoot: String?,
+                      fileProbe: any FileProbing = DefaultFileProbe(),
+                      homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         if let custom = customRoot, !custom.isEmpty {
-            let expanded = (custom as NSString).expandingTildeInPath
+            let expanded = expand(custom, relativeTo: homeDirectory)
             let url = URL(fileURLWithPath: expanded)
             if url.lastPathComponent == "opencode.db" {
                 return url
             }
         }
-        return openCodeRoot(customRoot: customRoot)
+        return openCodeRoot(customRoot: customRoot,
+                            fileProbe: fileProbe,
+                            homeDirectory: homeDirectory)
             .appendingPathComponent("opencode.db", isDirectory: false)
     }
 
@@ -99,20 +98,13 @@ struct OpenCodeBackendDetector {
     }
 
     /// Returns true if opencode.db exists and contains a `session` table.
-    static func isSQLiteAvailable(customRoot: String?) -> Bool {
-        let url = dbURL(customRoot: customRoot)
-        guard FileManager.default.fileExists(atPath: url.path) else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
-            sqlite3_close(db)
-            return false
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        let sql = "SELECT name FROM sqlite_master WHERE type='table' AND name='session' LIMIT 1;"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_finalize(stmt) }
-        return sqlite3_step(stmt) == SQLITE_ROW
+    static func isSQLiteAvailable(customRoot: String?,
+                                  fileProbe: any FileProbing = DefaultFileProbe(),
+                                  homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        let url = dbURL(customRoot: customRoot,
+                        fileProbe: fileProbe,
+                        homeDirectory: homeDirectory)
+        return fileProbe.sqliteDatabase(atPath: url.path, containsTable: "session")
     }
 
     /// Returns true if the legacy JSON storage/session directory exists.
@@ -132,5 +124,9 @@ struct OpenCodeBackendDetector {
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isRootDir), isRootDir.boolValue else { return false }
         let contents = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
         return contents.contains { $0.lastPathComponent.hasPrefix("ses_") && $0.pathExtension == "json" }
+    }
+
+    private static func expand(_ raw: String, relativeTo homeDirectory: URL) -> String {
+        UserPathExpansion.expand(raw, relativeTo: homeDirectory)
     }
 }

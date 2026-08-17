@@ -455,6 +455,10 @@ private extension AgentUpdateService {
             // utility — offering that as an update path would upgrade the wrong
             // package.
             return nil
+        case .qwen:
+            // Qwen Code's installed package was observed locally, but the source
+            // integration does not claim an update channel from that one machine.
+            return nil
         }
     }
 
