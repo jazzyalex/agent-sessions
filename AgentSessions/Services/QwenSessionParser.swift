@@ -527,6 +527,11 @@ enum QwenSessionParser {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(prefix), trimmed.hasSuffix(suffix) else { return false }
 
+        // A degenerate wrapper such as "<open>\n</close>" satisfies both hasPrefix and
+        // hasSuffix by sharing the single newline, so the two offsets overlap. Treat any
+        // overlap as an empty body (matching Qwen's own slice semantics) instead of
+        // forming an invalid Range, which would crash the whole indexing pass.
+        guard trimmed.count > prefix.count + suffix.count else { return true }
         let bodyStart = trimmed.index(trimmed.startIndex, offsetBy: prefix.count)
         let bodyEnd = trimmed.index(trimmed.endIndex, offsetBy: -suffix.count)
         let body = trimmed[bodyStart..<bodyEnd]

@@ -292,6 +292,66 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(matches.first, expectedID)
     }
 
+    /// Regression: the SQL `LIMIT` must stay bound even when `eligibleSessionIDs` is
+    /// non-nil (the production path always passes a concrete Set); it is widened by
+    /// `filteredSearchScanSlack` so the Swift-side filter can still refill the window.
+    /// Proven non-tautologically: with the slack pinned, an eligible set drawn only from
+    /// rows ranked *beyond* the bound comes back empty, which can only happen if SQLite
+    /// truncated the result set itself.
+    func testSearchSessionIDsFTSAppliesSQLLimitWithEligibleIDs() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        var urls: [URL] = []
+        for i in 0..<5 {
+            urls.append(try makeCodexFixture(
+                named: "limit-\(i).jsonl",
+                userText: "please find the narwhalcobalt token",
+                assistantText: "sure, looking into narwhalcobalt now",
+                in: ingestTempDir
+            ))
+        }
+        let service = SearchIngestService(db: db)
+        let progress = try await service.ingest(
+            source: .codex,
+            files: try urls.map { try fileRef(for: $0) },
+            toolIOEnabled: false
+        )
+        XCTAssertEqual(progress.processed, 5)
+
+        func search(limit: Int, eligible: Set<String>?) async throws -> [String] {
+            try await db.searchSessionIDsFTS(
+                sources: ["codex"], model: nil, repoSubstr: nil, pathSubstr: nil,
+                dateFrom: nil, dateTo: nil, query: "narwhalcobalt",
+                includeSystemProbes: true, limit: limit, eligibleSessionIDs: eligible
+            )
+        }
+
+        let all = try await search(limit: 10, eligible: nil)
+        XCTAssertEqual(all.count, 5, "all five fixtures must match the planted word")
+        let allSet = Set(all)
+
+        let originalSlack = IndexDBTestHooks.filteredSearchScanSlack
+        defer { IndexDBTestHooks.filteredSearchScanSlack = originalSlack }
+
+        // Cap holds with a concrete eligible set, and preserves the unbounded ordering.
+        IndexDBTestHooks.filteredSearchScanSlack = 0
+        let capped = try await search(limit: 2, eligible: allSet)
+        XCTAssertEqual(capped, Array(all.prefix(2)))
+
+        // With no slack, rows ranked beyond the bound never reach the Swift-side filter.
+        let tail = Set(all.suffix(3))
+        let beyondBound = try await search(limit: 2, eligible: tail)
+        XCTAssertTrue(beyondBound.isEmpty,
+                      "SQL LIMIT must truncate before eligibility filtering; got \(beyondBound)")
+
+        // Slack widens the same bound so the filter can refill the window past
+        // ineligible rows — and no further: LIMIT 2 + 1 sees only one eligible row.
+        IndexDBTestHooks.filteredSearchScanSlack = 1
+        let withSlack = try await search(limit: 2, eligible: tail)
+        XCTAssertEqual(withSlack, [all[2]])
+    }
+
     func testIngestSkipsAlreadyCurrentFiles() async throws {
         let (db, cleanup) = try makeTestIndexDB()
         defer { cleanup() }

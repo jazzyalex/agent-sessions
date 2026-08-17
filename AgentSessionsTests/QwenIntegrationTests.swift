@@ -143,6 +143,69 @@ final class QwenIntegrationTests: XCTestCase {
         XCTAssertTrue(nested.events.first?.text?.contains("nested") == true)
     }
 
+    /// Regression: a degenerate hook-context wrapper whose prefix and suffix overlap
+    /// (they share the single newline) used to form an invalid Range and crash the whole
+    /// indexing pass. It must parse as an empty-bodied wrapper instead.
+    func testDegenerateHookContextWrapperParsesWithoutCrashing() throws {
+        let root = try makeTemporaryRoot()
+        let open = "<qwen:user-prompt-submit-context>"
+        let close = "</qwen:user-prompt-submit-context>"
+
+        func parsedUserText(id: String, finalPart: String) throws -> Session {
+            let url = root.appendingPathComponent("\(id).jsonl")
+            var user = record(
+                uuid: "synthetic-user",
+                parentUUID: nil,
+                sessionID: id,
+                type: "user",
+                timestamp: "2026-08-17T12:00:00.000Z",
+                cwd: "/tmp/as-qwen-fixture/project",
+                messageText: "Visible retained prompt."
+            )
+            user.removeValue(forKey: "systemPayload")
+            user["message"] = [
+                "role": "user",
+                "parts": [
+                    ["text": "Visible retained prompt."],
+                    ["text": finalPart]
+                ]
+            ]
+            try writeJSONLines([user], to: url)
+            return try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
+        }
+
+        // Shared-newline wrapper: 68 characters, prefix (34) + suffix (35) overlap.
+        let sharedNewline = "\(open)\n\(close)"
+        XCTAssertTrue(sharedNewline.hasPrefix("\(open)\n"))
+        XCTAssertTrue(sharedNewline.hasSuffix("\n\(close)"))
+        let degenerate = try parsedUserText(
+            id: "019f0000-0000-7000-8000-000000000013",
+            finalPart: sharedNewline
+        )
+        XCTAssertEqual(degenerate.events.first?.text, "Visible retained prompt.")
+
+        // Near miss: a genuinely empty body (both newlines present) is also stripped.
+        let emptyBody = try parsedUserText(
+            id: "019f0000-0000-7000-8000-000000000014",
+            finalPart: "\(open)\n\n\(close)"
+        )
+        XCTAssertEqual(emptyBody.events.first?.text, "Visible retained prompt.")
+
+        // Near miss: a one-character body is a well-formed wrapper and is stripped.
+        let oneCharBody = try parsedUserText(
+            id: "019f0000-0000-7000-8000-000000000015",
+            finalPart: "\(open)\nx\n\(close)"
+        )
+        XCTAssertEqual(oneCharBody.events.first?.text, "Visible retained prompt.")
+
+        // Near miss: a whitespace-only body is likewise a well-formed wrapper.
+        let whitespaceBody = try parsedUserText(
+            id: "019f0000-0000-7000-8000-000000000016",
+            finalPart: "\(open)\n   \n\(close)"
+        )
+        XCTAssertEqual(whitespaceBody.events.first?.text, "Visible retained prompt.")
+    }
+
     func testLightweightParseKeepsSearchAndAnalyticsMetadata() throws {
         let session = try XCTUnwrap(QwenSessionParser.parseFile(at: positiveFixture))
 

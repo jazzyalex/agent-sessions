@@ -4,6 +4,9 @@ import SQLite3
 #if DEBUG
 enum IndexDBTestHooks {
     static var applicationSupportDirectoryProvider: (() -> URL?)?
+    /// Overrides `IndexDB.defaultFilteredSearchScanSlack` so tests can pin that the
+    /// SQL `LIMIT` really reaches SQLite on the filtered search path.
+    static var filteredSearchScanSlack: Int?
 }
 #endif
 
@@ -2251,6 +2254,18 @@ actor IndexDB {
         return out
     }
 
+    /// Extra FTS rows a filtered search may scan past so the eligibility/exclusion
+    /// filter can refill the result window without disabling the SQL LIMIT entirely.
+    static let defaultFilteredSearchScanSlack = 512
+
+    static var filteredSearchScanSlack: Int {
+        #if DEBUG
+        return IndexDBTestHooks.filteredSearchScanSlack ?? defaultFilteredSearchScanSlack
+        #else
+        return defaultFilteredSearchScanSlack
+        #endif
+    }
+
     func searchSessionIDsFTS(
         sources: [String],
         model: String?,
@@ -2315,9 +2330,15 @@ actor IndexDB {
         // Currency filtering must happen while stepping one SQLite statement. That
         // statement owns a stable read snapshot even if another connection deletes a
         // stale FTS row concurrently; separate LIMIT/OFFSET statements do not.
-        let sqlLimit = eligibleSessionIDs == nil ? limit : -1
-        sqlite3_bind_int(stmt, idx, Int32(sqlLimit)); idx += 1
-        sqlite3_bind_int(stmt, idx, Int32(eligibleSessionIDs == nil ? offset : 0))
+        // The SQL LIMIT stays bound in every mode: an unbounded query forfeits SQLite's
+        // top-N sorter for ORDER BY bm25(...), which must then materialize and fully sort
+        // every matching row. When Swift-side eligibility/exclusion filtering is active the
+        // bound is widened by a fixed slack so the filter can still refill the window by
+        // scanning past ineligible rows, but the scan stays bounded.
+        let isFiltered = eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty
+        let sqlLimit = isFiltered ? limit + Self.filteredSearchScanSlack : limit
+        sqlite3_bind_int(stmt, idx, Int32(clamping: sqlLimit)); idx += 1
+        sqlite3_bind_int(stmt, idx, Int32(isFiltered ? 0 : offset))
 
         var ids: [String] = []
         var step = sqlite3_step(stmt)
@@ -2398,9 +2419,15 @@ actor IndexDB {
             else if let i = b as? Int64 { sqlite3_bind_int64(stmt, idx, i) }
             idx += 1
         }
-        let sqlLimit = eligibleSessionIDs == nil ? limit : -1
-        sqlite3_bind_int(stmt, idx, Int32(sqlLimit)); idx += 1
-        sqlite3_bind_int(stmt, idx, Int32(eligibleSessionIDs == nil ? offset : 0))
+        // The SQL LIMIT stays bound in every mode: an unbounded query forfeits SQLite's
+        // top-N sorter for ORDER BY bm25(...), which must then materialize and fully sort
+        // every matching row. When Swift-side eligibility/exclusion filtering is active the
+        // bound is widened by a fixed slack so the filter can still refill the window by
+        // scanning past ineligible rows, but the scan stays bounded.
+        let isFiltered = eligibleSessionIDs != nil || !excludingSessionIDs.isEmpty
+        let sqlLimit = isFiltered ? limit + Self.filteredSearchScanSlack : limit
+        sqlite3_bind_int(stmt, idx, Int32(clamping: sqlLimit)); idx += 1
+        sqlite3_bind_int(stmt, idx, Int32(isFiltered ? 0 : offset))
 
         var ids: [String] = []
         var step = sqlite3_step(stmt)
