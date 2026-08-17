@@ -99,13 +99,48 @@ New in 4.8:
 - [Hermes Agent sessions](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, analytics, and resume workflows, including current `~/.hermes/state.db` storage.
 - [OpenClaw sessions](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide) participate in browsing, search, filtering, image browsing, and deleted-session visibility while ignoring trajectory traces. OpenClaw resume is not supported.
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
-- Qwen Code sessions (shipping in 4.9) participate in browsing, search, filtering, and Analytics, including active-chain tool calls and reasoning recorded in local JSONL history. Active-chat resume actions are implemented from the installed CLI's help and reader behavior, but remain end-to-end untested because authentication blocked a disposable 0.21.13 run; archived Qwen histories remain browse-only. Qwen image extraction is not yet supported.
+- Qwen Code sessions (new in 5.0) participate in browsing, search, filtering, and Analytics, including active-chain tool calls and reasoning recorded in local JSONL history. Active-chat resume actions are implemented from the installed CLI's help and reader behavior, but remain end-to-end untested because authentication blocked a disposable 0.21.13 run; archived Qwen histories remain browse-only. Qwen image extraction is not yet supported.
 - Unified browsing across supported agents, with strict filtering, saved sessions, and a single session list.
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.
 - Right-click Copy Resume Command or Resume for supported CLI sessions, with Terminal.app, iTerm2, and Warp launch targets.
 - Quota Meter with Session Runway shows **live burn rate per session** against your Codex and Claude 5-hour and weekly limits — in percent, tokens/hour, or dollars priced per model.
 - Local-only indexing designed for large histories.
+
+## Agent Support Status
+
+Every agent here is read from its own local session files. Status says who keeps that
+reading correct as the agent's format changes.
+
+| Agent | Status |
+|---|---|
+| Codex | Maintained |
+| Claude Code | Maintained |
+| Cursor Agent | Steward wanted |
+| GitHub Copilot CLI | Steward wanted |
+| OpenCode | Steward wanted |
+| Antigravity CLI | Steward wanted |
+| Pi | Steward wanted |
+| Kimi Code | Steward wanted |
+| Grok CLI | Steward wanted |
+| OpenClaw | Steward wanted |
+| Hermes | Steward wanted |
+| Qwen Code | Steward wanted |
+
+**Maintained** — the maintainer verifies it himself. **Steward-verified** — a named steward
+re-checks the format. **Steward wanted** — nobody has adopted it yet. Names, dates, and
+verified versions are in [STEWARDS.md](STEWARDS.md).
+
+### Help add — and keep — your agent
+
+Missing agent? Open the
+[new agent source form](https://github.com/jazzyalex/agent-sessions/issues/new?template=new-agent-source.yml)
+— [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) explains what evidence makes a proposal
+usable, and you do not need to write Swift. Already using one of the agents above? Become
+its steward: you get pinged two or three times a year to run one command against your own
+sessions and say whether the format still reads correctly. It takes about ten minutes, needs
+no commit rights, and your name goes on the entry. Details and signup in
+[STEWARDS.md](STEWARDS.md).
 
 ## Quota Meter — Session Runway
 

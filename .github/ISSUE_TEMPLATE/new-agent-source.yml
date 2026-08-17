@@ -81,6 +81,15 @@ body:
       required: true
 
   - type: checkboxes
+    id: stewardship
+    attributes:
+      label: Stewardship
+      description: Stewards keep one agent format-verified. About 10 minutes, two or three times a year, using your own installation. No commit rights and no code. See STEWARDS.md.
+      options:
+        - label: I'm willing to be pinged a few times a year to re-verify this agent's format (become its steward).
+          required: false
+
+  - type: checkboxes
     id: privacy
     attributes:
       label: Privacy confirmation

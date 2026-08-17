@@ -9,7 +9,7 @@ evidence and a sanitized fixture are often the hardest parts of an integration.
 Choose the contribution that fits what you can verify:
 
 1. **Propose a source.** Open the
-   [new-agent-source issue form](../.github/ISSUE_TEMPLATE/new-agent-source.yml) with the
+   [new-agent-source issue form](https://github.com/jazzyalex/agent-sessions/issues/new?template=new-agent-source.yml) with the
    agent's official project, tested version, storage path, and known capabilities.
 2. **Contribute format evidence.** Add a small sanitized fixture and document how it was
    captured. Remove prompts, outputs, account identifiers, tokens, credentials, private
@@ -41,6 +41,38 @@ current Cline CLI on macOS, the most useful contribution is a new-agent-source p
 verifies the local storage root, SQLite schema/version, CLI-versus-IDE source marker, deletion
 behavior, and a synthetic or fully sanitized session fixture. Do not implement from public
 documentation alone.
+
+## Become a steward
+
+Adding an agent is one job. Keeping it working is another, and it is the one that decides
+whether support survives. Agents change their session formats without warning, and the only
+reliable evidence is a real installation with real sessions in it.
+
+A **steward** looks after one agent. You get pinged two or three times a year, run one
+command against your own sessions, and say whether the format still reads correctly. That
+is about ten minutes. If the format moved, you attach the redacted sample the tool produced.
+
+The command is:
+
+```bash
+./scripts/steward_check.py <agent>
+```
+
+It checks your agent's sessions against the recorded baseline and, if the format changed,
+produces a redacted sample you can attach to an issue.
+
+What stewarding is not: no commit rights, no code, no review duty, no response deadline. You
+never send a real transcript — the tool redacts first and you choose what to attach. If you
+go quiet, the agent moves back to best-effort and nothing bad happens.
+
+What you get: named credit in [STEWARDS.md](../STEWARDS.md) and on the project site's
+support page, with a dated public record of each verification.
+
+To adopt an agent that is already supported, use the
+[steward signup form](https://github.com/jazzyalex/agent-sessions/issues/new?template=steward-signup.yml). If you are proposing a
+new agent, the [new-agent-source form](https://github.com/jazzyalex/agent-sessions/issues/new?template=new-agent-source.yml) and
+the [agent-source PR template](../.github/PULL_REQUEST_TEMPLATE/agent-source.md) both ask
+whether you are willing to steward it afterwards. Saying yes there is enough.
 
 ## Evidence required
 

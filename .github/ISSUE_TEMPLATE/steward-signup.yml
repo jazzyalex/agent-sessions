@@ -1,0 +1,50 @@
+name: Steward signup
+description: Adopt one already-supported agent and keep its session format verified.
+title: "[Steward]: "
+labels:
+  - steward
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking one on. A steward looks after a single agent: you get pinged two or three times a year, run `./scripts/steward_check.py <agent>` against your own sessions, and say whether the format still reads correctly. About 10 minutes. No commit rights, no code, no deadline. Details in STEWARDS.md.
+
+        This issue is public. Do not attach a real transcript, credentials, tokens, account identifiers, a production database, expanded home/private paths, private repository names, or private remote URLs. The check tool redacts before anything leaves your Mac, and you choose what to attach.
+
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent
+      description: One agent per signup. Use the name as it appears in STEWARDS.md.
+      placeholder: Qwen Code
+    validations:
+      required: true
+
+  - type: input
+    id: handle
+    attributes:
+      label: GitHub handle for credit
+      description: How you want to be named in STEWARDS.md and on the support page.
+      placeholder: "@your-handle"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I use this agent regularly on macOS and have real sessions on disk to check against.
+          required: true
+        - label: I'm willing to be pinged a few times a year to re-verify this agent's format.
+          required: true
+        - label: I will not post real session content, credentials, tokens, account identifiers, expanded home/private paths, private repository names, or private remote URLs.
+          required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Optional. Which surfaces you use (CLI, IDE, desktop), an unusual storage root, or anything you already know is off.
+    validations:
+      required: false

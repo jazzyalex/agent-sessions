@@ -39,6 +39,10 @@
 - [ ] Public documentation labels every capability consistently as verified, unsupported, or untested and states the evidence limits.
 - [ ] No real transcript, production database, secret, account identifier, private path, private repository name, private remote URL, or URL copied from session data is committed.
 
+## Stewardship
+
+- [ ] I'm willing to be pinged a few times a year to re-verify this agent's format (become its steward). About 10 minutes, using my own installation. No commit rights, no code. See [STEWARDS.md](../../STEWARDS.md).
+
 ## Verification
 
 ```text
