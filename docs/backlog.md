@@ -209,6 +209,37 @@ The remaining cost of a new source, and the PR #56 dry-run that measured it, are
 Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 `testSidebarAgentSourcesAreEveryRegistrySourceExceptTheHiddenOnes`.
 
+### Registry program follow-ups (final whole-branch review, 2026-08-16)
+> **open** · sev: low · urg: low · verified 2026-08-16
+
+- **What:** the six low-severity residues the program's final review triaged as
+  follow-ups rather than must-fixes (0 must-fix / 6 follow-up / 18 accept-as-is):
+  1. Guide-rot sentinel: [adding-a-session-source.md](adding-a-session-source.md) §6 is a
+     hand snapshot; two review rounds each found omissions in it. Fix shape: a test that
+     brace-matches exhaustive `SessionSource` switches in `AgentSessions/` against a
+     pinned file list, failing when a new switch appears unlisted.
+  2. Stale header comment: [SessionSourceRegistry.swift:21](../AgentSessions/Model/SessionSourceRegistry.swift:21)
+     still says "THE one remaining hand-maintained per-source list" — `sidebarAgentSources`
+     is a second (SPEC §6.A′.16 has the correct statement).
+  3. Dead `?? same-key` double-read fallbacks at `PresenceEngine.swift:1564,1573,1595`
+     (the fourth site died with Task 7's rewrite). Provably dead; delete.
+  4. `AvailabilityContext.live()` (AgentEnablement.swift) has zero callers and is the
+     UNCACHED detector — a hot-path adopter would reintroduce PATH sweeps. Delete or
+     doc-fence it.
+  5. `testAllowedSearchSourcesIsEnabledAndIncluded` needs a non-emptiness pin + one
+     unconditional positive-membership assertion (two legs are tautological).
+  6. `@AppStorage` enablement-default islands: `AnalyticsView`/`FirstRunSetupView`/
+     `PreferencesView+General` keep literal defaults (hermes/cursor `true`, openclaw
+     `false`) while their pi/kimi/grok rows use `AgentEnablement.isEnabled`; on upgrade
+     installs with absent keys these three views can disagree with the (converged) main
+     window. Mechanical: route all rows through `AgentEnablement`.
+- **Why deferred:** none affects a fresh install or changes shipped behavior; the program's
+  correctness bar was behavior preservation, and each of these is cleanup beyond it.
+- **Risk if wrong:** low — worst case is the documented upgrade-cohort UI asymmetry (item 6)
+  and doc rot (items 1-2); nothing corrupts data or search.
+- **To close:** items 2-5 are one small mechanical PR; items 1 and 6 are each a short
+  self-contained task.
+
 ### Three per-source behaviors the registry refactor deliberately preserved
 > **open** · sev: low · urg: low · verified 2026-08-16
 
