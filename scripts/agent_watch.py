@@ -562,6 +562,34 @@ def _newest_file(roots: list[str], glob: str, exclude_globs: list[str] | None = 
 _LOCAL_SCHEMA_SAMPLE_COUNT = 5
 
 
+# agent_watch's agent name -> its section name in agent-support-matrix.yml.
+#
+# THE ONE COPY. This existed three times — twice in this file (weekly local_schema,
+# prebump fresh-session diff) and once as rebuild_stage0_baseline.MATRIX_KEY — and the
+# copies drifted apart, which is a silent-wrong-answer bug rather than an untidiness:
+# a missing entry resolves `matrix_key` to None, so `baseline_paths` is empty,
+# `baseline_type_keys` is empty, and the prebump diff takes its "no baseline → nothing
+# diffs" branch and reports fresh_matches=True having compared NOTHING. On 2026-08-17
+# the prebump copy was still missing grok and qwen while the weekly copy had both, so
+# grok's first prebump driver would have passed without ever consulting a baseline.
+# Import this from rebuild_stage0_baseline rather than re-declaring it there.
+MATRIX_KEY_FOR_AGENT: dict[str, str] = {
+    "codex": "codex_cli",
+    "claude": "claude_code",
+    "copilot": "copilot_cli",
+    "antigravity": "antigravity",
+    "opencode": "opencode",
+    "hermes": "hermes",
+    "openclaw": "openclaw",
+    "cursor": "cursor",
+    "pi": "pi",
+    "kimi": "kimi_code",
+    "grok": "grok_cli",
+    "qwen": "qwen_code",
+    "droid": "droid",
+}
+
+
 def _newest_files(
     roots: list[str], glob: str, count: int, exclude_globs: list[str] | None = None
 ) -> list[Path]:
@@ -864,7 +892,11 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # `toolCallResult` is the legacy top-level tool-result struct; `usageMetadata` is
     # the token-usage struct, which the support matrix already marks out of scope
     # (usage/rate-limit tracking is an explicit unsupported surface for Qwen).
-    "qwen": {"args", "response", "toolCallResult", "usageMetadata"},
+    # `function_args` is the telemetry echo of a tool's own parameter object
+    # (`systemPayload.uiEvent.function_args`), so it is the same class as `args`: its
+    # keys are whatever tool ran (`file_path`, `glob`, `subagent_type`), and walking it
+    # makes every new tool parameter read as Qwen schema drift forever.
+    "qwen": {"args", "response", "toolCallResult", "usageMetadata", "function_args"},
 }
 
 
@@ -3209,12 +3241,7 @@ def _run_prebump(
         schema_diff: dict[str, Any] | None = None
         fresh_matches: bool | None = None
         if result.ok and result.session_path and result.session_path.exists():
-            matrix_key = {
-                "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
-                "antigravity": "antigravity", "opencode": "opencode", "hermes": "hermes",
-                "openclaw": "openclaw", "cursor": "cursor", "pi": "pi",
-                "kimi": "kimi_code",
-            }.get(agent_name)
+            matrix_key = MATRIX_KEY_FOR_AGENT.get(agent_name)
             baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
             baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
             if agent_name == "antigravity":
@@ -3492,20 +3519,7 @@ def main(argv: list[str]) -> int:
                 kind = local_schema_cfg.get("kind")
                 roots = list(local_schema_cfg.get("roots") or [])
                 glob = str(local_schema_cfg.get("glob") or "**/*")
-                matrix_key = {
-                    "codex": "codex_cli",
-                    "claude": "claude_code",
-                    "copilot": "copilot_cli",
-                    "antigravity": "antigravity",
-                    "opencode": "opencode",
-                    "hermes": "hermes",
-                    "openclaw": "openclaw",
-                    "cursor": "cursor",
-                    "pi": "pi",
-                    "kimi": "kimi_code",
-                    "grok": "grok_cli",
-                    "qwen": "qwen_code",
-                }.get(agent_name)
+                matrix_key = MATRIX_KEY_FOR_AGENT.get(agent_name)
                 baseline_paths = evidence.get(matrix_key or "", []) if matrix_key else []
                 baseline_type_keys = _baseline_type_keys_for_agent(agent_name, baseline_paths)
 

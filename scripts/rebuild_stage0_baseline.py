@@ -59,15 +59,18 @@ TARGET_FIXTURE = {
     "grok": "grok/chat_history.jsonl",
     "codex": "codex/small.jsonl",
     "copilot": "copilot/small.jsonl",
+    "kimi": "kimi/small.jsonl",
+    # Qwen's five fixtures are hand-built synthetic transcripts whose exact event
+    # counts are asserted by QwenIntegrationTests, so appended coverage gets its own
+    # file rather than perturbing one of them.
+    "qwen": "qwen/system_telemetry.jsonl",
 }
 
-# matrix key -> evidence_fixtures, mirroring agent_watch's own mapping.
-MATRIX_KEY = {
-    "codex": "codex_cli", "claude": "claude_code", "copilot": "copilot_cli",
-    "antigravity": "antigravity", "opencode": "opencode", "hermes": "hermes",
-    "openclaw": "openclaw", "cursor": "cursor", "pi": "pi", "kimi": "kimi_code",
-    "grok": "grok_cli",
-}
+# agent name -> its section in agent-support-matrix.yml. IMPORTED, never re-declared:
+# this used to be a third private copy of the same map, and copies drift. grok was
+# missing here on 2026-08-13 and qwen on 2026-08-17, and in both cases _baseline_paths
+# silently returned [] and the tool reported the ENTIRE schema as missing.
+MATRIX_KEY = agent_watch.MATRIX_KEY_FOR_AGENT
 
 
 def _load_config(agent: str) -> dict:

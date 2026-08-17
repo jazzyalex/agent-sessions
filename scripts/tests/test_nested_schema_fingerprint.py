@@ -63,6 +63,22 @@ def test_opaque_keys_are_recorded_but_never_walked(tmp_path):
     assert not [k for k in keys if "/Users/" in k]
 
 
+def test_qwen_function_args_is_named_but_never_walked(tmp_path):
+    # systemPayload.uiEvent.function_args is the telemetry ECHO of a tool's own
+    # parameter object, so its keys are whatever tool ran. Walking it made every new
+    # tool parameter read as Qwen schema drift on the 2026-08-17 first monitored run.
+    p = _write(tmp_path, [{"type": "system", "subtype": "ui_telemetry", "systemPayload": {
+        "uiEvent": {
+            "function_name": "Read",
+            "function_args": {"file_path": "/Users/someone/secret/a.txt", "limit": 20},
+        },
+    }}])
+    keys = agent_watch._schema_fingerprint_for_agent("qwen", p, max_lines=100)["type_keys"]
+    assert "function_args" in keys["system.systemPayload.uiEvent"]
+    assert "system.systemPayload.uiEvent.function_args" not in keys
+    assert not [k for k in keys if "/Users/" in k]
+
+
 def test_lists_union_every_element_not_just_the_first(tmp_path):
     # Claude's message.content mixes block types. Sampling only the first element hid
     # every later one — exactly the drift the nesting exists to catch.
@@ -122,3 +138,27 @@ def test_shipped_fixtures_cover_their_own_nested_baseline():
         diff = agent_watch._schema_diff(
             observed_type_keys=fp["type_keys"], baseline_type_keys=base)
         assert diff["unknown_only_is_empty"], f"{rel} does not match its own baseline"
+
+
+def test_every_monitored_agent_is_registered_in_the_rebuild_tool():
+    # rebuild_stage0_baseline.py resolves an agent's baseline fixtures by looking its
+    # matrix section up through its own hand-maintained MATRIX_KEY map. When an agent is
+    # missing, _baseline_paths returns EMPTY and the tool reports the entire schema as
+    # missing -- a fabricated total-drift report -- and then dies on --emit. grok hit
+    # this on 2026-08-13 (section `grok_cli:`) and qwen hit it again on 2026-08-17
+    # (section `qwen_code:`), because nothing forced a newly monitored agent into the
+    # map. This is that forcing function.
+    import rebuild_stage0_baseline as rebuild
+
+    cfg = json.loads((REPO / "docs/agent-support/agent-watch-config.json")
+                     .read_text(encoding="utf-8"))
+    matrix = (REPO / "docs/agent-support/agent-support-matrix.yml").read_text(encoding="utf-8")
+
+    for agent in cfg.get("agents", cfg):
+        key = rebuild.MATRIX_KEY.get(agent, agent)
+        assert f"\n  {key}:" in matrix, (
+            f"{agent}: MATRIX_KEY resolves to '{key}:', which is not a section in "
+            f"agent-support-matrix.yml -- _baseline_paths would return empty and the "
+            f"tool would report the whole schema as missing")
+        assert rebuild._baseline_paths(agent), (
+            f"{agent}: resolved no evidence_fixtures from the matrix")
