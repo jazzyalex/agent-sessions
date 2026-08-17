@@ -68,6 +68,11 @@ final class OnboardingCoordinator: ObservableObject {
     /// itself, exactly as "Maybe later" would.
     static let contributeAskMaxImpressionsPerRound = 3
 
+    /// Days the contribute ask may wait behind the feedback card before it takes
+    /// the slot for itself. Same value and same reasoning as the star ask's wait
+    /// behind the Quota Meter card.
+    static let contributeAskPriorityAfterDays: Double = 14
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -160,6 +165,12 @@ final class OnboardingCoordinator: ObservableObject {
         // itself may never render while another card holds the slot.
         if defaults.onboardingStarAskDueSince == nil, starAskTriggerMet() {
             defaults.onboardingStarAskDueSince = now()
+        }
+
+        // Same stamp for the contribute ask, and for the same reason: it sits at
+        // the bottom of the chain and may wait many launches without rendering.
+        if defaults.onboardingContributeAskDueSince == nil, contributeAskTriggerMet() {
+            defaults.onboardingContributeAskDueSince = now()
         }
 
         if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
@@ -273,7 +284,8 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the feedback card should occupy the session-list top slot.
     /// What's New always wins the slot, and a ✕ dismissal hides it for this launch.
     func shouldShowFeedbackCard() -> Bool {
-        whatsNewMajorMinor == nil
+        if contributeAskOutranksFeedbackCard() { return false }
+        return whatsNewMajorMinor == nil
             && !didConsumeTopSlotAskThisLaunch
             && !feedbackCardSuppressedThisLaunch
             && isFeedbackAskDue()
@@ -489,8 +501,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the contribute card should occupy the session-list top slot.
     ///
     /// It sits last, below feedback: it asks for the most work of any card here,
-    /// so anything else with something to say goes first. The star card outranks
-    /// it unconditionally — there is no aging rule, because unlike the Quota
+    /// so anything else with something to say goes first — until it has waited
+    /// `contributeAskPriorityAfterDays`, after which it ages past the feedback
+    /// card only (see `contributeAskOutranksFeedbackCard()`). The star card
+    /// outranks it unconditionally — there is no aging rule, because unlike the Quota
     /// Meter card the star ask always terminates within two rounds and hands the
     /// slot back on its own.
     ///
@@ -568,6 +582,25 @@ final class OnboardingCoordinator: ObservableObject {
 
         guard defaults.onboardingContributeAskState != .opened else { return }
         defaults.onboardingContributeAskState = .dismissedForever
+    }
+
+    /// Whether the contribute ask has waited long enough to take the slot from
+    /// the feedback card.
+    ///
+    /// Fixed priority alone is not enough, for the same reason the star ask ages
+    /// past the Quota Meter card. The feedback card's ✕ is soft: it returns every
+    /// launch, and a user who neither submits feedback nor declines it in the
+    /// prompt holds the slot indefinitely, so the contribute ask below it would
+    /// never be seen. After two weeks of waiting it goes first; it then spends
+    /// itself within two rounds and hands the slot straight back, so this cannot
+    /// deadlock the other direction.
+    ///
+    /// This outranks the feedback card only — never What's New, the Quota Meter
+    /// card, or the star ask, all of which still come first unconditionally.
+    func contributeAskOutranksFeedbackCard() -> Bool {
+        guard let dueSince = defaults.onboardingContributeAskDueSince else { return false }
+        guard now().timeIntervalSince(dueSince) / 86_400 >= Self.contributeAskPriorityAfterDays else { return false }
+        return shouldShowContributeCard()
     }
 
     /// Retention test for the contribute ask: earliest of 25 sessions opened or

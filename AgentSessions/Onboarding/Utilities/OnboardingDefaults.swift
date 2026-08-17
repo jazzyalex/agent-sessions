@@ -20,6 +20,7 @@ extension UserDefaults {
         static let contributeAskState = "OnboardingContributeAskState"
         static let contributeAskSnoozedUntil = "OnboardingContributeAskSnoozedUntil"
         static let contributeAskImpressions = "OnboardingContributeAskImpressions"
+        static let contributeAskDueSince = "OnboardingContributeAskDueSince"
     }
 
     /// Lifecycle of the one-time invitation to contribute a new agent source.
@@ -196,5 +197,13 @@ extension UserDefaults {
     var onboardingContributeAskImpressions: Int {
         get { integer(forKey: OnboardingKeys.contributeAskImpressions) }
         set { set(newValue, forKey: OnboardingKeys.contributeAskImpressions) }
+    }
+
+    /// When the contribute ask first became due. Drives the aging rule that lets
+    /// it overtake a feedback card the user keeps neither acting on nor
+    /// permanently declining.
+    var onboardingContributeAskDueSince: Date? {
+        get { object(forKey: OnboardingKeys.contributeAskDueSince) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.contributeAskDueSince) }
     }
 }

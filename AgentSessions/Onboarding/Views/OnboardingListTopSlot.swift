@@ -139,11 +139,11 @@ struct ContributeCard: View {
     /// sentence can be pinned by a test. Deliberately not a strings file — every
     /// other card in this slot keeps its copy inline too. No source count is
     /// stated here: that number changes every release.
-    static let titleText = "Using an agent we don't index?"
+    static let titleText = "Help add your agent"
     static let bodyText = """
-        New agents get added from user-contributed format samples — a pull request, your coding agent \
-        working from our brief, or a sanitized sample a maintainer can build from. Never share real \
-        transcripts, keys, or private paths.
+        Agent Sessions adds new agents from user contributions — a pull request, your coding agent \
+        working from our brief, or a sanitized sample. Never share real transcripts, keys, or \
+        private paths.
         """
 
     var body: some View {
@@ -159,11 +159,9 @@ struct ContributeCard: View {
                 Text(Self.bodyText)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    // Two lines, unlike the other cards: the frozen privacy
-                    // sentence sits last, and single-line clipping is exactly
-                    // what would delete it. At normal widths this still renders
-                    // as one line, so the card matches StarCard visually.
-                    .lineLimit(2)
+                    // No line limit, unlike the other cards: the frozen privacy
+                    // sentence sits last, and any clipping is exactly what would
+                    // delete it. The card grows to fit instead.
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -400,10 +398,10 @@ struct StarCard: View {
                 .foregroundStyle(palette.accentBlue)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Been useful?")
+                Text("Leave a star if this helps")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text("A star is the only thing this project asks for. One click, nothing sent.")
+                Text("A star helps others find this project. One click, nothing sent.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -451,7 +449,7 @@ struct FeedbackCard: View {
                 .foregroundStyle(palette.accentBlue)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Got a minute?")
+                Text("Help make Agent Sessions better")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text("What's the one thing you wish Agent Sessions did better?")
