@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 
 /// Lightweight container mounted at the top of the session list. It hosts exactly
-/// one card — What's New, then Quota Meter, then star, then feedback — and carries
+/// one card — What's New, then Quota Meter, then star, then feedback, then the
+/// contribute-an-agent invitation (last: it asks for the most work) — and carries
 /// the sheets for the compact What's New panel, the Quota Meter explainer, and the
 /// standalone feedback prompt. Renders nothing when there is nothing to show.
 ///
@@ -81,6 +82,18 @@ struct OnboardingListTopSlot: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            } else if coordinator.shouldShowContributeCard() {
+                ContributeCard(
+                    palette: palette,
+                    onOpen: openContributeForm,
+                    onLearnMore: openContributeGuide,
+                    onSnooze: { coordinator.snoozeContributeAsk() },
+                    onDismiss: { coordinator.dismissContributeAskForever() }
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                // Being ignored is an answer, counted once per launch.
+                .onAppear { coordinator.noteContributeCardShown() }
             }
         }
     }
@@ -94,6 +107,92 @@ struct OnboardingListTopSlot: View {
         // silently cost the user the ask they just tried to accept.
         guard NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL) else { return }
         coordinator.recordStarOpened()
+    }
+
+    /// Both contribute actions open a public page and nothing else — no session
+    /// data is read, and nothing is sent anywhere. Same success guard as the
+    /// star card: a click that opened no browser must not spend the ask.
+    private func openContributeForm() {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.contributeAgentSourceURL) else { return }
+        coordinator.recordContributeOpened()
+    }
+
+    private func openContributeGuide() {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.contributeGuideURL) else { return }
+        coordinator.recordContributeOpened()
+    }
+}
+
+/// Dismissible one-time invitation to add support for another coding agent.
+///
+/// Four exits, because the ask has four honest answers: contribute, read what it
+/// involves first, ask me later, or never. Both open actions are terminal — a
+/// user who went to look has been asked.
+struct ContributeCard: View {
+    let palette: OnboardingPalette
+    var onOpen: () -> Void
+    var onLearnMore: () -> Void
+    var onSnooze: () -> Void
+    var onDismiss: () -> Void
+
+    /// The card's own copy, held as a constant only so the frozen privacy
+    /// sentence can be pinned by a test. Deliberately not a strings file — every
+    /// other card in this slot keeps its copy inline too. No source count is
+    /// stated here: that number changes every release.
+    static let titleText = "Using an agent we don't index?"
+    static let bodyText = """
+        New agents get added from user-contributed format samples — a pull request, your coding agent \
+        working from our brief, or a sanitized sample a maintainer can build from. Never share real \
+        transcripts, keys, or private paths.
+        """
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "puzzlepiece.extension")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(palette.accentBlue)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(Self.titleText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(Self.bodyText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    // Two lines, unlike the other cards: the frozen privacy
+                    // sentence sits last, and single-line clipping is exactly
+                    // what would delete it. At normal widths this still renders
+                    // as one line, so the card matches StarCard visually.
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Contribute an agent", action: onOpen)
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
+
+            Button("How it works", action: onLearnMore)
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+
+            Button("Maybe later", action: onSnooze)
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Don't ask again")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
     }
 }
 

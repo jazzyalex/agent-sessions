@@ -37,6 +37,37 @@ final class OnboardingCoordinator: ObservableObject {
     /// the slot for itself.
     static let starAskPriorityAfterDays: Double = 14
 
+    /// Where "Contribute an agent" sends the user: the repository's structured
+    /// proposal form. Built from `githubRepositoryURL` so the card, the menu
+    /// item, and this can never drift onto different repositories.
+    ///
+    /// Interpolated rather than `appendingPathComponent` — the query string is
+    /// part of the destination, and path appending would percent-escape the `?`.
+    static let contributeAgentSourceURL = URL(
+        string: "\(githubRepositoryURL.absoluteString)/issues/new?template=new-agent-source.yml"
+    )!
+
+    /// The "How it works" link: both contribution routes (implement it, or hand
+    /// over sanitized format evidence) are described there.
+    static let contributeGuideURL = URL(
+        string: "\(githubRepositoryURL.absoluteString)/blob/main/docs/CONTRIBUTING.md"
+    )!
+
+    /// How long "Maybe later" silences the contribute ask before its single retry.
+    static let contributeAskSnoozeInterval: TimeInterval = 14 * 86_400
+
+    /// Sessions opened before the contribute ask is due. Someone who has browsed
+    /// this much has an opinion about which agents are missing.
+    static let contributeAskSessionsThreshold = 25
+
+    /// Days since first launch that make the contribute ask due on their own.
+    /// Higher than the star ask's 30 so the two never come due together.
+    static let contributeAskDaysThreshold: Double = 45
+
+    /// Launches a round of the contribute ask may go unanswered before it spends
+    /// itself, exactly as "Maybe later" would.
+    static let contributeAskMaxImpressionsPerRound = 3
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -70,6 +101,10 @@ final class OnboardingCoordinator: ObservableObject {
     /// persistent decision lives in `UserDefaults.onboardingStarAskState`.
     @Published var starCardSuppressedThisLaunch: Bool = false
 
+    /// Hides the contribute card for the rest of this launch. In-memory only;
+    /// the persistent decision lives in `UserDefaults.onboardingContributeAskState`.
+    @Published var contributeCardSuppressedThisLaunch: Bool = false
+
     /// Set once the user resolves any top-slot card. The slot shows one card at
     /// a time, but that alone only orders the queue — without this, dismissing
     /// the winner hands the slot straight to the runner-up on the same render,
@@ -86,6 +121,8 @@ final class OnboardingCoordinator: ObservableObject {
     /// One impression per launch, not per render: `.onAppear` fires again every
     /// time the list rebuilds the card.
     private var didCountStarImpressionThisLaunch: Bool = false
+    /// Same one-impression-per-launch rule for the contribute card.
+    private var didCountContributeImpressionThisLaunch: Bool = false
     /// True for the duration of a launch that showed the first-run setup — feedback
     /// must never appear in the same session as first run.
     private(set) var didPresentFreshInstallThisLaunch: Bool = false
@@ -445,6 +482,101 @@ final class OnboardingCoordinator: ObservableObject {
         guard let first = defaults.onboardingFirstLaunchDate else { return false }
         let days = now().timeIntervalSince(first) / 86_400
         return days >= Self.starAskDaysThreshold
+    }
+
+    // MARK: - Contribute an agent source
+
+    /// Whether the contribute card should occupy the session-list top slot.
+    ///
+    /// It sits last, below feedback: it asks for the most work of any card here,
+    /// so anything else with something to say goes first. The star card outranks
+    /// it unconditionally — there is no aging rule, because unlike the Quota
+    /// Meter card the star ask always terminates within two rounds and hands the
+    /// slot back on its own.
+    ///
+    /// Never fires on a fresh-install launch, and never asks again once the user
+    /// has opened either contribution page.
+    func shouldShowContributeCard() -> Bool {
+        guard whatsNewMajorMinor == nil else { return false }
+        guard !didConsumeTopSlotAskThisLaunch else { return false }
+        guard !contributeCardSuppressedThisLaunch else { return false }
+        guard !didPresentFreshInstallThisLaunch else { return false }
+
+        switch defaults.onboardingContributeAskState {
+        case .opened, .dismissedForever:
+            return false
+        case .notAsked:
+            break
+        case .snoozed:
+            // One retry, once the snooze has actually elapsed. A missing date
+            // would mean a snooze that never expires, so treat it as due.
+            if let until = defaults.onboardingContributeAskSnoozedUntil, now() < until {
+                return false
+            }
+        }
+
+        return contributeAskTriggerMet()
+    }
+
+    /// The user opened a contribution page — terminal, never ask again.
+    func recordContributeOpened() {
+        defaults.onboardingContributeAskState = .opened
+        contributeCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+    }
+
+    /// "Maybe later" — silent for two weeks, then exactly one retry.
+    func snoozeContributeAsk() {
+        contributeCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endContributeAskRound()
+    }
+
+    /// Records that this launch put the contribute card on screen. Being ignored
+    /// is an answer; three unanswered launches end the round like "Maybe later".
+    func noteContributeCardShown() {
+        guard !didCountContributeImpressionThisLaunch else { return }
+        didCountContributeImpressionThisLaunch = true
+
+        let seen = defaults.onboardingContributeAskImpressions + 1
+        defaults.onboardingContributeAskImpressions = seen
+        guard seen >= Self.contributeAskMaxImpressionsPerRound else { return }
+        endContributeAskRound()
+    }
+
+    /// One round only: the first buys two weeks and a retry, the second is a no.
+    private func endContributeAskRound() {
+        switch defaults.onboardingContributeAskState {
+        case .notAsked:
+            defaults.onboardingContributeAskState = .snoozed
+            defaults.onboardingContributeAskSnoozedUntil =
+                now().addingTimeInterval(Self.contributeAskSnoozeInterval)
+            // The retry gets its own budget of launches.
+            defaults.onboardingContributeAskImpressions = 0
+        case .snoozed:
+            defaults.onboardingContributeAskState = .dismissedForever
+        case .opened, .dismissedForever:
+            break
+        }
+    }
+
+    /// The card's ✕ — an explicit no, permanent. "Maybe later" is right beside it
+    /// for anyone who only wants it gone for now.
+    func dismissContributeAskForever() {
+        contributeCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+
+        guard defaults.onboardingContributeAskState != .opened else { return }
+        defaults.onboardingContributeAskState = .dismissedForever
+    }
+
+    /// Retention test for the contribute ask: earliest of 25 sessions opened or
+    /// 45 days since first launch.
+    private func contributeAskTriggerMet() -> Bool {
+        if defaults.onboardingSessionsOpenedCount >= Self.contributeAskSessionsThreshold { return true }
+        guard let first = defaults.onboardingFirstLaunchDate else { return false }
+        let days = now().timeIntervalSince(first) / 86_400
+        return days >= Self.contributeAskDaysThreshold
     }
 
     private func usageTriggerMet() -> Bool {

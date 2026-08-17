@@ -17,6 +17,25 @@ extension UserDefaults {
         static let starAskSnoozedUntil = "OnboardingStarAskSnoozedUntil"
         static let starAskImpressions = "OnboardingStarAskImpressions"
         static let starAskDueSince = "OnboardingStarAskDueSince"
+        static let contributeAskState = "OnboardingContributeAskState"
+        static let contributeAskSnoozedUntil = "OnboardingContributeAskSnoozedUntil"
+        static let contributeAskImpressions = "OnboardingContributeAskImpressions"
+    }
+
+    /// Lifecycle of the one-time invitation to contribute a new agent source.
+    ///
+    /// Deliberately the same shape as `StarAskState` — a clock-based snooze
+    /// rather than a version-gated retry — but strictly one round: this is an
+    /// invitation, not a campaign, so the second round-out is permanent.
+    enum ContributeAskState: String {
+        /// Not yet shown — eligible once the retention trigger fires.
+        case notAsked
+        /// "Maybe later" once — eligible again after `contributeAskSnoozedUntil`.
+        case snoozed
+        /// Dismissed outright, or a second "Maybe later" — never ask again.
+        case dismissedForever
+        /// The user opened one of the contribution pages — never ask again.
+        case opened
     }
 
     /// Lifecycle of the one-time GitHub star ask.
@@ -158,5 +177,24 @@ extension UserDefaults {
     var onboardingStarAskDueSince: Date? {
         get { object(forKey: OnboardingKeys.starAskDueSince) as? Date }
         set { set(newValue, forKey: OnboardingKeys.starAskDueSince) }
+    }
+
+    /// Lifecycle state of the one-time "contribute an agent source" invitation.
+    var onboardingContributeAskState: ContributeAskState {
+        get { ContributeAskState(rawValue: string(forKey: OnboardingKeys.contributeAskState) ?? "") ?? .notAsked }
+        set { set(newValue.rawValue, forKey: OnboardingKeys.contributeAskState) }
+    }
+
+    /// When a "Maybe later" on the contribute ask expires. Nil until the first snooze.
+    var onboardingContributeAskSnoozedUntil: Date? {
+        get { object(forKey: OnboardingKeys.contributeAskSnoozedUntil) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.contributeAskSnoozedUntil) }
+    }
+
+    /// Launches that have shown the contribute card in the current round without
+    /// the user answering. Reset when the first round ends.
+    var onboardingContributeAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.contributeAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.contributeAskImpressions) }
     }
 }

@@ -320,6 +320,7 @@
 		9D5534E425C266C04EC76C0E /* ClaudeUsageSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B6E7D6ACA5F366D824ECD0 /* ClaudeUsageSnapshotStore.swift */; };
 		9D6563AF9CA04851C64E2A32 /* PresenceEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94814E2E2CFFA7EEBB199684 /* PresenceEngineTests.swift */; };
 		9DC4500913E0B79BC44F52CB /* CodexResetCredits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E33283F976696A8C7B0F29C /* CodexResetCredits.swift */; };
+		9E1E38E4F0BD0822F36913E7 /* OnboardingContributeCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19B5E6EA5315CCCDA3D7250D /* OnboardingContributeCardTests.swift */; };
 		9F060FCCACC0EB76A7877CE6 /* ClaudeDesktopSidecarReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 024C702A48999485F18C6507 /* ClaudeDesktopSidecarReaderTests.swift */; };
 		9F33187F34E8F2F31A798643 /* OpenClawSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E4A5D9227D8C4D69B07535D /* OpenClawSyncTests.swift */; };
 		9F89EF848A0EB2D79B0AC11B /* UsageFreshness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D14178FB4333F9BC7B3EBCC /* UsageFreshness.swift */; };
@@ -630,6 +631,7 @@
 		174DDF6A7523AFD011F09864 /* FileProbing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Support/FileProbing.swift; sourceTree = SOURCE_ROOT; };
 		18536FCC7C346E874E56738E /* DroidCLIEnvironment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Droid/DroidCLIEnvironment.swift; sourceTree = SOURCE_ROOT; };
 		18D4968D6F4CB649CC369EC2 /* ClaudeDelegatedTokenRefresh.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeDelegatedTokenRefresh.swift; sourceTree = SOURCE_ROOT; };
+		19B5E6EA5315CCCDA3D7250D /* OnboardingContributeCardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/OnboardingContributeCardTests.swift; sourceTree = SOURCE_ROOT; };
 		19FAC728A9C11A666680AF44 /* PreferencesView+Copilot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AgentSessions/Views/Preferences/PreferencesView+Copilot.swift"; sourceTree = SOURCE_ROOT; };
 		1AC86925EFC5579C811934FF /* ActivationPolicyDecider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Services/ActivationPolicyDecider.swift; sourceTree = SOURCE_ROOT; };
 		1B030EA0D4248411BB1A3E6D /* ViewRegistryDerivationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/ViewRegistryDerivationTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1833,6 +1835,7 @@
 				A9020421B579E7FC4587EB8C /* SessionProviderCatalogTests.swift */,
 				1B030EA0D4248411BB1A3E6D /* ViewRegistryDerivationTests.swift */,
 				874B9CF7960BF48CD4DF1750 /* QwenIntegrationTests.swift */,
+				19B5E6EA5315CCCDA3D7250D /* OnboardingContributeCardTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -3036,6 +3039,7 @@
 				FB023DAFB8C3960C9E8841D3 /* SessionProviderCatalogTests.swift in Sources */,
 				6C3313EB8A1211FC7082BB03 /* ViewRegistryDerivationTests.swift in Sources */,
 				C3D3D2E2E792E18E473DFCCE /* QwenIntegrationTests.swift in Sources */,
+				9E1E38E4F0BD0822F36913E7 /* OnboardingContributeCardTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
