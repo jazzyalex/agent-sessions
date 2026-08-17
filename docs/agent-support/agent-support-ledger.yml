@@ -9,6 +9,53 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "4.8"
+    as_of_date_utc: "2026-08-17"
+    as_of_commit: "d4958be3"
+    verified:
+      qwen:
+        sessions:
+          max_verified_version: "0.14.3"
+          scope: "NOT a bump - baseline repair only; weekly monitoring moved from unsupported to supported"
+          evidence: ["Resources/Fixtures/stage0/agents/qwen/system_telemetry.jsonl", "scripts/probe_scan_output/agent_watch/20260817-203840Z/report.json"]
+          notes: "FIRST monitored run, and its format_drift_detected was OUR baseline being incomplete, not upstream moving - the distinction §5a warns about. Qwen shipped (d4958be3) with five hand-built synthetic fixtures, and synthetic fixtures cannot model a surface nobody transcribed: real transcripts carry systemPayload.outputHistoryItems/systemInfo (the /about dump), systemPayload.uiEvent telemetry, phase, rawCommand, assistant contextWindowSize, and envelope gitBranch. Closed by sweeping both on-disk sessions with rebuild_stage0_baseline.py rather than hand-adding keys. uiEvent.function_args is now opaque in _NESTED_OPAQUE_KEYS: it is the telemetry echo of a tool's own parameter object (file_path/glob/subagent_type), the same class as the existing `args` exclusion, so walking it would make every new tool parameter read as Qwen drift forever. TOOLING TRAP REPEATED: qwen was missing from rebuild_stage0_baseline.py's MATRIX_KEY (its matrix section is qwen_code:), byte-for-byte the grok bug from 2026-08-13 - _baseline_paths returned empty, so the tool would have reported the ENTIRE schema missing and then died on --emit. TARGET_FIXTURE got its own new file (system_telemetry.jsonl) because QwenIntegrationTests asserts exact event counts on all five existing fixtures; appending to any of them would have broken tests. max_verified_version deliberately NOT bumped: installed is 0.21.13 but every transcript on disk is 0.14.3, and qwen has no prebump driver, so the honest verdict is blocked_stale_sample and 0.21.13 support remains unclaimed."
+      kimi:
+        sessions:
+          max_verified_version: "0.36.1"
+          scope: "tier-2 support unchanged; fresh-session prebump re-validated"
+          evidence: ["Resources/Fixtures/stage0/agents/kimi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260817-203119Z-prebump/report.json"]
+          notes: "Bumped 0.34.0->0.36.1. The weekly had it at blocked_stale_sample, which per §1a means UNKNOWN and never clean - and once again that was hiding real drift: the fresh sandboxed 0.36.1 session emits a new top-level wire type plugin.session_start{content,time}, absent from all 8 sessions on disk. That absence is the point: rebuild_stage0_baseline.py --agent kimi reported 'fixture already covers every bucket/key on disk' while prebump reported fresh_matches_baseline=False, because the sandboxed session never lands in the real store. The record was harvested by re-running prebump with --keep-sandbox, the only way to see it. Appended to small.jsonl per KimiSessionParserTests' own documented convention (drift lines go there, not assistant_tools.jsonl, which sits at the previewLineLimit cap); it resolves to .meta through the existing catch-all so eventCount stays 3 and no parser change was needed. Prebump also blocked first on a credential-hygiene gate - ~/.kimi-code/config.toml was mode 0644 - fixed with chmod 600."
+      opencode:
+        sessions:
+          max_verified_version: "1.18.18"
+          scope: "tier-2 support unchanged"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260817-204043Z-prebump/report.json"]
+          notes: "Bumped 1.18.16->1.18.18 on a clean prebump (ok=True, fresh_matches_baseline=True) after REPAIRING A BROKEN INSTALL, not a format problem. /opt/homebrew/bin/opencode symlinks to the global npm opencode-ai@1.18.18, whose postinstall never ran, so bin/opencode.exe was still the shipped SHELL STUB that prints 'postinstall script was not run' and exits 1 - never the real binary. That is why weekly reported installed=unknown and the driver died with 'Exec format error', a failure mode that looks like a driver bug and is actually a package that was installed with --ignore-scripts (or by a package manager that skips postinstall). Fixed by running the documented recovery in place - node postinstall.mjs inside /opt/homebrew/lib/node_modules/opencode-ai - which downloaded the real Mach-O arm64 binary; `opencode --version` then answered 1.18.18. LESSON: an agent stuck at installed=unknown with a driver_exception should be checked with `file $(which <agent>)` before anything schema-shaped is suspected."
+      pi:
+        sessions:
+          max_verified_version: "0.84.2"
+          scope: "tier-2 support unchanged"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260817-202359Z-prebump/report.json"]
+          notes: "Bumped 0.84.1->0.84.2 on a clean prebump (ok=True, fresh_matches_baseline=True), clearing a blocked_stale_sample whose newest local sample was from 2026-05-12 and therefore older than both the CLI and the 30-day window. No drift, no parser change; pi returns to supports_latest."
+      grok:
+        sessions:
+          max_verified_version: "1.0.4"
+          scope: "tier-2 support unchanged"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260817-203840Z/report.json"]
+          notes: "PREBUMP DRIVER ADDED (`grok_single`), which is what lifted grok from a permanent supports_installed_only cap to supports_latest - the weekly could never have done it, because latest support requires a session written by the installed build and nothing could produce one on demand. Building it surfaced a silent-wrong-answer bug first: the agent->matrix-key map existed in THREE copies (weekly local_schema, prebump fresh-session diff, rebuild_stage0_baseline.MATRIX_KEY) and the prebump copy was still missing grok and qwen. A missing entry does not error - baseline_paths comes back empty, the diff takes its 'no baseline -> nothing diffs' branch, and prebump reports fresh_matches_baseline=true HAVING COMPARED NOTHING - so the first grok driver would have passed vacuously. Now single-sourced as agent_watch.MATRIX_KEY_FOR_AGENT, imported by the rebuild tool, and pinned by test_every_monitored_agent_is_registered_in_the_rebuild_tool (verified with a positive control: removing an agent makes it fail with the exact diagnostic). Driver specifics: `grok -p` headless with a pinned --session-id, sandbox HOME plus sandbox --cwd so the percent-encoded workdir bucket is predictable; auth is always the credential-file copy of ~/.grok/auth.json because grok exposes no api-key env var; and it verifies the sibling summary.json before reporting ok, since a Grok session is a directory and half of one would read as schema drift. First run: baseline_type_count 15, coverage 0.67, unknown_types [] / unknown_keys {}, with a real tool_result in the fresh session. STILL UNWATCHED, newly visible from the kept sandbox: a session directory also holds events.jsonl, updates.jsonl, rewind_points.jsonl, prompt_context.json, resources_state.json, signals.json and system_prompt.txt, none of which any fixture or fingerprint covers - alongside the previously-logged subagents/<childId>/meta.json and compaction/ gaps."
+          notes_prior_bump: "Bumped 1.0.3->1.0.4 on weekly local evidence only: schema_matches_baseline=True, unknown_types=[]/unknown_keys={}, sample fresh (2026-08-17, newer than the binary), discovery contract and its summary.json companion-file gate both passing. Version provenance is both_agree - the grok_update_check CLI probe and the grok-build cask reconciled to the same 1.0.4, so the max() rule in _reconcile_latest_version_from_probes had nothing to arbitrate. Stays supports_installed_only, not supports_latest: grok still has no prebump driver, so latest support is structurally unclaimable no matter how clean the weekly is."
+      codex:
+        sessions:
+          max_verified_version: "0.147.0"
+          scope: "NOT a bump - baseline repair only"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "scripts/probe_scan_output/agent_watch/20260817-203840Z/report.json"]
+          notes: "Additive drift surfaced MID-PASS: the 20:18 weekly was clean and the 20:31 weekly was not, because the first run's diff came from the cached latest_prebump_report and the second sampled newer sessions. Sweeping all 1209 sessions on disk found 11 pairs across 5 buckets, far more than the newest-5 weekly union showed: entered_review_mode and exited_review_mode both gained item_id/turn_id, mcp_tool_call_end gained action_name/app_name/connector_id/link_id, and session_meta.payload.base_instructions gained a provenance{model,type} struct. All additive keys on existing types, so no parser change and no version movement - 0.147.0 was already verified and installed."
+      claude:
+        sessions:
+          max_verified_version: "2.1.220"
+          scope: "NOT a bump - baseline repair only"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "scripts/probe_scan_output/agent_watch/20260817-203840Z/report.json"]
+          notes: "Weekly reported format_drift_detected off a single additive key, system.scope (one occurrence in 7 days, on a subtype:model_refusal_fallback record, value 'session'). Sweeping all 1876 sessions found two more the newest-5 union had missed: attachment:auto_mode gained autoModeConsentFlow/bashFirst/bypass/steerOnly and attachment:ultra_effort_exit gained type. Additive keys only - the parser reads through JSONSerialization dictionary access with no Codable anywhere, so unknown keys are ignored rather than thrown on, which is why this was an alert and not a breakage. Verified version unchanged: installed is 2.1.220 and upstream moved to 2.1.234 mid-pass, but an uninstalled build cannot be claimed."
   - agent_sessions_version: "4.7"
     as_of_date_utc: "2026-08-13"
     as_of_commit: "b6fe38d6"

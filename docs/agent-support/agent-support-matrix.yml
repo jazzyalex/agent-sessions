@@ -75,7 +75,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/copilot/schema_drift.jsonl"
       - "Resources/Fixtures/stage0/agents/copilot/subdir_v1/aaaabbbb-1111-2222-3333-ccccddddeeee/events.jsonl"
   opencode:
-    max_verified_version: "1.18.16"
+    max_verified_version: "1.18.18"
     version_field: "session.version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/opencode/storage_v2/session/proj_test/ses_s_stage0_small.json"
@@ -118,7 +118,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.84.1"
+    max_verified_version: "0.84.2"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -139,7 +139,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "0.34.0"
+    max_verified_version: "0.36.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -163,14 +163,14 @@ agents:
       - "AgentSessionsTests/KimiSessionDiscoveryTests.swift"
       - "AgentSessionsTests/KimiResumeCommandBuilderTests.swift"
   grok_cli:
-    max_verified_version: "1.0.3"
+    max_verified_version: "1.0.4"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and subagent hierarchy"
     unsupported_surfaces:
       - "live/active status"
       - "usage/rate-limit tracking"
-      - "prebump real-session validation (no agent_watch prebump driver yet; weekly monitoring is configured)"
     notes:
+      - "Prebump real-session validation added 2026-08-17 (driver `grok_single`), which is what lifted Grok from a permanent supports_installed_only cap to supports_latest. It runs `grok -p` headless with a pinned --session-id inside a sandbox HOME and a sandbox --cwd, so the percent-encoded workdir bucket is predictable and no real repository is ever the session's cwd. Grok exposes no api-key env var (only GROK_SANDBOX), so auth is always the credential-file copy of ~/.grok/auth.json - an OAuth record carrying account PII alongside the token, hence credential_file with the strict 0600 gate, never support_file. The driver verifies the sibling summary.json exists before reporting ok: a Grok session is a directory, and returning a transcript whose sidecar never landed would hand the fingerprinter half a session and surface the gap as schema drift."
       - "Weekly agent_watch monitoring added 2026-08-13: nested fingerprint over <session>/chat_history.jsonl merged with the sibling summary.json (bucket `summary`), plus a `grok_update_check` probe for authoritative latest. Latest source is the grok-build Homebrew cask JSON — Grok ships a native x.ai binary, not npm."
       - "Subagent hierarchy resolves from the parent's tree, not the child's sidecar: a spawned run is written both as a top-level session directory and as <parent>/subagents/<childId>/meta.json, which is the only place parent_session_id and subagent_type appear. Verified across 9 subagent links at 1.0.3."
       - "Grok's own `grok sessions list` hides subagent sessions; Agent Sessions surfaces them with parentage."
@@ -193,7 +193,7 @@ agents:
   qwen_code:
     max_verified_version: "0.14.3"
     version_field: "record.version"
-    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, and analytics"
+    support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
       - "usage/rate-limit tracking"
@@ -202,9 +202,11 @@ agents:
       - "automatic QWEN_RUNTIME_DIR discovery (choose that runtime directory's projects folder in Settings)"
       - "resume from an arbitrarily renamed copied projects root (those transcripts remain browseable and searchable)"
       - "fresh authenticated 0.21.13 transcript and live resume validation"
-      - "weekly session-format monitoring"
+      - "prebump real-session validation (no agent_watch prebump driver yet; weekly monitoring is configured)"
     notes:
       - "The installed Qwen Code CLI is 0.21.13. Its local package writer still uses projects/<project>/chats/<session-id>.jsonl and chats/archive; its own filename predicate accepts 32-36 hexadecimal-or-hyphen IDs. The user/assistant/tool_result record families are represented by synthetic fixtures. The installed help advertises --resume <id> and --continue, but its loader resolves active chats only, so archived histories are deliberately not offered resume. Model execution was authentication-blocked, so no fresh 0.21.13 transcript or end-to-end resume is claimed."
+      - "THE AUTH BLOCK HAS A NAMED CAUSE AND IT IS NOT FIXABLE BY RE-LOGIN (confirmed 2026-08-17 by running `qwen -p`): 'Qwen OAuth free tier was discontinued on 2026-04-15. Run /auth to switch to Coding Plan, OpenRouter, Fireworks AI, or another provider.' That date is why the newest transcript on disk is 2026-04-13 and why ~/.qwen/oauth_creds.json expired 2026-04-19 - the account did not lapse, the tier was withdrawn. `qwen auth` is also gone as a subcommand in 0.21.x (it reports '(removed)'); provider selection is the interactive /auth flow. CONSEQUENCES, so nobody re-derives this: qwen will sit at blocked_stale_sample indefinitely, no 0.21.13 transcript can be captured, resume cannot be validated end-to-end, and no prebump driver can be built until a paid Coding Plan or an alternate provider (OpenRouter/Fireworks) is configured. That is a billing decision for the maintainer, not an engineering task."
+      - "First weekly agent_watch run (2026-08-17) reported format_drift_detected, and it was an incomplete baseline rather than upstream movement: the five synthetic fixtures never modelled the systemPayload telemetry surface real transcripts carry (outputHistoryItems/systemInfo from /about, uiEvent, phase, rawCommand) or the assistant contextWindowSize and envelope gitBranch keys. Closed by sweeping both on-disk sessions with rebuild_stage0_baseline.py into system_telemetry.jsonl. uiEvent.function_args is registered opaque in _NESTED_OPAQUE_KEYS: it is the telemetry echo of a tool's own parameter object, so walking it would make every new tool parameter read as Qwen drift. Qwen was also missing from rebuild_stage0_baseline.py's MATRIX_KEY map (its section is qwen_code:), the same trap grok hit on 2026-08-13, which would have reported the entire schema missing and then failed --emit."
       - "The retained local transcript has 32 records and logs version 0.14.3. It was inspected only for keys, types, counts, and non-sensitive metadata; no production prompt, output, account identifier, project path, URL, credential, or record was copied."
       - "QWEN_HOME is honored automatically by both discovery and availability. QWEN_RUNTIME_DIR can relocate session output but is intentionally not read from the app process environment because it may be scoped only to the launched CLI; users must select its literal projects folder as the custom storage root. Copy and launch commands then carry the shell-quoted runtime parent through QWEN_RUNTIME_DIR; default-root commands remain unchanged. Arbitrarily renamed copied roots are browse-only."
       - "Current-writer systemPayload.displayText takes precedence over hook context appended to message.parts. For retained payload-less records, the current reader's exact final-part wrapper validation removes only a well-formed qwen:user-prompt-submit-context block; malformed or nested lookalikes remain visible. goal_runtime, cron, and notification user-role envelopes remain metadata rather than inflating user-turn counts or titles."
@@ -218,5 +220,6 @@ agents:
       - "Resources/Fixtures/stage0/agents/qwen/019f0000000070008000000000000003.jsonl"
       - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000004.jsonl"
       - "Resources/Fixtures/stage0/agents/qwen/019f0000-0000-7000-8000-000000000005.jsonl"
+      - "Resources/Fixtures/stage0/agents/qwen/system_telemetry.jsonl"
     evidence_tests:
       - "AgentSessionsTests/QwenIntegrationTests.swift"
