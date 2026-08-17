@@ -1,9 +1,9 @@
 agent_sessions_version: "4.9-unreleased"
-as_of_commit: "uncommitted working tree (base 7da5aca7)"
+as_of_commit: "ef4e9253"
 as_of_date: 2026-08-17
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
-  - "This working-tree snapshot includes unreleased Qwen Code support. It is not a release-ledger entry; replace the uncommitted base with the actual integration commit when the source is committed."
+  - "This unreleased snapshot includes Qwen Code support introduced in ef4e9253. It is not yet a release-ledger entry."
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
   - "Droid is retained for legacy imports and fixtures, but it is excluded from the active session-format monitoring set."
