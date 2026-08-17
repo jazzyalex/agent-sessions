@@ -1,247 +1,166 @@
 # Agents Guidelines
 
-## Marketing / Promo Coordination
-- All marketing / promo / growth work coordinates through `Marketing/STATUS.md` — read it first, update it last. It's the source of truth and indexes the detail files (goal + star log, angles, Product Hunt kit, HN draft). Draft only; the owner posts to their own accounts. (`Marketing/` is gitignored and local to this machine.)
+Shared playbook for every agent working in this repo (Claude, Codex, Cursor, Xcode, etc.).
+Write like a person: plain words, short sentences, no filler, no emoji. If a rule here
+needs decoding, that's a bug — fix the wording.
 
-## Build & Review Discipline
-- Do not ask the user to “confirm” or “if it looks good” until the code compiles locally with zero build errors.
-- After making changes that affect Swift sources or Xcode integration, validate by building the active scheme.
-- If the project cannot be built in your environment, clearly state what prevented the build, and provide the exact file and line references you validated.
+## Marketing / promo
+All marketing, promo, and growth work goes through `Marketing/STATUS.md` — read it first,
+update it last. It indexes the detail files (goals, star log, angles, launch kits).
+Agents draft; the owner posts from their own accounts. `Marketing/` is gitignored and
+local to this machine.
+
+## Build & review discipline
+- Don't ask the user to "confirm if it looks good" until the code builds with zero errors.
+- After changing Swift sources or Xcode project files, build the active scheme.
+- If you can't build in your environment, say exactly why and list the file:line
+  references you did verify.
+
+**When a build is mandatory before presenting:** you added/moved/renamed any Swift file;
+changed more than ~40 Swift lines or touched two or more top-level areas (say, Views +
+Services); touched concurrency (actors, Task, async/await); changed window/toolbar/layout
+structure or target membership; changed build settings, Info.plist, or resources.
+Skipping the build is fine only for clearly minor edits — one-liners that don't touch
+types or signatures, copy changes, comments, plain Markdown/JSON. In doubt, build.
+
+Build commands:
+- Xcode: Product → Build.
+- CLI: `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build`
+
+## Tests
+Use the stable wrapper: `./scripts/xcode_test_stable.sh`. It isolates test artifacts in
+`.deriveddata-tests`, which avoids intermittent nested-code-signature failures.
+
+Equivalent direct command:
+`xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath .deriveddata-tests -parallel-testing-enabled NO clean test`
+
+Keep that derived-data path **relative**. It once read `"$PWD/.deriveddata-tests"`, someone
+copied it into a context that didn't expand `$PWD`, and a literal `$PWD/` directory sat in
+the repo root unnoticed for four months. Relative can't fail that way.
 
 ## Swift/macOS QA
-- If test automation or QA scripts force macOS Appearance to Dark Mode, always restore macOS Appearance back to `System` at the end of the run.
-- In Codex Desktop, Swift/Xcode build and test commands commonly need access to Xcode cache directories that are outside the workspace sandbox. For `xcodebuild`, SwiftPM, or XCTest runs, request approved Xcode access up front when the command is expected to touch DerivedData, ModuleCache, SourcePackages, simulator caches, or other Xcode-managed cache paths. If a first run fails only because sandboxing blocked one of those paths, rerun the exact same command with approved Xcode access and report it as a sandbox access retry, not as a code or test failure.
-- Prefer narrow approved command prefixes for trusted repo-local Xcode workflows, such as the canonical AgentSessions build/test commands and `./scripts/xcode_test_stable.sh`. Do not use broad auto-approval rules for arbitrary Xcode-looking commands; if a command falls outside the trusted prefixes, request explicit approved Xcode access for that command.
-- Relaunching the app to test a change is trivial — just `killall AgentSessions 2>/dev/null; open .deriveddata-manual/Build/Products/Debug/AgentSessions.app` (the output of the manual `xcodebuild … -derivedDataPath .deriveddata-manual build`). Do NOT invoke a "run" skill or hunt for a launch skill — there isn't one and none is needed. Only reach for UI automation (computer-use/screenshots) if explicitly asked to drive or screenshot the app.
+- If a QA script forces macOS Appearance to Dark, set it back to System when done.
+- Relaunching the app to test a change is two commands — don't hunt for a "run" skill:
+  `killall AgentSessions 2>/dev/null; open .deriveddata-manual/Build/Products/Debug/AgentSessions.app`
+  (that's the output of a manual build with `-derivedDataPath .deriveddata-manual`).
+  Never launch an app bundle from a derived-data path that ran `xcodebuild test` — test
+  runs re-sign the bundle and it launches invisible.
+- Use UI automation (computer-use, screenshots) only when explicitly asked.
+- Codex Desktop sandbox note: `xcodebuild`, SwiftPM, and XCTest need Xcode's cache
+  directories (DerivedData, ModuleCache, SourcePackages, simulator caches), which sit
+  outside the workspace sandbox. Request approved Xcode access up front for those runs.
+  If a run fails purely because the sandbox blocked a cache path, rerun the same command
+  with access and report it as a sandbox retry — not a code or test failure. Approve
+  narrow command prefixes (the canonical build/test commands, the test wrapper), never
+  broad "anything Xcode-ish" rules.
 
-## Instructions for Codex CLI
+## How to work (explain, then go)
+State what you're about to change and why in two or three bullets, then immediately do
+it. The explanation gives the user an ESC window — it is not a request for permission.
+Don't ask "should I proceed?"; don't start editing before saying what you're doing;
+don't stall.
 
+Exception: if the user says **"plan mode++"**, deliver the plan only and wait for
+explicit approval.
 
+## Git: branches, worktrees, commits
+- **Never create, switch, rename, or delete a branch or worktree without explicit user
+  approval.** That includes `checkout -b`, `switch -c`, `branch -d/-D`, `worktree add`.
+- This working tree may be shared by several concurrent agent sessions; moving `HEAD`
+  moves it for all of them. Work on the current branch. If isolation seems warranted,
+  propose it and wait.
+- Commits and pushes are user-initiated only.
+- Use Conventional Commits (feat, fix, docs, chore, …) with trailers in the body:
+  `Tool: Cursor|Codex|Xcode|Manual|Claude|Figma`, `Model: <model-id>`,
+  `Why: <one line, if behavior or structure changed>`.
 
-### Format
-```
-I'll make the following changes:
-- File X: Add/modify Y because Z
-- File A: Remove B because C
+## User-visible changes
+If you change behavior or UI the user can see, add a bullet under `[Unreleased]` in
+`docs/CHANGELOG.md` and a one-or-two-bullet note in `docs/summaries/YYYY-MM.md`.
 
-[Immediately proceed with code changes - user has ESC window during explanation]
-
-- Edited file.swift...
-```
-
-### Flow Pattern
-**Correct:** Explain what will be done → Code → Results
-
-### Examples of What NOT to Do
-❌ Don't: Start with "• Edited file.swift..." before explaining
-❌ Don't: Ask "Should I proceed?" or wait for confirmation
-❌ Don't: Begin analyzing/thinking without stating the plan upfront
-
-### Examples of What TO Do
-✅ Do: "I'll tighten probe detection by requiring Probe WD for /status sessions and limiting marker matching. This reduces false positives." [then immediately start coding]
-✅ Do: State the approach clearly, then flow directly into implementation
-✅ Do: Give user the ESC window by printing plan first, but maintain momentum
-
-### Special Mode
-When user says "plan mode++" - ONLY provide the plan and stop. Wait for explicit approval before coding.
-
-This applies to ALL coding requests. The explanation is for transparency and ESC opportunity, not for breaking flow.
-
-### Significant change gating (must build before presenting)
-Treat a change as “significant” and always run a build locally before presenting results when any of the following are true:
-- Added, moved, or renamed any Swift file (app or tests).
-- Modified more than ~40 lines of Swift across the app, or touched 2+ top‑level areas (e.g., Views + Services, Model + Views).
-- Introduced or changed concurrency boundaries (actors, Task, async/await), or cross‑module interactions.
-- Altered window/layout/toolbar structure or target membership (PBXBuildFile/target Sources).
-- Changed build settings, target configuration, Info.plist, or added resources.
-
-It is acceptable to present without building for clearly minor edits, for example:
-- One‑line fixes that do not affect types/signatures, string/label copy changes, comment/doc updates, or pure Markdown/JSON assets.
-- In case of doubt, prefer to build.
-
-Suggested build steps
-- Xcode: Product → Build (active scheme).
-- CLI: `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build` (or use your configured build task).
-
-### Stable XCTest Invocation (avoid intermittent macOS code-sign flakes)
-- Prefer the stable test wrapper: `./scripts/xcode_test_stable.sh`.
-- Equivalent direct command:
-  - `xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath .deriveddata-tests -parallel-testing-enabled NO clean test`
-- Rationale: isolates test artifacts/signing state from shared `DerivedData`, which avoids intermittent `AgentSessionsTests.xctest` nested-signature failures.
-- The path is deliberately **relative**. It used to read `"$PWD/.deriveddata-tests"`, which is
-  identical in a normal shell but breaks the moment the line is copied somewhere `$PWD` is not
-  expanded — a single-quoted string, a JSON/YAML field, or any runner that passes the argument
-  straight to `xcodebuild`. The literal directory `$PWD/` then gets created in the repo root.
-  That happened once and sat there unnoticed for four months, alongside a `Users/` tree from the
-  same mistake made with an absolute path that lost its leading slash. Keep it relative.
-
-## Git Branch and Worktree Safety
-- **Never create, switch, rename, or delete a git branch without explicit user approval.** This includes `git checkout -b`, `git switch -c`, `git branch`, `git branch -d/-D`, and `git worktree add`.
-- The repository working tree may be shared by **multiple concurrent agent sessions**. A `git checkout`/`switch` moves `HEAD` for *every* session using that directory and can disrupt or corrupt another session's in-progress work and commits. Treat any branch/HEAD change as a cross-session action requiring approval.
-- Default to working on the **current** branch. Do not branch off `main` (or any branch) on your own initiative — not even to "isolate" a change. If isolation seems warranted, propose it and wait for approval.
-- Same standing rule as commits/pushes: branch and worktree operations are **user-initiated only**.
-
-## Conventional Commits and Trailers
-- Use Conventional Commits for every commit (feat, fix, docs, chore, etc.).
-- Include trailers in the commit body:
-  - `Tool: Cursor|Codex|Xcode|Manual|Claude|Figma`
-  - `Model: <model-id>`
-  - `Why: <1 line if behavior/structure changed>`
-
-## User‑Visible Changes
-- If you change user‑visible behavior or UI, add:
-  - A bullet under `[Unreleased]` in `docs/CHANGELOG.md`.
-  - A 1–2 bullet note in `docs/summaries/YYYY-MM.md`.
-
-## Documentation Style
-- **Never use emoji** in user-facing documentation, including:
-  - README.md
-  - GitHub release notes
-  - CHANGELOG.md
-  - Other user-facing documentation
-- Use clear, concise language without emoji decoration.
-
-## Investigation and Findings Policy
-- All findings in audits, plans, and reports must be **evidence-backed** — include file paths, line numbers, or exact output that substantiates each claim.
-- Uncertainty must be **explicitly labeled as hypothesis** (e.g., "Hypothesis: X may cause Y because Z"), never presented as verified fact.
-- Avoid probabilistic wording ("likely", "probably", "seems to") for claims that have been verified — use definitive language for verified facts and hypothesis labels for unverified ones.
+## Writing style (docs and reports)
+- No emoji anywhere user-facing: README, release notes, CHANGELOG, docs.
+- Every claim in an audit, plan, or report needs evidence — file paths, line numbers, or
+  exact output. If something is unverified, label it a hypothesis outright
+  ("Hypothesis: X may cause Y because Z"). Don't hedge verified facts with "likely" or
+  "seems to", and don't state guesses as facts.
 
 ## Backlog (`docs/backlog.md`)
-- When work is deliberately deferred, record it in `docs/backlog.md` — follow the **How to read this file** legend at the top of that file, and give the entry a stamp line (`> **open** · sev: … · urg: … · verified …`).
-- Severity is what breaks; urgency is time pressure. They are separate fields — do not collapse them.
-- `verified` is the date the entry was last checked against the code, not the date it was filed. Re-verify before acting on an old date, and update the stamp when you do.
-- Closing an entry means collapsing it to a two-line tombstone (date, commit, test name) or deleting it when GitHub or the CHANGELOG already records it. Never move entries to a second file.
+- Deferred work gets an entry — follow the "How to read this file" legend at the top,
+  including the stamp line (`> **open** · sev: … · urg: … · verified …`).
+- Severity = what breaks. Urgency = time pressure. Keep them separate.
+- `verified` is the date the entry was last checked against the code, not when it was
+  filed. Re-verify before acting on an old date, and update the stamp when you do.
+- Closing an entry = collapse it to a two-line tombstone (date, commit, test) or delete
+  it if GitHub/CHANGELOG already records it. Never move entries to a second file.
 
-## Xcode Project Hygiene
-- When adding/moving/renaming Swift files (app or tests), ensure they are added to `AgentSessions.xcodeproj` with both a `PBXFileReference` and a `PBXBuildFile` in the correct target. Missing entries will break builds with "Cannot find … in scope".
+## Adding Swift files to the Xcode project
+Every new Swift file needs a `PBXFileReference` and a `PBXBuildFile` in the right target,
+or the build fails with "Cannot find … in scope". Use the script — argument order is
+PROJECT TARGET FILE GROUP:
 
-## Adding New Swift Files to Xcode Project
-When creating new Swift files, use the tested Ruby script to add them to the Xcode project:
-
-
-**Script Location**
-`scripts/xcode_add_file.rb` - Adds a Swift file to a target with proper PBXFileReference and PBXBuildFile entries.
-
-**Usage Examples**
-
-Add file to main app target under GitInspector group:
 ```bash
 ./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
-  AgentSessions/GitInspector/Models/InspectorKeys.swift \
-  AgentSessions/GitInspector/Models
-```
-
-Add file to test target:
-```bash
+  AgentSessions/Feature/NewFile.swift AgentSessions/Feature
+# test target:
 ./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessionsTests \
-  AgentSessionsTests/GitInspectorViewModelTests.swift \
-  AgentSessionsTests
+  AgentSessionsTests/NewFileTests.swift AgentSessionsTests
 ```
 
-Add multiple files:
-```bash
-./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
-  AgentSessions/GitInspector/Utilities/ColorExtensions.swift \
-  AgentSessions/GitInspector/Utilities
+A correct run adds exactly 4 lines to project.pbxproj per file. Build afterwards to
+verify. If you ever edit project.pbxproj by hand instead: run
+`xcodebuild -resolvePackageDependencies -project AgentSessions.xcodeproj -scheme AgentSessions`,
+then build; if resolution reports "Missing package product", the pbxproj is corrupted —
+restore from git and use the script.
 
-./scripts/xcode_add_file.rb AgentSessions.xcodeproj AgentSessions \
-  AgentSessions/GitInspector/Views/StatusHeroSection.swift \
-  AgentSessions/GitInspector/Views
-```
+## UI/UX (HIG-aligned)
+- Content that can exceed window height goes in a vertical `ScrollView`; keep footer and
+  action controls outside the scroll so they stay visible.
+- Use the shared spacing tokens and dynamic system colors. No ad-hoc paddings.
+- For subtle visual changes, find the layer that actually paints the pixels before
+  editing — a nearby palette, token, or model value is not automatically the one in use.
+  Trace modifiers, `NSViewRepresentable`s, layout managers, drawing overrides, and cached
+  attributed strings as needed, then patch that layer and check the diff lands there.
 
-**Verification**
-Always build after adding files to verify they're properly integrated:
-```bash
-xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions \
-  -configuration Debug -destination 'platform=macOS' build
-```
+## Safety & execution
+- Prefer `Process` with an argument list over shelling out. Use timeouts; surface errors
+  inline and clearly.
+- No network operations without an explicit user action and clear UX around it.
+- No feature flags, rollout gates, or kill switches unless the user asked for them in
+  the current request. When unsure, implement directly and note the risk in the summary.
 
-**CRITICAL: After ANY modification to project.pbxproj**
-If you modify `AgentSessions.xcodeproj/project.pbxproj` directly (NOT using the Ruby script):
-1. **ALWAYS** resolve package dependencies first:
-   ```bash
-   xcodebuild -resolvePackageDependencies -project AgentSessions.xcodeproj -scheme AgentSessions
-   ```
-2. **THEN** verify the build succeeds:
-   ```bash
-   xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions -configuration Debug build
-   ```
-3. If package resolution fails or reports "Missing package product", the project.pbxproj was corrupted. Restore from git and use the Ruby script instead.
+## Remote doc/header fetches
+Delegate remote documentation or API inspection to a sub-agent so the main session stays
+responsive. Hard timeout: 20 seconds per attempt. On timeout, cancel and fall back —
+local repo docs first, then one narrower remote source. No unbounded retries; if the
+fallback also fails, say so and continue with local reasoning.
 
-## UI/UX Rules (HIG‑Aligned)
-- If content may exceed the window height, place the main content in a vertical `ScrollView` and keep footer/action controls outside the scroll region so actions remain visible.
-- Use the shared spacing tokens and dynamic system colors. Avoid ad‑hoc paddings; prefer consistent section spacing and card padding.
-- For subtle SwiftUI/AppKit visual changes, first identify the actual rendering layer that paints the visible UI. Do not assume a nearby palette, token, or model value is authoritative. Trace modifiers, custom `NSViewRepresentable` views, layout managers, drawing overrides, cached attributed strings, and alternate render modes as needed; patch the layer that actually draws the pixels, then verify the diff touches that layer.
+## Search & deletion safety
+These rules prevent regex over-matching and accidental data loss.
 
-## Safety & Execution
-- Avoid shelling out when a safe `Process` + argument list is possible. Use timeouts and clear, inline error messages for failures.
-- Never run network operations without an explicit user action and clear UX affordances.
+**Searching:**
+- Default to literal search: `rg -nF "[MY_MARKER v1]" "$ROOT" -g '**/*.jsonl'`.
+  Remember `[] () . + ? | ^ $` are regex metacharacters — `-F` sidesteps all of that.
+- Quote every variable: `grep -F -- "$needle" "$file"`, never `grep $needle $file`.
+- Scope with roots and globs; never scan `$HOME` blindly.
+- Sample before trusting: `rg -nF "$MARK" | head -20`, then open a couple of hits.
+- For any non-trivial match set, count by match reason (marker-only / path-only / both)
+  with a few sample paths per bucket, and save the manifest.
 
-## Feature Flags Policy
-- Do not add feature flags, rollout flags, kill switches, or behavior gates unless the user explicitly asks for feature flags in the current request.
-- When uncertain, implement the behavior directly without flags and call out any risks in the summary.
-
-### Remote Doc/Header Fetch Guardrails
-- For remote documentation, header, or API inspection tasks, delegate the fetch to a sub-agent first so the main agent remains responsive.
-- Use a hard timeout of 20 seconds per delegated fetch attempt.
-- If no useful output is returned within 20 seconds, cancel the attempt and immediately switch to a fallback source.
-- Fallback order is: local repository docs/files, then a narrower targeted remote source.
-- Do not run repeated unbounded retries; after fallback failure, report the limitation promptly and continue with best-effort local reasoning.
-
-
-## Pattern Search & Deletion Safety (General)
-
-When you search logs, filenames, or code and when you build scripts that might rename/move/delete files, follow these rules. They exist to prevent over‑matching (regex accidents) and accidental data loss.
-
-### Search rules (use literals by default)
-- Prefer ripgrep (`rg`) with fixed‑string mode for markers/tokens:
-  - `rg -nF "[MY_MARKER v1]" path -g '**/*.jsonl'`
-- If you must use regex: escape or anchor and include a quick test.
-  - Brackets `[]`, `()`, `.`, `+`, `?`, `|`, `^`, `$` are metacharacters.
-  - For JSON keys, match with quotes and minimal context: `rg -n '"key"\s*:\s*"value"'`.
-- Always quote variables to prevent globbing and word‑splitting in shell:
-  - `grep -F -- "$needle" "$file"` (not `grep $needle $file`).
-- Scope searches with globs and roots; never scan `$HOME` blindly:
-  - `rg -nF "$MARK" "$ROOT" -g '**/*.jsonl'`.
-- Verify with a small sample before proceeding:
-  - `rg -nF "$MARK" | head -n 20` and open a couple of files.
-
-### Counting and classification
-- Produce a brief “confusion matrix” for any non‑trivial match set:
-  - Count by reason (e.g., `marker_only`, `path_only`, `both`).
-  - Show 3 sample paths per bucket.
-- Save manifests for later review (plain text or JSONL).
-
-### Deletion / purge rules (must follow all)
-1) Dry‑run by default
-   - Every destructive script starts in dry‑run and prints counts, sample paths, and the exact command it would run.
-
-2) Two‑signal match for deletion
-   - Require at least two independent signals (e.g., marker AND working directory) before deleting. A single grep hit is insufficient.
-
-3) Typed confirmation with exact count
-   - To proceed, user must pass `--execute` and type a confirmation string that includes the count (e.g., `delete 22 files`).
-
-4) Random sample preview for large sets
-   - If deleting >20 items, print a random sample of 20 with the fields that justify deletion (e.g., first user line, cwd) before confirmation.
-
-5) Narrow scope and guard rails
-   - Restrict deletes to an explicit root; refuse to run on `/`, `$HOME`, or a missing/empty `$ROOT`.
-   - Use `find ... -print0 | xargs -0` to handle spaces/newlines safely.
-   - Never run `rm -rf` on interpolated paths without printing and pausing first.
-
-6) Logging and rollback aids
-   - Save a timestamped manifest of everything scheduled for deletion (and a copy of stdout) to `scripts/probe_scan_output/` or a similar audit folder.
-   - Prefer moving to a quarantine folder first (with timestamp) when feasible; hard‑delete only after a second confirmation.
-
-7) Tests / fixtures (for repo scripts)
-   - Add positive and negative fixtures that prove the matcher is literal when required (e.g., markers with `[]`).
-   - In CI, fail if expanding the pattern increases matches against the fixture corpus unexpectedly.
-
-### Quick shell snippets (safe patterns)
-- Literal marker search in JSONL:
-  - `rg -nF "[AS_MARKER v1]" "$ROOT" -g '**/*.jsonl' | cut -d: -f1 | sort -u`
-- JSON key/value search (escaped quotes):
-  - `rg -n '"(cwd|project)"\s*:\s*".*MyProbeDir' "$ROOT" -g '**/*.jsonl'`
-- Null‑safe deletion (dry‑run):
-  - `find "$ROOT" -type f -name '*.jsonl' -print0 | xargs -0 -n100 echo rm -v` (prints planned deletes)
+**Deleting (all rules apply):**
+1. Dry-run by default — print counts, sample paths, and the exact command before doing
+   anything.
+2. Require two independent signals per file (e.g. marker AND working directory); one
+   grep hit is never enough.
+3. Execution needs `--execute` plus a typed confirmation containing the exact count
+   ("delete 22 files").
+4. Deleting more than 20 items? Print a random sample of 20 with the evidence fields
+   first.
+5. Restrict to an explicit root; refuse `/`, `$HOME`, or an empty `$ROOT`. Use
+   `find … -print0 | xargs -0`. Never `rm -rf` an interpolated path without printing
+   and pausing.
+6. Save a timestamped manifest of everything scheduled for deletion (plus stdout) to an
+   audit folder such as `scripts/probe_scan_output/`. Prefer quarantine-then-delete over
+   direct hard deletes.
+7. Repo scripts that match-and-delete need positive and negative fixtures proving the
+   matcher is literal, and CI should fail if a pattern change unexpectedly widens matches.
