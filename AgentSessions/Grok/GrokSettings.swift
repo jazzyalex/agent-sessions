@@ -125,7 +125,12 @@ final class GrokSettings: ObservableObject {
     private func validatedCachedResolvedBinaryPath() -> String? {
         let cached = resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cached.isEmpty else { return nil }
-        if FileManager.default.isExecutableFile(atPath: cached) {
+        // A Grok build that supports neither --resume nor --continue does not
+        // exist; such a cache entry comes from a probe that could not execute
+        // the CLI at all. Keeping it silently disables every resume action
+        // forever, because the cache is only refreshed while the path is empty.
+        let advertisesNothing = !resolvedSupportsResume && !resolvedSupportsContinue
+        if FileManager.default.isExecutableFile(atPath: cached), !advertisesNothing {
             return cached
         }
         setResolvedBinaryPath(nil)

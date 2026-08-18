@@ -536,6 +536,7 @@
 		F2B4B7640DFFB2F641D497EA /* AntigravityResumeTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CD97A89CCCDCA326CCE023 /* AntigravityResumeTypes.swift */; };
 		F2C6B688E1EC6DFAD5F87726 /* SessionArchiveManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE3BFABDF39A35915C5DDCAA /* SessionArchiveManager.swift */; };
 		F320DB131F3AA4BDB9F8FD49 /* CLIProbeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CC9BECC80C54D4500149F5 /* CLIProbeEnvironment.swift */; };
+		F45672A8C39AB2B3BABA8858 /* GrokCLIEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2796283509C773BB935C56 /* GrokCLIEnvironmentTests.swift */; };
 		F45D0033901B8FEE986C0D59 /* FilterEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495C9F72C10641EC9FE0B216 /* FilterEngine.swift */; };
 		F5FC8F57E63FF30506CE3A67 /* ClaudeCloudError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 090D431165D2F15F77A07A65 /* ClaudeCloudError.swift */; };
 		F7079DCFE7E6447F920DBF84 /* CodexResumeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85CE64F2E8C4DCFAFF1B93C /* CodexResumeTests.swift */; };
@@ -1014,6 +1015,7 @@
 		CA7C1756682652197ECE7DC2 /* PiResumeCommandBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/PiResumeCommandBuilderTests.swift; sourceTree = SOURCE_ROOT; };
 		CB280BE020BB9F72E43A5F6E /* AntigravityResumeCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/AntigravityResume/AntigravityResumeCoordinator.swift; sourceTree = SOURCE_ROOT; };
 		CD1C31E4CE17DF6E4A170FD4 /* AuthStatusNotifierTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/AuthStatusNotifierTests.swift; sourceTree = SOURCE_ROOT; };
+		CD2796283509C773BB935C56 /* GrokCLIEnvironmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/GrokCLIEnvironmentTests.swift; sourceTree = SOURCE_ROOT; };
 		CD76AE362A94366A989622FA /* ResumePreferenceHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Resume/ResumePreferenceHelpers.swift; sourceTree = SOURCE_ROOT; };
 		CDA913FF55A1E3CE8A9586FF /* TerminalModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalModels.swift; path = AgentSessions/Services/TerminalModels.swift; sourceTree = SOURCE_ROOT; };
 		CF23433C19A198F51A627A65 /* OpenCodeSessionDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = OpenCodeSessionDiscovery.swift; path = AgentSessions/Services/OpenCodeSessionDiscovery.swift; sourceTree = SOURCE_ROOT; };
@@ -1845,6 +1847,7 @@
 				19B5E6EA5315CCCDA3D7250D /* OnboardingContributeCardTests.swift */,
 				25151786F954C6F7EDFBA7E5 /* PiSettingsTests.swift */,
 				C91B6EAA5FE64FC74099E249 /* CommandExecutorTests.swift */,
+				CD2796283509C773BB935C56 /* GrokCLIEnvironmentTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -3052,6 +3055,7 @@
 				9E1E38E4F0BD0822F36913E7 /* OnboardingContributeCardTests.swift in Sources */,
 				86DBE1CAFA09070E00C67654 /* PiSettingsTests.swift in Sources */,
 				5D837CC1F0263B6743122405 /* CommandExecutorTests.swift in Sources */,
+				F45672A8C39AB2B3BABA8858 /* GrokCLIEnvironmentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

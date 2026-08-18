@@ -46,9 +46,11 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
     }
 
     private let executor: CommandExecuting
+    private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
         self.executor = executor
+        self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
     func resolveBinary(customPath: String?) -> URL? {
@@ -65,7 +67,7 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         // was returned as a fallback before `~/.grok/bin` was ever examined,
         // permanently masking a real CLI installed there.
         let candidates: [String] = [
-            whichViaLoginShell(Self.binaryName),
+            probeEnv.loginShellExecutablePath(),
             which(Self.binaryName),
             "\(home)/.grok/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
@@ -83,7 +85,7 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         }
 
         do {
-            let versionRes = try executor.run([binary.path, "--version"], cwd: nil)
+            let versionRes = try runCLI(binary, "--version")
             let versionString: String
             if versionRes.exitCode == 0 {
                 let combined = [versionRes.stdout, versionRes.stderr]
@@ -94,22 +96,45 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
                 versionString = "unknown"
             }
 
-            let helpRes = try? executor.run([binary.path, "--help"], cwd: nil)
+            let helpRes = try? runCLI(binary, "--help")
             let helpOut = [helpRes?.stdout, helpRes?.stderr]
                 .compactMap { $0 }
                 .joined(separator: "\n")
+
+            let supportsResume = helpContainsFlag("--resume", in: helpOut)
+            let supportsContinue = helpContainsFlag("--continue", in: helpOut)
+
+            // A probe that never ran is not evidence that Grok lacks resume
+            // flags. A Grok that actually ran exits 0 for at least one of
+            // --version/--help, or prints a flag we recognise; anything else
+            // means we learned nothing, and calling that "supports nothing"
+            // silently disables every resume action.
+            let learnedNothing = !supportsResume && !supportsContinue
+            if versionRes.exitCode != 0, (helpRes?.exitCode ?? 127) != 0, learnedNothing {
+                let reason = [versionRes.stderr, helpRes?.stderr]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty } ?? ""
+                return .failure(.commandFailed(reason))
+            }
 
             return .success(
                 ProbeResult(
                     versionString: versionString,
                     binaryURL: binary,
-                    supportsResume: helpContainsFlag("--resume", in: helpOut),
-                    supportsContinue: helpContainsFlag("--continue", in: helpOut)
+                    supportsResume: supportsResume,
+                    supportsContinue: supportsContinue
                 )
             )
         } catch {
             return .failure(.commandFailed(error.localizedDescription))
         }
+    }
+
+    /// Every invocation of the CLI goes through here so the child always gets a
+    /// PATH the user would actually have, rather than the stunted one a
+    /// Finder-launched app inherits.
+    private func runCLI(_ binary: URL, _ argument: String) throws -> CommandResult {
+        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
     }
 
     private func which(_ command: String) -> String? {
@@ -121,18 +146,6 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         return nil
     }
 
-    private func whichViaLoginShell(_ command: String) -> String? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        do {
-            let result = try executor.run([shell, "-lic", "command -v \(command) || true"], cwd: nil)
-            let res = [result.stdout, result.stderr].joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !res.isEmpty, res != command else { return nil }
-            return res.split(whereSeparator: { $0.isNewline }).first.map(String.init)
-        } catch {
-            return nil
-        }
-    }
 
     private func bestGrokCLI(from paths: [String]) -> URL? {
         var firstExecutable: URL?
@@ -154,7 +167,7 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
     }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? executor.run([binary.path, "--help"], cwd: nil)
+        let help = try? runCLI(binary, "--help")
         let helpOut = [help?.stdout, help?.stderr]
             .compactMap { $0 }
             .joined(separator: "\n")

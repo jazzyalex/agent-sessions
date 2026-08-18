@@ -679,37 +679,6 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ## Resume / Terminal Launch
 
-### Finder-PATH / poison-cache hole remains for Grok
-> **open** · sev: low · urg: low · verified 2026-08-18
-
-- **What:** #58 fixed Pi resume when the app is launched from Finder: probes now run
-  with a login-shell PATH, a probe that never executed is a failure not a
-  "supports nothing" result, and a cached "supports nothing" binary is discarded.
-  Kimi and Qwen were brought onto the same helper on 2026-08-18. Grok still does
-  all three the old way.
-- **Where:** [GrokCLIEnvironment.swift](../AgentSessions/Grok/GrokCLIEnvironment.swift)
-  still probes with `executor.run(..., cwd: nil)` under the Finder PATH, and
-  [GrokSettings.swift](../AgentSessions/Grok/GrokSettings.swift) still trusts a
-  capability-free cache entry. Reference implementations:
-  [PiCLIEnvironment.swift](../AgentSessions/Pi/PiCLIEnvironment.swift),
-  [KimiCLIEnvironment.swift](../AgentSessions/Kimi/KimiCLIEnvironment.swift).
-- **Lower severity than Pi/Kimi/Qwen:** the `grok` on this machine is a native
-  Mach-O binary, not an `env node` script, so the shebang failure that triggered
-  #58 does not apply to that build. The poison-cache half still does, and a
-  Node-packaged Grok would hit both.
-- **Out of scope on purpose:** Hermes already probes through `zsh -lic`. Cursor's
-  copy plan falls through to `"agent"` instead of returning nil, so it degrades
-  less badly. Do not drag those two in unless a real report says they fail.
-- **Fix shape:** point `GrokCLIEnvironment` at `CLIProbeEnvironment`, apply the
-  "learned nothing" failure rule, and discard a cached binary that advertises no
-  capabilities. Same tests as `KimiCLIEnvironmentTests`.
-- **Risk if wrong:** a Finder-launched Grok user whose CLI is Node-packaged hits
-  the silent Copy Resume Command failure Pi had, and a poisoned cache survives
-  until they clear Settings.
-- **To close:** Grok probes under `CLIProbeEnvironment.probeEnvironment()`, treats
-  a non-executing probe as failure, and drops a no-capabilities cache entry.
-  Focused tests green.
-
 ### `runAppleScript` blocks the main thread for the Terminal / iTerm path
 > **open** · sev: low · urg: low · verified 2026-08-04
 
