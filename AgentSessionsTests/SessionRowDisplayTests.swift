@@ -199,11 +199,12 @@ final class SessionRowDisplayTests: XCTestCase {
     }
 
     func testApplyingLiveClaudeArchiveStateNoOpForSideChatSession() {
-        // A side-chat session's surfacePills also short-circuits to a bare
-        // [.standard(label: "desk", ...)] pill (before claudeDesktopSurfacePill
-        // is ever consulted) -- label/isArchived-identical to an unarchived
-        // Claude Desktop pill, but must never be promoted to an archived
-        // Desktop pill by the live-patch.
+        // A side-chat session's surfacePills short-circuits to a bare
+        // [.standard(label: "side", ...)] pill before claudeDesktopSurfacePill
+        // is ever consulted, and must never be promoted to an archived Desktop
+        // pill by the live-patch. The label used to be "desk", which made it
+        // isArchived- and label-identical to an unarchived Claude Desktop pill;
+        // that collision is gone, and the no-promotion guard still has to hold.
         let s = Session(
             id: "side-chat-1",
             source: .claude,
@@ -221,7 +222,7 @@ final class SessionRowDisplayTests: XCTestCase {
         )
         XCTAssertTrue(s.isSideChat)
         let staticPills = UnifiedSessionsView.staticSurfacePills(for: s)
-        XCTAssertEqual(staticPills.map(\.label), ["desk"])
+        XCTAssertEqual(staticPills.map(\.label), ["side"])
         XCTAssertEqual(staticPills.map(\.isArchived), [false])
 
         let patched = UnifiedSessionsView.applyingLiveClaudeArchiveState(
@@ -500,4 +501,34 @@ final class SessionRowDisplayTests: XCTestCase {
         let s = makeCodexSession(cwd: Self.codexWorkCwd)
         XCTAssertEqual(UnifiedSessionsView.surfacePills(for: s).map(\.label), ["work"])
     }
+    /// A side conversation is reconstructed from a log database every Codex
+    /// surface writes to, CLI `/side` included, so the row must not claim
+    /// Desktop. The relationship IS known, and "side" is what the transcript
+    /// view has always called it.
+    func testSideChatRowIsLabelledSideRatherThanDesktop() {
+        let sideChat = Session(
+            id: "codex-side-chat-abc",
+            source: .codex,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/codex/side-chat/abc",
+            fileSizeBytes: 1,
+            eventCount: 1,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil,
+            relationshipKind: .sideChat,
+            codexOriginator: "Codex Desktop",
+            codexSurface: .desktop
+        )
+
+        let pills = UnifiedSessionsView.surfacePills(for: sideChat)
+
+        XCTAssertEqual(pills.map(\.label), ["side"])
+        XCTAssertTrue(sideChat.isCodexDesktopSession,
+                      "the stored surface stays Desktop on purpose: project grouping reads it")
+    }
+
 }

@@ -330,7 +330,20 @@ enum SessionRowsBuilder {
 
     static func surfacePills(for session: Session, isClaudeArchived: Bool = false) -> [UnifiedSessionsView.CodexSurfacePill] {
         if session.isSideChat {
-            return [.standard(label: "desk", accessibilityLabel: "Desktop")]
+            // "side", not "desk". A side conversation is reconstructed from
+            // `~/.codex/sqlite/logs_*.sqlite`, which every Codex surface writes
+            // to -- CLI `/side` included -- so calling it Desktop asserts a
+            // provenance nothing in the record establishes. The relationship
+            // kind IS established, and it is what the transcript view has always
+            // shown for these (`transcriptSessionRelationshipLabel`).
+            //
+            // Only the label moves. `CodexSideChatLogReader` still stamps
+            // surface/originator Desktop because those fields are load-bearing
+            // elsewhere -- `CodexDesktopProjectClassifier` groups these rows
+            // under "Codex Desktop Chats", and Desktop cwd worktree heuristics
+            // key off the same predicate. Correcting the data needs the paired
+            // CLI/Desktop probes tracked in the backlog, not a nulled field.
+            return [.standard(label: "side", accessibilityLabel: "Side chat")]
         }
         if let claudeDesktopPill = claudeDesktopSurfacePill(for: session, isArchived: isClaudeArchived) {
             return [claudeDesktopPill]

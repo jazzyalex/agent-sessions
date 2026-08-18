@@ -409,6 +409,13 @@ enum CodexSideChatLogReader {
             codexInternalSessionIDHint: threadID,
             parentSessionID: request.parentThreadID,
             relationshipKind: .sideChat,
+            // Not evidence: every Codex surface writes side conversations to the
+            // same log database, so this says "Desktop" about CLI `/side` chats
+            // too. It stays only because `CodexDesktopProjectClassifier` and the
+            // Desktop cwd worktree heuristics read it -- nulling it here scatters
+            // these rows out of "Codex Desktop Chats". The row label no longer
+            // repeats the claim (`SessionRowsBuilder.surfacePills` shows "side").
+            // Deriving a real surface needs the paired probes in the backlog.
             codexOriginator: "Codex Desktop",
             codexSource: "side_chat",
             codexSurface: .desktop,

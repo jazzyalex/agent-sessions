@@ -47,81 +47,97 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Cross-Surface Session Storage
 
-### Audit and support distinct CLI, Desktop, IDE, and side-session stores
-> **open** · sev: med · urg: low · verified —
+### Cursor Desktop conversations are never discovered
+> **open** · sev: med · urg: low · verified 2026-08-18
 
-- **Scope:** local session persistence only. Cloud sync, vendor backends, and remote
-  account history are explicitly out of scope.
-- **Why this exists:** sharing a CLI, SDK, or base event model does not prove that two
-  product surfaces write the same local record. A surface can use a different root,
-  companion database, sidecar metadata, event vocabulary, or retention path even when
-  its primary transcript remains JSONL.
-- **Confirmed Claude split:** standard transcripts are discovered under
-  `~/.claude/projects`; Desktop Code metadata also lives under
-  `~/Library/Application Support/Claude/claude-code-sessions`; Cowork/local-agent
-  transcripts live in nested `.claude/projects` trees under
-  `~/Library/Application Support/Claude/local-agent-mode-sessions`. The current reader
-  already scans these roots, but coverage, joins, and duplicate handling have not been
-  certified as one cross-surface contract.
-- **Confirmed Codex split:** normal CLI, Desktop, IDE, and subagent rollouts share
-  `~/.codex/sessions`, while side conversations are reconstructed from
-  `~/.codex/sqlite/logs_*.sqlite`. `/side` is also available in current Codex CLI, but
-  `CodexSideChatLogReader` currently labels every reconstructed side conversation as
-  Codex Desktop.
-- **Confirmed Cursor split:** the current Cursor reader covers
-  `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` and
-  `~/.cursor/chats/**/store.db`. Cursor Desktop also has conversation/composer records
-  in `~/Library/Application Support/Cursor/User/**/state.vscdb`; that artifact family is
-  not currently discovered. Some modern Desktop agent windows may also write the
-  `~/.cursor` stores, so the work must classify artifacts from controlled sessions
-  rather than assign every path to one surface by assumption.
+- **What:** the Cursor reader covers `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`
+  and `~/.cursor/chats/**/store.db`. Cursor Desktop also stores conversations in
+  VS Code-style `state.vscdb` databases under
+  `~/Library/Application Support/Cursor/User/` — `globalStorage/state.vscdb` plus one per
+  workspace under `workspaceStorage/*/`. Nothing in the codebase mentions `vscdb`, so
+  none of it is discovered. This is missing data, not a wrong label: sessions the user
+  has that the app cannot show at all.
+- **Measured 2026-08-18:** `globalStorage/state.vscdb` on the owner's machine holds
+  **183 `composerData%` rows** in `cursorDiskKV`, alongside an `ItemTable`, with further
+  per-workspace databases untouched. `grep -rn vscdb AgentSessions/` returns nothing.
+- **Why this is not just "add a reader":** some modern Cursor Desktop agent windows may
+  also write the `~/.cursor` stores, so path alone cannot say which surface produced a
+  conversation. Assigning every `state.vscdb` record to "Desktop" would repeat the
+  mistake already sitting in the Codex side-chat reader (see its own entry).
+- **Investigation first:** run controlled Cursor sessions — one Desktop chat, one Desktop
+  agent window, one IDE-pane session — recording every file created or changed *before*
+  interpreting any schema. Establish which modes write `state.vscdb`, which write the
+  `~/.cursor` pair, and whether an ID joins the two families.
+- **Then:** document the `ItemTable` / `cursorDiskKV` records needed to reconstruct a
+  conversation, add discovery and parsing for the proven families, and deduplicate
+  deterministically against any matching `~/.cursor` session. Database access stays
+  read-only and bounded; never depend on vendor UI state or a network call.
+- **Risk if wrong:** double-counted sessions if the join is guessed, or a silent Desktop
+  label on IDE-produced records.
+- **To close:** sanitized fixtures per artifact family (including duplicate-ID and
+  missing-companion cases), discovery tests proving each root is found independently,
+  parser tests for joins and deduplication, and a coverage report listing discovered vs
+  unparsed families so a new vendor path cannot disappear silently.
 
-#### Investigation work
-- Build a versioned storage matrix with one row per harness surface and columns for
-  primary root, companion roots, physical format, stable session ID, surface marker,
-  project/task identity, archive path, and retention behavior.
-- Run paired, minimal local probes for CLI and Desktop using the same task. Record all
-  files created or changed before interpreting their schemas. Include one ordinary
-  session and one side/fork/subagent session where the surface supports it.
-- For Codex, compare CLI `/side` with Desktop side conversations and determine whether
-  both use the same log database records, whether either produces a rollout, and which
-  structural field can identify the originating surface. Do not infer the surface from
-  the location of the shared database.
-- For Claude, test standard CLI, Desktop Code, and Cowork independently. Verify the
-  transcript-to-sidecar join, missing-sidecar behavior, duplicate discovery across
-  roots, surface-specific record types, and project/task attribution.
-- For Cursor, identify which Desktop modes write `state.vscdb`, which write the
-  `~/.cursor` JSONL/`store.db` pair, and whether IDs can join the two families. Document
-  the `ItemTable` and `cursorDiskKV` records needed to reconstruct a conversation before
-  adding a reader.
+### Claude cross-root joins and deduplication were never certified
+> **open** · sev: low · urg: low · verified 2026-08-18
 
-#### Parser work after the probes
-- Remove the hard-coded Codex Desktop classification from reconstructed side sessions;
-  derive a surface only from recorded evidence and use an explicit unknown value when
-  the artifact does not identify it.
-- Add Cursor Desktop discovery and parsing for the proven `state.vscdb` conversation
-  families, with deterministic deduplication against any matching `~/.cursor` session.
-- Harden Claude cross-root identity and deduplication so a transcript plus Desktop
-  sidecar becomes one session, while Cowork sessions remain independently discoverable
+- **What:** Claude writes to three roots — standard transcripts under
+  `~/.claude/projects`, Desktop Code metadata under
+  `~/Library/Application Support/Claude/claude-code-sessions`, and Cowork/local-agent
+  transcripts in nested `.claude/projects` trees under
+  `~/Library/Application Support/Claude/local-agent-mode-sessions`. All three are
+  scanned. What has never been certified is the contract *between* them: whether a
+  transcript plus its Desktop sidecar reliably becomes one session, what happens when
+  the sidecar is missing, and whether a Cowork session stays independently discoverable
   when the standard root is absent.
-- Preserve artifact provenance on every parsed session: surface, primary artifact,
-  companion artifacts, join key, and whether any expected component was missing.
-- Keep all database access read-only and bounded; never depend on vendor UI state or a
-  network/backend request to enumerate local history.
+- **Where:** `ClaudeSessionIndexer` already repairs surface and originator for sessions
+  that arrive without them
+  ([:671](../AgentSessions/Services/ClaudeSessionIndexer.swift:671)), which is the
+  join working case-by-case rather than by a stated rule. `Session.claudeArchiveJoinKey`
+  is the filename-UUID join used for the archive sidecar.
+- **Why it matters less than the Cursor gap:** nothing is known to be missing or
+  mislabelled today. The risk is a duplicate row or a dropped sidecar under
+  combinations nobody has exercised — a correctness question without a reported symptom.
+- **Investigation:** test standard CLI, Desktop Code and Cowork independently with the
+  same task. Verify the transcript-to-sidecar join, missing-sidecar behavior, duplicate
+  discovery across roots, surface-specific record types, and project/task attribution.
+- **To close:** fixtures for each root including a missing-companion and a duplicate-ID
+  case; tests proving one session results from a transcript plus sidecar, and that a
+  Cowork session survives with no standard-root counterpart.
 
-#### Acceptance evidence
-- Commit sanitized fixtures for every physically distinct artifact family, including
-  missing-companion and duplicate-ID cases.
-- Add discovery tests proving that each supported root is found independently.
-- Add parser tests for surface classification, stable joins, project/task attribution,
-  side-session recovery, and deterministic deduplication.
-- Add a local coverage report that lists discovered and unparsed artifact families so a
-  new vendor storage path cannot silently disappear from the product.
-- Re-run the same probes after vendor upgrades and record format drift per surface, not
-  only per harness name.
-- **Why deferred:** this needs controlled sessions and fixture sanitization before parser
-  changes. Implementing from the current live databases alone would bake uncertain
-  surface attribution into production code.
+### Codex side chats still carry a Desktop surface nothing established
+> **open** · sev: low · urg: low · verified 2026-08-18
+
+- **What:** side conversations are reconstructed from `~/.codex/sqlite/logs_*.sqlite`,
+  which every Codex surface writes to — CLI `/side` included — yet
+  [CodexSideChatLogReader.swift:412](../AgentSessions/Services/CodexSideChatLogReader.swift:412)
+  stamps `codexOriginator`/`originator` "Codex Desktop" and `codexSurface`/`surface`
+  `.desktop` on all of them.
+- **Half fixed 2026-08-18:** the row no longer repeats the claim. `surfacePills` used to
+  short-circuit side chats to a "desk" pill; it now shows "side", matching what the
+  transcript view has always called them
+  ([SessionRowsBuilder.swift:332](../AgentSessions/Services/SessionRowsBuilder.swift:332)).
+  Pinned by `testSideChatRowIsLabelledSideRatherThanDesktop`.
+- **Why the data was left alone — read this before "just nulling the field":** those
+  fields are load-bearing. `CodexDesktopProjectClassifier.projectNameOverride`
+  ([Session.swift:1217](../AgentSessions/Model/Session.swift:1217)) gates on
+  `isCodexDesktopSession` to group these rows under "Codex Desktop Chats", and the
+  Desktop cwd worktree heuristics
+  ([Session.swift:1349](../AgentSessions/Model/Session.swift:1349)) key off the same
+  predicate. Nulling the surface scatters side chats out of their project grouping and
+  changes cwd resolution — a bigger, less obvious regression than the label it fixes.
+- **Real fix:** compare CLI `/side` against Desktop side conversations and find the
+  structural field that identifies the originating surface. Do not infer it from the
+  location of the shared database. Then derive the surface from that evidence, use an
+  explicit unknown when the record does not say, and give the project grouping its own
+  predicate instead of borrowing the Desktop one.
+- **Constraint to re-confirm first:** DB-hydrated sessions have been observed carrying
+  NULL surface metadata, with hydration never re-parsing it. Any rule that reads
+  `surface` must survive hydration or it will work on first index and fail afterwards.
+- **To close:** surface derived from recorded evidence with an explicit unknown value,
+  project grouping no longer dependent on a fabricated Desktop marker, and fixtures for
+  a CLI-originated and a Desktop-originated side conversation.
 
 ---
 
