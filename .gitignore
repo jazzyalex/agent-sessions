@@ -105,3 +105,6 @@ tools/triage/state.json
 
 # weekly agent-format drift scan launchd logs
 tools/agent-watch/out/
+
+# Local page mockups — built to preview before touching the real site
+docs/_preview/
