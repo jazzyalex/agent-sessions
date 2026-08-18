@@ -25,7 +25,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v4.8/AgentSessions-4.8.dmg"><b>Download Agent Sessions 4.8 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0/AgentSessions-5.0.dmg"><b>Download Agent Sessions 5.0 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -36,7 +36,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
   <a href="#development">Development</a>
 </p>
 
-> **New in 4.8** — Grok CLI joins as the eleventh current agent source, Analytics counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi and Pi. [See what's new ↓](#whats-new-in-48)
+> **New in 5.0** — agents are now plug-in adapters, Qwen Code joins as the thirteenth source, and adding the agent you use is a documented recipe (26 shared files before, 12 now). [See what's new ↓](#whats-new-in-50)
 
 ## Overview
 
@@ -78,18 +78,40 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 4.8
+## What's New in 5.0
 
-**TL;DR** - Grok CLI is the eleventh current agent source Agent Sessions reads, Analytics finally counts every agent you have enabled instead of a hand-written subset, and an unrelated binary earlier in your PATH no longer masks the real CLI for Cursor, Kimi and Pi.
+**TL;DR** - Agents are now plug-in adapters instead of hand wiring across every surface,
+which is why this release is 5.0. Qwen Code joins as the thirteenth source, and adding a
+fourteenth is a documented recipe: 26 shared-file edits before, 12 now, each one listed.
 
-New in 4.8:
-- **Grok CLI, the eleventh current agent source** — sessions in the list, in search, in Analytics and in the Image Browser, with tool calls, reasoning and assistant output in the transcript, a toolbar filter pill, Copy Resume Command and terminal resume. Subagent runs nest under the session that spawned them, which `grok sessions list` does not show at all. It switches itself on when Grok CLI is on your Mac.
-- **Analytics counts every agent** — the rollup ran on a hand-written list, and Cursor and OpenClaw were never on it, so their sessions contributed nothing to any total, chart or project breakdown and nothing said so. Analytics now derives from the full set of sources, and Cursor gains the agent-picker entry it never had.
-- **The right CLI wins the PATH race** — Cursor, Kimi and Pi returned the first executable they found even when it did not advertise the flags the CLI needs, so a same-named binary earlier in PATH permanently masked the real install, reported its version as the agent's, and refused resume outright.
-- **The Image Browser credits the right prompt** — agents inject housekeeping blocks as if they were your messages, and the browser filed an image under that scaffolding while the transcript filed it under the real prompt. Both now agree.
-- **"Live sessions only" includes Claude Desktop chats** — Claude Desktop has no terminal process for the usual live probes to find, so the filter could hide running chats the Quota Meter could already see.
+New in 5.0:
+- **Plug-in adapters for every agent** — the session list, search, the filter pills,
+  Analytics, the Settings panes and the launch state each carried their own hand-written
+  list of agents, so an agent could appear in one and be quietly missing from another.
+  They all derive from a single source description now. Switching an agent off reaches
+  every surface at once, and adding an agent is a documented, tested recipe rather than
+  fourteen scattered edits.
+- **Qwen Code, the thirteenth agent source** — local JSONL chats in browsing, search,
+  filtering, Analytics and the transcript view, with reasoning and tool activity, rewound
+  branches reconstructed along the active parent chain, and Settings controls for binary
+  and storage root. Active chats offer `--resume`; archived histories stay browse-only.
+  Format verified against real 0.14.3 transcripts.
+- **Add the agent you use** — a proposal form, an implementation brief you can hand to
+  your own coding agent, and a PR template, surfaced once from inside the app by a
+  dismissible card. Shipped agents can pick up a steward who keeps their format verified
+  as the CLI moves.
+- **The agent switches reach everywhere** — disabled agents no longer surface in
+  filter-view search results, Kimi and Grok report when their loading has finished, and
+  OpenClaw stops marking Analytics out of date on every launch.
+- **OpenCode and Hermes transcripts are searchable** — both store sessions in SQLite
+  behind one shared file path, and search ingest could not tell their sessions apart, so
+  their transcript text was never indexed.
 
-**Recent releases** — 4.7: Kimi Code joins as the tenth current agent source, and active Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit retired, leaving the Quota Meter as the only mode. 4.6.3: the footer usage meters can finally be switched off. 4.6: paste-a-cookie Claude web usage, no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
+**Recent releases** — 4.8: Grok CLI joins as the eleventh agent source, and Analytics
+counts every agent you have enabled. 4.7: Kimi Code joins as the tenth source, and active
+Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit
+retired, leaving the Quota Meter as the only mode. 4.6: paste-a-cookie Claude web usage,
+no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELOG.md).
 
 ## Core Features
 
@@ -181,7 +203,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-4.8.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v4.8/AgentSessions-4.8.dmg)
+1. [Download AgentSessions-5.0.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.0/AgentSessions-5.0.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

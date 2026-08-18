@@ -225,7 +225,7 @@ final class WhatsNewCatalogTests: XCTestCase {
     func testAuthoredHighlightsLeadProviderAndSupportRowsIn50() {
         let items = WhatsNewCatalog.assemble(for: "5.0")
         XCTAssertEqual(items.map(\.title), [
-            "One foundation under every agent",
+            "Agents are plug-in adapters now",
             "Add the agent you use",
             "The agent switches reach everywhere",
             "New: Qwen Code",
