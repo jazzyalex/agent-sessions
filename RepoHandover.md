@@ -1,3 +1,20 @@
+## 2026-08-17 20:13 · release-5.0 · 5.0 shipped: adapter architecture, Qwen, steward program
+status: done
+
+**State:** 5.0 live and verified (`deploy verify 5.0`: 0 errors/warnings) — GitHub release v5.0 (build 68), appcast, Homebrew. Suite at ship: 2093 + 186 script tests, 0 failures. Headline: agents are plug-in adapters (26→12 shared-file edits per new agent, measured on PR #56); Qwen Code is the thirteenth source (verified vs 0.14.3 transcripts — 0.21.x needs a paid Qwen plan); contribute-an-agent card + steward program shipped.
+
+**Decided / don't redo:**
+- Steward (not "maintainer") = per-agent format re-verifier; STEWARDS.md is the record, `./scripts/steward_check.py <agent>` is the one command (redacted sample, withheld on any leak-scan hit). Labels `steward`/`steward-wanted` exist; the prepared pinned issue (docs/superpowers/plans/2026-08-17-stewards-wanted-ISSUE.md) is NOT posted — owner said skip for now.
+- Invitations posted: issue #57 (Grok Build, rodion-m) and PR #56 (Devin, thedavidweng) — contribute-or-steward, both link the guide.
+- Grok parser is dictionary-tolerant now (last Codable gone); contribute card: full body always visible, statement titles everywhere ("Leave a star if this helps", "Help make Agent Sessions better", "Help add your agent").
+- Release copy leads with the adapter architecture, never "shared foundation"; pre-release fixes stayed folded per the 4.8 rule.
+
+**Next:**
+1. Manual post-release checks only the owner can do: Sparkle auto-update from 4.8, clean-machine Gatekeeper, `brew upgrade agent-sessions`.
+2. Watch #57/#56 replies; post the stewards-wanted issue when ready.
+3. Steward program Track 3 (site tier badges + become-a-steward page) and the 5.0 launch post — Marketing/STATUS.md first.
+4. Backlog: "Registry program follow-ups" entry (6 items) + preserved-behavior rulings; Qwen paid-plan decision for 0.21.x verification.
+
 ## 2026-08-16 20:28 · session-source-registry · Registry program complete, approved for owner QA
 status: done
 
