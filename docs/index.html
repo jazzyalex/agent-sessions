@@ -6,9 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Agent Sessions - Live Per-Session Quota Burn for Codex and Claude on macOS</title>
   <meta name="description"
-    content="See which agent session is eating your Codex and Claude 5-hour and weekly limits. Agent Sessions shows live per-session burn rate, priced per model, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended. Plus searchable local history across Codex, Claude, Cursor Agent, OpenCode, Hermes, OpenClaw, Antigravity, Copilot, Pi, Kimi Code, and Grok CLI. macOS, local-only, no telemetry. Version 5.0 makes every agent a plug-in adapter, adds Qwen Code as the thirteenth source, and opens a documented path to add the agent you use." />
+    content="See which agent session is eating your Codex and Claude 5-hour and weekly limits. Agent Sessions shows live per-session burn rate, priced per model, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended. Plus searchable local history across Codex, Claude, Cursor Agent, OpenCode, Hermes, OpenClaw, Antigravity, Copilot, Pi, Kimi Code, Grok CLI, and Qwen Code. macOS, local-only, no telemetry. Version 5.0 makes every agent a plug-in adapter, adds Qwen Code as the thirteenth source, and opens a documented path to add the agent you use." />
   <meta name="keywords"
-    content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Cursor Agent history, Cursor agent transcripts, Hermes state.db, Hermes Agent sessions, OpenClaw sessions, OpenClaw JSONL, AI coding agent history, local session browser, Claude Desktop, OpenCode SQLite, Antigravity CLI, GitHub Copilot CLI, macOS agent history" />
+    content="Codex history, Codex CLI sessions, Codex Desktop sessions, Codex VS Code sessions, Cursor Agent history, Cursor agent transcripts, Hermes state.db, Hermes Agent sessions, OpenClaw sessions, OpenClaw JSONL, AI coding agent history, local session browser, Claude Desktop, OpenCode SQLite, Antigravity CLI, GitHub Copilot CLI, Kimi Code history, Grok CLI history, Qwen Code history, macOS agent history" />
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jazzyalex.github.io/agent-sessions/">
   <meta property="og:title" content="Three agents running. One is eating your week.">
@@ -209,6 +209,11 @@
       text-align: left;
       box-shadow: var(--shadow-card);
     }
+    .hero .sub-2 {
+      display: inline-block;
+      margin-top: 10px;
+      color: var(--ink-2);
+    }
     .brew .prompt { color: var(--blue); user-select: none; }
     .brew code { color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -285,44 +290,42 @@
     }
 
     /* ---------- Agents marquee ---------- */
-    .agents {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-      margin-top: 40px;
-    }
-    .agents-row {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
+    /* ---------- Supported agents table ---------- */
+    #features .band-head { text-align: left; margin-bottom: 0; }
+    #features .band-head h2 { max-width: 18ch; }
+    #features .band-head p { margin-left: 0; margin-right: 0; max-width: 62ch; }
+
+    .support {
       width: 100%;
+      border-collapse: collapse;
+      margin-top: 34px;
     }
-    .agents-row.leads { flex-wrap: nowrap; }
-    .chip {
-      display: inline-flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1px;
-      padding: 9px 16px;
-      border-radius: 16px;
-      border: 1px solid var(--hair-strong);
-      background: var(--bg-elev);
-      color: var(--ink);
-      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-      transition: border-color .2s ease, transform .2s ease;
-    }
-    .chip:hover { transform: translateY(-2px); border-color: var(--blue); }
-    .chip b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-    .chip span {
-      font-size: 10.5px; font-weight: 600;
+    .support th, .support td { text-align: left; padding: 9px 10px; vertical-align: baseline; }
+    .support thead th {
+      font: 600 11px/1 var(--font);
+      letter-spacing: 0.07em; text-transform: uppercase;
       color: var(--ink-3);
-      text-transform: uppercase; letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--hair-strong);
+      padding-bottom: 9px;
     }
-    .chip.lead b { color: var(--blue); }
-    .chip.plain { padding: 9px 16px 8px; }
-    .chip.plain b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .support tbody tr { border-bottom: 1px solid var(--hair); }
+    .support tbody tr:last-child { border-bottom: 0; }
+    .support td.name { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; width: 30%; }
+    .support td.name em { font-style: normal; font-weight: 400; font-size: 12px; color: var(--blue); margin-left: 7px; }
+    .support td.surf { color: var(--ink-2); font-size: 14px; width: 28%; }
+    .support td.cap { font-size: 14px; color: var(--ink-2); width: 21%; }
+    .support .yes { color: var(--blue); font-weight: 600; }
+    .support .dash { color: var(--ink-3); opacity: 0.55; }
+    .support tr.primary td.name { color: var(--blue); }
+    .support tr.addrow td { padding-top: 15px; }
+    .support tr.addrow a { color: var(--blue); text-decoration: none; font-weight: 600; }
+    .support tr.addrow a:hover { text-decoration: underline; }
+    .support-note { margin-top: 14px; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+    @media (max-width: 760px) {
+      .support .colhide { display: none; }
+      .support td.name { width: auto; }
+      .support td.surf { width: auto; }
+    }
 
     /* ---------- Feature grid ---------- */
     .grid {
@@ -460,8 +463,8 @@
   <a id="top"></a>
   <header class="hero">
     <p class="eyebrow">macOS · Open Source · Local-first</p>
-    <h1>Three agents running. One is eating your week.</h1>
-    <p class="sub">Live burn rate <b>per session</b> against your Codex and Claude 5-hour and weekly limits — priced per model, so an Opus orchestrator driving Sonnet subagents shows what each actually costs.<br>Plus searchable history across every agent you run.</p>
+    <h1>Thirteen agents. One searchable history.</h1>
+    <p class="sub">Codex, Claude, Cursor and ten more write sessions to your Mac all day. Agent Sessions reads every one of them — full-text search, transcripts with tool calls and images, and a resume command that puts you back in the CLI you left.<br><span class="sub-2"><b>Codex and Claude also get a burn meter:</b> live per-session rate against your 5-hour and weekly limits, priced per model.</span></p>
     <div class="cta-row">
       <a class="btn primary" href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0/AgentSessions-5.0.dmg">Download Agent Sessions 5.0</a>
       <a class="btn ghost" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
@@ -490,28 +493,34 @@
   <section class="band" id="features">
     <div class="band-head">
       <h2>One window for every agent's memory.</h2>
-      <p>Desktop apps and CLI tools side by side — surfaced with source-specific labels and clear project context.</p>
-      <p><b>New in 5.0:</b> agents are plug-in adapters, Qwen Code joins as the thirteenth source, and adding the agent you use is a documented recipe.</p>
+      <p>Desktop apps and CLI tools side by side, each labelled with the surface it came from. <b>New in 5.0:</b> agents are plug-in adapters, Qwen Code joins as the thirteenth source, and adding the agent you use is a documented recipe.</p>
     </div>
-    <div class="agents">
-      <div class="agents-row leads">
-        <span class="chip lead"><b>Codex</b><span>Desktop · CLI · VS Code</span></span>
-        <span class="chip lead"><b>Claude</b><span>Desktop · CLI</span></span>
-        <span class="chip lead"><b>Cursor</b><span>Desktop ADE · CLI</span></span>
-      </div>
-      <div class="agents-row">
-        <span class="chip"><b>Antigravity</b><span>CLI</span></span>
-        <span class="chip"><b>GitHub Copilot</b><span>CLI</span></span>
-        <span class="chip"><b>OpenCode</b><span>CLI</span></span>
-        <span class="chip"><b>Pi</b><span>CLI</span></span>
-      </div>
-      <div class="agents-row">
-        <span class="chip plain"><b>Hermes</b></span>
-        <span class="chip plain"><b>OpenClaw</b></span>
-        <span class="chip"><b>Kimi Code</b><span>CLI</span></span>
-        <span class="chip"><b>Grok</b><span>CLI</span></span>
-      </div>
-    </div>
+    <table class="support">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Surfaces</th>
+          <th class="colhide">Resume</th>
+          <th class="colhide">Quota Meter</th>
+        </tr>
+      </thead>
+      <tbody>
+      <tr class="primary"><td class="name">Codex</td><td class="surf">Desktop &middot; CLI &middot; VS Code</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="yes">5h &middot; weekly &middot; $/h</span></td></tr>
+      <tr class="primary"><td class="name">Claude</td><td class="surf">Desktop &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="yes">5h &middot; weekly &middot; $/h</span></td></tr>
+      <tr class="primary"><td class="name">Cursor</td><td class="surf">IDE &middot; CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Antigravity</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">GitHub Copilot</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">OpenCode</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Pi</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Hermes</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Kimi Code</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Grok CLI</td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">Qwen Code<em>new in 5.0</em></td><td class="surf">CLI</td><td class="cap colhide"><span class="yes">Yes</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+      <tr><td class="name">OpenClaw</td><td class="surf">CLI</td><td class="cap colhide"><span class="dash">&mdash;</span></td><td class="cap colhide"><span class="dash">&mdash;</span></td></tr>
+        <tr class="addrow"><td class="name"><a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/CONTRIBUTING.md">Add your agent&nbsp;&rarr;</a></td><td class="surf">Twelve files, each with a test</td><td class="cap colhide"></td><td class="cap colhide"></td></tr>
+      </tbody>
+    </table>
+    <p class="support-note">The Quota Meter reads Codex and Claude usage windows &mdash; the other agents don't publish a quota to meter. Every agent above is searchable, browsable and counted in Analytics.</p>
 
     <div class="grid">
       <div class="feat span3">
