@@ -1,3 +1,50 @@
+## 2026-08-18 16:22 · grok-review-round-two · External review acted on; fixes uncommitted on main
+status: in-progress
+
+**State:** Grok reviewed the day's resume/provenance work; 4 of its 5 findings held and are fixed. Suite **2094 tests / 3 skipped / 0 failures**. 13 files modified on `main`, **nothing committed**.
+
+**Decided / don't redo:**
+- **Refuted, don't "fix" it:** `waitForExit()` is this repo's `BoundedProcessWait` (10s → SIGTERM → SIGKILL), not Foundation's. Grok read the call site and assumed the stdlib. There is no unbounded probe wait.
+- Qwen's custom-path branch needed *both* a capability guard and a load-time heal — the guard alone changes nothing, since the plan returned nil either way. `warmResolvedBinaryPathIfNeeded` now also warms a custom path; nothing else ever reprobes one.
+- `versionManagerPrefixes` reads nvm/fnm default aliases from disk. The pty fix for `[ -t 0 ]`-guarded rc files is **parked** in `docs/backlog.md`, not wanted before someone hits it.
+- The login-shell reorder saves a spawn only when the CLI runs on the inherited PATH. Finder-launched Node CLIs still spawn one via `run()`'s widening — do not claim otherwise in release copy.
+- Two of my own 5.0-era tests were vacuous, proved by mutation: deleting Pi's reader guard leaves both green. Seed `UserDefaults` directly to reach that guard.
+
+**Key files:**
+- `AgentSessions/Qwen/QwenSettings.swift` — load-time heal + custom-path warm
+- `AgentSessions/Indexing/DB.swift` — `upsertSessionMeta` now COALESCEs all six provenance columns
+- `AgentSessions/Resume/CLIProbeEnvironment.swift` — `versionManagerPrefixes`
+
+**Next:**
+1. Commit the 11 source/test files + `RepoHandover.md` + `docs/backlog.md` — path-limited; leave the owner's untracked `docs/_preview/` mockups out.
+2. Cut 5.0.1, then close issue #58.
+
+## 2026-08-18 14:52 · finder-path-resume + codex-provenance · #58 fixed for four agents; Codex surface stopped being erased
+status: done
+
+**State:** Ten code commits on `main` (`7d8f4feb`…`469dd5f2`), pushed, tree clean, suite **2089 tests / 3 skipped / 0 failures**. Two separate programs landed:
+
+1. **Issue #58 — resume dies when the app is launched from Finder.** LaunchServices hands the app `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`, so a `#!/usr/bin/env node` CLI in `/opt/homebrew/bin` exits 127. New shared `AgentSessions/Resume/CLIProbeEnvironment.swift` owns login-shell PATH discovery (one `$SHELL -lic` per probe, sentinel-marked, stdout only), lazy widening (inherited env first, widen only on a non-zero exit), flag matching, `which`, and the did-not-execute rule. Pi/Kimi/Qwen/Grok all route through it (−146/+53 across the four). Cache side: a probe that could not execute reported a real binary with every capability false, and the cache only refreshes while the resolved path is empty — so one bad probe disabled resume forever. Both writer and reader now reject a capability-free entry, which heals what 5.0 already wrote.
+2. **Codex surface attribution.** `classifyCodexSurface` reordered so `source: cli|exec` wins over the pinned `originator: "Codex Desktop"` (161 sessions reclassified); side chats derive provenance from the parent rollout instead of hardcoding Desktop; the side-chat pill reads `side`, not `desk`.
+
+**Decided / don't redo:**
+- **`source: "vscode"` is NOT proof of VS Code** — 76 such rollouts sit in Codex Desktop's own generated `~/Documents/Codex/<date>/<name>` workspaces. Only `cli`/`exec` were promoted. Backlog entry rewritten accordingly (sev med / urg low, verified 2026-08-18).
+- **`Process.environment = nil` empties the child, it does not inherit.** Foundation-verified with a standalone probe: untouched → full login PATH; nil → `/usr/gnu/bin:/usr/local/bin:/bin:/usr/bin:.`. `CommandExecutor` guards the write (`if let environment`). A mock executor cannot catch this — test against a real `Process`. Caught by external review, not by me; nearly shipped as a repo-wide PATH regression.
+- **Retry breadth stays broad** in `CLIProbeEnvironment.run` — it widens on any non-zero exit, not just 126/127. pi/kimi/qwen/grok all exit 0 for both `--help` and `--version`; the real failure is 127. Narrowing buys nothing any current agent needs and costs the safety margin.
+- **Issue #58 stays OPEN on purpose.** Fixed on `main`, not released; closing now tells the reporter to go try a build that does not exist.
+- **5.0.1 in the next few days, not a hotfix today.** Codex/Claude were never affected (both probe via `$SHELL -lic`); Pi resume landed 2026-05-12 so this is not a 5.0 regression; poisoned caches self-heal. The one argument for moving soon is that Qwen was 5.0's headline agent and its resume was broken for the default launch method.
+- **The projectless-thread store has zero overlap with the reclassified sessions** — `~/.codex/.codex-global-state.json` holds 66 `projectless-thread-ids`; of 231 cli/exec-sourced rollouts, **0** appear there. No session's "Codex Desktop Chats" project label moved.
+- **Gemini Flash is a changelog generator, not a reviewer.** Zero findings, "all 8 commits" when there were 15, two wrong code citations, stale test count. Grok found the `Process.environment` defect nobody had described. Keep Grok in the review slot.
+
+**Root cause worth keeping (only in `469dd5f2`'s message otherwise):** `SearchIngestService` omitted provenance from `SessionMetaRow` while `upsertSessionMeta` assigned the `codex_*` columns unconditionally — every ingest pass wiped what the indexer had written (3,568 of 3,578 rows had NULL surface). Fixed by carrying the already-parsed values (zero extra I/O), `COALESCE` on both upserts, and a one-time `codex_provenance_reindex_v1` migration. Post-fix: subagent 993, desktop 466, cli 231, vscode 45 — all 1,735 Codex rows carry surface.
+
+**Second round, from an external Grok review (uncommitted at time of writing):** four of its five findings held. (1) Qwen's *custom-path* branch skipped the capability guard — #58's failure mode surviving in one corner; healed at load now, and `warmResolvedBinaryPathIfNeeded` warms a custom path too, since nothing else ever reprobes one. (2) `upsertSessionMeta` still assigned `originator`/`origin_source`/`surface` unconditionally while `upsertSessionMetaCore` COALESCEd them — the same defect I had just fixed for `codex_*`, left half-applied. (3) An rc file guarded on `[ -t 0 ]` defeats discovery (the probe shell's stdin is a pipe; verified); `versionManagerPrefixes` now reads nvm's `~/.nvm/alias/default` and fnm's default alias from disk, and the pty fix is filed in `docs/backlog.md`. (4) Two of my own tests were vacuous — proved by mutation: deleting Pi's reader guard leaves both old tests green and kills only the new seeded-`UserDefaults` one. **Refuted:** "no timeout" — `waitForExit()` is `BoundedProcessWait`, 10s then SIGTERM/SIGKILL, not Foundation's. Suite 2094/3 skipped/0 failures.
+
+**Next:**
+1. Cut **5.0.1** (Finder-PATH fix + the Codex provenance repairs + the round-two fixes above). Not started — awaiting owner go.
+2. Decide whether the cooldown-lockout backlog entry ("Transient-failure cooldowns lock out both live sources with no reachable bypass", `docs/backlog.md`) rides along with 5.0.1. Recommended; undecided.
+3. Close **#58** when 5.0.1 ships.
+
 ## 2026-08-18 09:32 · release-5.0-notes · Sparkle notes republished short; skill rule added
 status: done
 
