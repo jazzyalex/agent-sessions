@@ -1257,4 +1257,58 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertNotEqual(failedRead, authoritativeEmpty,
                           "nil-to-empty identity recovery must kick ingest so stale rows are reconciled")
     }
+    // MARK: - Provenance survives a write that does not carry it
+
+    /// Search ingest omitted the codex_* provenance fields, and `upsertSessionMeta`
+    /// assigned them unconditionally — so every ingest pass wrote NULL over the
+    /// surface and originator the indexer had stored. The session list hydrates
+    /// from these columns, so a Desktop session then rendered as its fallback
+    /// pill until a full parse replaced it. Both upserts now COALESCE.
+    func testAWriteWithoutProvenanceDoesNotEraseStoredProvenance() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        var withProvenance = makeMetaRow(sessionID: "s1", source: "codex", path: "/tmp/s1.jsonl", mtime: 1)
+        withProvenance = SessionMetaRow(
+            sessionID: withProvenance.sessionID,
+            source: withProvenance.source,
+            path: withProvenance.path,
+            mtime: withProvenance.mtime,
+            size: withProvenance.size,
+            startTS: withProvenance.startTS,
+            endTS: withProvenance.endTS,
+            model: nil,
+            cwd: nil,
+            repo: nil,
+            title: nil,
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 1,
+            commands: 0,
+            parentSessionID: nil,
+            subagentType: nil,
+            customTitle: nil,
+            codexOriginator: "Codex Desktop",
+            codexSource: "vscode",
+            codexSurface: "desktop",
+            originator: "Codex Desktop",
+            originSource: "vscode",
+            surface: "desktop"
+        )
+
+        try await db.begin()
+        try await db.upsertSessionMeta(withProvenance)
+        try await db.commit()
+
+        // A later pass that never parsed the header — the shape that wiped it.
+        try await db.begin()
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "s1", source: "codex", path: "/tmp/s1.jsonl", mtime: 2))
+        try await db.commit()
+
+        let stored = try await db.fetchSessionMeta(for: "codex").first { $0.sessionID == "s1" }
+        XCTAssertEqual(stored?.codexSurface, "desktop", "a provenance-less write erased the stored surface")
+        XCTAssertEqual(stored?.codexOriginator, "Codex Desktop")
+        XCTAssertEqual(stored?.surface, "desktop")
+    }
+
 }

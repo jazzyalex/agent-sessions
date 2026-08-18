@@ -541,7 +541,20 @@ actor SearchIngestService {
             commands: commands,
             parentSessionID: session.parentSessionID,
             subagentType: session.subagentType,
-            customTitle: session.customTitle
+            customTitle: session.customTitle,
+            // Provenance was omitted here, so every field below defaulted to nil
+            // -- and `upsertSessionMeta` assigns the codex_* columns
+            // unconditionally, so each search ingest WIPED the surface and
+            // originator the indexer had written. That is why a Codex row shows
+            // its real pill only after a full parse: the list hydrates from a
+            // session_meta whose provenance was erased. Nothing extra is read to
+            // fix it -- `parseFileFull` above already produced all of it.
+            codexOriginator: session.codexOriginator,
+            codexSource: session.codexSource,
+            codexSurface: session.codexSurface?.rawValue,
+            originator: session.originator,
+            originSource: session.originSource,
+            surface: session.surface?.rawValue
         )
 
         let searchText = SessionSearchTextBuilder.build(session: session)

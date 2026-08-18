@@ -485,6 +485,25 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexSurfaceReindex)
         }
 
+        // Search ingest used to write NULL over codex_originator/codex_source/
+        // codex_surface on every pass, so existing databases carry rows whose
+        // provenance was erased -- the session list then falls back to a "cli"
+        // pill for sessions that are nothing of the sort, and only a full parse
+        // reveals the real surface. The writer is fixed and both upserts now
+        // COALESCE, but already-indexed unchanged files keep their wiped rows
+        // until they are re-read.
+        let codexProvenanceReindex = "codex_provenance_reindex_v1"
+        if !migrationApplied(db, key: codexProvenanceReindex) {
+            try exec(db, "DELETE FROM files WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_meta WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_search WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_tool_io WHERE source = 'codex';")
+            try exec(db, "DELETE FROM session_days WHERE source = 'codex';")
+            try exec(db, "DELETE FROM rollups_daily WHERE source = 'codex';")
+            try exec(db, "DELETE FROM index_state WHERE key LIKE 'analytics_backfill_done:codex:%';")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", codexProvenanceReindex)
+        }
+
         // Force a full reindex of Claude sessions so nested Workflow subagents
         // (.../subagents/workflows/wf_<id>/agent-*.jsonl) get parent_session_id and
         // subagent_type populated by the generalized ClaudeSessionParser.detectSubagentInfo,
@@ -1804,7 +1823,13 @@ actor IndexDB {
           repo=excluded.repo, title=excluded.title, codex_internal_session_id=excluded.codex_internal_session_id,
           is_housekeeping=excluded.is_housekeeping, messages=excluded.messages, commands=excluded.commands,
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type, custom_title=excluded.custom_title,
-          codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
+          -- COALESCE, not assignment. A writer that did not parse the provenance
+          -- passes NULL here, and assigning it erased a good value: search ingest
+          -- omitted these fields entirely and wiped the surface on every pass, so
+          -- the session list could only ever show its fallback pill.
+          codex_originator=COALESCE(excluded.codex_originator, session_meta.codex_originator),
+          codex_source=COALESCE(excluded.codex_source, session_meta.codex_source),
+          codex_surface=COALESCE(excluded.codex_surface, session_meta.codex_surface),
           reasoning_effort=excluded.reasoning_effort,
           originator=excluded.originator, origin_source=excluded.origin_source, surface=excluded.surface;
         """
@@ -1853,7 +1878,13 @@ actor IndexDB {
           is_housekeeping=excluded.is_housekeeping,
           parent_session_id=excluded.parent_session_id, subagent_type=excluded.subagent_type,
           custom_title=COALESCE(excluded.custom_title, session_meta.custom_title),
-          codex_originator=excluded.codex_originator, codex_source=excluded.codex_source, codex_surface=excluded.codex_surface,
+          -- COALESCE, not assignment. A writer that did not parse the provenance
+          -- passes NULL here, and assigning it erased a good value: search ingest
+          -- omitted these fields entirely and wiped the surface on every pass, so
+          -- the session list could only ever show its fallback pill.
+          codex_originator=COALESCE(excluded.codex_originator, session_meta.codex_originator),
+          codex_source=COALESCE(excluded.codex_source, session_meta.codex_source),
+          codex_surface=COALESCE(excluded.codex_surface, session_meta.codex_surface),
           originator=COALESCE(excluded.originator, session_meta.originator),
           origin_source=COALESCE(excluded.origin_source, session_meta.origin_source),
           surface=COALESCE(excluded.surface, session_meta.surface),
