@@ -1925,7 +1925,9 @@ final class SessionIndexer: ObservableObject {
         return json
     }
 
-    private static func classifyCodexSurface(originator: String?, source: Any?, sourceString: String?) -> CodexSessionSurface {
+    /// Not private: `CodexSideChatLogReader` classifies a side chat's parent
+    /// rollout through this, so both paths stay on one rule.
+    static func classifyCodexSurface(originator: String?, source: Any?, sourceString: String?) -> CodexSessionSurface {
         if let sourceDict = source as? [String: Any], sourceDict["subagent"] != nil {
             return .subagent
         }
@@ -1933,6 +1935,25 @@ final class SessionIndexer: ObservableObject {
         let originLower = originator?.lowercased()
         let sourceLower = sourceString?.lowercased()
 
+        // `source` wins for cli/exec, and only for those.
+        //
+        // From ~0.126 Codex pins `originator` to "Codex Desktop" on every
+        // surface, so testing originator first made the `source` branches below
+        // unreachable and stamped Desktop on genuine CLI sessions -- 161 of them
+        // in the owner's 1,735-rollout corpus, spread across ten cli_versions,
+        // so this is the norm on modern builds rather than a blip.
+        //
+        // `source == "vscode"` is deliberately NOT promoted the same way. It is
+        // not a surface: 76 rollouts carrying it sit in Codex Desktop's own
+        // generated `~/Documents/Codex/<date>/<name>` chat workspaces, so
+        // Desktop writes it too. Trusting it would relabel real Desktop sessions
+        // as VS Code and strip them from the Desktop Chats grouping -- swapping
+        // one wrong answer for another. Settling that needs a controlled Desktop
+        // session and a VS Code session on the same ordinary folder; until then
+        // vscode-source rows keep falling through to the originator rules.
+        if sourceLower == "cli" || sourceLower == "exec" {
+            return .cli
+        }
         if originLower == "codex desktop" ||
             originLower?.contains("desktop") == true ||
             originLower?.contains("app") == true {
@@ -1946,9 +1967,6 @@ final class SessionIndexer: ObservableObject {
         }
         if sourceLower == "vscode" {
             return .vscode
-        }
-        if sourceLower == "cli" || sourceLower == "exec" {
-            return .cli
         }
         if originator != nil || sourceString != nil {
             return .other

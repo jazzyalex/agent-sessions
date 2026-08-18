@@ -346,6 +346,60 @@ enum CodexSideChatLogReader {
         return Int64(values?.fileSize ?? 0)
     }
 
+    /// Provenance of the thread a side conversation was forked from.
+    ///
+    /// The log database cannot answer this: every Codex surface writes to it,
+    /// and the `originator=` it records is pinned to "Codex Desktop" on modern
+    /// builds regardless of surface. The parent's own rollout is the only
+    /// recorded evidence, and a fork's surface is by definition its parent's.
+    /// Returns nil when the parent has no rollout, which is common — a side
+    /// chat then carries no surface rather than an invented one.
+    private static func parentProvenance(dbURL: URL,
+                                         parentThreadID: String?) -> (originator: String?, surface: CodexSessionSurface)? {
+        guard let parentThreadID, !parentThreadID.isEmpty else { return nil }
+        let home = codexHome(fromLogDatabase: dbURL)
+        let fm = FileManager.default
+
+        for directory in ["sessions", "archived_sessions"] {
+            let root = home.appendingPathComponent(directory, isDirectory: true)
+            guard let walker = fm.enumerator(at: root,
+                                             includingPropertiesForKeys: nil,
+                                             options: [.skipsHiddenFiles]) else { continue }
+            for case let url as URL in walker {
+                guard url.pathExtension == "jsonl",
+                      url.lastPathComponent.contains(parentThreadID),
+                      let header = firstLine(of: url),
+                      let object = try? JSONSerialization.jsonObject(with: Data(header.utf8)) as? [String: Any] else {
+                    continue
+                }
+                let payload = (object["payload"] as? [String: Any]) ?? object
+                let originator = payload["originator"] as? String
+                let source = payload["source"]
+                let surface = SessionIndexer.classifyCodexSurface(originator: originator,
+                                                                  source: source,
+                                                                  sourceString: source as? String)
+                return (originator, surface)
+            }
+        }
+        return nil
+    }
+
+    private static func codexHome(fromLogDatabase dbURL: URL) -> URL {
+        let parent = dbURL.deletingLastPathComponent().standardizedFileURL
+        return parent.lastPathComponent == "sqlite" ? parent.deletingLastPathComponent() : parent
+    }
+
+    /// First line only — a rollout's header is its first record, and these files
+    /// run to megabytes.
+    private static func firstLine(of url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let chunk = try? handle.read(upToCount: 64 * 1024), let text = String(data: chunk, encoding: .utf8) else {
+            return nil
+        }
+        return text.split(whereSeparator: \.isNewline).first.map(String.init)
+    }
+
     private static func buildSession(db: OpaquePointer?,
                                      dbURL: URL,
                                      threadID: String,
@@ -392,6 +446,7 @@ enum CodexSideChatLogReader {
         }
         let firstUserTitle = events.first(where: { $0.kind == .user })?.text.map(collapsedWhitespace)
         let title = firstUserTitle
+        let provenance = parentProvenance(dbURL: dbURL, parentThreadID: request.parentThreadID)
 
         return Session(
             id: sideChatSessionID(threadID: threadID),
@@ -409,19 +464,17 @@ enum CodexSideChatLogReader {
             codexInternalSessionIDHint: threadID,
             parentSessionID: request.parentThreadID,
             relationshipKind: .sideChat,
-            // Not evidence: every Codex surface writes side conversations to the
-            // same log database, so this says "Desktop" about CLI `/side` chats
-            // too. It stays only because `CodexDesktopProjectClassifier` and the
-            // Desktop cwd worktree heuristics read it -- nulling it here scatters
-            // these rows out of "Codex Desktop Chats". The row label no longer
-            // repeats the claim (`SessionRowsBuilder.surfacePills` shows "side").
-            // Deriving a real surface needs the paired probes in the backlog.
-            codexOriginator: "Codex Desktop",
+            // Inherited from the parent thread's rollout, or absent. This used
+            // to assert "Codex Desktop" unconditionally, which was wrong for
+            // every CLI `/side` conversation and unverifiable for the rest.
+            // The "Codex Desktop Chats" grouping no longer depends on it --
+            // `Session.isCodexSideChatSession` keys off the path sentinel.
+            codexOriginator: provenance?.originator,
             codexSource: "side_chat",
-            codexSurface: .desktop,
-            originator: "Codex Desktop",
+            codexSurface: provenance?.surface,
+            originator: provenance?.originator,
             originSource: "side_chat",
-            surface: .desktop
+            surface: provenance?.surface
         )
     }
 
@@ -430,7 +483,7 @@ enum CodexSideChatLogReader {
     }
 
     static func sideChatSessionPath(threadID: String) -> String {
-        "codex-side-chat://\(threadID)"
+        "\(Session.codexSideChatPathScheme)\(threadID)"
     }
 
     private static func projectName(from cwd: String?) -> String? {

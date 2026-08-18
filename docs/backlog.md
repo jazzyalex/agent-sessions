@@ -106,38 +106,34 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   case; tests proving one session results from a transcript plus sidecar, and that a
   Cowork session survives with no standard-root counterpart.
 
-### Codex side chats still carry a Desktop surface nothing established
-> **open** · sev: low · urg: low · verified 2026-08-18
+### Codex `source: "vscode"` is not proof of VS Code
+> **open** · sev: med · urg: low · verified 2026-08-18
 
-- **What:** side conversations are reconstructed from `~/.codex/sqlite/logs_*.sqlite`,
-  which every Codex surface writes to — CLI `/side` included — yet
-  [CodexSideChatLogReader.swift:412](../AgentSessions/Services/CodexSideChatLogReader.swift:412)
-  stamps `codexOriginator`/`originator` "Codex Desktop" and `codexSurface`/`surface`
-  `.desktop` on all of them.
-- **Half fixed 2026-08-18:** the row no longer repeats the claim. `surfacePills` used to
-  short-circuit side chats to a "desk" pill; it now shows "side", matching what the
-  transcript view has always called them
-  ([SessionRowsBuilder.swift:332](../AgentSessions/Services/SessionRowsBuilder.swift:332)).
-  Pinned by `testSideChatRowIsLabelledSideRatherThanDesktop`.
-- **Why the data was left alone — read this before "just nulling the field":** those
-  fields are load-bearing. `CodexDesktopProjectClassifier.projectNameOverride`
-  ([Session.swift:1217](../AgentSessions/Model/Session.swift:1217)) gates on
-  `isCodexDesktopSession` to group these rows under "Codex Desktop Chats", and the
-  Desktop cwd worktree heuristics
-  ([Session.swift:1349](../AgentSessions/Model/Session.swift:1349)) key off the same
-  predicate. Nulling the surface scatters side chats out of their project grouping and
-  changes cwd resolution — a bigger, less obvious regression than the label it fixes.
-- **Real fix:** compare CLI `/side` against Desktop side conversations and find the
-  structural field that identifies the originating surface. Do not infer it from the
-  location of the shared database. Then derive the surface from that evidence, use an
-  explicit unknown when the record does not say, and give the project grouping its own
-  predicate instead of borrowing the Desktop one.
-- **Constraint to re-confirm first:** DB-hydrated sessions have been observed carrying
-  NULL surface metadata, with hydration never re-parsing it. Any rule that reads
-  `surface` must survive hydration or it will work on first index and fail afterwards.
-- **To close:** surface derived from recorded evidence with an explicit unknown value,
-  project grouping no longer dependent on a fabricated Desktop marker, and fixtures for
-  a CLI-originated and a Desktop-originated side conversation.
+- **What:** from cli_version ~0.126 Codex pins `originator` to "Codex Desktop" in every
+  rollout regardless of surface, so the real surface has to come from `source`. That is
+  now trusted for `cli` and `exec` — but **not** for `vscode`, because Codex Desktop
+  writes that value too.
+- **Evidence (owner's corpus, 1,735 rollouts, 2026-08-18):** 511 rollouts carry
+  `source: "vscode"`, and **76 of them sit in Codex Desktop's own generated
+  `~/Documents/Codex/<ISO-date>/<name>` chat workspaces** — the shape
+  `CodexDesktopProjectClassifier.isGeneratedDesktopChatWorkspace` already treats as
+  Desktop's signature. So `vscode` covers at least two surfaces. The remaining 435 have
+  ordinary cwds and cannot be attributed either way from the file alone.
+- **Why it is parked rather than "fixed":** promoting `source` for `vscode` the way it
+  was promoted for `cli`/`exec` would relabel those 76 real Desktop sessions as VS Code
+  *and* strip them from the "Codex Desktop Chats" grouping — one wrong answer swapped
+  for another. `classifyCodexSurface` says this inline; do not "finish the reorder"
+  without reading it.
+- **Settled already (2026-08-18):** `cli` and `exec` sources now win over the pinned
+  originator, correcting 161 sessions that showed as Desktop. Pinned by
+  `CodexSurfaceClassificationTests`, including a test asserting that `vscode` does *not*
+  get the same treatment.
+- **The experiment that would close it:** run one Codex Desktop session and one VS Code
+  extension session against the same ordinary repository folder, then diff the two
+  rollout headers. Any field that differs is the discriminator. Record every file
+  created or changed before interpreting schemas.
+- **To close:** a field that separates Desktop from VS Code, or a documented finding that
+  none exists and `.other`/`.unknown` is the honest classification for ambiguous rows.
 
 ---
 

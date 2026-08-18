@@ -316,6 +316,24 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     public var shortID: String { String(id.prefix(6)) }
 
+    /// Path sentinel written by `CodexSideChatLogReader.sideChatSessionPath`.
+    /// Declared here rather than on the reader because `AgentSessionsLogicTests`
+    /// compiles this file without it.
+    public static let codexSideChatPathScheme = "codex-side-chat://"
+
+    /// A Codex side conversation, identified by the path sentinel the side-chat
+    /// reader writes.
+    ///
+    /// Deliberately keyed on `filePath` and NOT on `relationshipKind`: the
+    /// `session_meta` table persists `surface`/`originator` but has no
+    /// `relationship_kind` or `parent_session_id` column, so a relationship
+    /// predicate evaporates the moment a session is hydrated from the DB
+    /// instead of parsed. `path` survives. Same lesson as the archived-Codex
+    /// filter.
+    public var isCodexSideChatSession: Bool {
+        source == .codex && filePath.hasPrefix(Session.codexSideChatPathScheme)
+    }
+
     public var isCodexDesktopSession: Bool {
         guard source == .codex else { return false }
         if (surface ?? codexSurface) == .desktop { return true }
@@ -1214,7 +1232,10 @@ enum CodexDesktopProjectClassifier {
         for session: Session,
         projectlessStore: CodexDesktopProjectlessThreadStore = .shared
     ) -> String? {
-        guard session.isCodexDesktopSession else { return nil }
+        // Side chats are included explicitly rather than by borrowing the
+        // Desktop surface. They used to qualify only because the reader stamped
+        // a Desktop surface on them that nothing established.
+        guard session.isCodexDesktopSession || session.isCodexSideChatSession else { return nil }
         if let internalID = session.codexInternalSessionID,
            !internalID.isEmpty,
            projectlessStore.isProjectlessThread(id: internalID) {
@@ -1346,7 +1367,7 @@ enum ProjectPathNormalizer {
     private static func resolve(for session: Session) -> Resolution? {
         resolve(
             cwd: session.cwd,
-            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession,
+            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isCodexSideChatSession || session.isClaudeDesktopSession,
             storedProjectName: session.lightweightRepoName,
             gitRepositoryURL: session.gitRepositoryURL,
             gitBranch: session.gitBranch
@@ -1356,7 +1377,7 @@ enum ProjectPathNormalizer {
     private static func resolveWithoutEventMetadata(for session: Session) -> Resolution? {
         resolve(
             cwd: session.lightweightCwdIfPresent,
-            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isClaudeDesktopSession,
+            usesDesktopWorktreeHeuristics: session.isCodexDesktopSession || session.isCodexSideChatSession || session.isClaudeDesktopSession,
             storedProjectName: session.lightweightRepoName,
             gitRepositoryURL: nil,
             gitBranch: nil

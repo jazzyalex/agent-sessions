@@ -527,8 +527,6 @@ final class SessionRowDisplayTests: XCTestCase {
         let pills = UnifiedSessionsView.surfacePills(for: sideChat)
 
         XCTAssertEqual(pills.map(\.label), ["side"])
-        XCTAssertTrue(sideChat.isCodexDesktopSession,
-                      "the stored surface stays Desktop on purpose: project grouping reads it")
     }
 
 }
