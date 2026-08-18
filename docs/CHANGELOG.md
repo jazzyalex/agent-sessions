@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **Pi resume works when the app is launched from Finder.** Pi ships as a `#!/usr/bin/env node` script, and a Finder-launched app inherits a PATH with no Homebrew in it — so the probe died on `env: node: No such file or directory` before Pi ran, and the app concluded Pi had no resume flags. Copy Resume Command went quiet and Resume in Pi CLI refused; Settings showed `Detected: unknown`. Probes now run with the PATH your login shell reports, a probe that could not execute is reported as a failure instead of as a Pi without features, and the cached "supports nothing" verdict such a probe left behind is discarded instead of disabling resume forever. ([#58](https://github.com/jazzyalex/agent-sessions/issues/58))
+
 ## [5.0] - 2026-08-17
 
 ### Highlights

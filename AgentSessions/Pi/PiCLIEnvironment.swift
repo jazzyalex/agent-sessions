@@ -28,9 +28,11 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
     }
 
     private let executor: CommandExecuting
+    private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
         self.executor = executor
+        self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: "pi")
     }
 
     func resolveBinary(customPath: String?) -> URL? {
@@ -49,7 +51,7 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         // real CLI installed under one of them. `pi` is a short, generic name,
         // so that collision is not hypothetical.
         let candidates: [String] = [
-            whichViaLoginShell("pi"),
+            probeEnv.loginShellExecutablePath(),
             which("pi"),
             "\(home)/.local/bin/pi",
             "\(home)/.npm-global/bin/pi",
@@ -66,7 +68,7 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         }
 
         do {
-            let versionRes = try executor.run([binary.path, "--version"], cwd: nil)
+            let versionRes = try runPi(binary, "--version")
             let versionString: String
             if versionRes.exitCode == 0 {
                 let combined = [versionRes.stdout, versionRes.stderr]
@@ -77,23 +79,47 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
                 versionString = "unknown"
             }
 
-            let helpRes = try? executor.run([binary.path, "--help"], cwd: nil)
+            let helpRes = try? runPi(binary, "--help")
             let helpOut = [helpRes?.stdout, helpRes?.stderr]
                 .compactMap { $0 }
                 .joined(separator: "\n")
+
+            let supportsSession = helpContainsFlag("--session", in: helpOut)
+            let supportsResume = helpContainsFlag("--resume", in: helpOut)
+            let supportsContinue = helpContainsFlag("--continue", in: helpOut)
+
+            // A probe that never ran is not evidence that Pi lacks resume flags.
+            // Reporting it as success-with-nothing-supported is what made the
+            // resume coordinator answer "Pi CLI does not advertise required
+            // flags" for a perfectly capable install. A Pi that actually ran
+            // exits 0 for at least one of --version/--help, or prints a flag we
+            // recognise; anything else means we learned nothing.
+            let learnedNothing = !supportsSession && !supportsResume && !supportsContinue
+            if versionRes.exitCode != 0, (helpRes?.exitCode ?? 127) != 0, learnedNothing {
+                let reason = [versionRes.stderr, helpRes?.stderr]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty } ?? ""
+                return .failure(.commandFailed(reason))
+            }
 
             return .success(
                 ProbeResult(
                     versionString: versionString,
                     binaryURL: binary,
-                    supportsSession: helpContainsFlag("--session", in: helpOut),
-                    supportsResume: helpContainsFlag("--resume", in: helpOut),
-                    supportsContinue: helpContainsFlag("--continue", in: helpOut)
+                    supportsSession: supportsSession,
+                    supportsResume: supportsResume,
+                    supportsContinue: supportsContinue
                 )
             )
         } catch {
             return .failure(.commandFailed(error.localizedDescription))
         }
+    }
+
+    /// Every invocation of the CLI goes through here so the child always gets a
+    /// PATH that can resolve `#!/usr/bin/env node`.
+    private func runPi(_ binary: URL, _ argument: String) throws -> CommandResult {
+        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
     }
 
     private func which(_ command: String) -> String? {
@@ -103,19 +129,6 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
             if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
         }
         return nil
-    }
-
-    private func whichViaLoginShell(_ command: String) -> String? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        do {
-            let result = try executor.run([shell, "-lic", "command -v \(command) || true"], cwd: nil)
-            let res = [result.stdout, result.stderr].joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !res.isEmpty, res != command else { return nil }
-            return res.split(whereSeparator: { $0.isNewline }).first.map(String.init)
-        } catch {
-            return nil
-        }
     }
 
     private func bestPiCLI(from paths: [String]) -> URL? {
@@ -138,7 +151,7 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
     }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? executor.run([binary.path, "--help"], cwd: nil)
+        let help = try? runPi(binary, "--help")
         let helpOut = [help?.stdout, help?.stderr]
             .compactMap { $0 }
             .joined(separator: "\n")

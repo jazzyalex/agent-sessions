@@ -23,16 +23,40 @@ public struct CommandResult {
 
 public protocol CommandExecuting {
     func run(_ command: [String], cwd: URL?) throws -> CommandResult
+    /// Runs with an explicit child environment. Needed for CLIs shipped as
+    /// `#!/usr/bin/env node` scripts: a Finder-launched app inherits a PATH with
+    /// no Homebrew or npm prefix in it, so the shebang cannot find its interpreter.
+    func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult
+}
+
+public extension CommandExecuting {
+    /// Executors that have no control over the child environment — test doubles,
+    /// and callers that never needed one — just inherit ours.
+    func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult {
+        try run(command, cwd: cwd)
+    }
 }
 
 public struct ProcessCommandExecutor: CommandExecuting {
     public init() {}
+
     public func run(_ command: [String], cwd: URL?) throws -> CommandResult {
+        try run(command, cwd: cwd, environment: nil)
+    }
+
+    public func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult {
         guard !command.isEmpty else {
             return CommandResult(stdout: "", stderr: "", exitCode: 0)
         }
 
         let process = Process()
+        // Only assign when the caller passed a dict. A fresh Process already
+        // has environment == nil (inherit). Writing nil explicitly does not
+        // inherit on this Foundation: the child starts empty, `/bin/sh` then
+        // invents a POSIX default PATH, and every 2-arg probe loses Homebrew.
+        if let environment {
+            process.environment = environment
+        }
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         process.arguments = Array(command.dropFirst())

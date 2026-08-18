@@ -679,6 +679,44 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ## Resume / Terminal Launch
 
+### Finder-PATH / poison-cache hole remains for Kimi, Qwen, and Grok
+> **open** · sev: med · urg: low · verified 2026-08-18
+
+- **What:** #58 fixed Pi resume when the app is launched from Finder: probes now run
+  with a login-shell PATH, a probe that never executed is a failure not a
+  "supports nothing" result, and a cached "supports nothing" binary is discarded.
+  Kimi, Qwen, and Grok still do all three the old way. They are Node/`env node`
+  CLIs the same way Pi is, so a Finder-launched app can poison their capability
+  cache and silently empty Copy Resume Command.
+- **Where:** helper exists but only Pi constructs it
+  ([CLIProbeEnvironment.swift](../AgentSessions/Resume/CLIProbeEnvironment.swift),
+  called from [PiCLIEnvironment.swift](../AgentSessions/Pi/PiCLIEnvironment.swift)).
+  Sibling probes still use `executor.run(..., cwd: nil)` with the Finder PATH:
+  [KimiCLIEnvironment.swift](../AgentSessions/Kimi/KimiCLIEnvironment.swift),
+  [QwenCLIEnvironment.swift](../AgentSessions/Qwen/QwenCLIEnvironment.swift),
+  [GrokCLIEnvironment.swift](../AgentSessions/Grok/GrokCLIEnvironment.swift).
+  Matching poison-cache keepers:
+  [KimiSettings.swift](../AgentSessions/Kimi/KimiSettings.swift),
+  [QwenSettings.swift](../AgentSessions/Qwen/QwenSettings.swift),
+  [GrokSettings.swift](../AgentSessions/Grok/GrokSettings.swift).
+- **Out of scope on purpose:** Hermes already probes through `zsh -lic`. Cursor's
+  copy plan falls through to `"agent"` instead of returning nil, so it degrades
+  less badly. Do not drag those two in unless a real report says they fail.
+- **Fix shape:** point each sibling `*CLIEnvironment` at `CLIProbeEnvironment`
+  (`commandName` is now single-quoted in the `-lic` script, so a name with shell
+  metacharacters cannot break out), apply Pi's "learned nothing" failure rule, and discard a cached
+  binary that advertises no capabilities. Same tests as
+  `PiCLIEnvironmentTests` / `PiSettingsTests`.
+- **Why deferred:** #58 is a Pi-only user report. Expanding the helper to three
+  more agents in the same change is a product widening, not the bug that was
+  filed. The helper is Pi-first until this entry closes.
+- **Risk if wrong:** a Finder-launched user of Kimi/Qwen/Grok hits the same
+  silent Copy Resume Command / "does not advertise required flags" failure Pi
+  had, and a poisoned cache survives until they clear Settings.
+- **To close:** all three siblings probe under `CLIProbeEnvironment.probeEnvironment()`,
+  treat a non-executing probe as failure, and drop a no-capabilities cache
+  entry. Focused tests green.
+
 ### `runAppleScript` blocks the main thread for the Terminal / iTerm path
 > **open** · sev: low · urg: low · verified 2026-08-04
 
