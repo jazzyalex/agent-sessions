@@ -42,20 +42,20 @@ final class GrokCLIEnvironmentTests: XCTestCase {
     /// which has no Homebrew on it. The shipping Grok is a self-contained
     /// Mach-O binary, so it starts anyway — but it is started with that PATH,
     /// and anything it shells out to inherits it.
-    func testProbeRunsCLIWithTheLoginShellPath() {
+    func testProbeRetriesUnderTheLoginShellPathWhenTheInheritedOneFails() {
         let binaryPath = makeTempExecutable(name: "grok-probe-path")
         let executor = MockExecutor()
         executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
-        executor.responses[[binaryPath, "--version"]] = CommandResult(stdout: "1.0.0", stderr: "", exitCode: 0)
-        executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: realHelp, stderr: "", exitCode: 0)
+        let envFailure = CommandResult(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
+        executor.responses[[binaryPath, "--version"]] = envFailure
+        executor.responses[[binaryPath, "--help"]] = envFailure
 
         _ = GrokCLIEnvironment(executor: executor).probe(customPath: binaryPath)
 
-        let probeEnvs = executor.environments(forCommandContaining: "--help")
-        XCTAssertFalse(probeEnvs.isEmpty, "expected --help to run with an explicit environment")
-        for path in probeEnvs.map({ $0?["PATH"] ?? "" }) {
-            XCTAssertTrue(path.contains("/opt/homebrew/bin"), "probe PATH lost the login-shell entries: \(path)")
-        }
+        let retried = executor.environments(forCommandContaining: "--help").compactMap { $0?["PATH"] }
+        XCTAssertFalse(retried.isEmpty, "a failed probe must be retried with a widened PATH")
+        XCTAssertTrue(retried.allSatisfy { $0.contains("/opt/homebrew/bin") },
+                      "retry PATH lost the login-shell entries: \(retried)")
     }
 
     /// A probe that never executed is not evidence that Grok lacks resume flags.

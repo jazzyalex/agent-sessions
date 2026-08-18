@@ -31,11 +31,11 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
         }
     }
 
-    private let executor: CommandExecuting
+    /// Every command this type runs goes through the probe environment, which
+    /// owns both the executor and the decision of when to widen PATH.
     private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
-        self.executor = executor
         self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
@@ -48,7 +48,7 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates: [String] = [
             probeEnv.loginShellExecutablePath(),
-            which(Self.binaryName),
+            CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
             "/opt/homebrew/bin/\(Self.binaryName)",
@@ -71,15 +71,15 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
             return .failure(.binaryNotFound)
         }
         do {
-            let version = try runCLI(binary, "--version")
+            let version = try probeEnv.run(binary, "--version")
             let combined = [version.stdout, version.stderr]
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let help = try? runCLI(binary, "--help")
+            let help = try? probeEnv.run(binary, "--help")
             let helpText = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
 
-            let supportsResume = helpContainsFlag("--resume", in: helpText)
-            let supportsContinue = helpContainsFlag("--continue", in: helpText)
+            let supportsResume = CLIProbeEnvironment.helpAdvertises("--resume", in: helpText)
+            let supportsContinue = CLIProbeEnvironment.helpAdvertises("--continue", in: helpText)
 
             // A probe that never ran is not evidence that Qwen lacks resume
             // flags. A Qwen that actually ran exits 0 for at least one of
@@ -87,10 +87,9 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
             // means we learned nothing, and calling that "supports nothing"
             // silently disables every resume action.
             let learnedNothing = !supportsResume && !supportsContinue
-            if version.exitCode != 0, (help?.exitCode ?? 127) != 0, learnedNothing {
-                let reason = [version.stderr, help?.stderr]
-                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { !$0.isEmpty } ?? ""
+            if let reason = CLIProbeEnvironment.probeFailureReason(version: version,
+                                                                   help: help,
+                                                                   learnedNothing: learnedNothing) {
                 return .failure(.commandFailed(reason))
             }
 
@@ -105,29 +104,9 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
         }
     }
 
-    /// Every invocation of the CLI goes through here so the child always gets a
-    /// PATH that can resolve `#!/usr/bin/env node`.
-    private func runCLI(_ binary: URL, _ argument: String) throws -> CommandResult {
-        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
-    }
-
-    private func which(_ command: String) -> String? {
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for component in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
-        }
-        return nil
-    }
-
-
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? runCLI(binary, "--help")
+        let help = try? probeEnv.run(binary, "--help")
         let output = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
-        return helpContainsFlag("--resume", in: output) || helpContainsFlag("--continue", in: output)
-    }
-
-    private func helpContainsFlag(_ flag: String, in help: String) -> Bool {
-        help.split { $0.isWhitespace || ",=[](){}<>:;".contains($0) }.contains { $0 == flag }
+        return CLIProbeEnvironment.helpAdvertises("--resume", in: output) || CLIProbeEnvironment.helpAdvertises("--continue", in: output)
     }
 }

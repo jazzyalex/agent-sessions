@@ -42,6 +42,37 @@ final class PiSettingsTests: XCTestCase {
     /// `Strategy` is not Equatable, and making it so for a test would be tail
     /// wagging dog — the only thing these assertions care about is that the plan
     /// resumes the requested session rather than falling back to --continue.
+    /// The reader discards a capability-free cache, but the writer is what stops
+    /// one being stored in the first place. Without this the probe rewrites the
+    /// dead entry after every discard, so each Copy Resume Command spawns a
+    /// fresh login shell and the cache never settles.
+    func testAProbeThatLearnedNothingIsNotStored() {
+        let settings = makeSettings()
+        let binaryPath = makeTempExecutable(name: "pi-settings-nothing-learned")
+
+        settings.setResolvedBinary(binaryPath, supportsSession: false, supportsResume: false, supportsContinue: false)
+
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty)
+        XCTAssertFalse(settings.resolvedSupportsSession)
+        XCTAssertFalse(settings.resolvedSupportsResume)
+        XCTAssertFalse(settings.resolvedSupportsContinue)
+    }
+
+    /// Clearing must take the capability flags with it — a yes behind an empty
+    /// path is a state no probe produces.
+    func testClearingAResolvedBinaryAlsoClearsItsCapabilities() {
+        let settings = makeSettings()
+        settings.setResolvedBinary(makeTempExecutable(name: "pi-settings-clear"),
+                                   supportsSession: true, supportsResume: true, supportsContinue: true)
+
+        settings.setResolvedBinaryPath(nil)
+
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty)
+        XCTAssertFalse(settings.resolvedSupportsSession)
+        XCTAssertFalse(settings.resolvedSupportsResume)
+        XCTAssertFalse(settings.resolvedSupportsContinue)
+    }
+
     private func sessionID(of strategy: PiResumeCommandBuilder.Strategy?) -> String? {
         guard case let .sessionByID(id) = strategy else { return nil }
         return id

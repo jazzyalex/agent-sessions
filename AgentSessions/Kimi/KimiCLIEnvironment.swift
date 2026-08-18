@@ -38,11 +38,11 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
         }
     }
 
-    private let executor: CommandExecuting
+    /// Every command this type runs goes through the probe environment, which
+    /// owns both the executor and the decision of when to widen PATH.
     private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
-        self.executor = executor
         self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
@@ -62,7 +62,7 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
         // mask a real CLI installed under one of them.
         let candidates: [String] = [
             probeEnv.loginShellExecutablePath(),
-            which(Self.binaryName),
+            CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.kimi-code/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
@@ -79,7 +79,7 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
         }
 
         do {
-            let versionRes = try runCLI(binary, "--version")
+            let versionRes = try probeEnv.run(binary, "--version")
             let versionString: String
             if versionRes.exitCode == 0 {
                 let combined = [versionRes.stdout, versionRes.stderr]
@@ -90,13 +90,13 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
                 versionString = "unknown"
             }
 
-            let helpRes = try? runCLI(binary, "--help")
+            let helpRes = try? probeEnv.run(binary, "--help")
             let helpOut = [helpRes?.stdout, helpRes?.stderr]
                 .compactMap { $0 }
                 .joined(separator: "\n")
 
-            let supportsSession = helpContainsFlag("--session", in: helpOut)
-            let supportsContinue = helpContainsFlag("--continue", in: helpOut)
+            let supportsSession = CLIProbeEnvironment.helpAdvertises("--session", in: helpOut)
+            let supportsContinue = CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
 
             // A probe that never ran is not evidence that Kimi lacks resume
             // flags. A Kimi that actually ran exits 0 for at least one of
@@ -104,10 +104,9 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
             // means we learned nothing, and calling that "supports nothing"
             // silently disables every resume action.
             let learnedNothing = !supportsSession && !supportsContinue
-            if versionRes.exitCode != 0, (helpRes?.exitCode ?? 127) != 0, learnedNothing {
-                let reason = [versionRes.stderr, helpRes?.stderr]
-                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { !$0.isEmpty } ?? ""
+            if let reason = CLIProbeEnvironment.probeFailureReason(version: versionRes,
+                                                                   help: helpRes,
+                                                                   learnedNothing: learnedNothing) {
                 return .failure(.commandFailed(reason))
             }
 
@@ -123,22 +122,6 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
             return .failure(.commandFailed(error.localizedDescription))
         }
     }
-
-    /// Every invocation of the CLI goes through here so the child always gets a
-    /// PATH that can resolve `#!/usr/bin/env node`.
-    private func runCLI(_ binary: URL, _ argument: String) throws -> CommandResult {
-        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
-    }
-
-    private func which(_ command: String) -> String? {
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for component in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
-        }
-        return nil
-    }
-
 
     private func bestKimiCLI(from paths: [String]) -> URL? {
         var firstExecutable: URL?
@@ -160,18 +143,11 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
     }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? runCLI(binary, "--help")
+        let help = try? probeEnv.run(binary, "--help")
         let helpOut = [help?.stdout, help?.stderr]
             .compactMap { $0 }
             .joined(separator: "\n")
-        return helpContainsFlag("--session", in: helpOut)
-            || helpContainsFlag("--continue", in: helpOut)
-    }
-
-    private func helpContainsFlag(_ flag: String, in help: String) -> Bool {
-        help.split { character in
-            character.isWhitespace || ",=[](){}<>:;".contains(character)
-        }
-        .contains { $0 == flag }
+        return CLIProbeEnvironment.helpAdvertises("--session", in: helpOut)
+            || CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
     }
 }

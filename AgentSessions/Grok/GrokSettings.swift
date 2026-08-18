@@ -64,12 +64,34 @@ final class GrokSettings: ObservableObject {
 
     func setResolvedBinary(_ path: String?, supportsResume: Bool, supportsContinue: Bool) {
         let value = (path ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // A probe that could not execute the CLI reports a real binary
+        // with every capability false. Storing that is what let a single
+        // failed probe disable resume for good: the cache is only
+        // refreshed while the resolved path is empty, so the dead verdict
+        // outlived whatever caused it. No shipping build supports none of
+        // --resume or --continue, so treat it as nothing learned.
+        guard supportsResume || supportsContinue else {
+            clearResolvedBinary()
+            return
+        }
         resolvedBinaryPath = value
         resolvedSupportsResume = !value.isEmpty && supportsResume
         resolvedSupportsContinue = !value.isEmpty && supportsContinue
         defaults.set(value, forKey: Keys.resolvedBinaryPath)
         defaults.set(resolvedSupportsResume, forKey: Keys.resolvedSupportsResume)
         defaults.set(resolvedSupportsContinue, forKey: Keys.resolvedSupportsContinue)
+    }
+
+    /// Clears the path *and* the capability flags: leaving the flags set
+    /// behind an empty path is a state no probe produces, and anything
+    /// reading a flag without first checking the path would see a stale yes.
+    private func clearResolvedBinary() {
+        resolvedBinaryPath = ""
+        defaults.set("", forKey: Keys.resolvedBinaryPath)
+        resolvedSupportsResume = false
+        resolvedSupportsContinue = false
+        defaults.set(false, forKey: Keys.resolvedSupportsResume)
+        defaults.set(false, forKey: Keys.resolvedSupportsContinue)
     }
 
     func hasCustomBinary() -> Bool {

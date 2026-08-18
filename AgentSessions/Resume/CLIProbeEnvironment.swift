@@ -44,6 +44,62 @@ final class CLIProbeEnvironment {
         return env
     }
 
+    /// Runs one probe command, widening PATH only when the inherited environment
+    /// could not run it.
+    ///
+    /// The widening costs a login shell, which is worth hundreds of milliseconds
+    /// and is pure waste whenever the app was launched from a terminal, the CLI
+    /// is a native binary, or the user pointed us straight at an executable —
+    /// all of which run fine on the PATH we already have. So try that first and
+    /// only pay for the shell once something has actually failed.
+    func run(_ binary: URL, _ argument: String) throws -> CommandResult {
+        let inherited = try executor.run([binary.path, argument], cwd: nil)
+        guard inherited.exitCode != 0 else { return inherited }
+
+        guard let widened = try? executor.run([binary.path, argument],
+                                              cwd: nil,
+                                              environment: probeEnvironment()) else {
+            return inherited
+        }
+        // Keep the first failure when widening did not help: its stderr names
+        // what the user's own PATH did, which is what they can act on.
+        return widened.exitCode == 0 ? widened : inherited
+    }
+
+    /// Whole-token flag match, so `--session-dir` never reads as `--session`.
+    static func helpAdvertises(_ flag: String, in help: String) -> Bool {
+        help.split { character in
+            character.isWhitespace || ",=[](){}<>:;".contains(character)
+        }
+        .contains { $0 == flag }
+    }
+
+    /// The reason to report when a probe never executed the CLI, or nil when it
+    /// did and we can trust what it said.
+    ///
+    /// A probe that could not run is not evidence that the CLI lacks resume
+    /// flags — recording it that way is what silently disabled every resume
+    /// action in #58. A CLI that actually ran exits 0 for at least one of
+    /// `--version`/`--help`, or prints a flag we recognise.
+    static func probeFailureReason(version: CommandResult,
+                                   help: CommandResult?,
+                                   learnedNothing: Bool) -> String? {
+        guard version.exitCode != 0, (help?.exitCode ?? 127) != 0, learnedNothing else { return nil }
+        return [version.stderr, help?.stderr]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+    }
+
+    /// First executable of that name on the PATH this process inherited.
+    static func which(_ command: String) -> String? {
+        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
+        for component in path.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
+        }
+        return nil
+    }
+
     private func discover() -> (path: String, executablePath: String?) {
         if let cached { return cached }
 

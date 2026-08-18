@@ -45,11 +45,11 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         }
     }
 
-    private let executor: CommandExecuting
+    /// Every command this type runs goes through the probe environment, which
+    /// owns both the executor and the decision of when to widen PATH.
     private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
-        self.executor = executor
         self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
@@ -68,7 +68,7 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         // permanently masking a real CLI installed there.
         let candidates: [String] = [
             probeEnv.loginShellExecutablePath(),
-            which(Self.binaryName),
+            CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.grok/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
@@ -85,7 +85,7 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
         }
 
         do {
-            let versionRes = try runCLI(binary, "--version")
+            let versionRes = try probeEnv.run(binary, "--version")
             let versionString: String
             if versionRes.exitCode == 0 {
                 let combined = [versionRes.stdout, versionRes.stderr]
@@ -96,13 +96,13 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
                 versionString = "unknown"
             }
 
-            let helpRes = try? runCLI(binary, "--help")
+            let helpRes = try? probeEnv.run(binary, "--help")
             let helpOut = [helpRes?.stdout, helpRes?.stderr]
                 .compactMap { $0 }
                 .joined(separator: "\n")
 
-            let supportsResume = helpContainsFlag("--resume", in: helpOut)
-            let supportsContinue = helpContainsFlag("--continue", in: helpOut)
+            let supportsResume = CLIProbeEnvironment.helpAdvertises("--resume", in: helpOut)
+            let supportsContinue = CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
 
             // A probe that never ran is not evidence that Grok lacks resume
             // flags. A Grok that actually ran exits 0 for at least one of
@@ -110,10 +110,9 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
             // means we learned nothing, and calling that "supports nothing"
             // silently disables every resume action.
             let learnedNothing = !supportsResume && !supportsContinue
-            if versionRes.exitCode != 0, (helpRes?.exitCode ?? 127) != 0, learnedNothing {
-                let reason = [versionRes.stderr, helpRes?.stderr]
-                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { !$0.isEmpty } ?? ""
+            if let reason = CLIProbeEnvironment.probeFailureReason(version: versionRes,
+                                                                   help: helpRes,
+                                                                   learnedNothing: learnedNothing) {
                 return .failure(.commandFailed(reason))
             }
 
@@ -129,23 +128,6 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
             return .failure(.commandFailed(error.localizedDescription))
         }
     }
-
-    /// Every invocation of the CLI goes through here so the child always gets a
-    /// PATH the user would actually have, rather than the stunted one a
-    /// Finder-launched app inherits.
-    private func runCLI(_ binary: URL, _ argument: String) throws -> CommandResult {
-        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
-    }
-
-    private func which(_ command: String) -> String? {
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for component in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
-        }
-        return nil
-    }
-
 
     private func bestGrokCLI(from paths: [String]) -> URL? {
         var firstExecutable: URL?
@@ -167,18 +149,11 @@ struct GrokCLIEnvironment: GrokCLIEnvironmentProviding {
     }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? runCLI(binary, "--help")
+        let help = try? probeEnv.run(binary, "--help")
         let helpOut = [help?.stdout, help?.stderr]
             .compactMap { $0 }
             .joined(separator: "\n")
-        return helpContainsFlag("--resume", in: helpOut)
-            || helpContainsFlag("--continue", in: helpOut)
-    }
-
-    private func helpContainsFlag(_ flag: String, in help: String) -> Bool {
-        help.split { character in
-            character.isWhitespace || ",=[](){}<>:;".contains(character)
-        }
-        .contains { $0 == flag }
+        return CLIProbeEnvironment.helpAdvertises("--resume", in: helpOut)
+            || CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
     }
 }

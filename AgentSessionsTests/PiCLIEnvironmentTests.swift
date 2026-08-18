@@ -89,22 +89,37 @@ extension PiCLIEnvironmentTests {
     /// Pi ships as a `#!/usr/bin/env node` script, so probing it with that PATH
     /// dies with `env: node: No such file or directory` before Pi ever runs.
     /// The probe must therefore hand the child a PATH that can find node.
-    func testProbeRunsCLIWithAPathThatCanResolveNode() {
+    func testProbeRetriesUnderTheLoginShellPathWhenTheInheritedOneFails() {
         let binaryPath = makeTempExecutable(name: "pi-probe-path")
+        let executor = RecordingExecutor()
+        let envFailure = CommandResult(stdout: "",
+                                       stderr: "env: node: No such file or directory\n",
+                                       exitCode: 127)
+        executor.responses[[binaryPath, "--version"]] = envFailure
+        executor.responses[[binaryPath, "--help"]] = envFailure
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+
+        _ = PiCLIEnvironment(executor: executor).probe(customPath: binaryPath)
+
+        let retried = executor.environments(forCommandContaining: "--help").compactMap { $0?["PATH"] }
+        XCTAssertFalse(retried.isEmpty, "a failed probe must be retried with a widened PATH")
+        XCTAssertTrue(retried.allSatisfy { $0.contains("/opt/homebrew/bin") },
+                      "retry PATH lost the login-shell entries: \(retried)")
+    }
+
+    /// The widening costs a login shell. A CLI that already runs under the PATH
+    /// we inherited — anything launched from a terminal, and every native binary
+    /// — must never pay for one.
+    func testProbeDoesNotAskTheLoginShellWhenTheInheritedPathWorks() {
+        let binaryPath = makeTempExecutable(name: "pi-probe-no-shell")
         let executor = RecordingExecutor()
         executor.responses[[binaryPath, "--version"]] = CommandResult(stdout: "0.84.2", stderr: "", exitCode: 0)
         executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: "--session <path|id>", stderr: "", exitCode: 0)
-        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
 
-        let env = PiCLIEnvironment(executor: executor)
-        _ = env.probe(customPath: binaryPath)
+        _ = PiCLIEnvironment(executor: executor).probe(customPath: binaryPath)
 
-        let probeEnvs = executor.environments(forCommandContaining: "--help")
-        XCTAssertFalse(probeEnvs.isEmpty, "expected --help to run with an explicit environment")
-        for path in probeEnvs.map({ $0?["PATH"] ?? "" }) {
-            XCTAssertTrue(path.contains("/opt/homebrew/bin"),
-                          "probe PATH lost the login-shell entries: \(path)")
-        }
+        XCTAssertEqual(executor.loginShellInvocations, 0,
+                       "a working probe spawned a login shell it did not need")
     }
 
     /// A probe that never executed is not evidence that Pi lacks resume flags.
@@ -156,6 +171,7 @@ extension PiCLIEnvironmentTests {
         var loginShellStdoutNoise: String = ""
         var loginShellStderr: String = ""
         private(set) var calls: [(command: [String], environment: [String: String]?)] = []
+        private(set) var loginShellInvocations = 0
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
             try run(command, cwd: cwd, environment: nil)
@@ -164,6 +180,7 @@ extension PiCLIEnvironmentTests {
         func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult {
             calls.append((command, environment))
             if command.count == 3, command[1] == "-lic" {
+                loginShellInvocations += 1
                 return CommandResult(stdout: loginShellScriptOutput(), stderr: loginShellStderr, exitCode: 0)
             }
             return responses[command] ?? CommandResult(stdout: "", stderr: "", exitCode: 0)

@@ -27,11 +27,11 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         }
     }
 
-    private let executor: CommandExecuting
+    /// Every command this type runs goes through the probe environment, which
+    /// owns both the executor and the decision of when to widen PATH.
     private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
-        self.executor = executor
         self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: "pi")
     }
 
@@ -52,7 +52,7 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         // so that collision is not hypothetical.
         let candidates: [String] = [
             probeEnv.loginShellExecutablePath(),
-            which("pi"),
+            CLIProbeEnvironment.which("pi"),
             "\(home)/.local/bin/pi",
             "\(home)/.npm-global/bin/pi",
             "/opt/homebrew/bin/pi",
@@ -68,7 +68,7 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         }
 
         do {
-            let versionRes = try runPi(binary, "--version")
+            let versionRes = try probeEnv.run(binary, "--version")
             let versionString: String
             if versionRes.exitCode == 0 {
                 let combined = [versionRes.stdout, versionRes.stderr]
@@ -79,14 +79,14 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
                 versionString = "unknown"
             }
 
-            let helpRes = try? runPi(binary, "--help")
+            let helpRes = try? probeEnv.run(binary, "--help")
             let helpOut = [helpRes?.stdout, helpRes?.stderr]
                 .compactMap { $0 }
                 .joined(separator: "\n")
 
-            let supportsSession = helpContainsFlag("--session", in: helpOut)
-            let supportsResume = helpContainsFlag("--resume", in: helpOut)
-            let supportsContinue = helpContainsFlag("--continue", in: helpOut)
+            let supportsSession = CLIProbeEnvironment.helpAdvertises("--session", in: helpOut)
+            let supportsResume = CLIProbeEnvironment.helpAdvertises("--resume", in: helpOut)
+            let supportsContinue = CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
 
             // A probe that never ran is not evidence that Pi lacks resume flags.
             // Reporting it as success-with-nothing-supported is what made the
@@ -95,10 +95,9 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
             // exits 0 for at least one of --version/--help, or prints a flag we
             // recognise; anything else means we learned nothing.
             let learnedNothing = !supportsSession && !supportsResume && !supportsContinue
-            if versionRes.exitCode != 0, (helpRes?.exitCode ?? 127) != 0, learnedNothing {
-                let reason = [versionRes.stderr, helpRes?.stderr]
-                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first { !$0.isEmpty } ?? ""
+            if let reason = CLIProbeEnvironment.probeFailureReason(version: versionRes,
+                                                                   help: helpRes,
+                                                                   learnedNothing: learnedNothing) {
                 return .failure(.commandFailed(reason))
             }
 
@@ -114,21 +113,6 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
         } catch {
             return .failure(.commandFailed(error.localizedDescription))
         }
-    }
-
-    /// Every invocation of the CLI goes through here so the child always gets a
-    /// PATH that can resolve `#!/usr/bin/env node`.
-    private func runPi(_ binary: URL, _ argument: String) throws -> CommandResult {
-        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
-    }
-
-    private func which(_ command: String) -> String? {
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for component in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
-        }
-        return nil
     }
 
     private func bestPiCLI(from paths: [String]) -> URL? {
@@ -151,19 +135,12 @@ struct PiCLIEnvironment: PiCLIEnvironmentProviding {
     }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? runPi(binary, "--help")
+        let help = try? probeEnv.run(binary, "--help")
         let helpOut = [help?.stdout, help?.stderr]
             .compactMap { $0 }
             .joined(separator: "\n")
-        return helpContainsFlag("--session", in: helpOut)
-            || helpContainsFlag("--resume", in: helpOut)
-            || helpContainsFlag("--continue", in: helpOut)
-    }
-
-    private func helpContainsFlag(_ flag: String, in help: String) -> Bool {
-        help.split { character in
-            character.isWhitespace || ",=[](){}<>:;".contains(character)
-        }
-        .contains { $0 == flag }
+        return CLIProbeEnvironment.helpAdvertises("--session", in: helpOut)
+            || CLIProbeEnvironment.helpAdvertises("--resume", in: helpOut)
+            || CLIProbeEnvironment.helpAdvertises("--continue", in: helpOut)
     }
 }
