@@ -55,13 +55,9 @@ final class PiSettings: ObservableObject {
         binaryPath = path
         defaults.set(path, forKey: Keys.binaryPath)
         if path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            setResolvedBinaryPath(nil)
+            clearResolvedBinary()
             warmResolvedBinaryPathIfNeeded()
         }
-    }
-
-    func setResolvedBinaryPath(_ path: String?) {
-        setResolvedBinary(path, supportsSession: path != nil, supportsResume: path != nil, supportsContinue: path != nil)
     }
 
     func setResolvedBinary(_ path: String?, supportsSession: Bool, supportsResume: Bool, supportsContinue: Bool) {
@@ -89,7 +85,7 @@ final class PiSettings: ObservableObject {
     /// Clears the path *and* the capability flags: leaving the flags set
     /// behind an empty path is a state no probe produces, and anything
     /// reading a flag without first checking the path would see a stale yes.
-    private func clearResolvedBinary() {
+    func clearResolvedBinary() {
         resolvedBinaryPath = ""
         defaults.set("", forKey: Keys.resolvedBinaryPath)
         resolvedSupportsSession = false
@@ -186,7 +182,7 @@ final class PiSettings: ObservableObject {
         if FileManager.default.isExecutableFile(atPath: cached), !advertisesNothing {
             return cached
         }
-        setResolvedBinaryPath(nil)
+        clearResolvedBinary()
         warmResolvedBinaryPathIfNeeded()
         return nil
     }

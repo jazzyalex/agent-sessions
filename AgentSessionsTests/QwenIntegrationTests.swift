@@ -803,6 +803,28 @@ final class QwenIntegrationTests: XCTestCase {
                       "retry PATH lost the login-shell entries: \(retried)")
     }
 
+    /// The #58 case end to end: a Node CLI that cannot start under the PATH a
+    /// Finder-launched app inherits, and does start once the probe widens it.
+    /// The other tests pin "a retry happened" and "a retry can succeed"
+    /// separately — this is the one that fails if the two do not join up.
+    func testCLIProbeRecoversUnderTheWidenedPath() {
+        let binaryPath = makeTemporaryExecutable()
+        let executor = MockCommandExecutor()
+        executor.needsHomebrewOnPath = true
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.responses[[binaryPath, "--version"]] = .init(stdout: "0.21.13", stderr: "", exitCode: 0)
+        executor.responses[[binaryPath, "--help"]] = .init(stdout: "--resume <id>\n--continue", stderr: "", exitCode: 0)
+
+        switch QwenCLIEnvironment(executor: executor).probe(customPath: binaryPath) {
+        case .success(let result):
+            XCTAssertEqual(result.versionString, "0.21.13")
+            XCTAssertTrue(result.supportsResume)
+            XCTAssertTrue(result.supportsContinue)
+        case .failure(let error):
+            XCTFail("Finder-launched probe never recovered: \(error)")
+        }
+    }
+
     /// A probe that never executed is not evidence that Qwen lacks resume flags.
     /// Recording it as "supports nothing" is what makes the resume actions go
     /// quiet, and the verdict is cached.
@@ -1047,6 +1069,9 @@ final class QwenIntegrationTests: XCTestCase {
     private final class MockCommandExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
         var loginShellPATH = "/usr/bin:/bin"
+        /// Models a `#!/usr/bin/env node` CLI: it cannot start unless the
+        /// environment it is given can find its interpreter.
+        var needsHomebrewOnPath = false
         private(set) var calls: [(command: [String], environment: [String: String]?)] = []
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
@@ -1063,6 +1088,9 @@ final class QwenIntegrationTests: XCTestCase {
                     stderr: "",
                     exitCode: 0
                 )
+            }
+            if needsHomebrewOnPath, environment?["PATH"]?.contains("/opt/homebrew/bin") != true {
+                return .init(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
             }
             return responses[command] ?? .init(stdout: "", stderr: "", exitCode: 0)
         }

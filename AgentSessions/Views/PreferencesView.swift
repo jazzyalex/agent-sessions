@@ -761,13 +761,13 @@ struct PreferencesView: View {
         cursorSettings.setBinaryPath("")
         cursorSettings.setResolvedBinaryPath(nil)
         piSettings.setBinaryPath("")
-        piSettings.setResolvedBinaryPath(nil)
+        piSettings.clearResolvedBinary()
         kimiSettings.setBinaryPath("")
-        kimiSettings.setResolvedBinaryPath(nil)
+        kimiSettings.clearResolvedBinary()
         grokSettings.setBinaryPath("")
-        grokSettings.setResolvedBinaryPath(nil)
+        grokSettings.clearResolvedBinary()
         qwenSettings.setBinaryPath("")
-        qwenSettings.setResolvedBinaryPath(nil)
+        qwenSettings.clearResolvedBinary()
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -1461,7 +1461,7 @@ extension PreferencesView {
                     self.piVersionString = nil
                     self.piResolvedPath = nil
                     if isAutoProbe {
-                        self.piSettings.setResolvedBinaryPath(nil)
+                        self.piSettings.clearResolvedBinary()
                     }
                     self.piProbeState = .failure
                     self.piCLIAvailable = false
@@ -1495,7 +1495,7 @@ extension PreferencesView {
                     self.kimiVersionString = nil
                     self.kimiResolvedPath = nil
                     if isAutoProbe {
-                        self.kimiSettings.setResolvedBinaryPath(nil)
+                        self.kimiSettings.clearResolvedBinary()
                     }
                     self.kimiProbeState = .failure
                     self.kimiCLIAvailable = false
@@ -1529,7 +1529,7 @@ extension PreferencesView {
                     self.grokVersionString = nil
                     self.grokResolvedPath = nil
                     if isAutoProbe {
-                        self.grokSettings.setResolvedBinaryPath(nil)
+                        self.grokSettings.clearResolvedBinary()
                     }
                     self.grokProbeState = .failure
                     self.grokCLIAvailable = false

@@ -99,11 +99,36 @@ final class GrokCLIEnvironmentTests: XCTestCase {
         XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the unusable cache entry should be cleared")
     }
 
+    /// The #58 case end to end: a Node CLI that cannot start under the PATH a
+    /// Finder-launched app inherits, and does start once the probe widens it.
+    /// The other tests pin "a retry happened" and "a retry can succeed"
+    /// separately — this is the one that fails if the two do not join up.
+    func testGrokProbeRecoversUnderTheWidenedPath() {
+        let binaryPath = makeTempExecutable(name: "grok-probe-recovers")
+        let executor = MockExecutor()
+        executor.needsHomebrewOnPath = true
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.responses[[binaryPath, "--version"]] = CommandResult(stdout: "1.0.0", stderr: "", exitCode: 0)
+        executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: realHelp, stderr: "", exitCode: 0)
+
+        switch GrokCLIEnvironment(executor: executor).probe(customPath: binaryPath) {
+        case .success(let probe):
+            XCTAssertEqual(probe.versionString, "1.0.0")
+            XCTAssertTrue(probe.supportsResume)
+            XCTAssertTrue(probe.supportsContinue)
+        case .failure(let error):
+            XCTFail("Finder-launched probe never recovered: \(error)")
+        }
+    }
+
     private final class MockExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
         var loginShellPATH = "/usr/bin:/bin"
         var loginShellExecutable: String?
         private(set) var calls: [(command: [String], environment: [String: String]?)] = []
+        /// Models a `#!/usr/bin/env node` CLI: it cannot start unless the
+        /// environment it is given can find its interpreter.
+        var needsHomebrewOnPath = false
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
             try run(command, cwd: cwd, environment: nil)
@@ -119,6 +144,9 @@ final class GrokCLIEnvironmentTests: XCTestCase {
                     out += "\(CLIProbeEnvironment.whichMarker.begin)\(loginShellExecutable)\(CLIProbeEnvironment.whichMarker.end)\n"
                 }
                 return CommandResult(stdout: out, stderr: "", exitCode: 0)
+            }
+            if needsHomebrewOnPath, environment?["PATH"]?.contains("/opt/homebrew/bin") != true {
+                return CommandResult(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
             }
             return responses[command] ?? CommandResult(stdout: "", stderr: "", exitCode: 0)
         }

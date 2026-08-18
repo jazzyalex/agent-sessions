@@ -47,7 +47,7 @@ final class QwenSettings: ObservableObject {
         defaults.set(path, forKey: Keys.binaryPath)
         let custom = path.trimmingCharacters(in: .whitespacesAndNewlines)
         if custom.isEmpty {
-            setResolvedBinaryPath(nil)
+            clearResolvedBinary()
             warmResolvedBinaryPathIfNeeded()
         } else if !pathsReferToSameBinary(custom, resolvedBinaryPath) {
             // Capabilities belong to the probed executable. A newly typed
@@ -81,13 +81,9 @@ final class QwenSettings: ObservableObject {
                 supportsContinue: resolved.supportsContinue
             )
         case .failure:
-            setResolvedBinaryPath(nil)
+            clearResolvedBinary()
         }
         return .accepted
-    }
-
-    func setResolvedBinaryPath(_ path: String?) {
-        setResolvedBinary(path, supportsResume: path != nil, supportsContinue: path != nil)
     }
 
     func setResolvedBinary(_ path: String?, supportsResume: Bool, supportsContinue: Bool) {
@@ -113,7 +109,7 @@ final class QwenSettings: ObservableObject {
     /// Clears the path *and* the capability flags: leaving the flags set
     /// behind an empty path is a state no probe produces, and anything
     /// reading a flag without first checking the path would see a stale yes.
-    private func clearResolvedBinary() {
+    func clearResolvedBinary() {
         resolvedBinaryPath = ""
         defaults.set("", forKey: Keys.resolvedBinaryPath)
         resolvedSupportsResume = false
@@ -159,7 +155,7 @@ final class QwenSettings: ObservableObject {
         // forever, because the cache is only refreshed while the path is empty.
         let advertisesNothing = !resolvedSupportsResume && !resolvedSupportsContinue
         if FileManager.default.isExecutableFile(atPath: cached), !advertisesNothing { return cached }
-        setResolvedBinaryPath(nil)
+        clearResolvedBinary()
         warmResolvedBinaryPathIfNeeded()
         return nil
     }

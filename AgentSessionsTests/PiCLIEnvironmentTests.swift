@@ -163,6 +163,29 @@ extension PiCLIEnvironmentTests {
 
     /// Records the environment each command was given, and answers the
     /// login-shell discovery call whatever exact script the probe sends.
+    /// The #58 case end to end: a Node CLI that cannot start under the PATH a
+    /// Finder-launched app inherits, and does start once the probe widens it.
+    /// The other tests pin "a retry happened" and "a retry can succeed"
+    /// separately — this is the one that fails if the two do not join up.
+    func testPiProbeRecoversUnderTheWidenedPath() {
+        let binaryPath = makeTempExecutable(name: "pi-probe-recovers")
+        let executor = RecordingExecutor()
+        executor.needsHomebrewOnPath = true
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.responses[[binaryPath, "--version"]] = CommandResult(stdout: "0.84.2", stderr: "", exitCode: 0)
+        executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: "--session <path|id>\n--resume\n--continue", stderr: "", exitCode: 0)
+
+        switch PiCLIEnvironment(executor: executor).probe(customPath: binaryPath) {
+        case .success(let probe):
+            XCTAssertEqual(probe.versionString, "0.84.2")
+            XCTAssertTrue(probe.supportsSession)
+            XCTAssertTrue(probe.supportsResume)
+            XCTAssertTrue(probe.supportsContinue)
+        case .failure(let error):
+            XCTFail("Finder-launched probe never recovered: \(error)")
+        }
+    }
+
     private final class RecordingExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
         var loginShellPATH = "/usr/bin:/bin"
@@ -171,6 +194,9 @@ extension PiCLIEnvironmentTests {
         var loginShellStdoutNoise: String = ""
         var loginShellStderr: String = ""
         private(set) var calls: [(command: [String], environment: [String: String]?)] = []
+        /// Models a `#!/usr/bin/env node` CLI: it cannot start unless the
+        /// environment it is given can find its interpreter.
+        var needsHomebrewOnPath = false
         private(set) var loginShellInvocations = 0
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
@@ -182,6 +208,9 @@ extension PiCLIEnvironmentTests {
             if command.count == 3, command[1] == "-lic" {
                 loginShellInvocations += 1
                 return CommandResult(stdout: loginShellScriptOutput(), stderr: loginShellStderr, exitCode: 0)
+            }
+            if needsHomebrewOnPath, environment?["PATH"]?.contains("/opt/homebrew/bin") != true {
+                return CommandResult(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
             }
             return responses[command] ?? CommandResult(stdout: "", stderr: "", exitCode: 0)
         }

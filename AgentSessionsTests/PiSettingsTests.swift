@@ -65,7 +65,7 @@ final class PiSettingsTests: XCTestCase {
         settings.setResolvedBinary(makeTempExecutable(name: "pi-settings-clear"),
                                    supportsSession: true, supportsResume: true, supportsContinue: true)
 
-        settings.setResolvedBinaryPath(nil)
+        settings.clearResolvedBinary()
 
         XCTAssertTrue(settings.resolvedBinaryPath.isEmpty)
         XCTAssertFalse(settings.resolvedSupportsSession)
