@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.0</title>
-            <pubDate>Mon, 17 Aug 2026 20:12:12 -0700</pubDate>
+            <title>5.0.1</title>
+            <pubDate>Tue, 18 Aug 2026 16:39:32 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,31 +27,30 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.0</h2>
-<h3 class="hl">Highlights</h3>
-<ul class="highlights">
-<li><strong>Agents are plug-in adapters now.</strong> Each agent used to be hand-wired into every surface — list, search, pills, Analytics, Settings — so it could show up in one and be missing from another. Now an agent is described once and every surface reads that description. Adding one dropped from 26 shared-file edits to 12, each listed in <a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/adding-a-session-source.md">the guide</a> with a test that fails if you miss it. Bring the agent you use.</li>
-<li><strong>Qwen Code is the thirteenth agent.</strong> Local Qwen chats land in browsing, search, Analytics and the transcript view — reasoning, tool calls, and rewound branches reconstructed along the active parent chain. Active chats resume in the CLI; archived ones stay browse-only. Format verified against real 0.14.3 transcripts (newer builds wait on a Qwen account — the free tier is gone).</li>
-</ul>
-<h3>Features</h3>
-<ul>
-<li><strong>The app asks for help adding your agent — once.</strong> A dismissible card points long-time users at the proposal form and contributing guide. It shows up late, takes no for an answer, and reads and sends nothing.</li>
-</ul>
+<h2>What&#x27;s New in 5.0.1</h2>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Disabled agents no longer sneak into filter-view search results.</strong> The search allow-list was hand-written and stopped short of several agents; it now derives from the same enablement everything else reads.</li>
-<li><strong>Kimi Code and Grok CLI now report when loading finishes.</strong> Their indexing never reached the launch state, so startup progress could sit incomplete while their sessions were ready. All thirteen agents report now; ones you don&#x27;t have settle to ready.</li>
-<li><strong>OpenClaw no longer marks Analytics stale on every launch.</strong> Its enable switch had a shadow copy that never agreed with the original; there is one setting now.</li>
-<li><strong>Every agent&#x27;s on/off switch flashes the same restart notice.</strong> Five agents used to skip it silently.</li>
-<li><strong>OpenCode and Hermes transcripts are searchable.</strong> Their SQLite-backed sessions shared one file path, so search ingest couldn&#x27;t tell them apart and skipped their text. Sessions are tracked by identity now, WAL-only changes included.</li>
+<li><strong>Resume works when you launch the app from Finder.</strong> Pi, Kimi Code and Qwen Code ship as <code>#!/usr/bin/env node</code> scripts, and Finder hands the app a PATH with no Homebrew in it, so the probe died before the CLI ever ran and the app decided the CLI had no resume flags. Grok CLI is native and never hit that, but cached the same dead verdict. All four now probe with your login shell&#x27;s PATH, and a probe that could not run is no longer mistaken for a CLI without features. (<a href="https://github.com/jazzyalex/agent-sessions/issues/58">#58</a>)</li>
+<li><strong>Node version managers no longer hide your CLI.</strong> Probes read nvm&#x27;s and fnm&#x27;s default alias straight from disk, so an rc file that only loads them in a real terminal is no longer a dead end.</li>
+<li><strong>Qwen takes a second look at a custom binary.</strong> A failed probe could record &quot;supports nothing&quot; against a path you picked yourself, and nothing ever retried it. That verdict is dropped and re-probed at launch.</li>
+<li><strong>Codex sessions keep their origin.</strong> Search indexing overwrote it on every pass, so Desktop sessions wore a <code>cli</code> pill and could change label as they finished loading. Existing libraries repair themselves once on upgrade.</li>
+<li><strong>Codex CLI and <code>codex exec</code> sessions stop claiming to be Desktop.</strong> Recent Codex builds stamp every session &quot;Codex Desktop&quot;, so the surface now comes from the session&#x27;s own <code>source</code> instead.</li>
+<li><strong>Side chats say &quot;side&quot; and inherit their parent&#x27;s origin.</strong> They claimed Desktop before, whatever they actually branched from.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0</a></p>
+<h3>Reminder: What You Got in 5.0</h3>
+<ul>
+<li><strong>Agents are plug-in adapters now.</strong> Each agent used to be hand-wired into every surface — list, search, pills, Analytics, Settings — so it could show up in one and be missing from another. Now an agent is described once and every surface reads that description. Adding one dropped from 26 shared-file edits to 12, each listed in <a href="https://github.com/jazzyalex/agent-sessions/blob/main/docs/adding-a-session-source.md">the guide</a> with a test that fails if you miss it. Bring the agent you use.</li>
+<li><strong>Qwen Code is the thirteenth agent.</strong> Local Qwen chats land in browsing, search, Analytics and the transcript view — reasoning, tool calls, and rewound branches reconstructed along the active parent chain. Active chats resume in the CLI; archived ones stay browse-only. Format verified against real 0.14.3 transcripts (newer builds wait on a Qwen account — the free tier is gone).</li>
+<li><strong>The app asks for help adding your agent — once.</strong> A dismissible card points long-time users at the proposal form and contributing guide. It shows up late, takes no for an answer, and reads and sends nothing.</li>
+<li><strong>Disabled agents no longer sneak into filter-view search results.</strong> The search allow-list was hand-written and stopped short of several agents; it now derives from the same enablement everything else reads.</li>
+</ul>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>68</sparkle:version>
-            <sparkle:shortVersionString>5.0</sparkle:shortVersionString>
+            <sparkle:version>69</sparkle:version>
+            <sparkle:shortVersionString>5.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0/AgentSessions-5.0.dmg" length="22686524" type="application/octet-stream" sparkle:edSignature="7HV51VPXrVMvUu9N4coezU60vDSxcsNohwyxh0/StinF0odr5bp6OAVTeBsbfgNIYn71Rq+CtYCxUECSi62lBQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.1/AgentSessions-5.0.1.dmg" length="22736389" type="application/octet-stream" sparkle:edSignature="tJZ2htpF3NrAbFcoXst92jA7hXm1duwSqunbWDzt2cO8v6/LjzBUOqAi4mAOkGFJxfz56QfELATDAXQtJwTsAw=="/>
         </item>
     </channel>
 </rss>
