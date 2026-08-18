@@ -38,9 +38,10 @@ final class GrokCLIEnvironmentTests: XCTestCase {
         XCTAssertEqual(GrokCLIEnvironment(executor: executor).resolveBinary(customPath: nil)?.path, binaryPath)
     }
 
-    /// A Finder-launched app inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`.
-    /// Homebrew is not on it, and a Grok packaged as a Node script could not run
-    /// its interpreter at all.
+    /// A Finder-launched app inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin`,
+    /// which has no Homebrew on it. The shipping Grok is a self-contained
+    /// Mach-O binary, so it starts anyway — but it is started with that PATH,
+    /// and anything it shells out to inherits it.
     func testProbeRunsCLIWithTheLoginShellPath() {
         let binaryPath = makeTempExecutable(name: "grok-probe-path")
         let executor = MockExecutor()

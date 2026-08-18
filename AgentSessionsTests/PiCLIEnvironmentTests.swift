@@ -130,14 +130,16 @@ extension PiCLIEnvironmentTests {
         }
     }
 
-    /// `command -v` answers on stdout. Login shells print banners, MOTDs and
-    /// version-manager chatter on stderr; merging the two lets a banner line
-    /// become the "resolved binary path".
+    /// Login shells print banners, MOTDs and version-manager chatter. Some of
+    /// it lands on stdout, which is the stream discovery parses — so the
+    /// markers, not the stream, are what keep a banner line from becoming the
+    /// "resolved binary path".
     func testLoginShellDiscoveryIgnoresShellBanners() {
         let executor = RecordingExecutor()
         let binaryPath = makeTempExecutable(name: "pi-resolve-banner")
         executor.loginShellStdout = "\(binaryPath)\n"
-        executor.loginShellStderr = "Welcome to zsh!\nnvm: using node v22\n"
+        executor.loginShellStdoutNoise = "Welcome to zsh!\n/usr/bin/env\n"
+        executor.loginShellStderr = "nvm: using node v22\n"
         executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: "--session <path|id>", stderr: "", exitCode: 0)
 
         let env = PiCLIEnvironment(executor: executor)
@@ -150,6 +152,8 @@ extension PiCLIEnvironmentTests {
         var responses: [[String]: CommandResult] = [:]
         var loginShellPATH = "/usr/bin:/bin"
         var loginShellStdout: String?
+        /// Banner text printed on stdout, outside the markers.
+        var loginShellStdoutNoise: String = ""
         var loginShellStderr: String = ""
         private(set) var calls: [(command: [String], environment: [String: String]?)] = []
 
@@ -170,7 +174,8 @@ extension PiCLIEnvironmentTests {
         }
 
         private func loginShellScriptOutput() -> String {
-            var out = "\(CLIProbeEnvironment.pathMarker.begin)\(loginShellPATH)\(CLIProbeEnvironment.pathMarker.end)\n"
+            var out = loginShellStdoutNoise
+            out += "\(CLIProbeEnvironment.pathMarker.begin)\(loginShellPATH)\(CLIProbeEnvironment.pathMarker.end)\n"
             if let loginShellStdout {
                 out += "\(CLIProbeEnvironment.whichMarker.begin)\(loginShellStdout.trimmingCharacters(in: .whitespacesAndNewlines))\(CLIProbeEnvironment.whichMarker.end)\n"
             }

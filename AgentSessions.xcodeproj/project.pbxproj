@@ -177,6 +177,7 @@
 		55DE6CE8A21315F0A28D31B2 /* TranscriptDerivedState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A4E88F760E29858ECDD340 /* TranscriptDerivedState.swift */; };
 		5648330A0957544AC6A3C299 /* DroidTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADAFE9DA5E86250005634F7A /* DroidTranscriptView.swift */; };
 		56AD86C6AA6FFF1B55F9905D /* AgentTerminalLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF2A3071BF27FDFC2D3389F3 /* AgentTerminalLauncher.swift */; };
+		56FBDA8277483A1D82FAB433 /* CLIProbeEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6E7E4451600BD7B7A915C4 /* CLIProbeEnvironmentTests.swift */; };
 		570F5F741130638C89E0B1E6 /* CodexSourceDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62B4D46D85FB47F12B48B73 /* CodexSourceDescriptor.swift */; };
 		5731AD7A25CF4B4DAA9BDF27 /* UpdateDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = B903187D9D8D4EDF9FAB0BBA /* UpdateDefaults.swift */; };
 		580BD9BD812D40E0A54F28D2 /* CodexResumeCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C60C047C8842A9B8A7AA2A /* CodexResumeCoordinatorTests.swift */; };
@@ -1053,6 +1054,7 @@
 		D87F261D1630E0F744175E84 /* CapPressureStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CapPressureStore.swift; path = AgentSessions/CodexStatus/CapPressureStore.swift; sourceTree = SOURCE_ROOT; };
 		D913B7B3339E3AE67FA5A628 /* AntigravityTerminalLauncher.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/AntigravityResume/AntigravityTerminalLauncher.swift; sourceTree = SOURCE_ROOT; };
 		D92B3997F1DDB13B7AC35CE3 /* TranscriptDerivedStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/TranscriptDerivedStateTests.swift; sourceTree = SOURCE_ROOT; };
+		DA6E7E4451600BD7B7A915C4 /* CLIProbeEnvironmentTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/CLIProbeEnvironmentTests.swift; sourceTree = SOURCE_ROOT; };
 		DB6BB67FF1D624BE69835C91 /* PreferencesView+Hermes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "AgentSessions/Views/Preferences/PreferencesView+Hermes.swift"; sourceTree = SOURCE_ROOT; };
 		DBDCB87E09445E1E39B93FDC /* AntigravitySourceDescriptor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AgentSessions/Model/AntigravitySourceDescriptor.swift; sourceTree = SOURCE_ROOT; };
 		DBSTEST00001000000000001 /* DBSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSessionsTests/Indexing/DBSmokeTests.swift; sourceTree = SOURCE_ROOT; };
@@ -1848,6 +1850,7 @@
 				25151786F954C6F7EDFBA7E5 /* PiSettingsTests.swift */,
 				C91B6EAA5FE64FC74099E249 /* CommandExecutorTests.swift */,
 				CD2796283509C773BB935C56 /* GrokCLIEnvironmentTests.swift */,
+				DA6E7E4451600BD7B7A915C4 /* CLIProbeEnvironmentTests.swift */,
 			);
 			path = AgentSessionsTests;
 			sourceTree = SOURCE_ROOT;
@@ -3056,6 +3059,7 @@
 				86DBE1CAFA09070E00C67654 /* PiSettingsTests.swift in Sources */,
 				5D837CC1F0263B6743122405 /* CommandExecutorTests.swift in Sources */,
 				F45672A8C39AB2B3BABA8858 /* GrokCLIEnvironmentTests.swift in Sources */,
+				56FBDA8277483A1D82FAB433 /* CLIProbeEnvironmentTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

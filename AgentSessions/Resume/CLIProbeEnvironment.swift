@@ -72,11 +72,19 @@ final class CLIProbeEnvironment {
     /// then our inherited PATH, then the prefixes a Node or Homebrew install uses.
     private static func mergedPath(loginPath: String?) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // Fixed prefixes only. The Node version managers people actually use put
+        // their shims behind a version or a per-shell directory — nvm at
+        // `~/.nvm/versions/node/<version>/bin`, fnm under a multishell path
+        // keyed to the running shell — so there is nothing static to add for
+        // them. The login-shell PATH above is what covers those installs, and
+        // this list is the floor for when the shell could not be asked.
         let fallbacks = [
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "\(home)/.local/bin",
             "\(home)/.npm-global/bin",
+            "\(home)/.volta/bin",
+            "\(home)/.bun/bin",
             "/usr/bin",
             "/bin",
             "/usr/sbin",

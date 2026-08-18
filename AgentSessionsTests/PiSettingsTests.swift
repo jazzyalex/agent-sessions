@@ -4,11 +4,11 @@ import Darwin
 
 @MainActor
 final class PiSettingsTests: XCTestCase {
-    private let suite = "PiSettingsTests"
-
-    private func makeSettings() -> PiSettings {
+    private func makeSettings(function: String = #function) -> PiSettings {
+        let suite = "PiSettingsTests.\(function)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return PiSettings.makeForTesting(defaults: defaults)
     }
 
