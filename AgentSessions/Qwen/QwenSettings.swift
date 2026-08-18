@@ -36,6 +36,15 @@ final class QwenSettings: ObservableObject {
         resolvedBinaryPath = defaults.string(forKey: Keys.resolvedBinaryPath) ?? ""
         resolvedSupportsResume = defaults.bool(forKey: Keys.resolvedSupportsResume)
         resolvedSupportsContinue = defaults.bool(forKey: Keys.resolvedSupportsContinue)
+        // Heal a cache written before the writer guard existed: an entry naming a
+        // binary that advertises neither flag came from a probe that could not
+        // execute the CLI. Dropping it here rather than at the first read is what
+        // lets the warm below rebuild it — including for a custom path, which has
+        // nothing else that would ever reprobe it.
+        if !resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !resolvedSupportsResume, !resolvedSupportsContinue {
+            clearResolvedBinary()
+        }
         if warmResolvedBinaryCache { warmResolvedBinaryPathIfNeeded() }
     }
 
@@ -134,11 +143,15 @@ final class QwenSettings: ObservableObject {
     }
 
     private func warmResolvedBinaryPathIfNeeded() {
-        guard resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              binaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // A custom path is warmed too, using itself as the override. Preferences
+        // probes only while the user has that pane open, so without this a
+        // cleared custom entry leaves every resume action off until they go
+        // looking for the button that fixes it.
         let request = currentProbeRequest()
+        let override = request.binaryOverride
         DispatchQueue.global(qos: .utility).async {
-            if case .success(let result) = QwenCLIEnvironment().probe(customPath: nil) {
+            if case .success(let result) = QwenCLIEnvironment().probe(customPath: override) {
                 DispatchQueue.main.async { [weak self] in
                     _ = self?.acceptProbeCompletion(.success(result), for: request)
                 }
@@ -164,6 +177,14 @@ final class QwenSettings: ObservableObject {
         let resolved = resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !resolved.isEmpty, pathsReferToSameBinary(custom, resolved),
               FileManager.default.isExecutableFile(atPath: resolved) else {
+            return nil
+        }
+        // The auto-detected branch discards a capability-free entry; this one has
+        // to as well, and for a sharper reason: nothing here falls back to a bare
+        // `qwen`, so keeping the dead entry disables resume with no way out.
+        guard resolvedSupportsResume || resolvedSupportsContinue else {
+            clearResolvedBinary()
+            warmResolvedBinaryPathIfNeeded()
             return nil
         }
         return resolved

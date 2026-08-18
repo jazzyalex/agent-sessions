@@ -39,6 +39,32 @@ final class PiSettingsTests: XCTestCase {
         XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the unusable cache entry should be cleared")
     }
 
+    /// The tests either side of this one write through `setResolvedBinary`,
+    /// whose own guard clears the entry before it is ever stored — so neither
+    /// reaches the reader's guard. The reader exists for caches an *older build*
+    /// wrote, and those only ever exist in `UserDefaults`, so seed them there.
+    func testACapabilityFreeCacheWrittenByAnOlderBuildIsHealedOnRead() {
+        let suite = "PiSettingsTests.\(#function)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+
+        let binaryPath = makeTempExecutable(name: "pi-settings-legacy-poisoned")
+        defaults.set(binaryPath, forKey: PiSettings.Keys.resolvedBinaryPath)
+        defaults.set(false, forKey: PiSettings.Keys.resolvedSupportsSession)
+        defaults.set(false, forKey: PiSettings.Keys.resolvedSupportsResume)
+        defaults.set(false, forKey: PiSettings.Keys.resolvedSupportsContinue)
+
+        let settings = PiSettings.makeForTesting(defaults: defaults)
+        XCTAssertEqual(settings.resolvedBinaryPath, binaryPath, "precondition: the dead entry loaded")
+
+        let plan = settings.copyCommandPlan(sessionID: "sess-1")
+        XCTAssertEqual(plan?.binary, "pi", "a 5.0-written entry must not keep resume disabled")
+        XCTAssertEqual(sessionID(of: plan?.strategy), "sess-1")
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty)
+        XCTAssertEqual(defaults.string(forKey: PiSettings.Keys.resolvedBinaryPath), "")
+    }
+
     /// `Strategy` is not Equatable, and making it so for a test would be tail
     /// wagging dog — the only thing these assertions care about is that the plan
     /// resumes the requested session rather than falling back to --continue.

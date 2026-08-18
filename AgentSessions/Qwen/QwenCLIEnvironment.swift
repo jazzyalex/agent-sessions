@@ -47,7 +47,6 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates: [String] = [
-            probeEnv.loginShellExecutablePath(),
             CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
@@ -57,11 +56,26 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
 
         var firstExecutable: URL?
         var seen: Set<String> = []
-        for path in candidates where seen.insert(path).inserted {
-            guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+        func consider(_ path: String) -> URL? {
+            guard seen.insert(path).inserted else { return nil }
+            guard FileManager.default.isExecutableFile(atPath: path) else { return nil }
             let url = URL(fileURLWithPath: path)
             if firstExecutable == nil { firstExecutable = url }
-            if supportsResumeFlags(binary: url) { return url }
+            return supportsResumeFlags(binary: url) ? url : nil
+        }
+
+        for path in candidates {
+            if let verified = consider(path) { return verified }
+        }
+
+        // The login shell is asked last and only if needed: it costs a shell
+        // spawn, and every location above is free to check. Its answer still
+        // outranks an unverified hit from that list.
+        if let late = probeEnv.loginShellExecutablePath() {
+            if let verified = consider(late) { return verified }
+            if FileManager.default.isExecutableFile(atPath: late) {
+                return URL(fileURLWithPath: late)
+            }
         }
         return firstExecutable
     }

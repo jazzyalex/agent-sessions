@@ -1831,7 +1831,11 @@ actor IndexDB {
           codex_source=COALESCE(excluded.codex_source, session_meta.codex_source),
           codex_surface=COALESCE(excluded.codex_surface, session_meta.codex_surface),
           reasoning_effort=excluded.reasoning_effort,
-          originator=excluded.originator, origin_source=excluded.origin_source, surface=excluded.surface;
+          -- Same rule, same reason: these three carry the surface for non-Codex
+          -- sources, and a writer that never parsed a header must not blank them.
+          originator=COALESCE(excluded.originator, session_meta.originator),
+          origin_source=COALESCE(excluded.origin_source, session_meta.origin_source),
+          surface=COALESCE(excluded.surface, session_meta.surface);
         """
         let stmt = try prepare(sql)
         defer { sqlite3_finalize(stmt) }

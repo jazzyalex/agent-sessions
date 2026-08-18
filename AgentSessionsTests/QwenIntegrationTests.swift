@@ -862,6 +862,29 @@ final class QwenIntegrationTests: XCTestCase {
         XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the unusable cache entry should be cleared")
     }
 
+    /// 5.0 stored a resolved path with every capability false whenever the probe
+    /// could not execute the CLI. An auto-detected entry heals on read — the
+    /// reader drops it and the plan falls back to a bare `qwen`. A custom path
+    /// has no such fallback and nothing that would reprobe it, so the entry has
+    /// to be dropped at load instead, before anything reads it.
+    func testACapabilityFreeCustomCacheFromAnOlderBuildIsHealedAtLoad() {
+        let suiteName = "QwenIntegrationTests-LegacyCustomPoisoned-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let binaryPath = makeTemporaryExecutable()
+
+        defaults.set(binaryPath, forKey: QwenSettings.Keys.binaryPath)
+        defaults.set(binaryPath, forKey: QwenSettings.Keys.resolvedBinaryPath)
+        defaults.set(false, forKey: QwenSettings.Keys.resolvedSupportsResume)
+        defaults.set(false, forKey: QwenSettings.Keys.resolvedSupportsContinue)
+
+        let settings = QwenSettings.makeForTesting(defaults: defaults)
+
+        XCTAssertEqual(settings.binaryPath, binaryPath, "the custom selection itself must survive")
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the dead entry must not outlive the load")
+        XCTAssertEqual(defaults.string(forKey: QwenSettings.Keys.resolvedBinaryPath), "")
+    }
+
     func testCustomBinaryCopyPlanUsesOnlyCapabilitiesProbedForThatPath() throws {
         let suiteName = "QwenIntegrationTests-CustomCapabilities-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

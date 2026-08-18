@@ -153,6 +153,53 @@ final class CLIProbeEnvironmentTests: XCTestCase {
         XCTAssertEqual(result.stderr, "env: node: No such file or directory")
     }
 
+    // MARK: - Version managers
+
+    /// An rc file guarded on `[ -t 0 ]` never loads nvm here — the discovery
+    /// shell's stdin is a pipe — so the default alias has to be readable from
+    /// disk. `v9.9.9` sorts above `v22.14.0` as a string, which is the whole
+    /// reason these are compared numerically.
+    func testResolvesTheNvmDefaultAliasAndPrefersTheNewestOtherwise() throws {
+        let home = try makeTempHome()
+        let nodes = "\(home)/.nvm/versions/node"
+        for version in ["v9.9.9", "v20.1.0", "v22.14.0"] {
+            try FileManager.default.createDirectory(atPath: "\(nodes)/\(version)/bin",
+                                                    withIntermediateDirectories: true)
+        }
+
+        // No alias yet: newest wins, and "newest" is not the string maximum.
+        XCTAssertEqual(CLIProbeEnvironment.versionManagerPrefixes(home: home),
+                       ["\(nodes)/v22.14.0/bin"])
+
+        // A bare major resolves to the matching install, not merely the newest.
+        try FileManager.default.createDirectory(atPath: "\(home)/.nvm/alias",
+                                                withIntermediateDirectories: true)
+        try "20\n".write(toFile: "\(home)/.nvm/alias/default", atomically: true, encoding: .utf8)
+        XCTAssertEqual(CLIProbeEnvironment.versionManagerPrefixes(home: home),
+                       ["\(nodes)/v20.1.0/bin"])
+
+        // Symbolic aliases name nothing installed; any current Node will do.
+        try "lts/*\n".write(toFile: "\(home)/.nvm/alias/default", atomically: true, encoding: .utf8)
+        XCTAssertEqual(CLIProbeEnvironment.versionManagerPrefixes(home: home),
+                       ["\(nodes)/v22.14.0/bin"])
+    }
+
+    func testAddsFnmDefaultAliasOnlyWhenItExists() throws {
+        let home = try makeTempHome()
+        XCTAssertTrue(CLIProbeEnvironment.versionManagerPrefixes(home: home).isEmpty)
+
+        let fnm = "\(home)/.fnm/aliases/default/bin"
+        try FileManager.default.createDirectory(atPath: fnm, withIntermediateDirectories: true)
+        XCTAssertEqual(CLIProbeEnvironment.versionManagerPrefixes(home: home), [fnm])
+    }
+
+    private func makeTempHome() throws -> String {
+        let home = NSTemporaryDirectory() + "as-probe-home-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: home) }
+        return home
+    }
+
     /// Hands back results in order and records what each attempt was given.
     private final class ScriptedExecutor: CommandExecuting {
         private var results: [CommandResult]

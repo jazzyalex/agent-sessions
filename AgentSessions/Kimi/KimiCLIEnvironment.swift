@@ -54,14 +54,13 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
         }
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        // One ordered list, searched as a whole, rather than group-by-group
-        // early returns. `bestKimiCLI` falls back to the first executable it
-        // saw, so with the groups separated an unverified hit from the login
-        // shell was returned before the later locations were ever examined —
-        // meaning an unrelated binary of the same name earlier in PATH would
-        // mask a real CLI installed under one of them.
+        // Searched as a whole, never group-by-group with early returns.
+        // `bestKimiCLI` falls back to the first executable it saw, so an
+        // unverified hit must not end the search: otherwise an unrelated binary
+        // of the same name earlier in PATH masks a real CLI installed under one
+        // of the later locations. The login shell's answer is considered after
+        // this list under the same rule.
         let candidates: [String] = [
-            probeEnv.loginShellExecutablePath(),
             CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.kimi-code/bin/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
@@ -70,7 +69,10 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
             "/usr/local/bin/\(Self.binaryName)"
         ].compactMap { $0 }
 
-        return bestKimiCLI(from: candidates)
+        // The login shell is asked last and only if needed: it costs a shell
+        // spawn, and every one of the cheap locations above is free to check.
+        // Its answer still outranks an unverified hit from that list.
+        return bestKimiCLI(from: candidates, deferred: { probeEnv.loginShellExecutablePath() })
     }
 
     func probe(customPath: String?) -> Result<ProbeResult, ProbeError> {
@@ -123,19 +125,31 @@ struct KimiCLIEnvironment: KimiCLIEnvironmentProviding {
         }
     }
 
-    private func bestKimiCLI(from paths: [String]) -> URL? {
+    private func bestKimiCLI(from paths: [String], deferred: () -> String?) -> URL? {
         var firstExecutable: URL?
         var seen = Set<String>()
 
-        for path in paths {
-            guard seen.insert(path).inserted else { continue }
-            guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+        func consider(_ path: String) -> URL? {
+            guard seen.insert(path).inserted else { return nil }
+            guard FileManager.default.isExecutableFile(atPath: path) else { return nil }
             let url = URL(fileURLWithPath: path)
             if firstExecutable == nil {
                 firstExecutable = url
             }
-            if supportsResumeFlags(binary: url) {
-                return url
+            return supportsResumeFlags(binary: url) ? url : nil
+        }
+
+        for path in paths {
+            if let verified = consider(path) { return verified }
+        }
+
+        if let late = deferred() {
+            if let verified = consider(late) { return verified }
+            // Nothing verified itself. What the user's own shell resolves the
+            // command to is still the better guess than an unverified hit from
+            // our prefix list — which is what searching it first used to give.
+            if FileManager.default.isExecutableFile(atPath: late) {
+                return URL(fileURLWithPath: late)
             }
         }
 

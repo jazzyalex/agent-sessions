@@ -106,6 +106,23 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
   case; tests proving one session results from a transcript plus sidecar, and that a
   Cowork session survives with no standard-root counterpart.
 
+### CLI discovery cannot see a shell whose rc file requires a terminal
+> **open** · sev: low · urg: low · verified 2026-08-18
+
+- **What:** `CLIProbeEnvironment.discover()` asks the user's login shell for their PATH via
+  `$SHELL -lic` with pipes for stdio. The child's stdin is therefore not a terminal, so an
+  rc file guarded on `[ -t 0 ]` returns before loading its version manager. nvm-installed
+  Node and any CLI installed under it stay invisible. (`[[ $- == *i* ]]` guards are fine —
+  `-i` satisfies them; this is specific to the tty test.)
+- **Verified:** `zsh -lic '[ -t 0 ] && echo yes || echo no' </dev/null` → `no`.
+- **Mitigated, not fixed (2026-08-18):** `versionManagerPrefixes` now reads nvm's
+  `~/.nvm/alias/default` and fnm's `aliases/default/bin` straight from disk, so the common
+  installs are covered without a shell. Anything else those rc files would have added is
+  still lost.
+- **The real fix:** run the discovery shell on a pseudo-terminal (`openpty`) so `[ -t 0 ]`
+  holds. Costs a pty pair per probe and needs the output drained off-thread; not worth it
+  until someone reports a case the alias files miss.
+
 ### Codex `source: "vscode"` is not proof of VS Code
 > **open** · sev: med · urg: low · verified 2026-08-18
 

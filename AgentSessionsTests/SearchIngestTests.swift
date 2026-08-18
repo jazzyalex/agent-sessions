@@ -1311,4 +1311,55 @@ final class SearchIngestTests: XCTestCase {
         XCTAssertEqual(stored?.surface, "desktop")
     }
 
+    /// The `surface` assertion above passes on derivation alone: `SessionMetaRow`
+    /// fills `surface` from `codexSurface`, so COALESCE on the codex columns
+    /// keeps it green even while the plain `surface` column is being blanked.
+    /// A source that carries no codex provenance has nothing to derive from,
+    /// which is what actually pins the other three columns.
+    func testAWriteWithoutProvenanceDoesNotEraseANonCodexSurface() async throws {
+        let (db, cleanup) = try makeTestIndexDB()
+        defer { cleanup() }
+
+        let base = makeMetaRow(sessionID: "c1", source: "claude", path: "/tmp/c1.jsonl", mtime: 1)
+        let withProvenance = SessionMetaRow(
+            sessionID: base.sessionID,
+            source: base.source,
+            path: base.path,
+            mtime: base.mtime,
+            size: base.size,
+            startTS: base.startTS,
+            endTS: base.endTS,
+            model: nil,
+            cwd: nil,
+            repo: nil,
+            title: nil,
+            codexInternalSessionID: nil,
+            isHousekeeping: false,
+            messages: 1,
+            commands: 0,
+            parentSessionID: nil,
+            subagentType: nil,
+            customTitle: nil,
+            codexOriginator: nil,
+            codexSource: nil,
+            codexSurface: nil,
+            originator: "Claude Code",
+            originSource: "cli",
+            surface: "cli"
+        )
+
+        try await db.begin()
+        try await db.upsertSessionMeta(withProvenance)
+        try await db.commit()
+
+        try await db.begin()
+        try await db.upsertSessionMeta(makeMetaRow(sessionID: "c1", source: "claude", path: "/tmp/c1.jsonl", mtime: 2))
+        try await db.commit()
+
+        let stored = try await db.fetchSessionMeta(for: "claude").first { $0.sessionID == "c1" }
+        XCTAssertEqual(stored?.surface, "cli", "a provenance-less write erased the stored surface")
+        XCTAssertEqual(stored?.originator, "Claude Code")
+        XCTAssertEqual(stored?.originSource, "cli")
+    }
+
 }

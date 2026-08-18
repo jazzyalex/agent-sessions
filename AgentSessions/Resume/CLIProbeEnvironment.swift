@@ -128,17 +128,19 @@ final class CLIProbeEnvironment {
     /// then our inherited PATH, then the prefixes a Node or Homebrew install uses.
     private static func mergedPath(loginPath: String?) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        // Fixed prefixes only. The Node version managers people actually use put
-        // their shims behind a version or a per-shell directory — nvm at
-        // `~/.nvm/versions/node/<version>/bin`, fnm under a multishell path
-        // keyed to the running shell — so there is nothing static to add for
-        // them. The login-shell PATH above is what covers those installs, and
-        // this list is the floor for when the shell could not be asked.
+        // The login-shell PATH above is the real answer for a version-manager
+        // install. It is not always available: an rc file that guards itself on
+        // `[ -t 0 ]` never loads nvm here, because the discovery shell's stdin is
+        // a pipe, not a terminal. So resolve the managers' *default* aliases from
+        // disk too — a plain file read, no shell — and let them fill that gap.
         let fallbacks = [
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "\(home)/.local/bin",
-            "\(home)/.npm-global/bin",
+            "\(home)/.npm-global/bin"
+        ]
+        + versionManagerPrefixes(home: home)
+        + [
             "\(home)/.volta/bin",
             "\(home)/.bun/bin",
             "/usr/bin",
@@ -155,6 +157,57 @@ final class CLIProbeEnvironment {
         return (sources + fallbacks)
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .joined(separator: ":")
+    }
+
+    /// Node version managers, resolved from their on-disk default alias.
+    ///
+    /// nvm installs at `~/.nvm/versions/node/<version>/bin` and records the
+    /// chosen default in `~/.nvm/alias/default`; npm's global CLIs land in that
+    /// same bin, so one entry supplies both the interpreter a `#!/usr/bin/env
+    /// node` shebang needs and the CLI itself. The alias may name a version
+    /// (`v22.14.0`), a major (`22`), or something symbolic (`lts/*`, `stable`) —
+    /// anything unmatched falls back to the newest install, since any current
+    /// Node runs these CLIs.
+    static func versionManagerPrefixes(home: String) -> [String] {
+        let fm = FileManager.default
+        var prefixes: [String] = []
+
+        let nvmVersions = "\(home)/.nvm/versions/node"
+        if let installed = try? fm.contentsOfDirectory(atPath: nvmVersions), !installed.isEmpty {
+            let newestFirst = installed.sorted { compareVersions($0, $1) == .orderedDescending }
+            let alias = (try? String(contentsOfFile: "\(home)/.nvm/alias/default", encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let chosen = alias.flatMap { name -> String? in
+                let wanted = name.hasPrefix("v") ? name : "v\(name)"
+                return newestFirst.first { $0 == wanted || $0.hasPrefix("\(wanted).") }
+            } ?? newestFirst.first
+            if let chosen, fm.fileExists(atPath: "\(nvmVersions)/\(chosen)/bin") {
+                prefixes.append("\(nvmVersions)/\(chosen)/bin")
+            }
+        }
+
+        // fnm's default alias is a symlink to whichever install it points at.
+        prefixes += [
+            "\(home)/.fnm/aliases/default/bin",
+            "\(home)/Library/Application Support/fnm/aliases/default/bin"
+        ].filter { fm.fileExists(atPath: $0) }
+
+        return prefixes
+    }
+
+    /// `v22.14.0` outranks `v9.1.0`; string ordering gets that backwards.
+    private static func compareVersions(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        func components(_ value: String) -> [Int] {
+            value.dropFirst(value.hasPrefix("v") ? 1 : 0).split(separator: ".").map { Int($0) ?? 0 }
+        }
+        let left = components(lhs)
+        let right = components(rhs)
+        for index in 0..<max(left.count, right.count) {
+            let a = index < left.count ? left[index] : 0
+            let b = index < right.count ? right[index] : 0
+            if a != b { return a < b ? .orderedAscending : .orderedDescending }
+        }
+        return .orderedSame
     }
 
     private static func field(_ marker: Marker, in output: String) -> String? {
