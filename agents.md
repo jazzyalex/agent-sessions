@@ -63,6 +63,15 @@ don't stall.
 Exception: if the user says **"plan mode++"**, deliver the plan only and wait for
 explicit approval.
 
+## Work sizing (dogfood)
+Before substantial implementation work (cross-file or behavioral changes, migrations,
+releases, multi-agent work), print a sizing block first using the local development
+build of [agent-sizing](https://github.com/jazzyalex/agent-sizing) — follow its
+`skills/agent-sizing/SKILL.md` from the sibling `agent-sizing` checkout next to this
+repo. Skip sizing for questions and trivial one-file edits. If the CLI or its
+calibration is missing, say so in one line and continue; never install anything or
+run its `calibrate` command on your own.
+
 ## Git: branches, worktrees, commits
 - **Never create, switch, rename, or delete a branch or worktree without explicit user
   approval.** That includes `checkout -b`, `switch -c`, `branch -d/-D`, `worktree add`.
