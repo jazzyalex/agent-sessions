@@ -106,6 +106,29 @@ fix it there first.
 - [ ] `docs/index.html` meta description, og:description, twitter:description updated with version + key change
 - [ ] All above files committed before running `deploy bump` (or bump will overwrite)
 
+## Sparkle Notes Are Short and Fun (Hard Rule)
+
+Sparkle notes appear in a small update window. Nobody reads prose there. The 5.0 notes
+shipped as full changelog paragraphs and had to be republished after the fact — don't
+repeat that.
+
+- **Highlight**: 2–4 sentences, hard max. Lead with the change, keep one concrete number
+  if there is one, cut everything a curious reader can find in the changelog.
+- **Feature / Bug Fix bullets**: 1–2 sentences. One for what changed, at most one for
+  why it was wrong before. A good bug-fix line can be a single sentence
+  ("Five agents used to skip it silently.").
+- **Whole notes**: aim under ~250 words. If the preview scrolls, it's too long.
+- **Tone**: dry fun is welcome — "takes no for an answer", "Bring the agent you use".
+  Personality yes, marketing-speak no, emoji never.
+- The full detail lives in `docs/CHANGELOG.md`; the notes may compress it freely.
+  If an entry can't be compressed without losing the point, the changelog entry is
+  overweight — tighten it there first (changelog entries also don't need to be essays).
+- Links in changelog entries that feed the notes must be **absolute URLs** — relative
+  links break in the appcast and the GitHub release body.
+- To republish notes after a release: edit `docs/CHANGELOG.md`, then
+  `python3 tools/release/sparkle_release_notes.py --version <V> --changelog docs/CHANGELOG.md --appcast docs/appcast.xml --github-url <release-url> --lint --out-text /tmp/notes.txt`,
+  then `gh release edit v<V> --notes-file /tmp/notes.txt`, commit and push the appcast.
+
 ## Sparkle Release Notes (Approval Gate)
 
 - The release pipeline generates **structured Sparkle notes** from `docs/CHANGELOG.md`:
