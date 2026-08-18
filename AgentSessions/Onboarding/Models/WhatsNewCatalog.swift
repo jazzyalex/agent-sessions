@@ -108,7 +108,7 @@ enum WhatsNewCatalog {
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
-        "5.0": "Qwen Code joins the lineup, and every agent Agent Sessions reads now runs on one shared foundation."
+        "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
@@ -119,8 +119,8 @@ enum WhatsNewCatalog {
             WhatsNewItem(
                 kind: .highlight,
                 iconSystemName: "square.stack.3d.up",
-                title: "One foundation under every agent",
-                body: "Each agent Agent Sessions reads was wired in by hand, surface by surface, so a new one could land in the session list and still be missing from Analytics, the filter pills or search. All thirteen now run off one shared description of what a session source is. Adding the next agent is a documented recipe with its own tests instead of fourteen scattered edits."
+                title: "Agents are plug-in adapters now",
+                body: "Each agent used to be wired in by hand, surface by surface, so a new one could land in the session list and still be missing from Analytics, the filter pills or search. Every agent is now described once, in its own adapter, and every surface reads that description. Adding an agent dropped from 26 shared-file edits to 12, each one listed in the guide with a test that fails if it's missed."
             ),
             WhatsNewItem(
                 kind: .highlight,
