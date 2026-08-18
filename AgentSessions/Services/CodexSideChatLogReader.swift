@@ -162,11 +162,13 @@ enum CodexSideChatLogReader {
 
         var sessions: [Session] = []
         sessions.reserveCapacity(sideThreadIDs.count)
+        let rollouts = rolloutIndex(codexHome: codexHome(fromLogDatabase: dbURL))
         for threadID in sideThreadIDs {
             if let session = buildSession(db: db,
                                           dbURL: dbURL,
                                           threadID: threadID,
-                                          maxRows: maxRowsPerThread) {
+                                          maxRows: maxRowsPerThread,
+                                          rolloutIndex: rollouts) {
                 sessions.append(session)
             }
         }
@@ -354,34 +356,45 @@ enum CodexSideChatLogReader {
     /// recorded evidence, and a fork's surface is by definition its parent's.
     /// Returns nil when the parent has no rollout, which is common — a side
     /// chat then carries no surface rather than an invented one.
-    private static func parentProvenance(dbURL: URL,
-                                         parentThreadID: String?) -> (originator: String?, surface: CodexSessionSurface)? {
-        guard let parentThreadID, !parentThreadID.isEmpty else { return nil }
-        let home = codexHome(fromLogDatabase: dbURL)
+    /// Thread ID -> rollout file, built once per load.
+    ///
+    /// Deliberately not a per-lookup search. A side chat whose parent has no
+    /// rollout is the common case, and a miss walks the whole tree — doing that
+    /// per side chat made the cost (side chats × rollout files) rather than one
+    /// enumeration.
+    static func rolloutIndex(codexHome: URL) -> [String: URL] {
         let fm = FileManager.default
-
+        var index: [String: URL] = [:]
         for directory in ["sessions", "archived_sessions"] {
-            let root = home.appendingPathComponent(directory, isDirectory: true)
+            let root = codexHome.appendingPathComponent(directory, isDirectory: true)
             guard let walker = fm.enumerator(at: root,
                                              includingPropertiesForKeys: nil,
                                              options: [.skipsHiddenFiles]) else { continue }
-            for case let url as URL in walker {
-                guard url.pathExtension == "jsonl",
-                      url.lastPathComponent.contains(parentThreadID),
-                      let header = firstLine(of: url),
-                      let object = try? JSONSerialization.jsonObject(with: Data(header.utf8)) as? [String: Any] else {
-                    continue
-                }
-                let payload = (object["payload"] as? [String: Any]) ?? object
-                let originator = payload["originator"] as? String
-                let source = payload["source"]
-                let surface = SessionIndexer.classifyCodexSurface(originator: originator,
-                                                                  source: source,
-                                                                  sourceString: source as? String)
-                return (originator, surface)
+            for case let url as URL in walker where url.pathExtension == "jsonl" {
+                // rollout-<timestamp>-<uuid>.jsonl
+                let stem = url.deletingPathExtension().lastPathComponent
+                guard stem.count >= 36 else { continue }
+                let threadID = String(stem.suffix(36))
+                if index[threadID] == nil { index[threadID] = url }
             }
         }
-        return nil
+        return index
+    }
+
+    static func parentProvenance(parentThreadID: String?,
+                                 rolloutIndex: [String: URL]) -> (originator: String?, surface: CodexSessionSurface)? {
+        guard let parentThreadID, !parentThreadID.isEmpty,
+              let url = rolloutIndex[parentThreadID],
+              let header = firstLine(of: url),
+              let object = try? JSONSerialization.jsonObject(with: Data(header.utf8)) as? [String: Any] else {
+            return nil
+        }
+        let payload = (object["payload"] as? [String: Any]) ?? object
+        let originator = payload["originator"] as? String
+        let source = payload["source"]
+        return (originator, SessionIndexer.classifyCodexSurface(originator: originator,
+                                                                source: source,
+                                                                sourceString: source as? String))
     }
 
     private static func codexHome(fromLogDatabase dbURL: URL) -> URL {
@@ -403,7 +416,8 @@ enum CodexSideChatLogReader {
     private static func buildSession(db: OpaquePointer?,
                                      dbURL: URL,
                                      threadID: String,
-                                     maxRows: Int) -> Session? {
+                                     maxRows: Int,
+                                     rolloutIndex: [String: URL]) -> Session? {
         let rows = readRows(db: db, threadID: threadID, maxRows: maxRows)
         let request = readSideConversationRequest(db: db,
                                                   threadID: threadID,
@@ -446,7 +460,7 @@ enum CodexSideChatLogReader {
         }
         let firstUserTitle = events.first(where: { $0.kind == .user })?.text.map(collapsedWhitespace)
         let title = firstUserTitle
-        let provenance = parentProvenance(dbURL: dbURL, parentThreadID: request.parentThreadID)
+        let provenance = parentProvenance(parentThreadID: request.parentThreadID, rolloutIndex: rolloutIndex)
 
         return Session(
             id: sideChatSessionID(threadID: threadID),
@@ -529,7 +543,11 @@ enum CodexSideChatLogReader {
     }
 
     private struct ThreadDiscoveryCache: Codable {
-        private static let currentSchemaVersion = 13
+        // 14: side chats stopped carrying a fabricated "Codex Desktop"
+        // surface. Cached Sessions embed the old stamp, and nothing else
+        // invalidates them until the log database changes size, so the fix
+        // would not have reached anyone with a warm cache.
+        private static let currentSchemaVersion = 14
         private static let cacheIOLock = NSLock()
 
         var schemaVersion: Int = currentSchemaVersion
