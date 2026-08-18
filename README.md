@@ -45,8 +45,8 @@ Run three agents at once and a normal quota meter tells you "60% used" — not w
 It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, and Qwen Code histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
-  <p style="margin:0 0 0px 0;"><em>Session Runway — live per-session quota burn-rate</em></p>
-  <img src="docs/assets/quota-meter-runway-rate-small.gif" alt="Quota Meter with Session Runway showing live per-session quota burn-rate bars" width="100%" style="max-width:640px;border-radius:8px;margin:5px 0;"/>
+  <p style="margin:0 0 0px 0;"><em>Session Runway — read the same burn as % of quota, tokens/hour, or cost/hour</em></p>
+  <img src="docs/assets/quota-meter-runway-rate-small.gif" alt="Quota Meter Session Runway switching its rate unit from percent of quota per hour to tokens per hour to estimated API-equivalent cost per hour" width="100%" style="max-width:640px;border-radius:8px;margin:5px 0;"/>
 
   <p style="margin:0 0 0px 0;"><em>Sessions search with transcript and image preview</em></p>
   <picture>
