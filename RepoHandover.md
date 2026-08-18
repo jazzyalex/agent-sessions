@@ -1,3 +1,17 @@
+## 2026-08-18 09:32 · release-5.0-notes · Sparkle notes republished short; skill rule added
+status: done
+
+**State:** 5.0 live and healthy. The shipped Sparkle/GitHub notes were full changelog prose; rewritten to ~250 words with some personality, republished into `docs/appcast.xml` + the v5.0 GitHub release, committed and pushed (`1912cad2`).
+
+**Decided / don't redo:**
+- Sparkle notes are SHORT: highlights 2–4 sentences, bullets 1–2, ~250-word cap, dry fun allowed, absolute links only. Hard rule + republish recipe now live in `.claude/skills/deploy/SKILL.md` ("Sparkle Notes Are Short and Fun").
+- Changelog entries feed the notes verbatim — overweight changelog entries get tightened in `docs/CHANGELOG.md` first, not worked around.
+
+**Next:**
+1. Owner manual checks: Sparkle auto-update from 4.8 (now shows the short notes), clean-machine Gatekeeper, `brew upgrade agent-sessions`.
+2. Watch #57 (Grok Build) / PR #56 (Devin) for replies to the contribute-or-steward invitations; post the drafted stewards-wanted issue when ready.
+3. 5.0 launch post + steward site pages (Marketing/STATUS.md first); Qwen paid-plan decision for 0.21.x verification.
+
 ## 2026-08-17 20:13 · release-5.0 · 5.0 shipped: adapter architecture, Qwen, steward program
 status: done
 
