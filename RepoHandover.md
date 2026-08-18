@@ -1,7 +1,7 @@
-## 2026-08-18 16:22 · grok-review-round-two · External review acted on; fixes uncommitted on main
-status: in-progress
+## 2026-08-18 16:22 · grok-review-round-two · External review acted on; 5.0.1 shipped
+status: done
 
-**State:** Grok reviewed the day's resume/provenance work; 4 of its 5 findings held and are fixed. Suite **2094 tests / 3 skipped / 0 failures**. 13 files modified on `main`, **nothing committed**.
+**State:** Grok reviewed the day's resume/provenance work; 4 of its 5 findings held and are fixed. **5.0.1 (build 69) is live and verified** — `deploy verify 5.0.1`: 0 errors, 0 warnings. GitHub release, appcast on Pages, Homebrew cask, tags local+remote. Both notarization submissions Accepted, both artifacts stapled. Suite at ship: 2094 tests / 3 skipped / 0 failures. Issue #58 was already closed by the owner; a "shipped in 5.0.1" follow-up is posted.
 
 **Decided / don't redo:**
 - **Refuted, don't "fix" it:** `waitForExit()` is this repo's `BoundedProcessWait` (10s → SIGTERM → SIGKILL), not Foundation's. Grok read the call site and assumed the stdlib. There is no unbounded probe wait.
@@ -15,9 +15,15 @@ status: in-progress
 - `AgentSessions/Indexing/DB.swift` — `upsertSessionMeta` now COALESCEs all six provenance columns
 - `AgentSessions/Resume/CLIProbeEnvironment.swift` — `versionManagerPrefixes`
 
+**Also settled during the release:**
+- The generated Sparkle notes came out as full changelog prose again — the 5.0 mistake. Fixed at the source (`docs/CHANGELOG.md`), not in the notes: 5.0.1's section is now six one-to-three-sentence bullets, ~210 words. The rest of the preview is the auto-generated 5.0 reminder, deliberately left as shipped history.
+- `docs/_preview/` is now gitignored — release QA demands a clean tree and those are local page mockups, not release content.
+- A patch release needs no new `WhatsNewCatalog` entry: it is keyed by major.minor, so 5.0's entry covers 5.0.1.
+
 **Next:**
-1. Commit the 11 source/test files + `RepoHandover.md` + `docs/backlog.md` — path-limited; leave the owner's untracked `docs/_preview/` mockups out.
-2. Cut 5.0.1, then close issue #58.
+1. Owner manual checks: Sparkle auto-update from 5.0, clean-machine Gatekeeper, `brew upgrade agent-sessions`.
+2. PR #56 (Devin CLI source) is still open and untouched — owner declined to act on it this session.
+3. Backlog candidates: the cooldown-lockout entry, and the pty-based CLI discovery entry filed today.
 
 ## 2026-08-18 14:52 · finder-path-resume + codex-provenance · #58 fixed for four agents; Codex surface stopped being erased
 status: done
