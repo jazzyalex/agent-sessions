@@ -209,6 +209,26 @@ final class KimiIntegrationSurfaceTests: XCTestCase {
         XCTAssertEqual(command, "/opt/custom/kimi --session session_abc")
     }
 
+    /// A cache written by a probe that could not execute Kimi names a real
+    /// binary with every capability false. Trusting it disables Copy Resume
+    /// Command forever, since the cache is only refreshed while the resolved
+    /// path is empty. See #58, reported against Pi.
+    @MainActor
+    func testCopyCommandPlanDiscardsACachedBinaryThatAdvertisesNoCapabilities() throws {
+        let settings = makeSettings()
+        let binary = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("kimi-poisoned-\(UUID().uuidString)")
+        try "#!/bin/sh\nexit 0\n".write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        settings.setResolvedBinary(binary.path, supportsSession: false, supportsContinue: false)
+
+        let plan = try XCTUnwrap(settings.copyCommandPlan(sessionID: "session_abc"),
+                                 "a failed probe must not silently disable Copy Resume Command")
+
+        XCTAssertEqual(plan.binary, "kimi")
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the unusable cache entry should be cleared")
+    }
+
     @MainActor
     func testCopyCommandPlanFallsBackToContinueWithoutSessionID() throws {
         let plan = try XCTUnwrap(makeSettings().copyCommandPlan(sessionID: "   "))

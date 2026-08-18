@@ -65,12 +65,50 @@ final class KimiCLIEnvironmentTests: XCTestCase {
 
     func testResolveBinaryUsesLoginShellCandidate() {
         let executor = MockExecutor()
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let binaryPath = makeTempExecutable(name: "kimi-resolve-login")
-        executor.responses[[shell, "-lic", "command -v kimi || true"]] = CommandResult(stdout: "\(binaryPath)\n", stderr: "", exitCode: 0)
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.loginShellExecutable = binaryPath
         executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: realHelp, stderr: "", exitCode: 0)
 
         XCTAssertEqual(KimiCLIEnvironment(executor: executor).resolveBinary(customPath: nil)?.path, binaryPath)
+    }
+
+    /// Kimi is a `#!/usr/bin/env node` script, so a Finder-launched app — whose
+    /// PATH has no Homebrew in it — cannot run the probe at all. See #58, which
+    /// reported this for Pi.
+    func testProbeRunsCLIWithAPathThatCanResolveNode() {
+        let binaryPath = makeTempExecutable(name: "kimi-probe-path")
+        let executor = MockExecutor()
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.responses[[binaryPath, "--version"]] = CommandResult(stdout: "0.31.1", stderr: "", exitCode: 0)
+        executor.responses[[binaryPath, "--help"]] = CommandResult(stdout: realHelp, stderr: "", exitCode: 0)
+
+        _ = KimiCLIEnvironment(executor: executor).probe(customPath: binaryPath)
+
+        let probeEnvs = executor.environments(forCommandContaining: "--help")
+        XCTAssertFalse(probeEnvs.isEmpty, "expected --help to run with an explicit environment")
+        for path in probeEnvs.map({ $0?["PATH"] ?? "" }) {
+            XCTAssertTrue(path.contains("/opt/homebrew/bin"), "probe PATH lost the login-shell entries: \(path)")
+        }
+    }
+
+    /// A probe that never executed is not evidence that Kimi lacks resume flags.
+    /// Recording it as "supports nothing" is what makes the resume actions go
+    /// quiet, and the verdict is cached.
+    func testProbeFailsLoudlyWhenTheCLICouldNotExecute() {
+        let binaryPath = makeTempExecutable(name: "kimi-probe-broken")
+        let executor = MockExecutor()
+        let envFailure = CommandResult(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
+        executor.responses[[binaryPath, "--version"]] = envFailure
+        executor.responses[[binaryPath, "--help"]] = envFailure
+
+        switch KimiCLIEnvironment(executor: executor).probe(customPath: binaryPath) {
+        case .success(let probe):
+            XCTFail("expected failure, got success with session=\(probe.supportsSession)")
+        case .failure(let error):
+            XCTAssertTrue(error.localizedDescription.contains("node"),
+                          "error should surface the real reason: \(error.localizedDescription)")
+        }
     }
 
     /// A binary whose help cannot be read still probes, but advertises nothing —
@@ -92,9 +130,30 @@ final class KimiCLIEnvironmentTests: XCTestCase {
 
     private final class MockExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
+        var loginShellPATH = "/usr/bin:/bin"
+        var loginShellExecutable: String?
+        private(set) var calls: [(command: [String], environment: [String: String]?)] = []
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
-            responses[command] ?? CommandResult(stdout: "", stderr: "", exitCode: 0)
+            try run(command, cwd: cwd, environment: nil)
+        }
+
+        /// Answers the login-shell discovery call whatever exact script the
+        /// probe sends, and records the environment each command was given.
+        func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult {
+            calls.append((command, environment))
+            if command.count == 3, command[1] == "-lic" {
+                var out = "\(CLIProbeEnvironment.pathMarker.begin)\(loginShellPATH)\(CLIProbeEnvironment.pathMarker.end)\n"
+                if let loginShellExecutable {
+                    out += "\(CLIProbeEnvironment.whichMarker.begin)\(loginShellExecutable)\(CLIProbeEnvironment.whichMarker.end)\n"
+                }
+                return CommandResult(stdout: out, stderr: "", exitCode: 0)
+            }
+            return responses[command] ?? CommandResult(stdout: "", stderr: "", exitCode: 0)
+        }
+
+        func environments(forCommandContaining argument: String) -> [[String: String]?] {
+            calls.filter { $0.command.contains(argument) }.map(\.environment)
         }
     }
 

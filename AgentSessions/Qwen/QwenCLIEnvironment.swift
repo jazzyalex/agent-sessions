@@ -32,9 +32,11 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
     }
 
     private let executor: CommandExecuting
+    private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
         self.executor = executor
+        self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
     func resolveBinary(customPath: String?) -> URL? {
@@ -45,7 +47,7 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates: [String] = [
-            whichViaLoginShell(Self.binaryName),
+            probeEnv.loginShellExecutablePath(),
             which(Self.binaryName),
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
@@ -69,21 +71,44 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
             return .failure(.binaryNotFound)
         }
         do {
-            let version = try executor.run([binary.path, "--version"], cwd: nil)
+            let version = try runCLI(binary, "--version")
             let combined = [version.stdout, version.stderr]
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let help = try? executor.run([binary.path, "--help"], cwd: nil)
+            let help = try? runCLI(binary, "--help")
             let helpText = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
+
+            let supportsResume = helpContainsFlag("--resume", in: helpText)
+            let supportsContinue = helpContainsFlag("--continue", in: helpText)
+
+            // A probe that never ran is not evidence that Qwen lacks resume
+            // flags. A Qwen that actually ran exits 0 for at least one of
+            // --version/--help, or prints a flag we recognise; anything else
+            // means we learned nothing, and calling that "supports nothing"
+            // silently disables every resume action.
+            let learnedNothing = !supportsResume && !supportsContinue
+            if version.exitCode != 0, (help?.exitCode ?? 127) != 0, learnedNothing {
+                let reason = [version.stderr, help?.stderr]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty } ?? ""
+                return .failure(.commandFailed(reason))
+            }
+
             return .success(ProbeResult(
                 versionString: version.exitCode == 0 && !combined.isEmpty ? combined : "unknown",
                 binaryURL: binary,
-                supportsResume: helpContainsFlag("--resume", in: helpText),
-                supportsContinue: helpContainsFlag("--continue", in: helpText)
+                supportsResume: supportsResume,
+                supportsContinue: supportsContinue
             ))
         } catch {
             return .failure(.commandFailed(error.localizedDescription))
         }
+    }
+
+    /// Every invocation of the CLI goes through here so the child always gets a
+    /// PATH that can resolve `#!/usr/bin/env node`.
+    private func runCLI(_ binary: URL, _ argument: String) throws -> CommandResult {
+        try executor.run([binary.path, argument], cwd: nil, environment: probeEnv.probeEnvironment())
     }
 
     private func which(_ command: String) -> String? {
@@ -95,20 +120,9 @@ struct QwenCLIEnvironment: QwenCLIEnvironmentProviding {
         return nil
     }
 
-    private func whichViaLoginShell(_ command: String) -> String? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        guard let result = try? executor.run([shell, "-lic", "command -v \(command) || true"], cwd: nil) else {
-            return nil
-        }
-        let output = [result.stdout, result.stderr]
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !output.isEmpty, output != command else { return nil }
-        return output.split(whereSeparator: { $0.isNewline }).first.map(String.init)
-    }
 
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? executor.run([binary.path, "--help"], cwd: nil)
+        let help = try? runCLI(binary, "--help")
         let output = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
         return helpContainsFlag("--resume", in: output) || helpContainsFlag("--continue", in: output)
     }

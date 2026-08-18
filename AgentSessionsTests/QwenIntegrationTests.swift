@@ -784,6 +784,62 @@ final class QwenIntegrationTests: XCTestCase {
         }
     }
 
+    /// Qwen is a `#!/usr/bin/env node` script, so a Finder-launched app — whose
+    /// PATH has no Homebrew in it — cannot run the probe at all. See #58, which
+    /// reported this for Pi.
+    func testCLIProbeRunsQwenWithAPathThatCanResolveNode() {
+        let binaryPath = makeTemporaryExecutable()
+        let executor = MockCommandExecutor()
+        executor.loginShellPATH = "/opt/homebrew/bin:/usr/bin:/bin"
+        executor.responses[[binaryPath, "--version"]] = .init(stdout: "0.21.13", stderr: "", exitCode: 0)
+        executor.responses[[binaryPath, "--help"]] = .init(stdout: "--resume <id>\n--continue", stderr: "", exitCode: 0)
+
+        _ = QwenCLIEnvironment(executor: executor).probe(customPath: binaryPath)
+
+        let probeEnvs = executor.environments(forCommandContaining: "--help")
+        XCTAssertFalse(probeEnvs.isEmpty, "expected --help to run with an explicit environment")
+        for path in probeEnvs.map({ $0?["PATH"] ?? "" }) {
+            XCTAssertTrue(path.contains("/opt/homebrew/bin"), "probe PATH lost the login-shell entries: \(path)")
+        }
+    }
+
+    /// A probe that never executed is not evidence that Qwen lacks resume flags.
+    /// Recording it as "supports nothing" is what makes the resume actions go
+    /// quiet, and the verdict is cached.
+    func testCLIProbeFailsLoudlyWhenQwenCouldNotExecute() {
+        let binaryPath = makeTemporaryExecutable()
+        let executor = MockCommandExecutor()
+        let envFailure = CommandResult(stdout: "", stderr: "env: node: No such file or directory\n", exitCode: 127)
+        executor.responses[[binaryPath, "--version"]] = envFailure
+        executor.responses[[binaryPath, "--help"]] = envFailure
+
+        switch QwenCLIEnvironment(executor: executor).probe(customPath: binaryPath) {
+        case .success(let result):
+            XCTFail("expected failure, got success with resume=\(result.supportsResume)")
+        case .failure(let error):
+            XCTAssertTrue(error.localizedDescription.contains("node"),
+                          "error should surface the real reason: \(error.localizedDescription)")
+        }
+    }
+
+    /// A cache written by a probe that could not execute Qwen names a real
+    /// binary with every capability false. Trusting it disables Copy Resume
+    /// Command forever, since the cache is only refreshed while the resolved
+    /// path is empty.
+    func testCopyPlanDiscardsACachedBinaryThatAdvertisesNoCapabilities() throws {
+        let suiteName = "QwenIntegrationTests-PoisonedCache-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = QwenSettings.makeForTesting(defaults: defaults)
+
+        settings.setResolvedBinary(makeTemporaryExecutable(), supportsResume: false, supportsContinue: false)
+
+        let plan = try XCTUnwrap(settings.copyCommandPlan(sessionID: sessionID),
+                                 "a failed probe must not silently disable Copy Resume Command")
+        XCTAssertEqual(plan.binary, QwenCLIEnvironment.binaryName)
+        XCTAssertTrue(settings.resolvedBinaryPath.isEmpty, "the unusable cache entry should be cleared")
+    }
+
     func testCustomBinaryCopyPlanUsesOnlyCapabilitiesProbedForThatPath() throws {
         let suiteName = "QwenIntegrationTests-CustomCapabilities-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -990,9 +1046,29 @@ final class QwenIntegrationTests: XCTestCase {
 
     private final class MockCommandExecutor: CommandExecuting {
         var responses: [[String]: CommandResult] = [:]
+        var loginShellPATH = "/usr/bin:/bin"
+        private(set) var calls: [(command: [String], environment: [String: String]?)] = []
 
         func run(_ command: [String], cwd: URL?) throws -> CommandResult {
-            responses[command] ?? .init(stdout: "", stderr: "", exitCode: 0)
+            try run(command, cwd: cwd, environment: nil)
+        }
+
+        /// Answers the login-shell discovery call whatever exact script the
+        /// probe sends, and records the environment each command was given.
+        func run(_ command: [String], cwd: URL?, environment: [String: String]?) throws -> CommandResult {
+            calls.append((command, environment))
+            if command.count == 3, command[1] == "-lic" {
+                return .init(
+                    stdout: "\(CLIProbeEnvironment.pathMarker.begin)\(loginShellPATH)\(CLIProbeEnvironment.pathMarker.end)\n",
+                    stderr: "",
+                    exitCode: 0
+                )
+            }
+            return responses[command] ?? .init(stdout: "", stderr: "", exitCode: 0)
+        }
+
+        func environments(forCommandContaining argument: String) -> [[String: String]?] {
+            calls.filter { $0.command.contains(argument) }.map(\.environment)
         }
     }
 
