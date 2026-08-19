@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Devin CLI joins as the fourteenth session source.** Agent Sessions discovers Devin CLI sessions in the shared `sessions.db` SQLite database under the CLI data directory and adds them to browsing, search, filtering, Analytics, saved-session backfill, and the transcript view, with the main-chain user/assistant/tool record tree rendered and working directories read from the `state.json` sidecar. Settings includes binary and storage-root controls; active-session resume actions use the installed CLI's advertised `--resume <id>` syntax, with directory-scoped `--continue` as a safe fallback. Devin keeps only active sessions in the database, so there is no archived-history surface, and the records carry no inline images. The format is verified against the installed CLI 3000.3.27 with a schema probe over 253 on-disk sessions; resume command plans are tested against probe-advertised capabilities, but remain end-to-end untested because authentication blocked a disposable run.
+
 ## [5.0.1] - 2026-08-18
 
 ### Bug Fixes

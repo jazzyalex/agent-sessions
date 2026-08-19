@@ -11,6 +11,7 @@
     { "id": "openclaw", "public_name": "OpenClaw" },
     { "id": "kimi", "public_name": "Kimi Code" },
     { "id": "grok", "public_name": "Grok CLI" },
-    { "id": "qwen", "public_name": "Qwen Code" }
+    { "id": "qwen", "public_name": "Qwen Code" },
+    { "id": "devin", "public_name": "Devin CLI" }
   ]
 }
