@@ -84,6 +84,7 @@ exclude:
   - "codebase-0.1-review.md"
   - "codex-resume.md"
   - "competitive-agentsview.md"
+  - "competitive-codexbar.md"
   - "deployment.md"
   - "feature_request_tool_blocks.md"
   - "focus-architecture.md"
