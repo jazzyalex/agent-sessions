@@ -471,6 +471,7 @@ private extension PreferencesView {
         case .kimi:        return $kimiAgentEnabled
         case .grok:        return $grokAgentEnabled
         case .qwen:        return $qwenAgentEnabled
+        case .devin:       return $devinAgentEnabled
         }
     }
 

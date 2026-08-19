@@ -349,6 +349,7 @@ struct UnifiedSessionsView: View {
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
+    private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -618,8 +619,10 @@ struct UnifiedSessionsView: View {
             .onChange(of: unified.includeGrok) { _, _ in restartSearchIfRunning() }
         let afterQwen = afterGrok
             .onChange(of: unified.includeQwen) { _, _ in restartSearchIfRunning() }
+        let afterDevin = afterQwen
+            .onChange(of: unified.includeDevin) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterQwen
+        let afterActiveOnly = afterDevin
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -1484,6 +1487,10 @@ struct UnifiedSessionsView: View {
         case .qwen:
             // The installed CLI resolves IDs only from active `chats`.
             return QwenResumeEligibility.canCopyResumeCommand(session)
+        case .devin:
+            // session.id is the `sessions.id` slug, which `--resume` accepts
+            // directly. `--continue` remains the fallback when it is absent.
+            return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
@@ -1639,6 +1646,20 @@ struct UnifiedSessionsView: View {
                                                           binaryCommand: plan.binary,
                                                           storageEnvironmentOverride: storageContext.environmentOverride) else { return }
             let command = wd.map { "cd \(ShellQuoting.quoteIfNeeded($0.path)) && \(core)" } ?? core
+            write(command)
+
+        case .devin:
+            let settings = DevinSettings.shared
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            // Same refusal as DevinResumeCoordinator: `--continue` resolves
+            // against the working directory, so without a `cd` it would hand the
+            // user a command that reopens an unrelated session.
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
+            let builder = DevinResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary) else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
         case .antigravity:
@@ -1959,6 +1980,7 @@ struct UnifiedSessionsView: View {
         case .kimi:        return $unified.includeKimi
         case .grok:        return $unified.includeGrok
         case .qwen:        return $unified.includeQwen
+        case .devin:       return $unified.includeDevin
         }
     }
 
@@ -2476,6 +2498,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeGrok { unified.includeGrok = true }
         case .qwen:
             if !unified.includeQwen { unified.includeQwen = true }
+        case .devin:
+            if !unified.includeDevin { unified.includeDevin = true }
         }
     }
 
@@ -2538,6 +2562,8 @@ struct UnifiedSessionsView: View {
             if unified.grokAgentEnabled, let e = grokIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { grokIndexer.reloadSession(id: id); return true }
         case .qwen:
             if unified.qwenAgentEnabled, let e = qwenIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { qwenIndexer.reloadSession(id: id); return true }
+        case .devin:
+            if unified.devinAgentEnabled, let e = devinIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { devinIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -3177,6 +3203,9 @@ struct UnifiedSessionsView: View {
             return true
         case .qwen:
             return QwenResumeEligibility.canResume(s)
+        case .devin:
+            // session.id is the `sessions.id` slug, which `--resume` accepts directly.
+            return true
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: s)) != nil
         case .droid, .openclaw:
@@ -3371,6 +3400,25 @@ struct UnifiedSessionsView: View {
                 let result = await coordinator.resumeInTerminal(input: input)
                 reportResumeFailure(launched: result.launched, error: result.error,
                                     source: s.source, in: presentingWindow)
+            }
+        case .devin:
+            let settings = DevinSettings.shared
+            let sid = s.id
+            let wd = effectiveWorkingDirectoryURL(for: s)
+            let bin = settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            let input = DevinResumeInput(sessionID: sid, workingDirectory: wd, binaryOverride: bin)
+            Task { @MainActor in
+                let launcher: DevinTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                  return DevinITermLauncher()
+                    case .warp:                    return DevinWarpLauncher()
+                    case .warpPreview:             return DevinWarpPreviewLauncher()
+                    case .terminalApp, .unknown:   return DevinTerminalLauncher()
+                    }
+                }()
+                let coord = DevinResumeCoordinator(env: DevinCLIEnvironment(), builder: DevinResumeCommandBuilder(), launcher: launcher)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
@@ -4009,6 +4057,7 @@ struct TranscriptHostView: View {
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
+    private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -4063,6 +4112,14 @@ struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .qwen ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: devinIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "Devin CLI",
+                enableCaching: false
+            )
+            .opacity(kind == .devin ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -4077,7 +4134,7 @@ struct TranscriptHostView: View {
     /// compares this set against `SessionSource.allCases`.
     static let coveredSources: Set<SessionSource> = [
         .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin
     ]
 }
 

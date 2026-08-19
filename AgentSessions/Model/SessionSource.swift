@@ -15,6 +15,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case kimi = "kimi"
     case grok = "grok"
     case qwen = "qwen"
+    case devin = "devin"
 
     public var displayName: String {
         switch self {
@@ -31,6 +32,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .kimi: return "Kimi Code"
         case .grok: return "Grok CLI"
         case .qwen: return "Qwen Code"
+        case .devin: return "Devin CLI"
         }
     }
 
@@ -49,6 +51,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .kimi: return "k.circle"
         case .grok: return "g.circle"
         case .qwen: return "q.circle"
+        case .devin: return "cpu"
         }
     }
 
@@ -66,6 +69,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .kimi:             return "4.7"
         case .grok:             return "4.8"
         case .qwen:             return "5.0"
+        case .devin:            return "5.1"
         }
     }
 
@@ -84,6 +88,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .kimi:     return "Browse your Kimi Code sessions"
         case .grok:     return "Browse your Grok CLI sessions"
         case .qwen:     return "Browse your Qwen Code sessions"
+        case .devin:    return "Browse your Devin CLI sessions"
         }
     }
 }

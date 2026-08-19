@@ -21,6 +21,7 @@ struct PreferencesView: View {
     @ObservedObject var kimiSettings = KimiSettings.shared
     @ObservedObject var grokSettings = GrokSettings.shared
     @ObservedObject var qwenSettings = QwenSettings.shared
+    @ObservedObject var devinSettings = DevinSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -69,6 +70,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.kimiCLIAvailable) var kimiCLIAvailable: Bool = true
     @AppStorage(PreferencesKey.grokCLIAvailable) var grokCLIAvailable: Bool = true
     @AppStorage(QwenPreferencesKey.cliAvailable) var qwenCLIAvailable: Bool = true
+    @AppStorage(DevinPreferencesKey.cliAvailable) var devinCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -83,6 +85,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.kimiEnabled) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @AppStorage(PreferencesKey.Agents.grokEnabled) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     @AppStorage(QwenPreferencesKey.enabled) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
+    @AppStorage(DevinPreferencesKey.enabled) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -250,6 +253,10 @@ struct PreferencesView: View {
     @State var qwenResolvedPath: String? = nil
     @State var qwenProbeDebounce: DispatchWorkItem? = nil
     @State var qwenActiveProbeRequest: QwenProbeRequest? = nil
+    @State var devinProbeState: ProbeState = .idle
+    @State var devinVersionString: String? = nil
+    @State var devinResolvedPath: String? = nil
+    @State var devinProbeDebounce: DispatchWorkItem? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -295,6 +302,9 @@ struct PreferencesView: View {
     @AppStorage(QwenPreferencesKey.sessionsRootOverride) var qwenSessionsPath: String = ""
     @State var qwenSessionsPathValid: Bool = true
     @State var qwenSessionsPathDebounce: DispatchWorkItem? = nil
+    @AppStorage(DevinPreferencesKey.sessionsRootOverride) var devinSessionsPath: String = ""
+    @State var devinSessionsPathValid: Bool = true
+    @State var devinSessionsPathDebounce: DispatchWorkItem? = nil
     // Per-agent update flow state
     @State var agentUpdateCheckingSources: Set<SessionSource> = []
     @State var agentUpdatingSources: Set<SessionSource> = []
@@ -447,6 +457,8 @@ struct PreferencesView: View {
                 grokTab
             case .qwen:
                 qwenTab
+            case .devin:
+                devinTab
             case .about:
                 aboutTab
             }
@@ -768,6 +780,8 @@ struct PreferencesView: View {
         grokSettings.clearResolvedBinary()
         qwenSettings.setBinaryPath("")
         qwenSettings.clearResolvedBinary()
+        devinSettings.setBinaryPath("")
+        devinSettings.setResolvedBinaryPath(nil)
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -781,6 +795,7 @@ struct PreferencesView: View {
         kimiSessionsPath = ""
         grokSessionsPath = ""
         qwenSessionsPath = ""
+        devinSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
@@ -788,6 +803,7 @@ struct PreferencesView: View {
         validateKimiSessionsPath()
         validateGrokSessionsPath()
         validateQwenSessionsPath()
+        validateDevinSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -810,6 +826,7 @@ struct PreferencesView: View {
         scheduleOpenClawProbe()
         schedulePiProbe()
         scheduleQwenProbe()
+        scheduleDevinProbe()
     }
 
     func closeWindow() {
@@ -934,6 +951,7 @@ struct PreferencesView: View {
         case .kimi: scheduleKimiProbe()
         case .grok: scheduleGrokProbe()
         case .qwen: scheduleQwenProbe()
+        case .devin: scheduleDevinProbe()
         }
     }
 
@@ -965,6 +983,8 @@ struct PreferencesView: View {
             return grokResolvedPath
         case .qwen:
             return qwenResolvedPath
+        case .devin:
+            return devinResolvedPath
         }
     }
 
@@ -1008,6 +1028,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .qwen:
             let value = qwenSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .devin:
+            let value = devinSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1146,6 +1169,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case kimi
     case grok
     case qwen
+    case devin
     case about
 
     var id: String { rawValue }
@@ -1173,6 +1197,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .kimi: return "Kimi Code"
         case .grok: return "Grok CLI"
         case .qwen: return "Qwen Code"
+        case .devin: return "Devin CLI"
         case .about: return "About"
         }
     }
@@ -1200,6 +1225,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .kimi: return "k.circle"
         case .grok: return "g.circle"
         case .qwen: return "q.circle"
+        case .devin: return "cpu"
         case .about: return "info.circle"
         }
     }
@@ -1231,6 +1257,7 @@ extension PreferencesTab {
         case .kimi:        self = .kimi
         case .grok:        self = .grok
         case .qwen:        self = .qwen
+        case .devin:       self = .devin
         }
     }
 
@@ -1255,6 +1282,7 @@ extension PreferencesTab {
         case .kimi:            return .kimi
         case .grok:            return .grok
         case .qwen:            return .qwen
+        case .devin:           return .devin
         }
     }
 
@@ -1270,7 +1298,7 @@ extension PreferencesTab {
     /// that forgets its row fails there instead of vanishing from Settings.
     static let sidebarAgentSources: [SessionSource] = [
         .codex, .claude, .opencode, .antigravity, .copilot,
-        .cursor, .pi, .kimi, .grok, .qwen, .hermes, .openclaw
+        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw
     ]
 
     static var sidebarAgentTabs: [PreferencesTab] {
@@ -1580,6 +1608,40 @@ extension PreferencesView {
         }
     }
 
+    func probeDevin() {
+        if devinProbeState == .probing { return }
+        devinProbeState = .probing
+        devinVersionString = nil
+        devinResolvedPath = nil
+        let override = devinSettings.binaryPath.isEmpty ? nil : devinSettings.binaryPath
+        let isAutoProbe = override == nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = DevinCLIEnvironment().probe(customPath: override)
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let res):
+                    self.devinVersionString = res.versionString
+                    self.devinResolvedPath = res.binaryURL.path
+                    if isAutoProbe {
+                        self.devinSettings.setResolvedBinary(res.binaryURL.path,
+                                                            supportsResume: res.supportsResume,
+                                                            supportsContinue: res.supportsContinue)
+                    }
+                    self.devinProbeState = .success
+                    self.devinCLIAvailable = true
+                case .failure:
+                    self.devinVersionString = nil
+                    self.devinResolvedPath = nil
+                    if isAutoProbe {
+                        self.devinSettings.setResolvedBinaryPath(nil)
+                    }
+                    self.devinProbeState = .failure
+                    self.devinCLIAvailable = false
+                }
+            }
+        }
+    }
+
     func probeOpenClaw() {
         if openClawProbeState == .probing { return }
         openClawProbeState = .probing
@@ -1632,6 +1694,8 @@ extension PreferencesView {
             if grokVersionString == nil && grokProbeState != .probing { probeGrok() }
         case .qwen:
             if qwenVersionString == nil && qwenProbeState != .probing { probeQwen() }
+        case .devin:
+            if devinVersionString == nil && devinProbeState != .probing { probeDevin() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1704,6 +1768,13 @@ extension PreferencesView {
         qwenProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeQwen() }
         qwenProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleDevinProbe() {
+        devinProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeDevin() }
+        devinProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

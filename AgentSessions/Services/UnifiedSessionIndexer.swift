@@ -439,6 +439,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeQwen: Bool = UnifiedSessionIndexer.storedInclude(.qwen) {
         didSet { applyInclude(.qwen, includeQwen) }
     }
+    @Published var includeDevin: Bool = UnifiedSessionIndexer.storedInclude(.devin) {
+        didSet { applyInclude(.devin, includeDevin) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -460,6 +463,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @Published private(set) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     @Published private(set) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
+    @Published private(set) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -954,6 +958,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.kimi) != kimiAgentEnabled { kimiAgentEnabled = value(.kimi) }
         if value(.grok) != grokAgentEnabled { grokAgentEnabled = value(.grok) }
         if value(.qwen) != qwenAgentEnabled { qwenAgentEnabled = value(.qwen) }
+        if value(.devin) != devinAgentEnabled { devinAgentEnabled = value(.devin) }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -2246,7 +2251,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     /// because their lightweight pass does not populate `lightweightCommands`.
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.
