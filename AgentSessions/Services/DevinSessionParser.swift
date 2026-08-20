@@ -67,8 +67,15 @@ enum DevinSessionParser {
             return out
 
         case "tool":
+            var output = content
+            if let images = object["images"] as? [[String: Any]], !images.isEmpty {
+                // Same marker rule as the user arm: the payload never reaches
+                // the transcript body.
+                let markers = Array(repeating: "[image]", count: images.count).joined(separator: "\n")
+                output = [markers, content].compactMap { $0 }.joined(separator: "\n")
+            }
             return [SessionEvent(id: "\(nodeID)-r", timestamp: time, kind: .tool_result, role: role, text: nil,
-                                 toolName: nil, toolInput: nil, toolOutput: content,
+                                 toolName: nil, toolInput: nil, toolOutput: output,
                                  messageID: object["tool_call_id"] as? String,
                                  parentID: nil, isDelta: false, rawJSON: json)]
 

@@ -76,8 +76,7 @@ final class DevinSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
     }
 
     var canAccessRootDirectory: Bool {
-        let root = discovery.sessionsRoot()
-        return discovery.hasDatabase()
+        discovery.hasDatabase()
     }
 
     func refresh(mode: IndexRefreshMode = .incremental,
@@ -109,22 +108,27 @@ final class DevinSessionIndexer: ObservableObject, SessionIndexerProtocol, @unch
 
             // A single database, so there is nothing to enumerate and no
             // per-file progress to report: one read returns every session.
-            let dbPath = self.discovery.databaseURL().path
-            let readResult = DevinSqliteReader.listSessionsIfReadable(databasePath: dbPath)
+            let dbURL = self.discovery.databaseURL()
+            let readResult = DevinSqliteReader.listSessionsIfReadable(databasePath: dbURL.path)
             let sessions = readResult ?? []
-            let merged = SessionArchiveManager.shared.mergePinnedArchiveFallbacks(into: sessions, source: .devin)
+            // nil (unreadable or missing database) must not read as "keep
+            // everything": an uninstalled CLI or a repointed custom root has to
+            // retire the corpus. authoritativeAbsence only claims deletion when
+            // the containing directory is still present, so an unmounted volume
+            // stays unknown. No archive exists for this source, so there are no
+            // pinned fallbacks to merge.
             let identitySnapshot = readResult.map {
-                SearchIngestService.IdentitySnapshot(storagePaths: [dbPath],
+                SearchIngestService.IdentitySnapshot(storagePaths: [dbURL.path],
                                                      sessionIDs: Set($0.map(\.id)))
-            }
+            } ?? SearchIngestService.IdentitySnapshot.authoritativeAbsence(ofDatabaseAt: dbURL)
             await MainActor.run {
                 guard self.refreshToken == token else { return }
-                self.allSessions = merged
+                self.allSessions = sessions
                 self.searchIdentitySnapshot = identitySnapshot
                 self.isIndexing = false
-                self.totalFiles = merged.count
-                self.filesProcessed = merged.count
-                self.hasEmptyDirectory = merged.isEmpty
+                self.totalFiles = sessions.count
+                self.filesProcessed = sessions.count
+                self.hasEmptyDirectory = sessions.isEmpty
                 self.progressText = "Ready"
                 self.launchPhase = .ready
             }

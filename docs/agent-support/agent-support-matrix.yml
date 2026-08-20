@@ -226,7 +226,7 @@ agents:
   devin_cli:
     max_verified_version: "3000.3.27 (0becb483)"
     version_field: "sessions.db records (verified via scripts/devin_sessions_schema_probe.py against the installed CLI)"
-    support_scope: "tier-2 identity-backed SQLite transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, and analytics"
+    support_scope: "tier-2 identity-backed SQLite transcript discovery, browsing, search, Preferences controls, colors, active-session copy-resume command and launch-in-terminal resume, and analytics"
     unsupported_surfaces:
       - "live/active status"
       - "images"
@@ -234,12 +234,15 @@ agents:
       - "custom storage root with an arbitrary structure (the devin data directory, cli directory, or the sessions.db file itself are accepted)"
       - "weekly session-format monitoring (devin is not yet in the monitored agent set)"
     notes:
-      - "The installed Devin CLI is 3000.3.27 (0becb483). Storage is a single shared SQLite database at ~/.local/share/devin/cli/sessions.db; the reader parses the main-chain message tree (user/assistant/tool_result records) and derives cwd from the state.json sidecar. resume --help advertises -c/--continue and -r/--resume <id>; session ids are human-readable slugs (sessions.id primary key) passed through verbatim."
+      - "The installed Devin CLI is 3000.3.27 (0becb483). Storage is a single shared SQLite database at ~/.local/share/devin/cli/sessions.db; the reader parses the main-chain message tree (user/assistant/tool_result records) and derives cwd from the sessions table's working_directory column. resume --help advertises -c/--continue and -r/--resume <id>; session ids are human-readable slugs (sessions.id primary key) passed through verbatim."
       - "Model execution was authentication-blocked, so no fresh end-to-end resume is claimed; the copied/launched command plans are tested against probe-advertised capabilities, and installed help and reader behavior justify the explicitly untested resume integration."
-      - "Devin is identity-backed and DB-only: parseFullByPath is nil, parseFullByIdentity is used, and no filesystem archives exist. The source is excluded from image browsing because the DB records carry no inline images."
+      - "Devin is identity-backed and DB-only: parseFullByPath is nil, parseFullByIdentity is used, and no filesystem archives exist. The records carry inline base64 images on user and tool messages, rendered as [image] markers; image extraction is not yet supported, so the source is excluded from image browsing."
+    evidence_fixtures:
+      - "in-test fixture: AgentSessionsTests/DevinSqliteReaderTests.swift buildFixture() builds a miniature sessions.db (five-node main chain plus an abandoned two-node branch); no committed binary fixture, the approved guide deviation for DB-backed sources"
     evidence_tests:
       - "AgentSessionsTests/DevinSqliteReaderTests.swift"
       - "AgentSessionsTests/DevinSessionDiscoveryTests.swift"
       - "AgentSessionsTests/DevinIntegrationSurfaceTests.swift"
+      - "AgentSessionsTests/DevinSessionParserTests.swift"
     evidence_tools:
       - "scripts/devin_sessions_schema_probe.py"

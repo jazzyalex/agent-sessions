@@ -148,7 +148,7 @@ extension PreferencesView {
                             .foregroundStyle(.red)
                     }
 
-                    Text("Devin writes one wire.jsonl journal per agent under its sessions directory. Override only when you point DEVIN_CODE_HOME at a non-default location.")
+                    Text("Devin keeps every session in one SQLite database (sessions.db) under its CLI data directory. Override only when that data lives outside the default location; the root may point at the devin data directory, the cli directory, or the sessions.db file itself.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

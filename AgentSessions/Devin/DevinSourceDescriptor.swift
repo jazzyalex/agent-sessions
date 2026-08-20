@@ -46,7 +46,7 @@ extension SessionSourceDescriptor {
             parseFullByIdentity: { url, sessionID in
                 DevinSqliteReader.loadFullSession(databasePath: url.path, sessionID: sessionID)
             },
-            searchUsesIdentityAtURL: { $0.pathExtension == "db" },
+            searchUsesIdentityAtURL: { $0.pathExtension.lowercased() == "db" },
             // Archiving is a no-op: sessions are rows in a shared database,
             // so there is nothing per-session to copy out.
             archive: nil,

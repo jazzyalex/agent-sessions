@@ -257,6 +257,7 @@ struct PreferencesView: View {
     @State var devinVersionString: String? = nil
     @State var devinResolvedPath: String? = nil
     @State var devinProbeDebounce: DispatchWorkItem? = nil
+    @State var devinActiveProbeRequest: DevinProbeRequest? = nil
     // Copilot sessions directory override
     @AppStorage(PreferencesKey.Paths.copilotSessionsRootOverride) var copilotSessionsPath: String = ""
     @State var copilotSessionsPathValid: Bool = true
@@ -781,7 +782,7 @@ struct PreferencesView: View {
         qwenSettings.setBinaryPath("")
         qwenSettings.clearResolvedBinary()
         devinSettings.setBinaryPath("")
-        devinSettings.setResolvedBinaryPath(nil)
+        devinSettings.clearResolvedBinary()
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -1609,32 +1610,40 @@ extension PreferencesView {
     }
 
     func probeDevin() {
-        if devinProbeState == .probing { return }
-        devinProbeState = .probing
-        devinVersionString = nil
-        devinResolvedPath = nil
-        let override = devinSettings.binaryPath.isEmpty ? nil : devinSettings.binaryPath
-        let isAutoProbe = override == nil
+        guard devinActiveProbeRequest == nil else { return }
+        startDevinProbe(devinSettings.currentProbeRequest(), resetPresentation: true)
+    }
+
+    private func startDevinProbe(_ request: DevinProbeRequest, resetPresentation: Bool) {
+        devinActiveProbeRequest = request
+        if resetPresentation {
+            devinProbeState = .probing
+            devinVersionString = nil
+            devinResolvedPath = nil
+        }
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = DevinCLIEnvironment().probe(customPath: override)
+            let result = DevinCLIEnvironment().probe(customPath: request.binaryOverride)
             DispatchQueue.main.async {
+                guard self.devinActiveProbeRequest == request else { return }
+                switch self.devinSettings.acceptProbeCompletion(result, for: request) {
+                case .stale(let currentRequest):
+                    // Keep the presentation in its existing probing state. The stale
+                    // result must not flash success/failure or change persisted flags.
+                    self.startDevinProbe(currentRequest, resetPresentation: false)
+                    return
+                case .accepted:
+                    self.devinActiveProbeRequest = nil
+                }
+
                 switch result {
                 case .success(let res):
                     self.devinVersionString = res.versionString
                     self.devinResolvedPath = res.binaryURL.path
-                    if isAutoProbe {
-                        self.devinSettings.setResolvedBinary(res.binaryURL.path,
-                                                            supportsResume: res.supportsResume,
-                                                            supportsContinue: res.supportsContinue)
-                    }
                     self.devinProbeState = .success
                     self.devinCLIAvailable = true
                 case .failure:
                     self.devinVersionString = nil
                     self.devinResolvedPath = nil
-                    if isAutoProbe {
-                        self.devinSettings.setResolvedBinaryPath(nil)
-                    }
                     self.devinProbeState = .failure
                     self.devinCLIAvailable = false
                 }

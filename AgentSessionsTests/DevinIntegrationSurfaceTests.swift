@@ -89,18 +89,76 @@ final class DevinIntegrationSurfaceTests: XCTestCase {
         XCTAssertEqual(command, "devin --resume bald-ketch")
     }
 
-    /// The custom binary set in Preferences must reach the copied command.
+    /// The custom binary set in Preferences must reach the copied command —
+    /// but only once a probe has resolved *that* binary and advertised a flag.
     @MainActor
-    func testCopyCommandPlanUsesCustomBinary() throws {
+    func testCopyCommandPlanUsesProbedCustomBinary() throws {
+        let binaryURL = makeExecutableBinary()
         let settings = makeSettings()
-        settings.setBinaryPath("/opt/custom/devin")
+        settings.setBinaryPath(binaryURL.path)
+        settings.setResolvedBinary(binaryURL.path, supportsResume: true, supportsContinue: true)
 
         let plan = try XCTUnwrap(settings.copyCommandPlan(sessionID: "bald-ketch"))
 
-        XCTAssertEqual(plan.binary, "/opt/custom/devin")
+        XCTAssertEqual(plan.binary, binaryURL.path)
         let command = try DevinResumeCommandBuilder().makeCoreCommand(strategy: plan.strategy,
                                                                       binaryCommand: plan.binary)
-        XCTAssertEqual(command, "/opt/custom/devin --resume bald-ketch")
+        XCTAssertEqual(command, "'\(binaryURL.path)' --resume bald-ketch")
+    }
+
+    /// A custom binary the probe resolved but which advertised neither flag
+    /// yields no plan — same refusal as the auto-detected branch, so the UI
+    /// disables copy-resume instead of emitting an unsupported command.
+    @MainActor
+    func testCustomBinaryAdvertisingNeitherFlagYieldsNoPlan() {
+        let binaryURL = makeExecutableBinary()
+        let settings = makeSettings()
+        settings.setBinaryPath(binaryURL.path)
+        settings.setResolvedBinary(binaryURL.path, supportsResume: false, supportsContinue: false)
+
+        XCTAssertNil(settings.copyCommandPlan(sessionID: "bald-ketch"))
+    }
+
+    /// A probe that could not execute the CLI reports a real binary with both
+    /// capabilities false. That verdict is "nothing learned": storing it would
+    /// let one failed probe disable resume for good, because the cache only
+    /// refreshes while the resolved path is empty.
+    @MainActor
+    func testSetResolvedBinaryWithNeitherFlagStoresNothingLearned() {
+        let settings = makeSettings()
+        settings.setResolvedBinary("/opt/devin", supportsResume: false, supportsContinue: false)
+
+        XCTAssertEqual(settings.resolvedBinaryPath, "")
+        XCTAssertFalse(settings.resolvedSupportsResume)
+        XCTAssertFalse(settings.resolvedSupportsContinue)
+    }
+
+    /// A cache entry naming a binary that advertises neither flag came from a
+    /// pre-guard probe. Init drops it so the warm path can rebuild it.
+    @MainActor
+    func testInitHealsCacheEntryThatAdvertisesNothing() {
+        let suite = "DevinIntegrationSurfaceTests.heal"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("/stale/devin", forKey: DevinSettings.Keys.resolvedBinaryPath)
+
+        let settings = DevinSettings.makeForTesting(defaults: defaults)
+
+        XCTAssertEqual(settings.resolvedBinaryPath, "")
+        XCTAssertFalse(settings.resolvedSupportsResume)
+        XCTAssertFalse(settings.resolvedSupportsContinue)
+    }
+
+    /// K1: these strings freeze at release. `resolvedSupportsResume` was
+    /// briefly mapped onto Kimi's `...SupportsSession` suffix before launch;
+    /// Devin's flag is `--resume`, and the literal below is the shipped form.
+    @MainActor
+    func testPersistedKeysKeepTheirLiteralStrings() {
+        XCTAssertEqual(DevinSettings.Keys.binaryPath, "DevinBinaryPath")
+        XCTAssertEqual(DevinSettings.Keys.resolvedBinaryPath, "DevinResolvedBinaryPath")
+        XCTAssertEqual(DevinSettings.Keys.resolvedSupportsResume, "DevinResolvedSupportsResume")
+        XCTAssertEqual(DevinSettings.Keys.resolvedSupportsContinue, "DevinResolvedSupportsContinue")
     }
 
     /// A blank session id (e.g. an unparsed transcript before discovery runs)
@@ -130,16 +188,18 @@ final class DevinIntegrationSurfaceTests: XCTestCase {
         XCTAssertEqual(command, "'\(binaryURL.path)' --continue")
     }
 
-    /// A probed binary that advertises neither flag must yield no plan, so the
-    /// UI can disable copy-resume rather than emit an unsupported command.
+    /// A probed binary that advertises neither flag is "nothing learned": the
+    /// dead verdict is discarded, and copy-resume falls back to a bare `devin`
+    /// on PATH rather than emitting an unsupported command.
     @MainActor
-    func testProbedBinaryAdvertisingNeitherFlagYieldsNoPlan() throws {
+    func testAutoProbedBinaryAdvertisingNeitherFlagFallsBackToBareBinary() throws {
+        let binaryURL = makeExecutableBinary()
         let settings = makeSettings()
-        settings.setResolvedBinary(makeExecutableBinary().path,
-                                   supportsResume: false,
-                                   supportsContinue: false)
+        settings.setResolvedBinary(binaryURL.path, supportsResume: false, supportsContinue: false)
 
-        XCTAssertNil(settings.copyCommandPlan(sessionID: "bald-ketch"))
+        XCTAssertEqual(settings.resolvedBinaryPath, "")
+        let plan = try XCTUnwrap(settings.copyCommandPlan(sessionID: "bald-ketch"))
+        XCTAssertEqual(plan.binary, DevinCLIEnvironment.binaryName)
     }
 
     /// `copyCommandPlan` re-validates the cached resolved path against the
@@ -165,5 +225,3 @@ final class DevinIntegrationSurfaceTests: XCTestCase {
         XCTAssertTrue(PreferencesTab.allCases.contains(.devin))
     }
 }
-
-extension DevinResumeCommandBuilder.BuildError: Equatable {}

@@ -67,7 +67,7 @@ writes a redacted sample you can attach to an issue.
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
-| Devin CLI | steward wanted | 2026-08-18 · 3000.3.27 (see note) | Best-effort |
+| Devin CLI | @thedavidweng | 2026-08-18 · 3000.3.27 (see note) | Steward-verified |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),

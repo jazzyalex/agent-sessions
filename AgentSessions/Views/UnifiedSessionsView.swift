@@ -1490,7 +1490,9 @@ struct UnifiedSessionsView: View {
         case .devin:
             // session.id is the `sessions.id` slug, which `--resume` accepts
             // directly. `--continue` remains the fallback when it is absent.
-            return true
+            // A probe that advertised neither flag yields no plan; mirror that
+            // here so the menu item disables instead of silently doing nothing.
+            return DevinSettings.shared.copyCommandPlan(sessionID: session.id) != nil
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
