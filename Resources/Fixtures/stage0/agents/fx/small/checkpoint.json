@@ -76,6 +76,105 @@
         },
         "completed_tool_names": [],
         "terminal_reason": "cancelled"
+      },
+      {
+        "kind": "background_command",
+        "user": {
+          "text": "Run the test suite in the background",
+          "images": []
+        },
+        "log_path": "/Users/fx-demo/Projects/alpha/.fx/background/bg-001.log",
+        "expect_url": false,
+        "url": null,
+        "background_record_id": null,
+        "assistant": "The suite passed with no failures.",
+        "execution": {
+          "schema_version": 3,
+          "tool_steps": [
+            {
+              "assistant": "Starting the suite now.",
+              "tool_calls": [
+                {
+                  "id": "call_fixture_003",
+                  "name": "run_command",
+                  "arguments_json": "{\"command\":\"swift test\",\"background\":true}",
+                  "provider_result": null
+                }
+              ],
+              "tool_results": [
+                {
+                  "tool_call_id": "call_fixture_003",
+                  "tool_name": "run_command",
+                  "status": "success",
+                  "output": "Test Suite 'All tests' passed",
+                  "output_handle": null,
+                  "preview": null,
+                  "output_bytes": 32,
+                  "stored_output_bytes": 32,
+                  "truncated": false,
+                  "created_at_ms": 1787261200000
+                }
+              ]
+            }
+          ],
+          "files": []
+        }
+      },
+      {
+        "kind": "compacted_summary",
+        "summary": "The user asked for a directory listing and a bulk rename; both were handled before compaction.",
+        "removed_turn_count": 3,
+        "compaction_count": 1,
+        "root_user_messages": [
+          "List the files in the current directory"
+        ]
+      },
+      {
+        "kind": "interrupted",
+        "user": {
+          "text": "Summarize the src folder next",
+          "images": []
+        },
+        "assistant": "The src folder holds the main sources; I was about to list them when the turn was cut.",
+        "execution": {
+          "schema_version": 3,
+          "tool_steps": [
+            {
+              "assistant": "Checking what is inside src.",
+              "tool_calls": [
+                {
+                  "id": "call_fixture_004",
+                  "name": "list_files",
+                  "arguments_json": "{\"path\":\"src\"}",
+                  "provider_result": null
+                }
+              ],
+              "tool_results": [
+                {
+                  "tool_call_id": "call_fixture_004",
+                  "tool_name": "list_files",
+                  "status": "success",
+                  "output": "main.swift\nutil.swift\n",
+                  "output_handle": null,
+                  "preview": null,
+                  "output_bytes": 21,
+                  "stored_output_bytes": 21,
+                  "truncated": false,
+                  "created_at_ms": 1787261300000
+                }
+              ]
+            }
+          ],
+          "files": []
+        },
+        "tool_call": {
+          "id": "call_fixture_005",
+          "name": "read_file",
+          "arguments_json": "{\"path\":\"src/main.swift\"}",
+          "provider_result": null
+        },
+        "completed_tool_names": ["list_files"],
+        "terminal_reason": "cancelled"
       }
     ]
   }

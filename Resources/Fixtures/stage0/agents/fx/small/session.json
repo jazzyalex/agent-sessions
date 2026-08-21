@@ -8,7 +8,7 @@
   "origin_workspace_root": "/Users/fx-demo/Projects/alpha",
   "workspace_root": "/Users/fx-demo/Projects/alpha",
   "conversation_language": "en",
-  "history_len": 2,
+  "history_len": 5,
   "total_input_tokens": 1200,
   "total_output_tokens": 340,
   "preferences": {

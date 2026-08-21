@@ -101,7 +101,7 @@ actor ImageBrowserIndexCache {
         let createdAt = Int64(Date().timeIntervalSince1970)
 
         switch session.source {
-        case .codex, .claude, .openclaw, .grok, .kimi, .pi, .hermes, .cursor, .fx:
+        case .codex, .claude, .openclaw, .grok, .kimi, .pi, .hermes, .cursor:
             let located: [Base64ImageDataURLScanner.LocatedSpan] = {
                 do {
                     switch session.source {
@@ -123,12 +123,20 @@ actor ImageBrowserIndexCache {
                         return try ClaudeBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
                     case .openclaw:
                         return try OpenClawBase64ImageScanner.scanFileWithLineIndexes(at: url, maxMatches: maxMatches, shouldCancel: shouldCancel)
-                    case .antigravity, .opencode, .copilot, .droid, .qwen, .fx:
+                    case .antigravity, .opencode, .copilot, .droid, .qwen:
                         // Old `default: return []`. Unreachable — the enclosing arm only
                         // admits the eight base64-scanned sources, and these four have
-                        // their own arms further down — but explicit so a thirteenth
-                        // source added to the outer arm cannot land here and silently
-                        // report "no images" instead of being wired to a scanner.
+                        // their own arms further down — but explicit so a new
+                        // base64-scanned source added to the outer arm cannot land here
+                        // and silently report "no images" instead of being wired to a
+                        // scanner.
+                        return []
+                    case .fx:
+                        // Unreachable — fx is classified with droid/qwen below, not in
+                        // the enclosing base64-scan arm. Named apart from the arm above
+                        // so that comment stays literally true about its members;
+                        // enumerated here only because the inner switch must remain
+                        // exhaustive.
                         return []
                     }
                 } catch {
@@ -151,11 +159,15 @@ actor ImageBrowserIndexCache {
                     // Every Grok match is already an `image` content part's data URI,
                     // so there is no non-image base64 to disambiguate the way Codex has.
                     return true
-                case .antigravity, .opencode, .copilot, .droid, .qwen, .fx:
+                case .antigravity, .opencode, .copilot, .droid, .qwen:
                     // Old `default: return false`. Unreachable for the same reason as the
                     // scanner switch above; explicit so a new source added to the outer
                     // arm must choose between the conservative URL-context filter and
                     // accepting every match, instead of quietly discarding all of them.
+                    return false
+                case .fx:
+                    // Unreachable — fx is classified with droid/qwen below. Named apart
+                    // so the arm above stays literally true about its members.
                     return false
                 }
             }
@@ -270,12 +282,14 @@ actor ImageBrowserIndexCache {
             saveIndex(built, forPath: session.filePath)
             return built
 
-        case .droid, .qwen:
-            // Deliberately no image extraction. Exhaustive on purpose — this used to be
-            // a `default:`, which silently gave every unlisted provider an empty index:
-            // Grok, Kimi, Pi, Hermes and Cursor all landed here and showed no images,
-            // with nothing to distinguish "this format has none" from "nobody wired it
-            // up". A new source now has to say which it is.
+        case .droid, .qwen, .fx:
+            // Deliberately no image extraction (fx records inline base64 payloads,
+            // but its parser renders them as [image] markers and never reads the
+            // payload). Exhaustive on purpose — this used to be a `default:`, which
+            // silently gave every unlisted provider an empty index: Grok, Kimi, Pi,
+            // Hermes and Cursor all landed here and showed no images, with nothing
+            // to distinguish "this format has none" from "nobody wired it up". A new
+            // source now has to say which it is.
             let built = ImageBrowserStoredIndex(signature: signature,
                                                 spans: [],
                                                 openCodeImages: nil,

@@ -14,11 +14,19 @@ import Foundation
 /// - `checkpoint.json` — `{schema_version, session_id, log_generation,
 ///   through_seq, state}`. `state.history[]` is the transcript; the sibling
 ///   `events.jsonl` is write-ahead infrastructure and is never read.
-/// - `state.history[]` entries are whole turns keyed by `kind`:
+/// - `state.history[]` entries are whole turns keyed by `kind` — all four
+///   kinds are rendered:
 ///   `assistant` carries `{user: {text, images}, assistant, execution}`;
 ///   `interrupted` carries `{user, assistant (often null), tool_call,
-///   completed_tool_names, terminal_reason}`. The user prompt lives *inside*
-///   the turn — fx has no standalone user records.
+///   completed_tool_names, terminal_reason}` plus `execution` whenever tools
+///   completed before the cut;
+///   `background_command` is an assistant-shaped turn the runtime parked in
+///   the background (`{user, log_path, expect_url, url, background_record_id}`
+///   plus optional `assistant`/`execution`);
+///   `compacted_summary` is the turn that replaces the history removed by
+///   auto-compaction (`{summary, removed_turn_count, compaction_count}` plus
+///   optionally `root_user_messages`). The user prompt lives *inside* the
+///   turn — fx has no standalone user records.
 /// - `execution.tool_steps[]` — each `{assistant, tool_calls, tool_results}`;
 ///   a turn renders user → per-step narration + calls + results → final reply.
 /// - `tool_calls[]` — `{id, name, arguments_json}` where **`arguments_json`
@@ -142,26 +150,57 @@ enum FxSessionParser {
 
         switch kind {
         case "assistant":
-            if let execution = turn["execution"] as? [String: Any] {
-                let steps = execution["tool_steps"] as? [[String: Any]] ?? []
-                for (stepIndex, step) in steps.enumerated() {
-                    out.append(contentsOf: toolStepEvents(from: step, turnIndex: turnIndex, stepIndex: stepIndex))
-                }
+            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
+
+        case "background_command":
+            // A command the runtime moved to the background: the same body as
+            // an ordinary turn (fx only appends `assistant`/`execution` once
+            // there is something to record), plus where its output went.
+            var detail: [String] = []
+            if let logPath = turn["log_path"] as? String, !logPath.isEmpty { detail.append("log \(logPath)") }
+            if let url = turn["url"] as? String, !url.isEmpty { detail.append(url) }
+            let note = detail.isEmpty ? "[background command]"
+                                      : "[background command — \(detail.joined(separator: " · "))]"
+            out.append(event(turnIndex: turnIndex, suffix: "b", kind: .meta, role: "system",
+                             text: note, messageID: nil, raw: jsonEncode(turn)))
+            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
+
+        case "compacted_summary":
+            // The turn that replaces the history auto-compaction removed.
+            // Rendering the summary is what keeps the gap from looking like a
+            // session that simply started over.
+            var lines: [String] = []
+            let removed = int(turn["removed_turn_count"]) ?? 0
+            let generation = int(turn["compaction_count"]) ?? 0
+            lines.append("[context compacted: \(removed) earlier turn\(removed == 1 ? "" : "s") removed (compaction #\(generation))]")
+            if let summary = turn["summary"] as? String, !summary.isEmpty {
+                lines.append(summary)
             }
-            if let reply = turn["assistant"] as? String, !reply.isEmpty {
-                out.append(event(turnIndex: turnIndex, suffix: "a", kind: .assistant, role: "assistant", text: reply,
-                                 messageID: nil, raw: jsonEncode(turn)))
+            if let roots = turn["root_user_messages"] as? [String], !roots.isEmpty {
+                lines.append("Original prompt(s):")
+                lines.append(contentsOf: roots.map { "- \($0)" })
             }
+            out.append(event(turnIndex: turnIndex, suffix: "c", kind: .meta, role: "system",
+                             text: lines.joined(separator: "\n"), messageID: nil, raw: jsonEncode(turn)))
 
         case "interrupted":
-            // A cancelled turn: the dangling call never got a result, and the
-            // terminal reason is the only record of why the turn ends here.
+            // A cancelled or failed turn. fx still records everything that
+            // did happen before the cut: completed steps, any partial reply,
+            // then the one call that never got its result.
+            out.append(contentsOf: responseEvents(from: turn, turnIndex: turnIndex))
             if let call = turn["tool_call"] as? [String: Any] {
                 out.append(toolCallEvent(from: call, turnIndex: turnIndex, suffix: "t"))
             }
             let reason = turn["terminal_reason"] as? String ?? "interrupted"
+            var text = "[interrupted: \(reason)]"
+            if turn["execution"] == nil,
+               let completed = turn["completed_tool_names"] as? [String], !completed.isEmpty {
+                // Degenerate shape: tools completed but their steps were not
+                // persisted, so the names are the only surviving evidence.
+                text = "[interrupted: \(reason) — completed: \(completed.joined(separator: ", "))]"
+            }
             out.append(event(turnIndex: turnIndex, suffix: "i", kind: .meta, role: "system",
-                             text: "[interrupted: \(reason)]", messageID: nil, raw: jsonEncode(turn)))
+                             text: text, messageID: nil, raw: jsonEncode(turn)))
 
         default:
             out.append(event(turnIndex: turnIndex, suffix: "m", kind: .meta, role: kind,
@@ -171,6 +210,24 @@ enum FxSessionParser {
         if out.isEmpty {
             out.append(event(turnIndex: turnIndex, suffix: "e", kind: .meta, role: kind,
                              text: nil, messageID: nil, raw: jsonEncode(turn)))
+        }
+        return out
+    }
+
+    /// The shared body of an agent turn — ordinary, background, or cut short:
+    /// narrated tool steps with keyed calls and results, then the final (or,
+    /// when interrupted, partial) reply.
+    private static func responseEvents(from turn: [String: Any], turnIndex: Int) -> [SessionEvent] {
+        var out: [SessionEvent] = []
+        if let execution = turn["execution"] as? [String: Any] {
+            let steps = execution["tool_steps"] as? [[String: Any]] ?? []
+            for (stepIndex, step) in steps.enumerated() {
+                out.append(contentsOf: toolStepEvents(from: step, turnIndex: turnIndex, stepIndex: stepIndex))
+            }
+        }
+        if let reply = turn["assistant"] as? String, !reply.isEmpty {
+            out.append(event(turnIndex: turnIndex, suffix: "a", kind: .assistant, role: "assistant", text: reply,
+                             messageID: nil, raw: jsonEncode(turn)))
         }
         return out
     }
@@ -286,12 +343,23 @@ enum FxSessionParser {
         ms > 0 ? Date(timeIntervalSince1970: Double(ms) / 1_000.0) : nil
     }
 
+    /// JSON booleans must be rejected before numeric reads — but Foundation's
+    /// dynamic casting answers `true` to `jsonOne is Bool` for the integer 1,
+    /// so discriminate by CFType: only a genuine `__NSCFBoolean` carries
+    /// CFBoolean's type ID. Without this, every fx field whose honest value is
+    /// exactly 1 (`history_len: 1`, `compaction_count: 1`, …) reads as absent.
+    private static func isJSONBool(_ value: Any) -> Bool {
+        CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
+    }
+
     private static func int(_ value: Any?) -> Int? {
-        (value is Bool) ? nil : (value as? NSNumber)?.intValue
+        guard let value, !isJSONBool(value) else { return nil }
+        return (value as? NSNumber)?.intValue
     }
 
     private static func int64(_ value: Any?) -> Int64? {
-        (value is Bool) ? nil : (value as? NSNumber)?.int64Value
+        guard let value, !isJSONBool(value) else { return nil }
+        return (value as? NSNumber)?.int64Value
     }
 
     private static func jsonEncode(_ object: Any) -> String {

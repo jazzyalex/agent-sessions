@@ -240,29 +240,7 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
 
                 if let idx = self.allSessions.firstIndex(where: { $0.id == id }) {
                     let current = self.allSessions[idx]
-                    // fx history entries are whole turns with no branching, so a
-                    // successful full parse is authoritative for every derived
-                    // field. Merge with `??` fallbacks only where the checkpoint
-                    // genuinely does not carry the value (timestamps from the
-                    // sidecar the full parse also reads).
-                    let merged = Session(id: parsed.id,
-                                         source: parsed.source,
-                                         startTime: parsed.startTime ?? current.startTime,
-                                         endTime: parsed.endTime ?? current.endTime,
-                                         model: parsed.model ?? current.model,
-                                         filePath: parsed.filePath,
-                                         fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
-                                         eventCount: max(current.eventCount, parsed.nonMetaCount),
-                                         events: parsed.events,
-                                         cwd: parsed.cwd ?? current.lightweightCwd,
-                                         repoName: current.repoName ?? parsed.repoName,
-                                         lightweightTitle: current.lightweightTitle ?? parsed.lightweightTitle,
-                                         lightweightCommands: current.lightweightCommands,
-                                         parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
-                                         subagentType: parsed.subagentType ?? current.subagentType,
-                                         customTitle: parsed.customTitle ?? current.customTitle,
-                                         surface: parsed.surface ?? current.surface,
-                                         reasoningEffort: parsed.reasoningEffort ?? current.reasoningEffort)
+                    let merged = Self.mergedSession(parsed: parsed, current: current)
                     self.allSessions[idx] = merged
                     let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
                     let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
@@ -271,6 +249,35 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
                 self.recomputeNow()
             }
         }
+    }
+
+    /// Guide §3.1: a successful full parse is authoritative for every
+    /// branch-derived field. fx has no branches, but compaction rewrites
+    /// `state.history` in place, so the transcript can shrink and the title
+    /// can change — merging with `max` or current-first fallbacks would keep
+    /// the discarded history's metadata beside the new transcript. `??`
+    /// survives only where neither the checkpoint nor the sidecar it rereads
+    /// carries the value at all (timestamps, model, effort). Internal so the
+    /// shrink regression can pin the rule without a live indexer.
+    static func mergedSession(parsed: Session, current: Session) -> Session {
+        Session(id: parsed.id,
+                source: parsed.source,
+                startTime: parsed.startTime ?? current.startTime,
+                endTime: parsed.endTime ?? current.endTime,
+                model: parsed.model ?? current.model,
+                filePath: parsed.filePath,
+                fileSizeBytes: parsed.fileSizeBytes ?? current.fileSizeBytes,
+                eventCount: parsed.nonMetaCount,
+                events: parsed.events,
+                cwd: parsed.cwd ?? current.lightweightCwd,
+                repoName: parsed.repoName ?? current.repoName,
+                lightweightTitle: parsed.lightweightTitle ?? current.lightweightTitle,
+                lightweightCommands: parsed.lightweightCommands,
+                parentSessionID: parsed.parentSessionID ?? current.parentSessionID,
+                subagentType: parsed.subagentType ?? current.subagentType,
+                customTitle: parsed.customTitle ?? current.customTitle,
+                surface: parsed.surface ?? current.surface,
+                reasoningEffort: parsed.reasoningEffort ?? current.reasoningEffort)
     }
 
     private static func fileStat(for url: URL) -> SessionFileStat? {

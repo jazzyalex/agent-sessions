@@ -2246,12 +2246,13 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     /// Backs the "has commands" quick filter.
     ///
-    /// Every JSONL provider is judged on real tool-call evidence. Claude and
-    /// Antigravity are stricter: an unparsed session counts as command-free
-    /// because their lightweight pass does not populate `lightweightCommands`.
+    /// Every JSONL provider is judged on real tool-call evidence. Claude,
+    /// Antigravity and fx are stricter: an unparsed session counts as
+    /// command-free because their lightweight pass does not populate
+    /// `lightweightCommands` (fx only sets it on a full parse).
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
-        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .fx:
+        case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen:
             // hasToolCallEvent is precomputed once at Session construction from
             // `events` (Session.swift), so this no longer rescans the full
             // events array per session per recompute.
@@ -2259,7 +2260,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return session.hasToolCallEvent
             }
             return (session.lightweightCommands ?? 0) > 0
-        case .claude, .antigravity:
+        case .claude, .antigravity, .fx:
             if session.events.isEmpty { return false }
             return session.hasToolCallEvent
         }
