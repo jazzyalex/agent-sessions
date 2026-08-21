@@ -26,8 +26,9 @@ extension SessionSourceDescriptor {
             source: .fx,
             shortLabel: "fx",
             badgeInitials: "FX",
-            // Vercel-mark crimson; clear of OpenClaw's orange, Devin's amber and
-            // Codex's deep blue.
+            // fx ships no usable brand chroma — its mark and site are monochrome —
+            // so this slot is a free choice, not an inherited color: crimson,
+            // clear of OpenClaw's orange and Codex's deep blue.
             brandHue: .calibrated(red: 0.80, green: 0.22, blue: 0.27),
             monochromeWhite: 0.60,
             onboardingAccent: { _ in Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: .fx)) },
