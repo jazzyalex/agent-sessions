@@ -1,9 +1,9 @@
-agent_sessions_version: "5.0-unreleased"
-as_of_commit: "ef4e9253"
-as_of_date: 2026-08-17
+agent_sessions_version: "5.0.1"
+as_of_commit: "111df518"
+as_of_date: 2026-08-21
 workflow_doc: "docs/agent-support/workflow.md"
 notes:
-  - "This unreleased snapshot includes Qwen Code support introduced in ef4e9253. It is not yet a release-ledger entry."
+  - "Snapshot taken at the 2026-08-21 format check. Qwen Code support (ef4e9253) shipped in v5.0 and is recorded in the 2026-08-17 ledger entry; the 2026-08-21 check is recorded under agent_sessions_version 5.0.1."
   - "Max verified versions come from repo fixtures and documented format changes."
   - "Some agents do not log their own CLI version; those are marked unknown."
   - "Droid is retained for legacy imports and fixtures, but it is excluded from the active session-format monitoring set."
