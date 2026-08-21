@@ -184,7 +184,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .pi: (aqua: [0.000000, 0.672455, 0.553618, 1.000000], darkAqua: [0.088800, 0.740000, 0.624919, 1.000000]),
         .kimi: (aqua: [0.537587, 0.441176, 0.854966, 1.000000], darkAqua: [0.575672, 0.490830, 0.854966, 1.000000]),
         .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000]),
-        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000])
+        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000]),
+        .fx: (aqua: [0.845854, 0.309793, 0.338470, 1.000000], darkAqua: [0.845854, 0.374120, 0.399356, 1.000000])
     ]
 
     /// The ten toolbar pill colors, recorded from the same pre-flip palette. These also
@@ -203,7 +204,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .pi: (aqua: [0.000000, 0.672455, 0.553618, 1.000000], darkAqua: [0.088800, 0.740000, 0.624919, 1.000000]),
         .kimi: (aqua: [0.537587, 0.441176, 0.854966, 1.000000], darkAqua: [0.575672, 0.490830, 0.854966, 1.000000]),
         .grok: (aqua: [0.423895, 0.479055, 0.591420, 1.000000], darkAqua: [0.555542, 0.616276, 0.740000, 1.000000]),
-        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000])
+        .qwen: (aqua: [0.528275, 0.410185, 0.813014, 1.000000], darkAqua: [0.562444, 0.458524, 0.813014, 1.000000]),
+        .fx: (aqua: [0.845854, 0.309793, 0.338470, 1.000000], darkAqua: [0.845854, 0.374120, 0.399356, 1.000000])
     ]
 
     /// The row/legend label the three deleted label switches produced (`SessionTerminalView`'s
@@ -221,7 +223,8 @@ final class SessionSourceRegistryTests: XCTestCase {
         .pi: "Pi",
         .kimi: "Kimi Code",
         .grok: "Grok CLI",
-        .qwen: "Qwen Code"
+        .qwen: "Qwen Code",
+        .fx: "fx"
     ]
 
     func testBrandAccentMatchesPinnedGoldens() {
@@ -315,7 +318,7 @@ final class SessionSourceRegistryTests: XCTestCase {
         let goldens: [SessionSource: String] = [
             .codex: "CX", .claude: "CC", .antigravity: "AG", .opencode: "OC",
             .hermes: "HM", .copilot: "CP", .droid: "D", .openclaw: "CL",
-            .cursor: "CR", .pi: "PI", .kimi: "KM", .grok: "GK", .qwen: "QW"
+            .cursor: "CR", .pi: "PI", .kimi: "KM", .grok: "GK", .qwen: "QW", .fx: "FX"
         ]
         for s in SessionSource.allCases {
             XCTAssertEqual(SessionSourceRegistry.descriptor(for: s).badgeInitials, goldens[s], "\(s)")
@@ -328,7 +331,7 @@ final class SessionSourceRegistryTests: XCTestCase {
         let goldens: [SessionSource: Double] = [
             .codex: 0.4, .claude: 0.5, .antigravity: 0.6, .opencode: 0.7,
             .hermes: 0.72, .copilot: 0.75, .droid: 0.8, .openclaw: 0.85,
-            .cursor: 0.9, .pi: 0.68, .kimi: 0.66, .grok: 0.62, .qwen: 0.61
+            .cursor: 0.9, .pi: 0.68, .kimi: 0.66, .grok: 0.62, .qwen: 0.61, .fx: 0.60
         ]
         for s in SessionSource.allCases {
             XCTAssertEqual(SessionSourceRegistry.descriptor(for: s).monochromeWhite,
@@ -394,7 +397,8 @@ final class SessionSourceRegistryTests: XCTestCase {
             .pi: "9",
             .kimi: nil,
             .grok: nil,
-            .qwen: nil
+            .qwen: nil,
+            .fx: nil
         ]
         XCTAssertEqual(Set(expectedShortcuts.keys),
                        Set(SessionSource.allCases.filter { $0 != .codex && $0 != .claude }),
@@ -420,7 +424,7 @@ final class SessionSourceRegistryTests: XCTestCase {
     func testEveryCurrentSourceSuppliesParsingAndArchiving() {
         let sourcesWithFrozenArchiveSupport: Set<SessionSource> = [
             .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-            .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen
+            .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .fx
         ]
         for s in SessionSource.allCases {
             let d = SessionSourceRegistry.descriptor(for: s)

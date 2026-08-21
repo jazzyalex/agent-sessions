@@ -52,7 +52,8 @@ final class ViewRegistryDerivationTests: XCTestCase {
             (.pi, "Pi", "9"),
             (.kimi, "Kimi Code", nil),
             (.grok, "Grok CLI", nil),
-            (.qwen, "Qwen Code", nil)
+            (.qwen, "Qwen Code", nil),
+            (.fx, "fx", nil)
         ]
 
         XCTAssertEqual(derived.count, expected.count)
@@ -131,7 +132,7 @@ final class ViewRegistryDerivationTests: XCTestCase {
     func testSidebarAgentTabOrderIsFrozen() {
         XCTAssertEqual(PreferencesTab.sidebarAgentTabs,
                        [.codexCLI, .claudeResume, .opencode, .antigravityCLI, .copilotCLI,
-                        .cursor, .pi, .kimi, .grok, .qwen, .hermesCLI, .openClawCLI])
+                        .cursor, .pi, .kimi, .grok, .qwen, .hermesCLI, .openClawCLI, .fx])
     }
 
     /// Every pane a source maps to must have a non-empty title and icon: the sidebar rows

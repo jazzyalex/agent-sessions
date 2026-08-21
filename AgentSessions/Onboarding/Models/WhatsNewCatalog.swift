@@ -108,7 +108,8 @@ enum WhatsNewCatalog {
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",
-        "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe."
+        "5.0": "Qwen Code joins the lineup, and agents are now plug-in adapters — adding the one you use is a documented recipe.",
+        "5.1": "fx joins the lineup: the vercel-labs coding agent's local sessions are now browsable, searchable and resumable."
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [

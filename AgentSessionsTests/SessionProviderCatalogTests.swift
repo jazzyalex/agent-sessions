@@ -44,6 +44,7 @@ final class SessionProviderCatalogTests: XCTestCase {
         assertIndexer(catalog, source: .kimi, is: KimiSessionIndexer.self)
         assertIndexer(catalog, source: .grok, is: GrokSessionIndexer.self)
         assertIndexer(catalog, source: .qwen, is: QwenSessionIndexer.self)
+        assertIndexer(catalog, source: .fx, is: FxSessionIndexer.self)
     }
 
     /// Registry order must mirror `SessionSource.allCases` order (SPEC §10.1) — the catalog

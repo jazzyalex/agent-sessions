@@ -349,6 +349,7 @@ struct UnifiedSessionsView: View {
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
+    private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -619,7 +620,10 @@ struct UnifiedSessionsView: View {
         let afterQwen = afterGrok
             .onChange(of: unified.includeQwen) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterQwen
+        let afterFx = afterQwen
+            .onChange(of: unified.includeFx) { _, _ in restartSearchIfRunning() }
+
+        let afterActiveOnly = afterFx
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -1484,6 +1488,13 @@ struct UnifiedSessionsView: View {
         case .qwen:
             // The installed CLI resolves IDs only from active `chats`.
             return QwenResumeEligibility.canCopyResumeCommand(session)
+        case .fx:
+            // session.id is the on-disk session directory name, which
+            // `--resume <id>` accepts directly. `--continue` remains the
+            // fallback when it is absent. A probe that advertised neither flag
+            // yields no plan; mirror that here so the menu item disables
+            // instead of silently doing nothing.
+            return FxSettings.shared.copyCommandPlan(sessionID: session.id) != nil
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
@@ -1639,6 +1650,20 @@ struct UnifiedSessionsView: View {
                                                           binaryCommand: plan.binary,
                                                           storageEnvironmentOverride: storageContext.environmentOverride) else { return }
             let command = wd.map { "cd \(ShellQuoting.quoteIfNeeded($0.path)) && \(core)" } ?? core
+            write(command)
+
+        case .fx:
+            let settings = FxSettings.shared
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            // Same refusal as FxResumeCoordinator: `--continue` reopens the
+            // latest session for the workspace, so without a `cd` it would hand
+            // the user a command that reopens an unrelated session.
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
+            let builder = FxResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary) else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
             write(command)
 
         case .antigravity:
@@ -1959,6 +1984,7 @@ struct UnifiedSessionsView: View {
         case .kimi:        return $unified.includeKimi
         case .grok:        return $unified.includeGrok
         case .qwen:        return $unified.includeQwen
+        case .fx:          return $unified.includeFx
         }
     }
 
@@ -2476,6 +2502,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeGrok { unified.includeGrok = true }
         case .qwen:
             if !unified.includeQwen { unified.includeQwen = true }
+        case .fx:
+            if !unified.includeFx { unified.includeFx = true }
         }
     }
 
@@ -2538,6 +2566,8 @@ struct UnifiedSessionsView: View {
             if unified.grokAgentEnabled, let e = grokIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { grokIndexer.reloadSession(id: id); return true }
         case .qwen:
             if unified.qwenAgentEnabled, let e = qwenIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { qwenIndexer.reloadSession(id: id); return true }
+        case .fx:
+            if unified.fxAgentEnabled, let e = fxIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { fxIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -3173,7 +3203,7 @@ struct UnifiedSessionsView: View {
             return canResumeCodexInCLI(s)
         case .claude:
             return !s.isClaudeWorkflowSubagent
-        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok:
+        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok, .fx:
             return true
         case .qwen:
             return QwenResumeEligibility.canResume(s)
@@ -3371,6 +3401,26 @@ struct UnifiedSessionsView: View {
                 let result = await coordinator.resumeInTerminal(input: input)
                 reportResumeFailure(launched: result.launched, error: result.error,
                                     source: s.source, in: presentingWindow)
+            }
+        case .fx:
+            let settings = FxSettings.shared
+            let input = FxResumeInput(
+                sessionID: s.id,
+                workingDirectory: effectiveWorkingDirectoryURL(for: s),
+                binaryOverride: settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            )
+            Task { @MainActor in
+                let launcher: FxTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                return FxITermLauncher()
+                    case .warp:                  return FxWarpLauncher()
+                    case .warpPreview:           return FxWarpPreviewLauncher()
+                    case .terminalApp, .unknown: return FxTerminalLauncher()
+                    }
+                }()
+                let coord = FxResumeCoordinator(env: FxCLIEnvironment(), builder: FxResumeCommandBuilder(), launcher: launcher)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
         case .antigravity:
             let settings = AntigravityCLISettings.shared
@@ -4009,6 +4059,7 @@ struct TranscriptHostView: View {
     private var kimiIndexer: KimiSessionIndexer { catalog.indexer(.kimi, as: KimiSessionIndexer.self) }
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
+    private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -4063,6 +4114,14 @@ struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .qwen ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: fxIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "fx",
+                enableCaching: false
+            )
+            .opacity(kind == .fx ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -4077,7 +4136,7 @@ struct TranscriptHostView: View {
     /// compares this set against `SessionSource.allCases`.
     static let coveredSources: Set<SessionSource> = [
         .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .fx
     ]
 }
 

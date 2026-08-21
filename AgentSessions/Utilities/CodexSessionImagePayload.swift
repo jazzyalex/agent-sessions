@@ -252,7 +252,10 @@ enum SessionInlineImageMapper {
                 return OpenClawBase64ImageScanner.fileContainsUserBase64Image(at: sessionFileURL, shouldCancel: shouldCancel)
             case .antigravity:
                 return AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionFileURL, shouldCancel: shouldCancel)
-            case .droid, .qwen:
+            case .droid, .qwen, .fx:
+                // fx embeds image payloads inside checkpoint.json's user.images
+                // arrays without a data-URI prefix, so the generic scanner has
+                // nothing to find; extraction is not implemented.
                 return false
             }
         }()
@@ -311,7 +314,7 @@ enum SessionInlineImageMapper {
                         .scanFile(at: sessionFileURL, maxMatches: maxMatches, shouldCancel: shouldCancel)
                         .map { InlineScanResult(payload: .file(fileURL: $0.fileURL, mediaType: $0.mediaType, fileSizeBytes: $0.fileSizeBytes),
                                                 lineIndex: $0.lineIndex) }
-                case .droid, .qwen:
+                case .droid, .qwen, .fx:
                     return []
                 }
             } catch {
@@ -328,7 +331,7 @@ enum SessionInlineImageMapper {
                 }
             case .claude, .opencode, .copilot, .openclaw, .antigravity, .grok:
                 return located
-            case .droid, .qwen:
+            case .droid, .qwen, .fx:
                 return []
             }
         }()
