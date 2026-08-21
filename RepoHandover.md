@@ -1,5 +1,29 @@
+## 2026-08-21 14:31 · format-check-2026-08-21 · Format sweep closed — QA stamped, release-ready
+status: done
+
+**State:** Release QA PASSED (version 5.0.1; all five checks green: git scope, Debug xcodebuild, stable XCTest wrapper, Python release tests, warning sweep). Swift 2098/0 failures, Python 186/186. All 12 agents report `unknown_types=[]` / `unknown_keys={}`, 12/12 discovery contracts pass, every usage probe ok. Seven versions bumped; matrix, ledger and tracking log all updated. Both self-review findings were then fixed (matrix header refreshed to 5.0.1/2026-08-21; antigravity `truncated_fields` restored to the real `["content"]` discriminator) and QA re-run. **The QA stamp binds to the exact HEAD it ran against — re-run `tools/release/deploy qa` after any further commit or it no longer certifies `main`.**
+
+**Decided / don't redo:**
+- QA found two real problems that two passing test runs and three weekly scans did NOT. Do not treat a clean weekly + green tests as release-ready; run `deploy qa`.
+- `test_grok_discovery_and_version.py` read the LIVE matrix (agent_watch reads it from a hardcoded path), so bumping grok broke an unrelated test. Now pinned via `_read_verified_versions_from_matrix` — keyed by MATRIX key (`grok_cli`), not the agent name.
+- Codex fixtures can go stale MID-SWEEP: the sampled rollout was a live session still appending. It added `item.changes` + `item.action.pattern` after the fixture was rebuilt and the version bumped. Re-verify codex last, after the bumps.
+- `item_completed.item.changes` is keyed by absolute file path but is ALREADY in codex's `_NESTED_OPAQUE_KEYS`, so it emits as `{}` — no user paths leak. Do not remove it from that set.
+- Gemini fixtures + `testGeminiFixturesAreIgnoredAfterAntigravityMigration` + the `scan_tool_formats.py` skip are RETAINED on purpose (live guard; 8 real Gemini sessions still under `~/.gemini/tmp/*/chats/`). Documented in the test.
+- A new fixture file is invisible until its path is added to `evidence_fixtures` in the matrix — the baseline is that list, not the directory.
+- `rebuild_stage0_baseline.py` ignores `db_roots` (swept the wrong OpenCode store) and cannot see sandboxed kimi prebump sessions. Filed in `docs/backlog.md`.
+
+- Both self-review findings are CLOSED. The matrix header is the file a reader consults to identify the current snapshot; it was claiming `5.0-unreleased` after v5.0/v5.0.1 shipped. The antigravity `truncated_fields` placeholder was worse than cosmetic: the GENERIC record falls to the `default:` branch which calls `markTruncated`, so a redacted discriminator silently asserted the UNMARKED path. Redaction must preserve field-name discriminators, not just `type`/`role`/`subtype`/`model`.
+
+**Key files:**
+- `docs/agent-support/agent-support-ledger.yml` — newest entry has the full per-agent reasoning
+- `docs/backlog.md` — 7 new entries (6 value-pass candidates + the rebuild-tool blind spot)
+
+**Next:**
+1. Do NOT install Hermes 0.20.5 (no one-shot to regenerate a session → would regress 0.17.0 to `blocked_stale_sample`). Qwen stays blocked on a paid plan.
+2. Backlog candidates are filed but unimplemented — codex `memory_citation`/`parsed_cmd`, claude `bridge-session`, kimi `agentId`/`token_counting.*`.
+
 ## 2026-08-21 13:47 · format-check-2026-08-21 · Weekly format sweep + Gemini CLI removal
-status: in-progress
+status: superseded-by:2026-08-21 14:31
 
 **State:** Pushed `be348726` on main (two commits). Weekly `agent_watch` scan covered all 12 monitored agents — discovery contracts 12/12, usage probes all ok, all drift additive and parse-safe. Gemini CLI removed from the skills/scripts and uninstalled from the machine. Six value-pass entries filed in `docs/backlog.md`.
 
