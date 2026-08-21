@@ -225,3 +225,26 @@ agents:
       - "Resources/Fixtures/stage0/agents/qwen/system_telemetry.jsonl"
     evidence_tests:
       - "AgentSessionsTests/QwenIntegrationTests.swift"
+  fx:
+    max_verified_version: "0.0.4"
+    version_field: "session.json schema_version 3 / storage_format event_log_v1 (verified via an on-disk survey of ~/.fx/sessions against the installed CLI)"
+    support_scope: "tier-2 local per-session checkpoint transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, and analytics"
+    unsupported_surfaces:
+      - "live/active status"
+      - "image extraction (records carry inline base64 payloads rendered as [image] markers)"
+      - "subagent hierarchy (has_managed_children sessions and the subagent/ relationship index are not surfaced)"
+      - "weekly session-format monitoring (fx is not yet in the monitored agent set)"
+      - "pre-v3 legacy layout (session.json snapshot without checkpoint.json) is invisible to discovery until fx itself migrates the session on next open"
+    notes:
+      - "The installed fx CLI is 0.0.4. Storage is one directory per session under ~/.fx/sessions/<sessionId>/ holding checkpoint.json (the materialized conversation), session.json (identity/workspace/model/timestamps sidecar), display.json (title/preview), usage-v2.json, and an append-only events.jsonl infrastructure log that the reader never opens (45 MB against a 2.4 MB checkpoint in the largest session measured). state.history[] entries are whole turns keyed by kind, and all four are rendered: assistant turns carry user prompt + execution.tool_steps + final reply; background_command turns share that body plus a log_path/url marker; compacted_summary turns render the summary that replaced the removed history (with removed_turn_count/compaction_count and any root_user_messages); interrupted turns render the completed execution steps, any partial reply, the dangling tool_call and the terminal_reason."
+      - "tool_calls[].arguments_json is a JSON string on the wire (Grok/Kimi's shape, not Devin's object) and is passed through verbatim. Tool results key back to calls by tool_call_id and carry their own created_at_ms; text events have no per-entry timestamp and inherit nil, so transcripts render with session-level bounds only."
+      - "Session ids are the on-disk directory names (<millis>-<nanos>-<hex> composites). resume --help advertises --resume [last|<id>] and -c/--continue (latest workspace session); --continue is only offered when a working directory is known, matching FxResumeCoordinator's refusal rule."
+      - "Model execution was not attempted end-to-end, so no fresh resume run is claimed; the copied/launched command plans are tested against probe-advertised capabilities, and installed help and reader behavior justify the explicitly untested resume integration."
+      - "The format is young (0.0.4, event_log_v1) and expected to drift; the checkpoint/state.history shapes above are pinned by FxSessionParserTests against committed fixtures."
+    evidence_fixtures:
+      - "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json (+ session.json, display.json)"
+      - "Resources/Fixtures/stage0/agents/fx/unsupported/checkpoint.json (malformed; sidecar facts must survive)"
+    evidence_tests:
+      - "AgentSessionsTests/FxSessionParserTests.swift"
+      - "AgentSessionsTests/FxSessionDiscoveryTests.swift"
+      - "AgentSessionsTests/FxIntegrationSurfaceTests.swift"

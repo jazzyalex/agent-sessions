@@ -459,6 +459,10 @@ private extension AgentUpdateService {
             // Qwen Code's installed package was observed locally, but the source
             // integration does not claim an update channel from that one machine.
             return nil
+        case .fx:
+            // fx ships its own `fx upgrade` release-channel command; mapping it
+            // onto a package manager would offer the wrong upgrade path.
+            return nil
         }
     }
 

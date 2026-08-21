@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **fx joins as the fourteenth session source.** Agent Sessions discovers fx (vercel-labs) sessions in one directory per session under `~/.fx/sessions` and adds them to browsing, search, filtering, Analytics, and the transcript view, rendering each checkpoint's turn history — all four kinds of it: the user prompt with narrated tool steps and keyed calls/results, the final reply, background commands with their log location, compaction summaries, and interrupted turns with whatever completed before the cut — with working directories read from each session's `session.json`. Settings includes binary and storage-root controls; active-session resume actions use the installed CLI's advertised `--resume <id>` syntax, with workspace-scoped `--continue` as a safe fallback that is refused when no working directory is known. Image extraction is not yet supported (inline base64 renders as `[image]` markers), and resume command plans are tested against probe-advertised capabilities but remain end-to-end untested.
+
 ## [5.0.1] - 2026-08-18
 
 ### Bug Fixes
