@@ -174,6 +174,39 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
+### Watch list from the 2026-08-21 format sweep
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** fields upstream started emitting that are real but do not yet earn a surface.
+  Recorded so they are not re-litigated at every sweep, and so a second sighting can
+  promote one:
+  - **Codex `results`** — web-search items with `title`, `url`, `snippet`, `domain`,
+    `thumbnail_url`. Search results render anonymously today; promote if search turns
+    become common.
+  - **Codex `active_permission_profile`** — seen as `{id: ":danger-full-access"}` on
+    `turn_context`. A permission state the UI hides; promote if it varies within a
+    session.
+  - **Codex `ordinal`** — now on every record (915 of 915 in the sample). A monotonic
+    sequence number is a stronger ordering key than a timestamp; reach for it if
+    transcript ordering ever proves unstable.
+  - **OpenCode `part.patch`** — a `hash` plus the `files` a turn changed, but only 16 of
+    ~8,900 parts. Too rare to build on; count again before promoting.
+  - **Claude `user.turnCompanion`** — 6 records across 60 sessions, on skill-invocation
+    turns. Too rare to read anything into.
+- **Settled this sweep, do not re-open:** Antigravity's `truncated_fields` is **already
+  handled** —
+  [AntigravityTranscriptParser.swift:43](../AgentSessions/Services/AntigravityTranscriptParser.swift:43)
+  reads it and marks the clipped text. It is a JSON array in all 39 records across 28
+  local transcripts, so the existing `as? [Any]` cast is right. It surfaced as drift only
+  because the baseline fixture lacks the key — a fixture refresh, not work. Noted because
+  it read like a UI gap on first pass.
+- **Noise, deliberately not filed:** Claude `atis-latch` (275 records, `atis` always
+  empty), `batching_reminder_sent`, `silent_turn_reminder`, `total_tokens_reminder` — all
+  harness nudges; Codex `internal_chat_message_metadata_passthrough.create_time`; Kimi
+  `runtime.set_binding`.
+- **To close:** each line is either promoted to its own entry on a second sighting, or
+  deleted as settled noise.
+
 ### Grok session sidecars are neither watched nor read
 > **open** · sev: low · urg: low · verified 2026-08-17
 
@@ -222,6 +255,49 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Transcript UI
+
+### Codex `memory_citation` names the prior sessions a turn cited
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** Codex 0.149's `item_completed` items can carry `memory_citation`, holding
+  `entries` (`path`, `lineStart`, `lineEnd`, and a human `note`) and `rolloutIds` — the
+  ids of the *other rollout sessions* this turn drew on. That is a session-to-session
+  edge, and a session browser is the one surface positioned to render it; nothing else
+  has both sessions on hand.
+- **Where:** found 2026-08-21 in the weekly sweep. `memory_citation` and `rolloutIds`
+  appear nowhere in `AgentSessions/`; the events arrive on the `event_msg` path and fall
+  to `.meta`, so both survive in `rawJSON` unread.
+- **Fix shape:** resolve `rolloutIds` against the session index and offer them as links
+  from the citing turn — the index already keys sessions by id.
+- **Why deferred:** only observed on 0.149+, so the corpus is one session deep. Confirm
+  it appears in ordinary use before building navigation on it.
+- **Risk if wrong:** an id that resolves to an unindexed or deleted rollout must degrade
+  to plain text; a dead-end link is worse than no link.
+- **To close:** a Codex turn that cited prior sessions offers navigation to them, and a
+  fixture covers a citation whose `rolloutIds` are absent from the index.
+
+### Codex `item_completed` describes shell calls the transcript still renders raw
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** Codex 0.149 added an `item_completed` event family — 264 records in the first
+  local session that had it — whose items carry `parsed_cmd`, a structured read of the
+  command (`{type: read, name: "SKILL.md", path: …}`), plus a per-call `duration`
+  (`secs`/`nanos`). Tool rows show the raw command string and derive timing from
+  timestamps.
+- **Where:** `parsed_cmd`, `duration` and `item_completed` appear nowhere in
+  `AgentSessions/`. The canonical stream is unaffected — `response_item.custom_tool_call`
+  is still emitted (135 in the same session) and still maps to `.tool_call` at
+  [SessionEvent.swift:32](../AgentSessions/Model/SessionEvent.swift:32) — so this is
+  additive detail, not a parse break.
+- **Fix shape:** label a tool row from `parsed_cmd.type` + `name` ("Read SKILL.md") with
+  the raw command still reachable; feed `duration` to
+  [TranscriptTurnTiming.swift](../AgentSessions/Services/TranscriptTurnTiming.swift).
+  That is the same source-reported-vs-derived question as the Kimi `turn.ended` entry
+  under *Kimi Code* — decide it once for both.
+- **Risk if wrong:** `item_completed` is 0.149-only, so every older Codex session lacks
+  it. The label must enhance the raw command, never replace it and leave older rows bare.
+- **To close:** Codex tool rows show a parsed label where one exists and fall back
+  cleanly where it does not.
 
 ### OpenCode parent sessions are unsearchable for their own subagent reports
 > **open** · sev: low · urg: low · verified 2026-08-21
@@ -371,6 +447,26 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 ---
 
 ## Kimi Code
+
+### `agentId` now attributes every event to an agent and nothing reads it
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** Kimi 0.38.0 stamps `agentId` on 13 wire event types — `turn.prompt`,
+  `turn.ended`, `llm.request`, `usage.record`, `context.append_message`,
+  `permission.set_mode` among them — and `profile.bind` gained a `subagents` list. Kimi
+  events are currently anonymous as to which agent produced them.
+- **Where:** found in the 2026-08-21 prebump (`kimi_prompt` driver, fresh 0.38.0
+  session). `agentId` occurs in `AgentSessions/` only in unrelated Cursor and OpenClaw
+  path contexts, never in
+  [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift).
+- **Fix shape:** the app already models subagent reports for other sources; this is the
+  per-event key that would let Kimi join that model instead of staying a flat stream.
+- **Why deferred:** the evidence is one thin prebump session of 24 events. Confirm
+  `agentId` actually varies inside a real multi-agent Kimi session first.
+- **Risk if wrong:** if it is always the main agent in ordinary use, an attribution UI
+  adds a column that never changes.
+- **To close:** `agentId` is confirmed to vary in a real session and Kimi subagent events
+  become attributable — or it is recorded here as constant and dropped.
 
 ### `turn.ended` carries per-turn duration that nothing reads
 > **open** · sev: low · urg: low · verified 2026-08-17
@@ -540,6 +636,31 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 
 ## Claude Cloud Sessions
 
+### `bridge-session` carries the local↔bridge join key the dedup rule only assumes
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** Claude transcripts now carry a `bridge-session` record — 569 of them across
+  13 of 60 recent sessions — holding `sessionId`, `bridgeSessionId` (`cse_…`),
+  `lastSequenceNum`, and owner account/org uuids.
+- **Where:** `bridge-session` and `bridgeSessionId` appear nowhere in `AgentSessions/`.
+  [ClaudeCloudSessionCatalog.swift:20](../AgentSessions/ClaudeCloud/ClaudeCloudSessionCatalog.swift:20)
+  already drops bridge rows from the cloud list on the stated grounds that "the local
+  indexer already surfaces them, so including them would double-render rows" — 168 of the
+  177 rows measured. Nothing has ever joined a bridge row to the local session it
+  supposedly duplicates, so that exclusion has been unverifiable. This record is the join
+  key.
+- **Fix shape:** use it first to *verify* the exclusion — does every dropped bridge row
+  have a local transcript? — and only then consider badging a local session as
+  bridge-run.
+- **Why deferred:** it corrects an assumption rather than adding a surface, which makes
+  it worth doing before any bridge-facing UI rather than after.
+- **Risk if wrong:** this does **not** soften the finding that cloud sessions leave no
+  local trace. Sessions with `environment_kind == anthropic_cloud` still leave none;
+  bridge sessions are the ones running against a local device, which is why they have a
+  transcript at all. Conflating the two would re-open a question already settled.
+- **To close:** the bridge exclusion is verified against local sessions instead of
+  assumed, and the answer is recorded here.
+
 ### Reconsider the surface: presence badge instead of runway rows
 > **open** · sev: low · urg: low · verified —
 
@@ -577,6 +698,21 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 ---
 
 ## Usage Tracking
+
+### Kimi reports measured token counts per turn and nothing reads them
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** Kimi 0.38.0 added `token_counting.measured` and
+  `token_counting.turn_recorded`, carrying `tokens`, `length`, `turnId` and `time`. This
+  is source-measured accounting, not an estimate derived from a per-model table.
+- **Where:** `token_counting` appears nowhere in `AgentSessions/`; both types fall to
+  `.meta` in [KimiSessionParser.swift](../AgentSessions/Services/KimiSessionParser.swift).
+- **Fix shape:** the same shape as the Qwen entry below — a source that states its own
+  usage. Build one path that serves both rather than two single-source paths.
+- **Why deferred:** pairs with the Qwen usage entry; neither justifies a bespoke surface
+  alone.
+- **To close:** at least one source's self-reported token usage is displayed, covering
+  Kimi and Qwen through the same path.
 
 ### Qwen already reports its own token usage and we discard it
 > **open** · sev: med · urg: low · verified 2026-08-17
