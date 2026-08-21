@@ -886,13 +886,26 @@ struct UnifiedSessionsView: View {
 	            quotaMeterProviders: quotaMeterProviders
 	        )
 	        // Recomputed only when the index changes, never per render: the miss
-	        // case (no Codex/Claude sessions at all) is the one that scans the
-	        // whole list, and it is also the one that would repeat every frame.
+	        // cases (no Codex/Claude sessions at all, and the steward tally, which
+	        // cannot short-circuit) are the ones that scan the whole list, and they
+	        // are also the ones that would repeat every frame.
 	        .onReceive(unified.$allSessions) { sessions in
 	            quotaMeterProviders = QuotaMeterProviderAvailability(
 	                hasCodex: sessions.contains { $0.source == .codex },
 	                hasClaude: sessions.contains { $0.source == .claude }
 	            )
+	            // Tallied through `StewardAskEligibility` rather than inline: it is
+	            // the tested path, and a second copy here would be the one that
+	            // silently disagrees with it.
+	            let counts = StewardAskEligibility.sessionCounts(in: sessions.lazy.map(\.source))
+	            // Guarded assignment: this is `@Published` on an object this view
+	            // observes, so writing it unconditionally would rebuild the whole
+	            // session list on every index change even when the answer has not
+	            // moved. The line above is `@State`, which SwiftUI compares for us.
+	            let stewardTarget = StewardAskEligibility.target(sessionCounts: counts)
+	            if onboardingCoordinator.stewardAskTarget != stewardTarget {
+	                onboardingCoordinator.stewardAskTarget = stewardTarget
+	            }
 	        }
 	    }
 

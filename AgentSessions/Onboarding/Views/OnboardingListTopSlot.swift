@@ -3,9 +3,10 @@ import AppKit
 
 /// Lightweight container mounted at the top of the session list. It hosts exactly
 /// one card — What's New, then Quota Meter, then star, then feedback, then the
-/// contribute-an-agent invitation (last: it asks for the most work) — and carries
-/// the sheets for the compact What's New panel, the Quota Meter explainer, and the
-/// standalone feedback prompt. Renders nothing when there is nothing to show.
+/// steward invitation, then the contribute-an-agent invitation (last two: they ask
+/// for the most work, targeted before generic) — and carries the sheets for the
+/// compact What's New panel, the Quota Meter explainer, and the standalone
+/// feedback prompt. Renders nothing when there is nothing to show.
 ///
 /// Order is activation before extraction: the Quota Meter card asks the user to
 /// try something, the star and feedback cards ask them for something. Feedback
@@ -23,6 +24,14 @@ struct OnboardingListTopSlot: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled: Bool = false
     @AppStorage(PreferencesKey.claudeUsageEnabled) private var claudeUsageEnabled: Bool = false
+    /// Measured pane width, handed to the two cards whose text is allowed to
+    /// wrap so they can move their actions below it in a narrow window. Zero
+    /// until the first layout pass; see `WrappingSlotCard.paneWidth`.
+    ///
+    /// Safe against a layout loop: it feeds a card's internal arrangement, which
+    /// changes the card's height, and the width being measured comes from the
+    /// pane above and never from the card.
+    @State private var paneWidth: CGFloat = 0
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
 
@@ -82,13 +91,27 @@ struct OnboardingListTopSlot: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            } else if let agent = coordinator.stewardAskTarget, coordinator.shouldShowStewardCard() {
+                StewardCard(
+                    palette: palette,
+                    agent: agent,
+                    onSignUp: { openStewardSignup(for: agent) },
+                    onLearnMore: openStewardGuide,
+                    onDismiss: { coordinator.dismissStewardAskForever() },
+                    paneWidth: paneWidth
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                // Being ignored is an answer, counted once per launch.
+                .onAppear { coordinator.noteStewardCardShown() }
             } else if coordinator.shouldShowContributeCard() {
                 ContributeCard(
                     palette: palette,
                     onOpen: openContributeForm,
                     onLearnMore: openContributeGuide,
                     onSnooze: { coordinator.snoozeContributeAsk() },
-                    onDismiss: { coordinator.dismissContributeAskForever() }
+                    onDismiss: { coordinator.dismissContributeAskForever() },
+                    paneWidth: paneWidth
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
@@ -96,6 +119,12 @@ struct OnboardingListTopSlot: View {
                 .onAppear { coordinator.noteContributeCardShown() }
             }
         }
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: SlotWidthKey.self, value: proxy.size.width)
+            }
+        )
+        .onPreferenceChange(SlotWidthKey.self) { paneWidth = $0 }
     }
 
     /// The star card's one side effect. Kept here rather than in the coordinator
@@ -121,6 +150,215 @@ struct OnboardingListTopSlot: View {
         guard NSWorkspace.shared.open(OnboardingCoordinator.contributeGuideURL) else { return }
         coordinator.recordContributeOpened()
     }
+
+    /// Opens the signup form with the agent pre-filled. Same success guard as the
+    /// other cards: a click that opened no browser must not spend the ask. Only
+    /// the agent's name leaves the app — see `stewardSignupURL(for:)`.
+    private func openStewardSignup(for agent: StewardAgent) {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.stewardSignupURL(for: agent)) else { return }
+        coordinator.recordStewardSignupOpened()
+    }
+
+    private func openStewardGuide() {
+        guard NSWorkspace.shared.open(OnboardingCoordinator.stewardGuideURL) else { return }
+        coordinator.recordStewardGuideOpened()
+    }
+}
+
+/// Carries the slot's measured width up from a background reader.
+private struct SlotWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// One link-style action in a slot card's action row.
+struct SlotCardAction: Identifiable {
+    let title: String
+    /// The card's primary action, drawn semibold. At most one per card.
+    let isProminent: Bool
+    let perform: () -> Void
+
+    /// Titles are unique within a card and stable across renders, which `UUID()`
+    /// would not be.
+    var id: String { title }
+}
+
+/// Chrome shared by the two slot cards whose body text is allowed to wrap.
+///
+/// Every other card in this slot caps its body at `lineLimit(1)` and truncates
+/// cleanly however narrow the pane gets. These two must not: each ends on a
+/// sentence about what is never shared, and truncating is precisely what would
+/// delete it. So the layout adapts instead.
+///
+/// In one row, the actions are laid beside the text and take a fixed width, so
+/// every pixel the pane loses comes out of the text column. Below
+/// `minimumWideWidth` there is not enough left for a sentence — at the session
+/// list's 320pt minimum the contribute card's column fell under the width of the
+/// word "contributions", and SwiftUI broke it mid-word into "contributio / ns".
+/// Under that threshold the actions move below the text and wrap among
+/// themselves, so the text always gets the full width.
+struct WrappingSlotCard: View {
+    let palette: OnboardingPalette
+    let iconName: String
+    let iconTint: Color
+    let title: String
+    let message: String
+    let actions: [SlotCardAction]
+    let dismissHelp: String
+    var onDismiss: () -> Void
+    /// Width of the slot, measured by `OnboardingListTopSlot`. Zero before the
+    /// first layout pass, which is read as wide: most windows are, and starting
+    /// wide avoids a visible flip on the common path.
+    var paneWidth: CGFloat = 0
+
+    /// Pane width below which the actions wrap under the text.
+    ///
+    /// Derived from the widest action row here — the contribute card's three
+    /// links need roughly 320pt — plus the icon, the card's own padding, and
+    /// about 200pt of text column, under which an 11pt sentence stops reading as
+    /// a sentence. Shared by both cards rather than computed per card: the
+    /// steward card could stay wide slightly longer, and gains nothing from
+    /// switching at a different width than its neighbour.
+    static let minimumWideWidth: CGFloat = 560
+
+    /// Indent that lines the wrapped action row up with the text column above it.
+    private static let textColumnIndent: CGFloat = 24
+
+    /// Whether the actions wrap under the text. Internal rather than private so
+    /// the threshold's behaviour at the list's minimum width can be tested
+    /// without rendering.
+    var prefersCompactLayout: Bool { paneWidth > 0 && paneWidth < Self.minimumWideWidth }
+
+    var body: some View {
+        Group {
+            if prefersCompactLayout {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        icon
+                        textColumn
+                        Spacer(minLength: 8)
+                        dismissButton
+                    }
+                    Flow(spacing: 12) {
+                        ForEach(actions) { actionButton($0) }
+                    }
+                    .padding(.leading, Self.textColumnIndent)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    icon
+                    textColumn
+                    Spacer(minLength: 8)
+                    ForEach(actions) { actionButton($0) }
+                    dismissButton
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+    }
+
+    private var icon: some View {
+        Image(systemName: iconName)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(iconTint)
+    }
+
+    private var textColumn: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                // Titles here carry agent names and run longer than the
+                // single-line cards' do. Wrapping beats truncating to "Help ad…".
+                .fixedSize(horizontal: false, vertical: true)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func actionButton(_ action: SlotCardAction) -> some View {
+        Button(action.title, action: action.perform)
+            .buttonStyle(.link)
+            .font(.system(size: 12, weight: action.isProminent ? .semibold : .regular))
+    }
+
+    private var dismissButton: some View {
+        Button(action: onDismiss) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(dismissHelp)
+    }
+}
+
+/// Invitation to steward one specific agent — the one the user's own sessions
+/// show they run.
+///
+/// Three exits, one fewer than the contribute card: sign up, read what the job
+/// is, or never. There is no "Maybe later" because the ask already re-arms on a
+/// release bump, and a snooze button on top of that would only add a second way
+/// to say the thing silence already says.
+struct StewardCard: View {
+    let palette: OnboardingPalette
+    let agent: StewardAgent
+    var onSignUp: () -> Void
+    var onLearnMore: () -> Void
+    var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
+
+    /// A question, not a statement of the project's problem. The card is asking
+    /// the reader to volunteer, so it opens by qualifying them — someone who does
+    /// not use this agent can stop reading at the first two words. Held as static
+    /// functions so tests can pin the claims without rendering the view.
+    static func titleText(for agent: StewardAgent) -> String {
+        "Use \(agent.stewardName)?"
+    }
+
+    /// Opens with the ask, then the reason, then what it costs. Qwen keeps its own
+    /// reason because its situation is genuinely different: every other agent here
+    /// can at least be spot-checked by the maintainer, and Qwen cannot be checked
+    /// at all. No version or month is quoted — `STEWARDS.md`, one click away
+    /// behind "What's involved", carries the precise footnote and can be kept
+    /// current without shipping a build.
+    static func bodyText(for agent: StewardAgent) -> String {
+        if agent.source == .qwen {
+            return """
+                Looking for a steward. Qwen's free tier ended, so newer builds go unverified here. \
+                One command, a few times a year. No code, nothing shared.
+                """
+        }
+        return """
+            Looking for a steward to help keep Agent Sessions reading it correctly when the format \
+            moves. One command, a few times a year. No code, nothing shared.
+            """
+    }
+
+    var body: some View {
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "checkmark.seal",
+            iconTint: Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: agent.source)),
+            title: Self.titleText(for: agent),
+            message: Self.bodyText(for: agent),
+            actions: [
+                SlotCardAction(title: "Become the steward", isProminent: true, perform: onSignUp),
+                SlotCardAction(title: "What's involved", isProminent: false, perform: onLearnMore)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
+    }
 }
 
 /// Dismissible one-time invitation to add support for another coding agent.
@@ -134,6 +372,7 @@ struct ContributeCard: View {
     var onLearnMore: () -> Void
     var onSnooze: () -> Void
     var onDismiss: () -> Void
+    var paneWidth: CGFloat = 0
 
     /// The card's own copy, held as a constant only so the frozen privacy
     /// sentence can be pinned by a test. Deliberately not a strings file — every
@@ -147,50 +386,21 @@ struct ContributeCard: View {
         """
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "puzzlepiece.extension")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(palette.accentBlue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Self.titleText)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text(Self.bodyText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    // No line limit, unlike the other cards: the frozen privacy
-                    // sentence sits last, and any clipping is exactly what would
-                    // delete it. The card grows to fit instead.
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 8)
-
-            Button("Contribute an agent", action: onOpen)
-                .buttonStyle(.link)
-                .font(.system(size: 12, weight: .semibold))
-
-            Button("How it works", action: onLearnMore)
-                .buttonStyle(.link)
-                .font(.system(size: 12))
-
-            Button("Maybe later", action: onSnooze)
-                .buttonStyle(.link)
-                .font(.system(size: 12))
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Don't ask again")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 10).fill(palette.rowFill))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
+        WrappingSlotCard(
+            palette: palette,
+            iconName: "puzzlepiece.extension",
+            iconTint: palette.accentBlue,
+            title: Self.titleText,
+            message: Self.bodyText,
+            actions: [
+                SlotCardAction(title: "Contribute an agent", isProminent: true, perform: onOpen),
+                SlotCardAction(title: "How it works", isProminent: false, perform: onLearnMore),
+                SlotCardAction(title: "Maybe later", isProminent: false, perform: onSnooze)
+            ],
+            dismissHelp: "Don't ask again",
+            onDismiss: onDismiss,
+            paneWidth: paneWidth
+        )
     }
 }
 
@@ -478,3 +688,50 @@ struct FeedbackCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.rowStroke, lineWidth: 1))
     }
 }
+
+#if DEBUG
+/// The steward card at the pane widths that actually occur: the session list's
+/// 320pt minimum, a typical split, and a wide window. The contribute card sits
+/// underneath as the reference — this card is measured against it, since the two
+/// are neighbours in the slot and ask for comparable work.
+private struct StewardCardPreviewMatrix: View {
+    let colorScheme: ColorScheme
+
+    private static let qwen = StewardAgent(source: .qwen, stewardName: "Qwen Code")
+    /// The longest name in the list — the worst case for the title.
+    private static let copilot = StewardAgent(source: .copilot, stewardName: "GitHub Copilot CLI")
+
+    var body: some View {
+        let palette = OnboardingPalette(colorScheme: colorScheme)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach([CGFloat(340), 520, 900], id: \.self) { width in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("— \(Int(width))pt pane —")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 8) {
+                            StewardCard(palette: palette, agent: Self.qwen,
+                                        onSignUp: {}, onLearnMore: {}, onDismiss: {},
+                                        paneWidth: width)
+                            StewardCard(palette: palette, agent: Self.copilot,
+                                        onSignUp: {}, onLearnMore: {}, onDismiss: {},
+                                        paneWidth: width)
+                            ContributeCard(palette: palette, onOpen: {}, onLearnMore: {},
+                                           onSnooze: {}, onDismiss: {}, paneWidth: width)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(width: width)
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .environment(\.colorScheme, colorScheme)
+    }
+}
+
+#Preview("StewardCard • Light") { StewardCardPreviewMatrix(colorScheme: .light) }
+#Preview("StewardCard • Dark") { StewardCardPreviewMatrix(colorScheme: .dark) }
+#endif

@@ -73,6 +73,52 @@ final class OnboardingCoordinator: ObservableObject {
     /// behind the Quota Meter card.
     static let contributeAskPriorityAfterDays: Double = 14
 
+    /// The steward job description, linked from the card's "What's involved".
+    static let stewardGuideURL = URL(
+        string: "\(githubRepositoryURL.absoluteString)/blob/main/STEWARDS.md"
+    )!
+
+    /// Where "Become the steward" sends the user: the signup form with the agent
+    /// field pre-filled, so the one thing we know and they would have to type is
+    /// already there.
+    ///
+    /// The agent name is the only thing that travels in the URL. Session counts,
+    /// paths, and which other agents they run stay on their Mac — the form is a
+    /// public issue, and they see every field before submitting it.
+    /// `nonisolated` because it builds a URL and touches no coordinator state —
+    /// the enclosing type's `@MainActor` would otherwise leak onto every caller.
+    nonisolated static func stewardSignupURL(for agent: StewardAgent) -> URL {
+        var components = URLComponents(string: "\(githubRepositoryURL.absoluteString)/issues/new")
+        components?.queryItems = [
+            URLQueryItem(name: "template", value: "steward-signup.yml"),
+            URLQueryItem(name: "agent", value: agent.stewardName)
+        ]
+        // The form without a prefill still works; a nil URL would drop the ask.
+        return components?.url ?? githubRepositoryURL
+    }
+
+    /// Sessions opened before the steward ask is due. Deliberately the contribute
+    /// ask's bar: both ask for real, recurring work, so sharing the bar means the
+    /// two come due together and the chain order — targeted ask first — decides
+    /// which one is spent on this user.
+    static let stewardAskSessionsThreshold = 25
+
+    /// Days since first launch that make the steward ask due on their own.
+    static let stewardAskDaysThreshold: Double = 45
+
+    /// Launches a round of the steward ask may go unanswered before it spends
+    /// itself. There is no "Maybe later" here, so silence is the only soft no.
+    static let stewardAskMaxImpressionsPerRound = 3
+
+    /// Days the steward ask may wait behind the feedback card before it takes the
+    /// slot. Same value and reasoning as the contribute ask's wait.
+    static let stewardAskPriorityAfterDays: Double = 14
+
+    /// Releases the steward ask may spend before it stops for good. One round per
+    /// release re-arms an ask the user simply never saw; three of them is the
+    /// point where continuing to ask is nagging.
+    static let stewardAskMaxRounds = 3
+
     /// Drives the modal onboarding window (first-run setup or Power Tips tour).
     @Published var presentation: OnboardingPresentation?
 
@@ -110,6 +156,18 @@ final class OnboardingCoordinator: ObservableObject {
     /// the persistent decision lives in `UserDefaults.onboardingContributeAskState`.
     @Published var contributeCardSuppressedThisLaunch: Bool = false
 
+    /// The stewardless agent this user actually runs, or nil when none qualifies.
+    ///
+    /// Assigned by the session list once the index loads, exactly as the Quota
+    /// Meter card's availability is passed in: the coordinator never reads
+    /// sessions itself and stays a pure state machine. Nil until then, which is
+    /// also the correct answer — the card must not ask before we know.
+    @Published var stewardAskTarget: StewardAgent?
+
+    /// Hides the steward card for the rest of this launch. In-memory only; the
+    /// persistent decision lives in `UserDefaults.onboardingStewardAskState`.
+    @Published var stewardCardSuppressedThisLaunch: Bool = false
+
     /// Set once the user resolves any top-slot card. The slot shows one card at
     /// a time, but that alone only orders the queue — without this, dismissing
     /// the winner hands the slot straight to the runner-up on the same render,
@@ -128,6 +186,21 @@ final class OnboardingCoordinator: ObservableObject {
     private var didCountStarImpressionThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the contribute card.
     private var didCountContributeImpressionThisLaunch: Bool = false
+    /// Same one-impression-per-launch rule for the steward card.
+    private var didCountStewardImpressionThisLaunch: Bool = false
+    /// Set when any card's round ended during this launch.
+    ///
+    /// Ending a round retires that card, which frees the slot for the next card
+    /// in the chain — and a card that reaches the slot that way appeared partway
+    /// through a session the user was already looking at something else in.
+    /// Charging it an impression spends an ask on attention it never got.
+    ///
+    /// Deliberately **not** `@Published`. Publishing here would rebuild the list
+    /// the moment a round ends, and since the round ends from `.onAppear`, the
+    /// card that just spent it would vanish on the very launch it was shown.
+    /// Ending a round otherwise writes only to `UserDefaults`, so the card stays
+    /// on screen for the rest of the launch, which is the intended behaviour.
+    private var didEndAnAskRoundThisLaunch: Bool = false
     /// True for the duration of a launch that showed the first-run setup — feedback
     /// must never appear in the same session as first run.
     private(set) var didPresentFreshInstallThisLaunch: Bool = false
@@ -171,6 +244,13 @@ final class OnboardingCoordinator: ObservableObject {
         // the bottom of the chain and may wait many launches without rendering.
         if defaults.onboardingContributeAskDueSince == nil, contributeAskTriggerMet() {
             defaults.onboardingContributeAskDueSince = now()
+        }
+
+        // And for the steward ask. Stamped on the retention gate alone: whether
+        // a stewardless agent is on this Mac is not known until the index loads,
+        // and the wait this measures has started either way.
+        if defaults.onboardingStewardAskDueSince == nil, stewardAskTriggerMet() {
+            defaults.onboardingStewardAskDueSince = now()
         }
 
         if isFreshInstallProvider(), !defaults.onboardingFullTourCompleted {
@@ -284,6 +364,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// Whether the feedback card should occupy the session-list top slot.
     /// What's New always wins the slot, and a ✕ dismissal hides it for this launch.
     func shouldShowFeedbackCard() -> Bool {
+        if stewardAskOutranksFeedbackCard() { return false }
         if contributeAskOutranksFeedbackCard() { return false }
         return whatsNewMajorMinor == nil
             && !didConsumeTopSlotAskThisLaunch
@@ -436,6 +517,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// launches end the round exactly as "Maybe later" would.
     func noteStarCardShown() {
         guard !didCountStarImpressionThisLaunch else { return }
+        guard !didEndAnAskRoundThisLaunch else { return }
         didCountStarImpressionThisLaunch = true
 
         let seen = defaults.onboardingStarAskImpressions + 1
@@ -456,8 +538,10 @@ final class OnboardingCoordinator: ObservableObject {
         case .snoozed:
             defaults.onboardingStarAskState = .dismissedForever
         case .starred, .dismissedForever:
-            break
+            // Already terminal — nothing was spent, so nothing was freed.
+            return
         }
+        didEndAnAskRoundThisLaunch = true
     }
 
     /// The card's ✕ — an explicit no. Unlike the feedback card there is no second
@@ -511,6 +595,12 @@ final class OnboardingCoordinator: ObservableObject {
     /// Never fires on a fresh-install launch, and never asks again once the user
     /// has opened either contribution page.
     func shouldShowContributeCard() -> Bool {
+        // The steward ask is this same invitation aimed at an agent we can see
+        // the user runs, so it goes first whenever it has a target. It stays a
+        // separate ask with its own lifecycle: spending it does not spend this
+        // one, and a user with no stewardless agent sees exactly what they saw
+        // before the steward card existed.
+        guard !shouldShowStewardCard() else { return false }
         guard whatsNewMajorMinor == nil else { return false }
         guard !didConsumeTopSlotAskThisLaunch else { return false }
         guard !contributeCardSuppressedThisLaunch else { return false }
@@ -550,6 +640,7 @@ final class OnboardingCoordinator: ObservableObject {
     /// is an answer; three unanswered launches end the round like "Maybe later".
     func noteContributeCardShown() {
         guard !didCountContributeImpressionThisLaunch else { return }
+        guard !didEndAnAskRoundThisLaunch else { return }
         didCountContributeImpressionThisLaunch = true
 
         let seen = defaults.onboardingContributeAskImpressions + 1
@@ -570,8 +661,10 @@ final class OnboardingCoordinator: ObservableObject {
         case .snoozed:
             defaults.onboardingContributeAskState = .dismissedForever
         case .opened, .dismissedForever:
-            break
+            // Already terminal — nothing was spent, so nothing was freed.
+            return
         }
+        didEndAnAskRoundThisLaunch = true
     }
 
     /// The card's ✕ — an explicit no, permanent. "Maybe later" is right beside it
@@ -610,6 +703,142 @@ final class OnboardingCoordinator: ObservableObject {
         guard let first = defaults.onboardingFirstLaunchDate else { return false }
         let days = now().timeIntervalSince(first) / 86_400
         return days >= Self.contributeAskDaysThreshold
+    }
+
+    // MARK: - Steward an existing agent
+
+    /// Whether the steward card should occupy the session-list top slot.
+    ///
+    /// It sits directly above the contribute card and below feedback: it asks
+    /// for the same kind of work, but of someone we can see already has the
+    /// sessions the job needs, so it is the better of the two asks to spend on
+    /// this user. It ages past the feedback card on the same rule the contribute
+    /// ask uses (see `stewardAskOutranksFeedbackCard()`).
+    ///
+    /// Requires a target agent, which the session list supplies once the index
+    /// loads. No target means no honest ask — there is nothing to name.
+    ///
+    /// Never fires on a fresh-install launch, and never asks again once the user
+    /// has opened the signup form or dismissed it.
+    func shouldShowStewardCard() -> Bool {
+        guard stewardAskTarget != nil else { return false }
+        guard whatsNewMajorMinor == nil else { return false }
+        guard !didConsumeTopSlotAskThisLaunch else { return false }
+        guard !stewardCardSuppressedThisLaunch else { return false }
+        guard !didPresentFreshInstallThisLaunch else { return false }
+
+        switch defaults.onboardingStewardAskState {
+        case .signedUp, .dismissedForever:
+            return false
+        case .notAsked:
+            break
+        case .askedThisRelease:
+            // One round per release. Without a readable version there is no way
+            // to tell whether the release moved, so stay quiet; a missing stamp,
+            // on the other hand, is a round that could never expire, so treat it
+            // as spendable.
+            guard let current = currentMajorMinorProvider(),
+                  defaults.onboardingStewardAskAskedAtMajorMinor != current else {
+                return false
+            }
+        }
+
+        return stewardAskTriggerMet()
+    }
+
+    /// The user opened the signup form — terminal, never ask again. Whether they
+    /// actually submit it is not visible from here, and re-asking someone who
+    /// went to the form would land on the person most likely to have said yes.
+    func recordStewardSignupOpened() {
+        defaults.onboardingStewardAskState = .signedUp
+        stewardCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+    }
+
+    /// "What's involved" — they went to read the job description and did not sign
+    /// up. That ends this release's round rather than the ask: reading it is the
+    /// most interested a not-yet-yes gets, and next release is a fair time to ask
+    /// again.
+    func recordStewardGuideOpened() {
+        stewardCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+        endStewardAskRound()
+    }
+
+    /// Records that this launch put the steward card on screen. Being ignored is
+    /// an answer; three unanswered launches end the round, and with no "Maybe
+    /// later" button on this card that silence is the only soft no available.
+    func noteStewardCardShown() {
+        guard !didCountStewardImpressionThisLaunch else { return }
+        guard !didEndAnAskRoundThisLaunch else { return }
+        didCountStewardImpressionThisLaunch = true
+
+        let seen = defaults.onboardingStewardAskImpressions + 1
+        defaults.onboardingStewardAskImpressions = seen
+        guard seen >= Self.stewardAskMaxImpressionsPerRound else { return }
+        endStewardAskRound()
+    }
+
+    /// Spends one round: quiet until the next major.minor bump, and permanently
+    /// quiet once `stewardAskMaxRounds` of them have gone unanswered.
+    private func endStewardAskRound() {
+        switch defaults.onboardingStewardAskState {
+        case .signedUp, .dismissedForever:
+            return
+        case .notAsked, .askedThisRelease:
+            break
+        }
+        didEndAnAskRoundThisLaunch = true
+
+        let spent = defaults.onboardingStewardAskRoundsSpent + 1
+        defaults.onboardingStewardAskRoundsSpent = spent
+        // Every round gets its own budget of launches.
+        defaults.onboardingStewardAskImpressions = 0
+
+        guard spent < Self.stewardAskMaxRounds else {
+            defaults.onboardingStewardAskState = .dismissedForever
+            return
+        }
+        defaults.onboardingStewardAskState = .askedThisRelease
+        defaults.onboardingStewardAskAskedAtMajorMinor = currentMajorMinorProvider()
+    }
+
+    /// The card's ✕ — an explicit no about stewardship as a whole, not just this
+    /// agent. There is no "Maybe later" to mean the softer thing, and silence
+    /// already covers the user who has not decided.
+    func dismissStewardAskForever() {
+        stewardCardSuppressedThisLaunch = true
+        didConsumeTopSlotAskThisLaunch = true
+
+        guard defaults.onboardingStewardAskState != .signedUp else { return }
+        defaults.onboardingStewardAskState = .dismissedForever
+    }
+
+    /// Whether the steward ask has waited long enough to take the slot from the
+    /// feedback card.
+    ///
+    /// Same problem the contribute ask has, and the same fix: the feedback card's
+    /// ✕ is soft and returns every launch, so a user who neither submits feedback
+    /// nor declines it in the prompt would hold this off forever. After two weeks
+    /// it goes first, and it spends itself within three rounds, so this cannot
+    /// deadlock the other direction.
+    ///
+    /// This outranks the feedback card only — What's New, the Quota Meter card,
+    /// and the star ask all still come first unconditionally.
+    func stewardAskOutranksFeedbackCard() -> Bool {
+        guard let dueSince = defaults.onboardingStewardAskDueSince else { return false }
+        guard now().timeIntervalSince(dueSince) / 86_400 >= Self.stewardAskPriorityAfterDays else { return false }
+        return shouldShowStewardCard()
+    }
+
+    /// Retention test for the steward ask: earliest of 25 sessions opened or 45
+    /// days since first launch. Note this is retention only — whether the user
+    /// runs a stewardless agent is `stewardAskTarget`'s job.
+    private func stewardAskTriggerMet() -> Bool {
+        if defaults.onboardingSessionsOpenedCount >= Self.stewardAskSessionsThreshold { return true }
+        guard let first = defaults.onboardingFirstLaunchDate else { return false }
+        let days = now().timeIntervalSince(first) / 86_400
+        return days >= Self.stewardAskDaysThreshold
     }
 
     private func usageTriggerMet() -> Bool {

@@ -21,6 +21,30 @@ extension UserDefaults {
         static let contributeAskSnoozedUntil = "OnboardingContributeAskSnoozedUntil"
         static let contributeAskImpressions = "OnboardingContributeAskImpressions"
         static let contributeAskDueSince = "OnboardingContributeAskDueSince"
+        static let stewardAskState = "OnboardingStewardAskState"
+        static let stewardAskAskedAtMajorMinor = "OnboardingStewardAskAskedAtMajorMinor"
+        static let stewardAskImpressions = "OnboardingStewardAskImpressions"
+        static let stewardAskRoundsSpent = "OnboardingStewardAskRoundsSpent"
+        static let stewardAskDueSince = "OnboardingStewardAskDueSince"
+    }
+
+    /// Lifecycle of the invitation to steward one already-supported agent.
+    ///
+    /// Version-gated rather than clock-gated, unlike the star and contribute
+    /// asks: this one has no "Maybe later" at all. It gets one round per
+    /// release, and `onboardingStewardAskRoundsSpent` stops it for good after
+    /// three, so silence costs the user nothing and never compounds.
+    enum StewardAskState: String {
+        /// Not yet shown — eligible once the retention gate and a target agent
+        /// both exist.
+        case notAsked
+        /// A round was spent in the release named by
+        /// `onboardingStewardAskAskedAtMajorMinor` — eligible again after a bump.
+        case askedThisRelease
+        /// The ✕, or a third spent round — never ask again.
+        case dismissedForever
+        /// The user opened the signup form — never ask again.
+        case signedUp
     }
 
     /// Lifecycle of the one-time invitation to contribute a new agent source.
@@ -205,5 +229,40 @@ extension UserDefaults {
     var onboardingContributeAskDueSince: Date? {
         get { object(forKey: OnboardingKeys.contributeAskDueSince) as? Date }
         set { set(newValue, forKey: OnboardingKeys.contributeAskDueSince) }
+    }
+
+    /// Lifecycle state of the invitation to steward one supported agent.
+    var onboardingStewardAskState: StewardAskState {
+        get { StewardAskState(rawValue: string(forKey: OnboardingKeys.stewardAskState) ?? "") ?? .notAsked }
+        set { set(newValue.rawValue, forKey: OnboardingKeys.stewardAskState) }
+    }
+
+    /// The major.minor whose round the steward ask has already spent. Nil until
+    /// the first round ends; a bump past it re-arms the ask.
+    var onboardingStewardAskAskedAtMajorMinor: String? {
+        get { string(forKey: OnboardingKeys.stewardAskAskedAtMajorMinor) }
+        set { set(newValue, forKey: OnboardingKeys.stewardAskAskedAtMajorMinor) }
+    }
+
+    /// Launches that have shown the steward card in the current round without
+    /// the user answering. Reset when a round ends.
+    var onboardingStewardAskImpressions: Int {
+        get { integer(forKey: OnboardingKeys.stewardAskImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.stewardAskImpressions) }
+    }
+
+    /// Rounds the steward ask has spent across all releases. The lifetime cap:
+    /// someone who has ignored this in three separate releases is not going to
+    /// sign up, and asking a fourth time is nagging.
+    var onboardingStewardAskRoundsSpent: Int {
+        get { integer(forKey: OnboardingKeys.stewardAskRoundsSpent) }
+        set { set(newValue, forKey: OnboardingKeys.stewardAskRoundsSpent) }
+    }
+
+    /// When the steward ask first became due. Drives the aging rule that lets it
+    /// overtake a feedback card the user keeps neither acting on nor declining.
+    var onboardingStewardAskDueSince: Date? {
+        get { object(forKey: OnboardingKeys.stewardAskDueSince) as? Date }
+        set { set(newValue, forKey: OnboardingKeys.stewardAskDueSince) }
     }
 }

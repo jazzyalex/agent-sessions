@@ -445,4 +445,29 @@ final class OnboardingStarCardTests: XCTestCase {
     func testSnoozeIntervalIsTwoWeeks() {
         XCTAssertEqual(OnboardingCoordinator.starAskSnoozeInterval, 14 * 86_400)
     }
+
+    /// When this ask's round ends it frees the slot mid-launch, and the card that
+    /// falls into it appeared in a session the user was already looking at
+    /// something else in. Charging that card an impression spends an ask on
+    /// attention it never got.
+    @MainActor
+    func testEndingTheRoundDoesNotChargeTheNextCardAnImpression() {
+        let defaults = makeDefaults("Star.noStolenImpression")
+        defaults.onboardingSessionsOpenedCount = 25
+        defaults.onboardingFirstLaunchDate = Self.referenceNow
+        // Two launches of this round already spent; this one ends it.
+        defaults.onboardingStarAskImpressions = 2
+
+        let coordinator = makeCoordinator(defaults: defaults)
+        coordinator.noteStarCardShown()
+        XCTAssertEqual(defaults.onboardingStarAskState, .snoozed)
+
+        coordinator.noteContributeCardShown()
+        XCTAssertEqual(defaults.onboardingContributeAskImpressions, 0)
+
+        // Next launch it is charged normally.
+        let nextLaunch = makeCoordinator(defaults: defaults)
+        nextLaunch.noteContributeCardShown()
+        XCTAssertEqual(defaults.onboardingContributeAskImpressions, 1)
+    }
 }
