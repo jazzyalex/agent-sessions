@@ -1,3 +1,47 @@
+## 2026-08-21 13:47 · format-check-2026-08-21 · Weekly format sweep + Gemini CLI removal
+status: in-progress
+
+**State:** Pushed `be348726` on main (two commits). Weekly `agent_watch` scan covered all 12 monitored agents — discovery contracts 12/12, usage probes all ok, all drift additive and parse-safe. Gemini CLI removed from the skills/scripts and uninstalled from the machine. Six value-pass entries filed in `docs/backlog.md`.
+
+**Decided / don't redo:**
+- `~/.gemini` is SHARED with Antigravity (`agy` reads `~/.gemini/config/`, `config/mcp_config.json`, `config/hooks.json`, `config/projects/`, `antigravity-cli/settings.json`). Only the npm app `@google/gemini-cli` was removed. Never delete that tree.
+- `scan_tool_formats.py`'s `agent == "gemini"` skip stays until the gemini fixtures go — removing it while they exist ADDS scanning.
+- Antigravity `truncated_fields` is already handled (`AntigravityTranscriptParser.swift:43`); it's a JSON array in all 39 records. Fixture gap only, not a UI gap — don't re-open it as one.
+- Gemini CLI was dropped from the app 2026-06-24 on purpose; its presence on disk was not a monitoring miss.
+- Deleted root `GEMINI.md` (stale: claimed 4 agents, listed Gemini CLI, cited the dropped Git Context Inspector). Safe because `agy` treats `GEMINI.md` and `AGENTS.md` as interchangeable rules files and the FS is case-insensitive, so Antigravity now falls through to the real `agents.md` playbook instead of a stale duplicate.
+- No new agents missed: 12 monitored = matrix = public-agents = STEWARDS; droid is legacy-only by design; fx (#59) + Devin (#56) still unmerged.
+
+**Key files:**
+- `scripts/probe_scan_output/agent_watch/20260821-202239Z/report.json` — the weekly evidence
+- `scripts/probe_scan_output/agent_watch/20260821-202457Z-prebump/report.json` — copilot clean, kimi drift
+- `docs/backlog.md` — the six new entries, stamped `verified 2026-08-21`
+
+**Next:**
+1. Bump versions backed by today's evidence: grok 1.0.4→1.0.5, copilot 1.0.79→1.0.80 (matrix + ledger + `docs/agent-json-tracking.md`, §6).
+2. Refresh fixtures for the five drift agents (codex 0.149 `item_completed`, claude 5 new types, opencode `part.patch`, antigravity `truncated_fields`, kimi `agentId`/`token_counting.*`), then re-run weekly.
+3. Clear the gemini leftovers together: `Resources/Fixtures/stage0/agents/gemini/`, `Stage0GoldenFixturesTests.swift:285`, the `scan_tool_formats.py` skip — needs a build + test run.
+4. Do NOT install Hermes 0.20.5 — no working one-shot to regenerate a session, so it would regress 0.17.0 to `blocked_stale_sample` (§1b). Qwen stays blocked on a paid plan.
+
+## 2026-08-21 13:21 · db-source-liveness · OpenCode/Hermes/Copilot session fixes shipped
+status: done
+
+**State:** Committed + pushed `46d6110c` on main: real session IDs in OpenCode/Copilot toolbar, WAL-aware focused-session monitor + DB row probes so live OpenCode/Hermes sessions re-hydrate, subagent reports unwrapped (OpenCode `task`, Hermes `delegate_task`, Qwen `{"output"}`), OpenClaw copy-ID prefix strip, Pi subagent nesting, Cursor store.db tick waste removed. Full suite 2098/0. Owner has a fresh Debug build running for visual QA.
+
+**Decided / don't redo:**
+- OpenCode cannot get a CLI/Desktop badge: both clients share `opencode.db` and nothing stamps the client; desktop's `.dat` map only proves "opened in Desktop". Don't build on it.
+- Hermes tool rows have an EMPTY `tool_name` on disk — never gate Hermes tool handling on the name; gate on payload shape.
+- `task` cards keep the 20-line "Show all" fold on purpose (consistent with other tool cards).
+- Search ingest has no parser-version stamp; unwrap fixes improve search text only for sessions reindexed after the change (noted in backlog).
+
+**Key files:**
+- `AgentSessions/Services/UnifiedSessionIndexer.swift` `fileSignature` — `-wal/-shm` fold; the gate every DB-backed source depends on
+- `AgentSessions/Services/HermesSessionIndexer.swift` / `OpenCodeSessionIndexer.swift` — pre-parse freshness probes
+- `docs/backlog.md` → "OpenCode parent sessions are unsearchable for their own subagent reports"
+
+**Next:**
+1. Owner visual QA: Copilot ID chip; OpenCode live session grows while selected; Qwen/Hermes tool cards show plain text.
+2. If QA passes, consider a 5.0.2 patch release (user-visible OpenCode regressions since v1.2 SQLite backend).
+
 ## 2026-08-18 16:22 · grok-review-round-two · External review acted on; 5.0.1 shipped
 status: done
 
