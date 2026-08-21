@@ -9,6 +9,57 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.0.1"
+    as_of_date_utc: "2026-08-21"
+    as_of_commit: "44d09021"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.149.0"
+          scope: "tier-1 support unchanged; additive item_completed family covered"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "scripts/probe_scan_output/agent_watch/20260821-211408Z/report.json"]
+          notes: "Bumped 0.147.0->0.149.0. 0.149 adds an event_msg.payload:item_completed family (264 records in the first local session carrying it) whose items hold parsed_cmd, duration, memory_citation{entries,rolloutIds}, web-search results, and an aggregated command/exec view, plus a monotonic `ordinal` on EVERY record and turn_context.active_permission_profile. This is ADDITIVE, not a replacement: response_item.custom_tool_call/_output are still emitted (135 each in the same session) and still map to .tool_call via SessionEvent, so the transcript never depended on the new family. Fixture rebuilt with rebuild_stage0_baseline.py --emit over 1215 sessions (70 missing pairs across 25 buckets). Value pass filed memory_citation and parsed_cmd/duration as backlog candidates; results/active_permission_profile/ordinal recorded as watch."
+      claude:
+        sessions:
+          max_verified_version: "2.1.239"
+          scope: "tier-1 support unchanged; five additive types covered"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "scripts/probe_scan_output/agent_watch/20260821-211408Z/report.json"]
+          notes: "Bumped 2.1.220->2.1.239. New top-level types atis-latch and bridge-session, attachment subtypes batching_reminder_sent/silent_turn_reminder/total_tokens_reminder, and user.turnCompanion. All land on ClaudeSessionParser's default: branch as .meta, so no parser change. Measured across 1696 sessions before classifying: total_tokens_reminder 2723 records in 20/60 recent sessions, bridge-session 569 in 13/60, atis-latch 275 in 19/60 (its `atis` value is always empty), batching_reminder_sent 80 in 2/60, turnCompanion 6 in 4/60. bridge-session is the one with value and is filed as a backlog candidate: it carries bridgeSessionId (cse_...), which is the local-to-bridge join key that ClaudeCloudSessionCatalog's bridge-row exclusion has so far only assumed."
+      opencode:
+        sessions:
+          max_verified_version: "1.18.21"
+          scope: "tier-2 support unchanged; part.patch covered"
+          evidence: ["Resources/Fixtures/stage0/agents/opencode/storage_v2/part/m_assistant_large_1/008.json", "scripts/probe_scan_output/agent_watch/20260821-211408Z/report.json"]
+          notes: "Bumped 1.18.18->1.18.21 after covering a new part type `patch` {hash, files}, 16 of ~8900 parts in the live DB. TOOLING TRAP, new variant: rebuild_stage0_baseline.py reported 'fixture already covers every bucket/key on disk' while the weekly reported part.patch as drift. Its _all_sessions() reads only weekly.local_schema.roots and IGNORES db_roots, so for OpenCode it swept the stale legacy storage/session dir (1 session) instead of opencode.db (the live corpus). A clean report from an instrument pointed at the wrong store is not evidence. Fixture was hand-written to match the existing storage_v2 part convention, and the path had to be added to evidence_fixtures in the matrix -- the baseline is that explicit list, so a new file is invisible until it is registered. Filed as a backlog entry against the rebuild tool."
+      antigravity:
+        sessions:
+          max_verified_version: "1.1.14"
+          scope: "tier-2 support unchanged; truncated_fields covered"
+          evidence: ["Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl", "scripts/probe_scan_output/agent_watch/20260821-211408Z/report.json"]
+          notes: "Bumped 1.1.12->1.1.14 (installed, NOT upstream 1.1.17 -- per section 1b, do not claim a build no session was written by). The only drift was truncated_fields on GENERIC/USER_INPUT, and it is ALREADY HANDLED: AntigravityTranscriptParser reads it and appends a truncation marker. Purely a fixture gap. Recorded because the first pass misread it as a UI gap: printing the value through Python str() renders a JSON array as ['content'] and made it look like a string the `as? [Any]` cast would miss. It is an array in all 39 records across 28 transcripts, so the existing cast is correct."
+      copilot:
+        sessions:
+          max_verified_version: "1.0.80"
+          scope: "tier-2 support unchanged; fresh-session prebump re-validated"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260821-202457Z-prebump/report.json"]
+          notes: "Bumped 1.0.79->1.0.80 on a clean prebump (ok=True, fresh_matches_baseline=True, unknown_types [] / unknown_keys {}), clearing a blocked_stale_sample whose newest local sample predated the CLI binary. No drift, no parser change; copilot returns to supports_latest. The fresh session is thin (15 events), so this is a floor and not proof that rare event families are unchanged."
+      kimi:
+        sessions:
+          max_verified_version: "0.38.0"
+          scope: "tier-2 support unchanged; agentId attribution and token_counting covered"
+          evidence: ["Resources/Fixtures/stage0/agents/kimi/small.jsonl", "scripts/probe_scan_output/agent_watch/20260821-211538Z-prebump/report.json"]
+          notes: "Bumped 0.36.1->0.38.0. blocked_stale_sample was again hiding real drift (section 1a): 0.38.0 stamps agentId on 13 wire types, adds subagents to profile.bind, and introduces runtime.set_binding plus token_counting.measured/turn_recorded. NONE of it is visible on disk -- rebuild_stage0_baseline.py reported 'fixture already covers every bucket/key' because the kimi prebump runs in a SANDBOX, so the fresh session never lands in ~/.kimi-code. Same lesson as the 2026-08-17 plugin.session_start find, and the records were again harvested by re-running prebump with --keep-sandbox. Fixture updated by ADDING KEYS to existing records rather than appending records, because KimiSessionParserTests asserts exact counts for context.append_message (3) and turn.prompt (2); only the three genuinely new types were appended. agentId and token_counting.* are filed as backlog candidates."
+      grok:
+        sessions:
+          max_verified_version: "1.0.5"
+          scope: "tier-2 support unchanged"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260821-211408Z/report.json"]
+          notes: "Bumped 1.0.4->1.0.5 on a clean weekly with fresh non-stale local evidence and no unknowns; grok remains supports_latest via the grok_single driver added 2026-08-17."
+    notes:
+      - "Format check 2026-08-21: bumped Codex 0.147.0->0.149.0, Claude 2.1.220->2.1.239, OpenCode 1.18.18->1.18.21, Antigravity 1.1.12->1.1.14, Copilot 1.0.79->1.0.80, Kimi 0.36.1->0.38.0, and Grok 1.0.4->1.0.5."
+      - "NOT bumped and why: Hermes stays 0.17.0 (upstream 0.20.5, but no working one-shot exists to regenerate a session, and installing without one would regress a real claim to blocked_stale_sample per section 1b). Qwen stays 0.14.3 (OAuth free tier discontinued 2026-04-15, so no session can be produced at all -- a billing decision, not engineering). OpenClaw, Cursor and Pi were already at their installed versions."
+      - "Gemini CLI was removed from the monitoring skill and scripts this session, and the stale root GEMINI.md was deleted; support itself was dropped 2026-06-24 in favour of Antigravity. The Resources/Fixtures/stage0/agents/gemini fixtures are DELIBERATELY RETAINED as negative-test inputs for testGeminiFixturesAreIgnoredAfterAntigravityMigration -- real Gemini sessions still exist under ~/.gemini/tmp/*/chats/, the same tree Antigravity discovers from."
+      - "Every discovery path contract passed (12/12) and every usage probe returned ok: Codex five_hour/weekly, Claude session_5h/week_all_models plus status.claude.com."
   - agent_sessions_version: "4.8"
     as_of_date_utc: "2026-08-17"
     as_of_commit: "d4958be3"

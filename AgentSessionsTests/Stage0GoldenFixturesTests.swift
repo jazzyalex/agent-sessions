@@ -281,6 +281,13 @@ final class Stage0GoldenFixturesTests: XCTestCase {
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("unknown block with visible text") })
     }
 
+    /// The `agents/gemini/*` fixtures are kept ONLY as negative-test inputs for this
+    /// guard — Gemini CLI support was removed 2026-06-24. Do not delete them as dead
+    /// weight: real Gemini sessions still sit under `~/.gemini/tmp/*/chats/`, the same
+    /// tree Antigravity discovers from (`~/.gemini/antigravity-cli/brain`), so this
+    /// proves a discovery widening cannot silently start parsing them as Antigravity.
+    /// `scripts/scan_tool_formats.py`'s `agent == "gemini"` skip is what keeps these
+    /// same files out of the format scanner.
     func testGeminiFixturesAreIgnoredAfterAntigravityMigration() throws {
         for name in ["agents/gemini/small.json", "agents/gemini/schema_drift.json", "agents/gemini/large.json", "agents/gemini/jsonl_v040.jsonl"] {
             let url = FixturePaths.stage0FixtureURL(name)

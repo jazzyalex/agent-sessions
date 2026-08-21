@@ -376,6 +376,34 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Plumbing
 
+### `rebuild_stage0_baseline.py` is blind to `db_roots`, so it sweeps the wrong OpenCode store
+> **open** · sev: med · urg: low · verified 2026-08-21
+
+- **What:** the rebuild tool reported "opencode: fixture already covers every bucket/key
+  on disk" while the same day's weekly reported `part.patch` as drift. Both ran; only one
+  looked at the live data. `_all_sessions()` builds its file list from
+  `weekly.local_schema.roots` + `glob` and never consults `db_roots`, so for OpenCode it
+  swept the stale legacy `storage/session` directory — **1 session** — instead of
+  `opencode.db`, which holds ~8,900 parts. The tool then reports full coverage, which is
+  the most dangerous possible answer: a false clean from an instrument aimed at the wrong
+  corpus.
+- **Where:** [rebuild_stage0_baseline.py:104](../scripts/rebuild_stage0_baseline.py:104)
+  (`_all_sessions`); OpenCode's `db_roots` is declared in
+  [agent-watch-config.json](../docs/agent-support/agent-watch-config.json) under
+  `agents.opencode.weekly.local_schema`. Weekly reads it via the
+  `opencode_latest_session` fingerprint kind; the rebuild tool has no equivalent branch.
+- **Fix shape:** teach `_all_sessions` to fall back to the DB path when `db_roots` is set,
+  reusing the weekly fingerprinter. Note the emit side is the harder half — OpenCode
+  fixtures are a multi-file `storage_v2` tree, not JSONL lines, so a DB-sourced record has
+  to be written out as `part/<messageID>/NNN.json` **and** registered in the matrix's
+  `evidence_fixtures` before it counts.
+- **Why deferred:** the 2026-08-21 gap was closed by hand, so nothing is currently
+  mis-stated in the fixtures. The risk is the next sweep trusting the tool again.
+- **Risk if wrong:** silent. This class of bug never errors — it returns "all clear" and
+  the drift stays invisible until something downstream breaks.
+- **To close:** running the tool for OpenCode reports the same missing pairs the weekly
+  does, or it refuses to answer for agents whose corpus it cannot read.
+
 ### Hand-maintained per-source lists drift every time an agent is added
 > **done** 2026-08-16
 

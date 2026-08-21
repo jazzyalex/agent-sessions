@@ -15,3 +15,5 @@
 {"step_index":0,"source":"MODEL","type":"GREP_SEARCH","status":"DONE","created_at":"[trimmed for fixture]","content":"[trimmed for fixture]"}
 {"step_index":0,"source":"MODEL","type":"GREP_SEARCH","status":"DONE","created_at":"[trimmed for fixture]","content":"[trimmed for fixture]","truncated_fields":["content"]}
 {"step_index":0,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"[trimmed for fixture]","content":"[trimmed for fixture]","truncated_fields":["content"]}
+{"step_index":0,"source":"[trimmed for fixture]","type":"USER_INPUT","status":"[trimmed for fixture]","created_at":"[trimmed for fixture]","content":"[trimmed for fixture]","truncated_fields":["[trimmed for fixture]"]}
+{"step_index":0,"source":"[trimmed for fixture]","type":"GENERIC","status":"[trimmed for fixture]","created_at":"[trimmed for fixture]","content":"[trimmed for fixture]","truncated_fields":["[trimmed for fixture]"]}
