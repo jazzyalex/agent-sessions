@@ -99,7 +99,6 @@ For efficiency, dispatch work in parallel by independence:
 | Claude   | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/storage/session/*/ses_*.json` |
 | Droid    | `~/.factory/sessions/**/*.jsonl` |
-| Gemini   | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
 | Copilot  | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
 | Cursor   | `~/.cursor/projects/**/.../agent-transcripts/**/*.jsonl` |

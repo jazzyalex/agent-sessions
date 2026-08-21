@@ -241,7 +241,7 @@ def main() -> int:
     ap.add_argument("--db", default=str(default_db_path()), help="Path to index.db.")
     ap.add_argument(
         "--sources",
-        default="codex,claude,gemini,opencode,copilot,droid",
+        default="codex,claude,opencode,copilot,droid",
         help="Comma-separated sources to include.",
     )
     ap.add_argument("--limit", type=int, default=250, help="Max sessions to scan (newest-first).")

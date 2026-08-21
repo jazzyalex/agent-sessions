@@ -80,7 +80,6 @@ Use these as the baseline for supported providers:
 | Claude | `~/.claude/projects/**/*.{jsonl,ndjson}` |
 | OpenCode | `*/opencode/storage/session/*/ses_*.json` |
 | Hermes | `~/.hermes/sessions/session_*.json` |
-| Gemini | `~/.gemini/tmp/<hash>/(chats/)?session-*.json` |
 | Copilot | `~/.copilot/session-state/*.jsonl` |
 | OpenClaw | `*/agents/<id>/sessions/*.jsonl` |
 | Cursor | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |

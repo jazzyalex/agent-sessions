@@ -170,7 +170,7 @@ types; building its driver surfaced them immediately. Treat a stale verdict as
 "unknown", never as "clean".
 
 Prebump uses the hybrid env-var-first auth policy: if the relevant API-key
-env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `FACTORY_API_KEY`, `GITHUB_TOKEN`) is set it is forwarded into the sandbox
 and real HOME is never read. Otherwise the driver copies the declared
 credential file from real HOME into the sandbox after running three hygiene
