@@ -271,7 +271,9 @@ final class HermesSessionParser {
                                                rawJSON: rawJSON))
                 }
             case "tool":
-                let toolOutput = content
+                // tool_name is empty/absent on tool rows on disk, so gate on payload shape;
+                // unwrapDelegateOutput is a passthrough for anything that is not an envelope.
+                let toolOutput = content.map { unwrapDelegateOutput($0) }
                 let kind: SessionEventKind = (message.finish_reason == "error") ? .error : .tool_result
                 events.append(SessionEvent(id: baseID,
                                            timestamp: fallbackTimestamp,
@@ -304,6 +306,42 @@ final class HermesSessionParser {
         }
 
         return events
+    }
+
+    /// `delegate_task` stores the child agent's report double-encoded:
+    /// `{"results":[{"task_index":0,"status":"completed","summary":"<JSON string>",…}]}`.
+    /// Decode it so the transcript shows the report, not an escaped blob.
+    static func unwrapDelegateOutput(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              obj.count == 1,
+              let results = obj["results"] as? [[String: Any]], !results.isEmpty,
+              results.allSatisfy({ $0["task_index"] != nil && $0["status"] != nil }) else { return raw }
+
+        var sections: [String] = []
+        for result in results {
+            var header: [String] = []
+            if let idx = result["task_index"] { header.append("Subtask \(idx)") }
+            if let status = result["status"] as? String, !status.isEmpty { header.append(status) }
+            if let secs = result["duration_seconds"] as? Double { header.append(String(format: "%.0fs", secs)) }
+            else if let secs = result["duration_seconds"] as? Int { header.append("\(secs)s") }
+            if let calls = result["api_calls"] as? Int { header.append("\(calls) API calls") }
+
+            var body = (result["summary"] as? String) ?? (result["result"] as? String) ?? ""
+            if let inner = body.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: inner),
+               let pretty = try? JSONSerialization.data(withJSONObject: decoded, options: [.prettyPrinted, .sortedKeys]),
+               let text = String(data: pretty, encoding: .utf8) {
+                body = text
+            }
+            body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let error = result["error"] as? String, !error.isEmpty {
+                body = body.isEmpty ? "Error: \(error)" : body + "\n\nError: \(error)"
+            }
+            if body.isEmpty { body = "(subagent returned no result)" }
+            sections.append(header.isEmpty ? body : header.joined(separator: " · ") + "\n\n" + body)
+        }
+        return sections.joined(separator: "\n\n")
     }
 
     private static func deriveTitle(messages: [SessionJSON.Message], platform: String?, sessionID: String) -> String {
@@ -377,6 +415,24 @@ final class HermesSessionParser {
 struct HermesStateDBReader {
     static func listSessions(dbURL: URL) -> [Session] {
         listSessionsIfReadable(dbURL: dbURL) ?? []
+    }
+
+    /// Cheap freshness probe for a live session: the newest message timestamp and row count.
+    /// `sessions` has no updated_at and `ended_at` stays NULL while the agent runs, so the
+    /// messages table is the only thing that moves.
+    static func sessionActivitySignature(dbURL: URL, sessionID: String) -> String? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*), COALESCE(MAX(timestamp), 0) FROM messages WHERE session_id = ?;", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return "\(sqlite3_column_int64(stmt, 0)):\(sqlite3_column_double(stmt, 1))"
     }
 
     /// nil distinguishes a database/query failure from an authoritative empty table.
@@ -527,7 +583,7 @@ struct HermesStateDBReader {
                                            text: nil,
                                            toolName: toolName,
                                            toolInput: nil,
-                                           toolOutput: content,
+                                           toolOutput: content.map { HermesSessionParser.unwrapDelegateOutput($0) },
                                            messageID: toolCallID,
                                            parentID: nil,
                                            isDelta: false,

@@ -276,6 +276,8 @@ final class SessionParserTests: XCTestCase {
         VALUES (3, 'hermes_sqlite_demo', 'tool', '/tmp/hermes-repo', 'call_hermes_1', NULL, 'shell', 1780000002.0, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
         INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
         VALUES (4, 'hermes_sqlite_demo', 'session_meta', NULL, NULL, NULL, NULL, 1780000003.0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
+        INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp, token_count, finish_reason, reasoning, reasoning_content, reasoning_details, codex_reasoning_items, codex_message_items, platform_message_id, observed)
+        VALUES (5, 'hermes_sqlite_demo', 'tool', '{"results": [{"task_index": 0, "status": "completed", "summary": "{\\"passed\\":true}", "api_calls": 4, "duration_seconds": 23.2}]}', 'call_hermes_2', NULL, '', 1780000003.5, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1);
         """)
     }
 
@@ -2738,6 +2740,45 @@ final class SessionParserTests: XCTestCase {
         XCTAssertTrue(metaTexts.contains(where: { $0.contains("OpenCode part: new-type") }), "Expected unknown OpenCode part type to be preserved as a meta event for JSON view")
     }
 
+    func testHermesUnwrapDelegateOutputDecodesDoubleEncodedSummary() {
+        let raw = #"{"results":[{"task_index":0,"status":"completed","summary":"{\"passed\":true,\"notes\":\"fine\"}","api_calls":4,"duration_seconds":12.0}]}"#
+        let out = HermesSessionParser.unwrapDelegateOutput(raw)
+        XCTAssertTrue(out.hasPrefix("Subtask 0 · completed · 12s · 4 API calls\n\n"), out)
+        XCTAssertTrue(out.contains("\"passed\" : true"), out)
+        XCTAssertFalse(out.contains("\\\""), "summary must be decoded, not left escaped: \(out)")
+        XCTAssertEqual(HermesSessionParser.unwrapDelegateOutput("plain text"), "plain text")
+    }
+
+    func testQwenToolResponseTextUnwrapsOutputEnvelope() {
+        XCTAssertEqual(QwenSessionParser.toolResponseText(["output": "# Report\n\nline"]), "# Report\n\nline")
+        XCTAssertEqual(QwenSessionParser.toolResponseText(["error": "boom"]), "boom")
+        XCTAssertEqual(QwenSessionParser.toolResponseText(["output": "x", "extra": 1])?.contains("extra"), true)
+    }
+
+    func testPiParentSessionIDStripsTimestampPrefix() {
+        let id = "019e19c9-1b2c-7d3e-8f4a-0123456789ab"
+        XCTAssertEqual(PiSessionParser.parentSessionID(from: "/x/2026-05-12T01-24-44-826Z_\(id).jsonl"), id)
+        XCTAssertEqual(PiSessionParser.parentSessionID(from: "/x/\(id).jsonl"), id)
+        XCTAssertEqual(PiSessionParser.parentSessionID(from: "/x/legacy_name.jsonl"), "legacy_name")
+        XCTAssertNil(PiSessionParser.parentSessionID(from: nil))
+    }
+
+    func testOpenCodeUnwrapTaskOutputStripsEnvelopeAndSurfacesChildSession() {
+        let raw = "<task id=\"ses_child1\" state=\"completed\">\n<task_result>\n# Audit\n\nline two\n</task_result>\n</task>"
+        let out = OpenCodeSessionParser.unwrapTaskOutput(raw, childSessionID: nil)
+        XCTAssertEqual(out, "Subagent session: ses_child1\n\n# Audit\n\nline two")
+
+        let legacy = "Answer body.\n\n<task_metadata>\nsession_id: ses_child2\n</task_metadata>"
+        XCTAssertEqual(OpenCodeSessionParser.unwrapTaskOutput(legacy, childSessionID: nil),
+                       "Subagent session: ses_child2\n\nAnswer body.")
+
+        let empty = "<task id=\"ses_x\" state=\"completed\">\n<task_result>\n</task_result>\n</task>"
+        XCTAssertEqual(OpenCodeSessionParser.unwrapTaskOutput(empty, childSessionID: "ses_meta"),
+                       "Subagent session: ses_meta\n(subagent returned no result)")
+
+        XCTAssertEqual(OpenCodeSessionParser.unwrapTaskOutput("plain", childSessionID: nil), "plain")
+    }
+
     func testOpenCodeToolExitCodeClassifiesErrorAndAppendsExitCode() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-OpenCode-Exit-\(UUID().uuidString)", isDirectory: true)
@@ -4938,8 +4979,14 @@ final class SessionParserTests: XCTestCase {
         guard let full = HermesStateDBReader.loadFullSession(dbURL: dbURL, sessionID: "hermes_sqlite_demo") else {
             return XCTFail("full Hermes state DB parse returned nil")
         }
-        XCTAssertEqual(full.eventCount, 4)
+        XCTAssertEqual(full.eventCount, 5)
         XCTAssertEqual(full.customTitle, "Hermes SQLite demo")
+        // delegate_task rows carry an empty tool_name on disk; the envelope must still be decoded.
+        let delegate = try XCTUnwrap(full.events.first { $0.kind == .tool_result && $0.messageID == "call_hermes_2" })
+        XCTAssertTrue((delegate.toolOutput ?? "").hasPrefix("Subtask 0 · completed · 23s · 4 API calls\n\n"), delegate.toolOutput ?? "nil")
+        XCTAssertTrue((delegate.toolOutput ?? "").contains("\"passed\" : true"), delegate.toolOutput ?? "nil")
+        XCTAssertEqual(HermesStateDBReader.sessionActivitySignature(dbURL: dbURL, sessionID: "hermes_sqlite_demo"), "5:1780000003.5")
+        XCTAssertEqual(HermesStateDBReader.sessionActivitySignature(dbURL: dbURL, sessionID: "missing"), "0:0.0")
         XCTAssertTrue(full.events.contains { $0.kind == .user && ($0.text ?? "").contains("Hello from Hermes SQLite") })
         XCTAssertTrue(full.events.contains { $0.kind == .assistant && ($0.text ?? "").contains("Running pwd.") })
         XCTAssertTrue(full.events.contains { $0.kind == .tool_call && $0.toolName == "shell" && $0.messageID == "call_hermes_1" })

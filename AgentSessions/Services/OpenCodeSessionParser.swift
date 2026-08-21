@@ -163,6 +163,54 @@ final class OpenCodeSessionParser {
     }
 
     /// Full parse of an OpenCode session, including all message events.
+    /// OpenCode wraps a subagent's final answer in an XML envelope
+    /// (`<task id=… state=…><task_result>…</task_result></task>` on current builds,
+    /// a trailing `<task_metadata>session_id: …</task_metadata>` on older ones).
+    /// Strip it so the transcript card shows the report itself, and surface the
+    /// child session id on the first line so the reader can find where the work happened.
+    static func unwrapTaskOutput(_ raw: String, childSessionID: String?) -> String {
+        var body = raw
+        var childID = childSessionID
+
+        if let open = body.range(of: "<task_result>"),
+           let close = body.range(of: "</task_result>", options: .backwards),
+           open.upperBound <= close.lowerBound {
+            if childID == nil,
+               let idRange = body.range(of: #"<task id="([^"]+)""#, options: .regularExpression) {
+                let attr = body[idRange]
+                if let q1 = attr.firstIndex(of: "\""), let q2 = attr.lastIndex(of: "\""), q1 < q2 {
+                    childID = String(attr[attr.index(after: q1)..<q2])
+                }
+            }
+            body = String(body[open.upperBound..<close.lowerBound])
+        }
+
+        if let metaOpen = body.range(of: "<task_metadata>"),
+           let metaClose = body.range(of: "</task_metadata>", options: .backwards),
+           metaOpen.upperBound <= metaClose.lowerBound {
+            let meta = body[metaOpen.upperBound..<metaClose.lowerBound]
+            if childID == nil,
+               let line = meta.split(separator: "\n").first(where: { $0.contains("session_id:") }),
+               let colon = line.firstIndex(of: ":") {
+                let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty { childID = value }
+            }
+            body.removeSubrange(metaOpen.lowerBound..<metaClose.upperBound)
+        }
+
+        // Truncated envelope (no closing tag): drop OpenCode's own "task_id: … (for resuming…)"
+        // preamble so it is not shown twice next to our header.
+        if body.hasPrefix("task_id: "), let newline = body.firstIndex(of: "\n") {
+            body = String(body[body.index(after: newline)...])
+        }
+        body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let header = childID.map { "Subagent session: \($0)" }
+        if body.isEmpty {
+            return [header, "(subagent returned no result)"].compactMap { $0 }.joined(separator: "\n")
+        }
+        return [header, body].compactMap { $0 }.joined(separator: "\n\n")
+    }
+
     static func parseFileFull(at url: URL) -> Session? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
@@ -530,7 +578,12 @@ final class OpenCodeSessionParser {
                 let state = obj["state"] as? [String: Any] ?? [:]
                 let status = (state["status"] as? String)?.lowercased()
                 let inputStr = stringifyJSON(state["input"])
-                let outputStr = stringifyJSON(state["output"]) ?? stringifyJSON(state["stdout"])
+                var outputStr = stringifyJSON(state["output"]) ?? stringifyJSON(state["stdout"])
+                if toolName?.lowercased() == "task", let raw = outputStr {
+                    let metadata = state["metadata"] as? [String: Any]
+                    let childID = (metadata?["sessionId"] as? String) ?? (metadata?["sessionID"] as? String)
+                    outputStr = unwrapTaskOutput(raw, childSessionID: childID)
+                }
                 let errorStr = stringifyJSON(state["error"]) ?? stringifyJSON(state["stderr"])
                 let exitCode: Int? = {
                     let metadata = state["metadata"] as? [String: Any]

@@ -223,6 +223,31 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Transcript UI
 
+### OpenCode parent sessions are unsearchable for their own subagent reports
+> **open** · sev: low · urg: low · verified 2026-08-21
+
+- **What:** an OpenCode `task` tool result carries the subagent's full report (8–12 KB
+  each; 7 of them in one Triada session). `SessionSearchTextBuilder.build` caps a
+  session's search text at 48 000 chars and walks events in order, so the parent's budget
+  is spent on prompts/reasoning/`read` output before the task outputs are reached. A search
+  for a phrase from the report hits only the child session, never the parent that
+  commissioned it.
+- **Where:** [SessionSearchTextBuilder.swift:164](../AgentSessions/Search/SessionSearchTextBuilder.swift)
+  (the cap); task outputs are already unwrapped at parse time by
+  `OpenCodeSessionParser.unwrapTaskOutput` (2026-08-21).
+- **Fix shape:** give `task` results priority inside the budget (emit them first, or
+  reserve a slice), or index them into `session_tool_io` for the parent.
+- **Note:** search ingest is keyed on file mtime/size with no parser-version stamp, so the
+  2026-08-21 unwrap fixes (OpenCode `task`, Qwen `{"output"}`, Hermes `delegate_task`)
+  improve search text only for sessions (re)indexed after the change.
+- **Why deferred:** recall gap only — the child session is searchable and nests under
+  the parent in the list. Decided 2026-08-21 with the task-envelope fix.
+- **Not doing:** exempting `task` cards from the 20-line "Show all" fold — one click,
+  consistent with every other tool card; not worth four edit sites in
+  `TranscriptBlockListView`.
+- **To close:** searching a phrase that appears only in a subagent's report matches the
+  parent session.
+
 ### MCP tool calls render anonymously though Codex now names the connector
 > **open** · sev: low · urg: low · verified 2026-08-17
 

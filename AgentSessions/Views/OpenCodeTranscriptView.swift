@@ -17,9 +17,11 @@ struct OpenCodeTranscriptView: View {
     }
 
     private func opencodeSessionID(for session: Session) -> String? {
-        // Use the session filename (ses_...) as the visible ID
+        // session.id is the OpenCode ses_... id under both the JSON and SQLite backends.
+        // Under SQLite every session shares filePath (opencode.db), so never derive from the path first.
+        if !session.id.isEmpty { return session.id }
         let base = URL(fileURLWithPath: session.filePath).deletingPathExtension().lastPathComponent
-        if base.count >= 8 { return base }
+        if base.count >= 8, base != "opencode" { return base }
         return nil
     }
 }

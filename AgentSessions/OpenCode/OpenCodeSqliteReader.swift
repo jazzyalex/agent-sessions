@@ -40,6 +40,27 @@ struct OpenCodeSqliteReader {
         return queryFullSession(db: db, sessionID: sessionID, dbPath: url.path)
     }
 
+    // MARK: - Freshness probe
+
+    /// Returns the session's `time_updated` without loading any parts. Used to decide
+    /// whether a hydrated transcript snapshot is stale while OpenCode is still writing.
+    static func sessionUpdatedAt(customRoot: String?, sessionID: String) -> Date? {
+        let url = OpenCodeBackendDetector.dbURL(customRoot: customRoot)
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT time_updated FROM session WHERE id = ? LIMIT 1;", -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, sessionID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let millis = sqlite3_column_int64(stmt, 0)
+        return millis > 0 ? Date(timeIntervalSince1970: Double(millis) / 1000.0) : nil
+    }
+
     // MARK: - Internal query helpers
 
     private static func querySessionList(db: OpaquePointer?, dbPath: String) -> [Session]? {

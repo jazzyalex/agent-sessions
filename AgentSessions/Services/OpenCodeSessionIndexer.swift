@@ -285,9 +285,21 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
 
             guard let existing = existingSnapshot else { return }
             let hasLoadedEvents = !existing.events.isEmpty
-            if hasLoadedEvents && !force { return }
 
             if capturedBackend == .sqlite {
+                // A hydrated snapshot is frozen at first open; OpenCode keeps appending parts
+                // while the session runs. Re-hydrate only when the DB row is newer than the
+                // snapshot (cheap single-row probe), so a live session does not stay stale
+                // until a manual refresh — and a monitor tick on an idle one stays free.
+                if hasLoadedEvents, reason != .manualRefresh {
+                    let updatedAt = OpenCodeSqliteReader.sessionUpdatedAt(customRoot: capturedCustomRoot, sessionID: id)
+                    let isNewer: Bool = {
+                        guard let updatedAt else { return false }
+                        guard let snapshotEnd = existing.endTime else { return true }
+                        return updatedAt > snapshotEnd
+                    }()
+                    if !isNewer { return }
+                }
                 // SQLite path: no file on disk, load from DB directly
                 let shouldSurfaceLoadingState = reason == .manualRefresh || !hasLoadedEvents
                 if shouldSurfaceLoadingState {
@@ -334,6 +346,7 @@ final class OpenCodeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
 
             // JSON path
+            if hasLoadedEvents && !force { return }
             guard FileManager.default.fileExists(atPath: existing.filePath) else { return }
 
             let url = URL(fileURLWithPath: existing.filePath)

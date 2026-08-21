@@ -431,7 +431,7 @@ enum QwenSessionParser {
                                     kind: toolResultIsError(record.object) ? .error : .tool_result,
                                     role: role ?? "tool", text: nil,
                                     toolName: response["name"] as? String,
-                                    toolOutput: jsonString(response["response"]),
+                                    toolOutput: toolResponseText(response["response"]),
                                     messageID: response["id"] as? String,
                                     rawJSON: rawJSON, parentID: record.parentUUID))
             }
@@ -545,6 +545,17 @@ enum QwenSessionParser {
         guard let result = object["toolCallResult"] as? [String: Any] else { return false }
         if result["error"] != nil, !(result["error"] is NSNull) { return true }
         return (result["status"] as? String)?.lowercased() == "error"
+    }
+
+    /// Qwen wraps every tool result as `{"output": "<text>"}` (or `{"error": …}`), including
+    /// the `agent` subagent's markdown report. Unwrap single-key envelopes so the transcript
+    /// shows the text rather than a JSON literal with escaped newlines.
+    static func toolResponseText(_ value: Any?) -> String? {
+        if let dict = value as? [String: Any], dict.count == 1 {
+            if let output = dict["output"] as? String { return output }
+            if let error = dict["error"] as? String { return error }
+        }
+        return jsonString(value)
     }
 
     private static func jsonString(_ value: Any?) -> String? {

@@ -272,8 +272,9 @@ final class CursorSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
             let hasLoadedEvents = !existing.events.isEmpty
             if hasLoadedEvents && !force { return }
 
-            // DB-only sessions have no transcript file to reload
-            guard FileManager.default.fileExists(atPath: existing.filePath) else { return }
+            // DB-only sessions (filePath = store.db) have no JSONL transcript to reload.
+            guard existing.filePath.lowercased().hasSuffix(".jsonl"),
+                  FileManager.default.fileExists(atPath: existing.filePath) else { return }
 
             let url = URL(fileURLWithPath: existing.filePath)
             let preParseStat = Self.fileStat(for: url)

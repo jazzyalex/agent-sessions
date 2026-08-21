@@ -39,6 +39,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    private var lastDBActivitySignatureBySessionID: [String: String] = [:]
     private(set) var searchIdentitySnapshot: SearchIngestService.IdentitySnapshot?
 
     init() {
@@ -231,14 +232,33 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                   FileManager.default.fileExists(atPath: existing.filePath) else { return }
 
             let hasLoadedEvents = !existing.events.isEmpty
-            if hasLoadedEvents && !force { return }
-
             let url = URL(fileURLWithPath: existing.filePath)
+            let isStateDB = url.pathExtension.lowercased() == "db"
+
+            // state.db is a shared WAL database: its file stat freezes between checkpoints,
+            // so dedupe on the session's message activity instead (OpenCode-style probe).
+            // Probe BEFORE parsing and remember that value: a message landing mid-parse then
+            // still differs from the stored signature and triggers the next re-hydrate.
+            let preParseSignature = isStateDB
+                ? HermesStateDBReader.sessionActivitySignature(dbURL: url, sessionID: id)
+                : nil
+            if isStateDB {
+                if hasLoadedEvents, reason != .manualRefresh {
+                    guard let preParseSignature else { return }
+                    self.reloadLock.lock()
+                    let last = self.lastDBActivitySignatureBySessionID[id]
+                    self.reloadLock.unlock()
+                    if preParseSignature == last { return }
+                }
+            } else {
+                if hasLoadedEvents && !force { return }
+            }
+
             let preParseStat = Self.fileStat(for: url)
             self.reloadLock.lock()
             let lastReloadStat = self.lastFullReloadFileStatsBySessionID[id]
             self.reloadLock.unlock()
-            if force, reason != .manualRefresh, hasLoadedEvents, let preParseStat, let lastReloadStat, preParseStat == lastReloadStat {
+            if !isStateDB, force, reason != .manualRefresh, hasLoadedEvents, let preParseStat, let lastReloadStat, preParseStat == lastReloadStat {
                 return
             }
 
@@ -255,6 +275,7 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                 : (HermesSessionParser.parseFileFull(at: url) ?? existing)
             self.reloadLock.lock()
             if let preParseStat { self.lastFullReloadFileStatsBySessionID[id] = preParseStat }
+            if isStateDB { self.lastDBActivitySignatureBySessionID[id] = preParseSignature }
             self.reloadLock.unlock()
 
             Task { @MainActor [weak self] in

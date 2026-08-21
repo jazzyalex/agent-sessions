@@ -1440,6 +1440,11 @@ struct UnifiedSessionsView: View {
         if session.source == .antigravity {
             return AntigravitySessionIDHelper.deriveSessionID(from: session)
         }
+        if session.source == .openclaw, session.id.hasPrefix("openclaw:") {
+            // Internal key is "openclaw:<agent>:<uuid>"; the OpenClaw session id is the uuid.
+            let parts = session.id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            if parts.count == 3 { return nonEmptySessionID(String(parts[2])) }
+        }
         return nonEmptySessionID(session.id)
     }
 

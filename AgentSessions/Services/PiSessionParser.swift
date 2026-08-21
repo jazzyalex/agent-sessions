@@ -675,9 +675,16 @@ final class PiSessionParser {
         return URL(fileURLWithPath: path).lastPathComponent
     }
 
-    private static func parentSessionID(from path: String?) -> String? {
+    static func parentSessionID(from path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
-        return URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        // Files are named "<ISO timestamp>_<session uuid>"; Session.id is the bare uuid,
+        // so strip the timestamp prefix or the child never nests under its parent.
+        if let underscore = base.lastIndex(of: "_") {
+            let tail = String(base[base.index(after: underscore)...])
+            if UUID(uuidString: tail) != nil { return tail }
+        }
+        return base
     }
 
     private static func fileSize(at url: URL) -> Int? {

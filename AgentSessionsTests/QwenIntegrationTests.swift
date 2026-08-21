@@ -86,7 +86,7 @@ final class QwenIntegrationTests: XCTestCase {
         let result = try XCTUnwrap(session.events.first(where: { $0.kind == .tool_result }))
         XCTAssertEqual(result.toolName, "read_file")
         XCTAssertEqual(result.messageID, "synthetic-call-1")
-        XCTAssertEqual(result.toolOutput, #"{"output":"Synthetic file contents."}"#)
+        XCTAssertEqual(result.toolOutput, "Synthetic file contents.")
         XCTAssertTrue(session.hasToolCallEvent)
         XCTAssertTrue(UnifiedSessionIndexer.passesHasCommandsFilter(session))
     }

@@ -1262,7 +1262,20 @@ final class UnifiedSessionIndexer: ObservableObject {
         let url = URL(fileURLWithPath: path)
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
         guard values?.isRegularFile == true else { return nil }
-        return FileSignature(path: path, modifiedAt: values?.contentModificationDate ?? .distantPast)
+        var modifiedAt = values?.contentModificationDate ?? .distantPast
+        // SQLite in WAL mode (OpenCode, Hermes, Cursor) appends to `-wal` and only touches
+        // the main db file on checkpoint, so its mtime can lag live writes by minutes.
+        // Fold the sidecars in so a live DB-backed session still trips the monitor.
+        if url.pathExtension.lowercased() == "db" {
+            for suffix in ["-wal", "-shm"] {
+                let sidecar = URL(fileURLWithPath: path + suffix)
+                if let date = (try? sidecar.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                   date > modifiedAt {
+                    modifiedAt = date
+                }
+            }
+        }
+        return FileSignature(path: path, modifiedAt: modifiedAt)
     }
 
     private func detectLatestClaudeSignature() -> FileSignature? {
