@@ -412,6 +412,14 @@ def _run_weekly(tmp_path, monkeypatch, cfg_path, report_root, *, cask="1.0.3", c
         lambda _cfg: (["grok", "--version"], 0, "grok 1.0.3 (abc)", "", "1.0.3"),
     )
     monkeypatch.setattr(agent_watch, "_resolve_cli_binary_mtime", lambda _argv: ("/tmp/fake-grok", None))
+    # Pin the verified version instead of reading the live matrix. agent_watch reads
+    # docs/agent-support/agent-support-matrix.yml from a hardcoded path, so without this
+    # every real grok bump silently rewrites these tests' inputs: bumping grok_cli to
+    # 1.0.5 on 2026-08-21 made `upstream_newer_than_verified` False and failed the
+    # cask-lag test, which simulates upstream 1.0.5 against a verified 1.0.3.
+    # Keyed by MATRIX key (grok_cli), not the config agent name — agent_watch maps
+    # agent -> matrix key when it builds verified_map.
+    monkeypatch.setattr(agent_watch, "_read_verified_versions_from_matrix", lambda _path: {"grok_cli": "1.0.3"})
     monkeypatch.setattr(
         agent_watch,
         "_fetch_upstream",
