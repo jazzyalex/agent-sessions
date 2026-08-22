@@ -163,4 +163,85 @@ final class DevinSqliteReaderTests: XCTestCase {
     func testMissingDatabaseYieldsEmptyList() {
         XCTAssertTrue(DevinSqliteReader.listSessions(databasePath: "/tmp/definitely-not-here.db").isEmpty)
     }
+
+    // MARK: - The nil-versus-empty contract
+
+    /// `nil` and `[]` are different answers and search ingest treats them
+    /// differently: only a clean read may retire identities. Every other test
+    /// here goes through `listSessions`, which collapses the two, so these are
+    /// the only ones pinning the distinction.
+    func testUnreadableDatabaseIsNilNotEmpty() {
+        XCTAssertNil(DevinSqliteReader.listSessionsIfReadable(databasePath: "/tmp/definitely-not-here.db"))
+    }
+
+    func testReadableButEmptyDatabaseIsEmptyNotNil() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("devin-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("sessions.db").path
+
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else { throw NSError(domain: "fixture", code: 2) }
+        try exec(db, """
+            CREATE TABLE sessions (
+              id TEXT PRIMARY KEY, working_directory TEXT NOT NULL, backend_type TEXT NOT NULL,
+              model TEXT NOT NULL, agent_mode TEXT NOT NULL, created_at INTEGER NOT NULL,
+              last_activity_at INTEGER NOT NULL, title TEXT, main_chain_id INTEGER,
+              hidden INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE message_nodes (
+              row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+              node_id INTEGER NOT NULL, parent_node_id INTEGER, chat_message TEXT NOT NULL,
+              created_at INTEGER NOT NULL, metadata TEXT, UNIQUE(session_id, node_id));
+            """)
+        sqlite3_close(db)
+
+        let result = DevinSqliteReader.listSessionsIfReadable(databasePath: path)
+        XCTAssertNotNil(result, "an empty store read cleanly is [] — nil would mean the read failed")
+        XCTAssertEqual(result?.count, 0)
+    }
+
+    // MARK: - Cycle safety
+
+    /// `message_nodes` is a forest and nothing in the schema forbids a cycle, so
+    /// both recursive CTEs carry a depth bound. Without it these calls spin
+    /// `sqlite3_step` forever — this test hangs rather than fails if the bound
+    /// is ever removed, which is why it runs against a deliberately cyclic store.
+    func testCyclicParentChainTerminates() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("devin-cycle-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("sessions.db").path
+
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else { throw NSError(domain: "fixture", code: 2) }
+        try exec(db, """
+            CREATE TABLE sessions (
+              id TEXT PRIMARY KEY, working_directory TEXT NOT NULL, backend_type TEXT NOT NULL,
+              model TEXT NOT NULL, agent_mode TEXT NOT NULL, created_at INTEGER NOT NULL,
+              last_activity_at INTEGER NOT NULL, title TEXT, main_chain_id INTEGER,
+              hidden INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE message_nodes (
+              row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+              node_id INTEGER NOT NULL, parent_node_id INTEGER, chat_message TEXT NOT NULL,
+              created_at INTEGER NOT NULL, metadata TEXT, UNIQUE(session_id, node_id));
+            INSERT INTO sessions VALUES
+              ('loop-session', '/tmp/x', 'Windsurf', 'swe-1-7', 'bypass', 1, 2, 'Looping', 2, 0);
+            """)
+        // 1 <-> 2: walking parents from the tip never reaches a root.
+        try exec(db, """
+            INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES
+              ('loop-session', 1, 2, '{"role":"user","content":"a"}', 1),
+              ('loop-session', 2, 1, '{"role":"assistant","content":"b"}', 2);
+            """)
+        sqlite3_close(db)
+
+        // Both entry points walk the chain; neither may hang.
+        let listed = DevinSqliteReader.listSessionsIfReadable(databasePath: path)
+        XCTAssertEqual(listed?.count, 1)
+
+        let full = DevinSqliteReader.loadFullSession(databasePath: path, sessionID: "loop-session")
+        XCTAssertNotNil(full)
+    }
 }

@@ -15,14 +15,34 @@ import SQLite3
 /// and render that chain in root-to-tip order.
 enum DevinSqliteReader {
     /// Opened read-only and without a mutex: the CLI may hold the same file open.
+    ///
+    /// The busy timeout matters more here than for a file-per-session source. This
+    /// database is written by the live CLI, and a `SQLITE_BUSY` partway through the
+    /// session scan is not a harmless retry-later: it ends the read early, and the
+    /// caller has no way to tell a short database from a short read. Waiting briefly
+    /// turns almost every contended read into a successful one; the terminal-status
+    /// check in `listSessionsIfReadable` catches the rest.
     private static func open(_ path: String) -> OpaquePointer? {
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(db)
             return nil
         }
+        sqlite3_busy_timeout(db, 2_000)
         return db
     }
+
+    /// Upper bound on a `parent_node_id` walk.
+    ///
+    /// `message_nodes` is a forest and nothing in the schema forbids a cycle, so a
+    /// recursive CTE walking parents has no natural terminator on corrupt or
+    /// rewound data — it spins `sqlite3_step` forever at 100% CPU, and for the
+    /// all-sessions count query one bad row would wedge the whole refresh. The
+    /// survey behind this reader saw 49,891 main-chain nodes across 253 sessions, so
+    /// this bound is two orders of magnitude above any real conversation while still
+    /// terminating a loop in well under a second. `scripts/devin_sessions_schema_probe.py`
+    /// guards its own walk with a visited set for the same reason.
+    private static let maxChainDepth = 50_000
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -57,7 +77,8 @@ enum DevinSqliteReader {
         defer { sqlite3_finalize(stmt) }
 
         var sessions: [Session] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             let id = text(stmt, 0)
             guard !id.isEmpty else { continue }
             let title = text(stmt, 1)
@@ -78,7 +99,15 @@ enum DevinSqliteReader {
                                         eventCount: chainCounts[id] ?? 0,
                                         events: [],
                                         databasePath: databasePath))
+            step = sqlite3_step(stmt)
         }
+        // A lock or IO error ends the loop exactly like SQLITE_DONE, and the rows
+        // read so far are indistinguishable from a complete answer. Returning them
+        // would be reported as a clean read, and search reconciliation retires every
+        // identity missing from a clean read — so a contended database would delete
+        // the corpus it could not finish listing. Same guard as
+        // OpenCodeSqliteReader and HermesStateDBReader.
+        guard step == SQLITE_DONE else { return nil }
         return sessions
     }
 
@@ -95,15 +124,16 @@ enum DevinSqliteReader {
     /// roughly eightfold.
     private static func mainChainCounts(db: OpaquePointer?) -> [String: Int] {
         let sql = """
-            WITH RECURSIVE chain(session_id, node_id, parent_node_id) AS (
-                SELECT s.id, m.node_id, m.parent_node_id
+            WITH RECURSIVE chain(session_id, node_id, parent_node_id, depth) AS (
+                SELECT s.id, m.node_id, m.parent_node_id, 0
                 FROM sessions s
                 JOIN message_nodes m ON m.session_id = s.id AND m.node_id = s.main_chain_id
                 WHERE s.hidden = 0
               UNION ALL
-                SELECT c.session_id, m.node_id, m.parent_node_id
+                SELECT c.session_id, m.node_id, m.parent_node_id, c.depth + 1
                 FROM chain c
                 JOIN message_nodes m ON m.session_id = c.session_id AND m.node_id = c.parent_node_id
+                WHERE c.depth < \(maxChainDepth)
             )
             SELECT session_id, COUNT(*) FROM chain GROUP BY session_id;
             """
@@ -160,15 +190,16 @@ enum DevinSqliteReader {
     /// Walks `main_chain_id` back to its root, then renders root-to-tip.
     private static func mainChainEvents(db: OpaquePointer?, sessionID: String, mainChainID: Int64) -> [SessionEvent] {
         let sql = """
-            WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at) AS (
-                SELECT node_id, parent_node_id, chat_message, created_at
+            WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at, depth) AS (
+                SELECT node_id, parent_node_id, chat_message, created_at, 0
                 FROM message_nodes WHERE session_id = ?1 AND node_id = ?2
               UNION ALL
-                SELECT m.node_id, m.parent_node_id, m.chat_message, m.created_at
+                SELECT m.node_id, m.parent_node_id, m.chat_message, m.created_at, c.depth + 1
                 FROM chain c
                 JOIN message_nodes m ON m.session_id = ?1 AND m.node_id = c.parent_node_id
+                WHERE c.depth < \(maxChainDepth)
             )
-            SELECT node_id, chat_message, created_at FROM chain;
+            SELECT node_id, chat_message, created_at FROM chain ORDER BY depth DESC;
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
@@ -176,12 +207,15 @@ enum DevinSqliteReader {
         sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1, transient)
         sqlite3_bind_int64(stmt, 2, mainChainID)
 
-        // The recursion yields tip-first; collect then reverse into reading order.
+        // The recursion walks tip-to-root, so `depth` counts backwards through the
+        // conversation and `ORDER BY depth DESC` is reading order. Sorting in SQL
+        // rather than reversing the array afterwards means the order is a property
+        // of the query instead of an assumption about CTE emission order, which is
+        // not guaranteed and broke on duplicate `node_id` rows.
         var rows: [(nodeID: Int64, json: String, createdAt: Int64)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             rows.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), sqlite3_column_int64(stmt, 2)))
         }
-        rows.reverse()
 
         var events: [SessionEvent] = []
         for row in rows {
