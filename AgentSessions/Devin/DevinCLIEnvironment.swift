@@ -12,6 +12,13 @@ protocol DevinCLIEnvironmentProviding {
 ///     -r, --resume [<SESSION_ID>]
 ///                          Resume a conversation. With an ID, resume that
 ///                          session; without one, pick interactively.
+///
+/// Everything here runs through `CLIProbeEnvironment`, the shared helper the
+/// other CLI-backed sources use. This file originally hand-rolled its own
+/// process handling and reinherited every defect that helper exists to prevent:
+/// no PATH widening for a `#!/usr/bin/env node` install, a login shell spawned
+/// first and uncached, banners mistaken for binary paths, and — worst — a probe
+/// that could not execute the CLI reported as a CLI that supports nothing.
 struct DevinCLIEnvironment: DevinCLIEnvironmentProviding {
     static let binaryName = "devin"
 
@@ -30,136 +37,104 @@ struct DevinCLIEnvironment: DevinCLIEnvironmentProviding {
             switch self {
             case .binaryNotFound:
                 return "Devin CLI executable not found."
-            case let .commandFailed(stderr):
-                return stderr.isEmpty ? "Failed to execute devin --version." : stderr
+            case let .commandFailed(detail):
+                return detail.isEmpty ? "Failed to execute devin --version." : detail
             }
         }
     }
 
-    private let executor: CommandExecuting
+    /// Every command this type runs goes through the probe environment, which
+    /// owns both the executor and the decision of when to widen PATH.
+    private let probeEnv: CLIProbeEnvironment
 
     init(executor: CommandExecuting = ProcessCommandExecutor()) {
-        self.executor = executor
+        self.probeEnv = CLIProbeEnvironment(executor: executor, commandName: Self.binaryName)
     }
 
     func resolveBinary(customPath: String?) -> URL? {
         if let customPath, !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let expanded = (customPath as NSString).expandingTildeInPath
-            let url = URL(fileURLWithPath: expanded)
+            let url = URL(fileURLWithPath: (customPath as NSString).expandingTildeInPath)
             return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
         }
 
-        let loginShellCandidates = [whichViaLoginShell(Self.binaryName)].compactMap { $0 }
-        if let url = bestDevinCLI(from: loginShellCandidates) {
-            return url
-        }
-
-        let pathCandidates = [which(Self.binaryName)].compactMap { $0 }
-        if let url = bestDevinCLI(from: pathCandidates) {
-            return url
-        }
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = [
+        let candidates: [String] = [
+            CLIProbeEnvironment.which(Self.binaryName),
             "\(home)/.local/share/devin/cli/\(Self.binaryName)",
             "\(home)/.local/bin/\(Self.binaryName)",
             "\(home)/.npm-global/bin/\(Self.binaryName)",
             "/opt/homebrew/bin/\(Self.binaryName)",
             "/usr/local/bin/\(Self.binaryName)"
-        ]
+        ].compactMap { $0 }
 
-        return bestDevinCLI(from: candidates)
+        var firstExecutable: URL?
+        var seen: Set<String> = []
+        func consider(_ path: String) -> URL? {
+            guard seen.insert(path).inserted else { return nil }
+            guard FileManager.default.isExecutableFile(atPath: path) else { return nil }
+            let url = URL(fileURLWithPath: path)
+            if firstExecutable == nil { firstExecutable = url }
+            return supportsResumeFlags(binary: url) ? url : nil
+        }
+
+        for path in candidates {
+            if let verified = consider(path) { return verified }
+        }
+
+        // The login shell is asked last and only if needed: it costs a shell
+        // spawn, and every location above is free to check. Its answer still
+        // outranks an unverified hit from that list.
+        if let late = probeEnv.loginShellExecutablePath() {
+            if let verified = consider(late) { return verified }
+            if FileManager.default.isExecutableFile(atPath: late) {
+                return URL(fileURLWithPath: late)
+            }
+        }
+        return firstExecutable
     }
 
     func probe(customPath: String?) -> Result<ProbeResult, ProbeError> {
         guard let binary = resolveBinary(customPath: customPath) else {
             return .failure(.binaryNotFound)
         }
-
         do {
-            let versionRes = try executor.run([binary.path, "--version"], cwd: nil)
-            let versionString: String
-            if versionRes.exitCode == 0 {
-                let combined = [versionRes.stdout, versionRes.stderr]
-                    .joined(separator: "\n")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                versionString = combined.isEmpty ? "unknown" : combined
-            } else {
-                versionString = "unknown"
+            let version = try probeEnv.run(binary, "--version")
+            let combined = [version.stdout, version.stderr]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let help = try? probeEnv.run(binary, "--help")
+            let helpText = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
+
+            let supportsResume = CLIProbeEnvironment.helpAdvertises("--resume", in: helpText)
+            let supportsContinue = CLIProbeEnvironment.helpAdvertises("--continue", in: helpText)
+
+            // A probe that never ran is not evidence that Devin lacks resume
+            // flags. A Devin that actually ran exits 0 for at least one of
+            // --version/--help, or prints a flag we recognise; anything else
+            // means we learned nothing, and calling that "supports nothing"
+            // silently disables every resume action — the #58 defect.
+            let learnedNothing = !supportsResume && !supportsContinue
+            if let reason = CLIProbeEnvironment.probeFailureReason(version: version,
+                                                                   help: help,
+                                                                   learnedNothing: learnedNothing) {
+                return .failure(.commandFailed(reason))
             }
 
-            let helpRes = try? executor.run([binary.path, "--help"], cwd: nil)
-            let helpOut = [helpRes?.stdout, helpRes?.stderr]
-                .compactMap { $0 }
-                .joined(separator: "\n")
-
-            return .success(
-                ProbeResult(
-                    versionString: versionString,
-                    binaryURL: binary,
-                    supportsResume: helpContainsFlag("--resume", in: helpOut),
-                    supportsContinue: helpContainsFlag("--continue", in: helpOut)
-                )
-            )
+            return .success(ProbeResult(
+                versionString: version.exitCode == 0 && !combined.isEmpty ? combined : "unknown",
+                binaryURL: binary,
+                supportsResume: supportsResume,
+                supportsContinue: supportsContinue
+            ))
         } catch {
             return .failure(.commandFailed(error.localizedDescription))
         }
     }
 
-    private func which(_ command: String) -> String? {
-        guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
-        for component in path.split(separator: ":") {
-            let candidate = URL(fileURLWithPath: String(component)).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate.path }
-        }
-        return nil
-    }
-
-    private func whichViaLoginShell(_ command: String) -> String? {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        do {
-            let result = try executor.run([shell, "-lic", "command -v \(command) || true"], cwd: nil)
-            let res = [result.stdout, result.stderr].joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !res.isEmpty, res != command else { return nil }
-            return res.split(whereSeparator: { $0.isNewline }).first.map(String.init)
-        } catch {
-            return nil
-        }
-    }
-
-    private func bestDevinCLI(from paths: [String]) -> URL? {
-        var firstExecutable: URL?
-        var seen = Set<String>()
-
-        for path in paths {
-            guard seen.insert(path).inserted else { continue }
-            guard FileManager.default.isExecutableFile(atPath: path) else { continue }
-            let url = URL(fileURLWithPath: path)
-            if firstExecutable == nil {
-                firstExecutable = url
-            }
-            if supportsResumeFlags(binary: url) {
-                return url
-            }
-        }
-
-        return firstExecutable
-    }
-
     private func supportsResumeFlags(binary: URL) -> Bool {
-        let help = try? executor.run([binary.path, "--help"], cwd: nil)
-        let helpOut = [help?.stdout, help?.stderr]
-            .compactMap { $0 }
-            .joined(separator: "\n")
-        return helpContainsFlag("--resume", in: helpOut)
-            || helpContainsFlag("--continue", in: helpOut)
-    }
-
-    private func helpContainsFlag(_ flag: String, in help: String) -> Bool {
-        help.split { character in
-            character.isWhitespace || ",=[](){}<>:;".contains(character)
-        }
-        .contains { $0 == flag }
+        let help = try? probeEnv.run(binary, "--help")
+        let output = [help?.stdout, help?.stderr].compactMap { $0 }.joined(separator: "\n")
+        return CLIProbeEnvironment.helpAdvertises("--resume", in: output)
+            || CLIProbeEnvironment.helpAdvertises("--continue", in: output)
     }
 }
