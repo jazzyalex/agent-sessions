@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ## [5.0.2] - 2026-08-21
 
+### Features
+- **Agent Sessions can now ask you to look after an agent nobody checks.** Most supported agents have no steward, so when one changes its transcript format there is nobody to notice, and the drift sits there. If your own history shows you actually use one of them, the session list offers a signup with the agent already filled in. Qwen Code comes first — its free tier was withdrawn, so no current Qwen transcript can be captured here at all. Once you've seen the ask it goes quiet until the next release, stops for good after three, and never appears on a fresh install. Nothing about your sessions leaves the Mac: the agent's name is all that travels.
+
+### Bug Fixes
+- **The "Help add your agent" card stays readable in a narrow window.** Its buttons took a fixed width, so everything the window lost came out of the text — and at the session list's narrowest, words broke across lines mid-word. The buttons now drop underneath the text instead of squeezing it.
+
 ## [5.0.1] - 2026-08-18
 
 ### Bug Fixes
