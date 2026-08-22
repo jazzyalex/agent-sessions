@@ -13,7 +13,11 @@ enum OnboardingPresentation: Equatable {
 final class OnboardingCoordinator: ObservableObject {
     /// The public repository the star ask points at. Held here so the card, the
     /// menu item, and the tests can never drift onto different URLs.
-    static let githubRepositoryURL = URL(string: "https://github.com/jazzyalex/agent-sessions")!
+    ///
+    /// `nonisolated` so the `nonisolated` URL builders below can read it: it is
+    /// an immutable `let` of a `Sendable` type, so the enclosing `@MainActor`
+    /// buys it nothing and only makes it an error to read off the main actor.
+    nonisolated static let githubRepositoryURL = URL(string: "https://github.com/jazzyalex/agent-sessions")!
 
     /// How long "Maybe later" silences the star ask before its single retry.
     static let starAskSnoozeInterval: TimeInterval = 14 * 86_400
