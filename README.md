@@ -25,7 +25,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.1/AgentSessions-5.0.1.dmg"><b>Download Agent Sessions 5.0.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.2/AgentSessions-5.0.2.dmg"><b>Download Agent Sessions 5.0.2 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -203,7 +203,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-5.0.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.1/AgentSessions-5.0.1.dmg)
+1. [Download AgentSessions-5.0.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.2/AgentSessions-5.0.2.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew

@@ -4,13 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [5.0.2] - 2026-08-21
-
-### Features
-- **Agent Sessions can now ask you to look after an agent nobody checks.** Most supported agents have no steward, so when one changes its transcript format there is nobody to notice, and the drift sits there. If your own history shows you actually use one of them, the session list offers a signup with the agent already filled in. Qwen Code comes first — its free tier was withdrawn, so no current Qwen transcript can be captured here at all. Once you've seen the ask it goes quiet until the next release, stops for good after three, and never appears on a fresh install. Nothing about your sessions leaves the Mac: the agent's name is all that travels.
+## [5.0.2] - 2026-08-22
 
 ### Bug Fixes
-- **The "Help add your agent" card stays readable in a narrow window.** Its buttons took a fixed width, so everything the window lost came out of the text — and at the session list's narrowest, words broke across lines mid-word. The buttons now drop underneath the text instead of squeezing it.
+- **OpenCode and Copilot sessions carry their own ID again.** OpenCode moved to a single shared `opencode.db`, and the transcript toolbar still read the ID off the file path — so every OpenCode session called itself "code" and Copy Session ID handed you `opencode`. Both now read the session's own id.
+- **A live OpenCode or Hermes session keeps growing while you watch it.** Their freshness check looked at the database file's timestamp, but SQLite writes land in the `-wal` sidecar first, so a transcript you had open froze at whatever it held when you selected it. Cursor was checked the same way.
+- **Subagent reports read as text, not as an envelope.** An OpenCode `task`, a Hermes `delegate_task` and a Qwen tool result each arrive wrapped — raw `<task_result>` XML or a one-key JSON blob — and the transcript rendered the wrapper. The report itself is shown now, with the child session's id on the OpenCode card. Sessions indexed before this update pick it up when they are next re-read.
+- **Copy Session ID on an OpenClaw session pastes the id.** It came with the `openclaw:<agent>:` prefix Agent Sessions uses to keep its agents apart, which nothing outside the app accepts.
+- **Pi subagent runs nest under the session that spawned them.** Pi records the parent id with the transcript filename's timestamp still on the front, so the match never landed and subagents sat at the top level.
+
+### Improvements
+- **Cursor stops re-reading its database on every refresh.** Sessions that live only in `store.db` were being run through the JSONL transcript parser on each pass, which could never find anything there.
+
+<!-- Headings the release-note generator does not recognise are dropped from the
+     Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py).
+     Entries below are development history, deliberately unannounced. -->
+### Maintenance
+- The session list can ask a long-time user to steward an agent that has no one watching its format, prefilled with an agent their own history shows they run. Same spent-once lifecycle as the other asks in that slot: quiet until the next release, retired after three rounds, never on a fresh install, and only the agent's name ever leaves the Mac. The card's buttons also stopped squeezing its text at the narrowest window width, and a DEBUG-only launch argument (`-AgentSessionsDebugTopSlotCard`) forces one of these cards on screen so it can be reviewed without hand-editing UserDefaults.
+- `SessionArchiveManager.pin` and the pinned-session sync loop now honour a source that declares `archive: nil`, which previously only gated the two backfill resolvers — a shared-database source would have had its whole store copied per starred session. Inert for all thirteen shipping sources; found while reviewing PR #56.
+- Weekly format sweep for 2026-08-21: five drifts closed, seven agent versions bumped, the Grok version tests decoupled from the live matrix, and Gemini CLI dropped from the format-check tooling.
 
 ## [5.0.1] - 2026-08-18
 
