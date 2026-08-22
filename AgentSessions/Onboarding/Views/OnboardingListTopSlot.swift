@@ -32,6 +32,9 @@ struct OnboardingListTopSlot: View {
     /// changes the card's height, and the width being measured comes from the
     /// pane above and never from the card.
     @State private var paneWidth: CGFloat = 0
+    /// Lets the ✕ on a forced card actually dismiss it, so the override can be
+    /// clicked through like the real thing instead of being pinned on screen.
+    @State private var debugCardDismissed = false
 
     private var palette: OnboardingPalette { OnboardingPalette(colorScheme: colorScheme) }
 
@@ -52,7 +55,13 @@ struct OnboardingListTopSlot: View {
 
     var body: some View {
         Group {
-            if let version = coordinator.whatsNewMajorMinor {
+            // Ahead of the whole chain on purpose: the point of the override is
+            // to see one card regardless of what would otherwise hold the slot.
+            if let override = TopSlotDebugOverride.current, !debugCardDismissed {
+                debugCard(override)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            } else if let version = coordinator.whatsNewMajorMinor {
                 WhatsNewCard(
                     palette: palette,
                     majorMinor: version,
@@ -162,6 +171,72 @@ struct OnboardingListTopSlot: View {
     private func openStewardGuide() {
         guard NSWorkspace.shared.open(OnboardingCoordinator.stewardGuideURL) else { return }
         coordinator.recordStewardGuideOpened()
+    }
+
+    /// A forced card, wired to the real destinations but to none of the ask
+    /// lifecycles. The links open exactly what they open in production — worth
+    /// clicking, since that is the only way to see the prefilled signup form —
+    /// while nothing here records an impression, spends a round, or dismisses an
+    /// ask forever. Looking at a card must not cost the user the real one.
+    @ViewBuilder
+    private func debugCard(_ override: TopSlotDebugOverride) -> some View {
+        switch override {
+        case let .steward(agent):
+            StewardCard(
+                palette: palette,
+                agent: agent,
+                onSignUp: { _ = NSWorkspace.shared.open(OnboardingCoordinator.stewardSignupURL(for: agent)) },
+                onLearnMore: { _ = NSWorkspace.shared.open(OnboardingCoordinator.stewardGuideURL) },
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
+            )
+        case .contribute:
+            ContributeCard(
+                palette: palette,
+                onOpen: { _ = NSWorkspace.shared.open(OnboardingCoordinator.contributeAgentSourceURL) },
+                onLearnMore: { _ = NSWorkspace.shared.open(OnboardingCoordinator.contributeGuideURL) },
+                onSnooze: { debugCardDismissed = true },
+                onDismiss: { debugCardDismissed = true },
+                paneWidth: paneWidth
+            )
+        }
+    }
+}
+
+/// Forces one top-slot card on screen so it can be looked at in a running app.
+///
+/// The asks this slot holds are all gated behind weeks of retention and a
+/// spent-once lifecycle, so there is no way to reach most of them by hand — the
+/// steward card additionally needs sessions of an unstewarded agent in the
+/// index. Rather than hand-editing `UserDefaults` into a state that then sticks,
+/// pass the card as a launch argument, which lands in the volatile argument
+/// domain and leaves nothing behind when the app quits:
+///
+/// ```
+/// open <built>.app --args -AgentSessionsDebugTopSlotCard qwen
+/// ```
+///
+/// Accepts any `SessionSource` raw value listed in
+/// `StewardAskEligibility.stewardlessAgents` (`qwen`, `grok`, `cursor`, …) or
+/// `contribute`. Debug builds only: `current` is a compile-time nil elsewhere,
+/// so no release build can be argued into showing a card it has not earned.
+enum TopSlotDebugOverride {
+    case steward(StewardAgent)
+    case contribute
+
+    static let defaultsKey = "AgentSessionsDebugTopSlotCard"
+
+    static var current: TopSlotDebugOverride? {
+        #if DEBUG
+        guard let raw = UserDefaults.standard.string(forKey: defaultsKey) else { return nil }
+        if raw == "contribute" { return .contribute }
+        guard let source = SessionSource(rawValue: raw),
+              let agent = StewardAskEligibility.stewardlessAgents.first(where: { $0.source == source })
+        else { return nil }
+        return .steward(agent)
+        #else
+        nil
+        #endif
     }
 }
 
