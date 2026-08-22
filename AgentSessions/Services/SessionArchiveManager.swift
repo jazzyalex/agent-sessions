@@ -112,6 +112,15 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     }
 
     func pin(session: Session) {
+        // A source that declines archiving (`archive == nil`, SPEC §4) has nothing
+        // per-session to copy out, so there is nothing to pin. This gate is not
+        // cosmetic: for a shared-database source every session reports the same
+        // `filePath`, so without it `ensureSynced` copies the entire store once per
+        // starred session — gigabytes for devin — and re-copies it whenever the live
+        // CLI moves the file's stat. Starring itself is unaffected; `toggleFavorite`
+        // records it via `favorites.toggle` before this call.
+        guard SessionSourceRegistry.descriptor(for: session.source).archive != nil else { return }
+
         let k = key(source: session.source, id: session.id)
         // Update UI immediately, but move all file IO/logging off the main thread.
         let placeholder = SessionArchiveInfo(
@@ -328,6 +337,11 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
         guard pinsEnabled else { return }
         let store = StarredSessionsStore()
         for source in SessionSource.allCases {
+            // The `pin` gate alone is not enough. Starring writes the id to
+            // `StarredSessionsStore` before `pin` is ever called, so this loop would
+            // find it here with no archive info and take the backfill branch below,
+            // copying the upstream anyway one launch later. Skip the whole source.
+            guard SessionSourceRegistry.descriptor(for: source).archive != nil else { continue }
             let pinned = store.pinnedIDs(for: source)
             guard !pinned.isEmpty else { continue }
             var fallbackURLs: [String: URL]? = nil

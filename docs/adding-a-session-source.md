@@ -23,6 +23,7 @@ lives mostly inside your own folder. On top of it you owe eight baseline things:
 2. **Source-local fixtures and tests** — at minimum positive and malformed-or-unsupported
    discovery / parser coverage, plus settings and resume eligibility tests when those capabilities
    exist. Synthetic fixtures belong under `Resources/Fixtures/stage0/agents/<source>/`.
+   A single-SQLite-file source may build its schema in-test instead — see the carve-out in §5.
 3. **The `SessionSource` case** and its four metadata arms in
    [`SessionSource.swift`](../AgentSessions/Model/SessionSource.swift).
 4. **One line** in `SessionSourceRegistry.ordered`.
@@ -369,8 +370,27 @@ the same generation, so **Rebuild Core Index** cannot purge unchanged files and 
 re-ingesting them. Keep this transaction/generation invariant when adding another rebuild
 or destructive maintenance path.
 
-`archive: nil` means the source does not participate in pin/archive backfill. Current
-sources supply an `ArchiveCapability`; a new database-only source may decline it.
+`archive: nil` means the source participates in neither pin/archive backfill **nor pinning
+itself** — `SessionArchiveManager.pin` returns early for it. Current sources supply an
+`ArchiveCapability`; a new database-only source may decline it.
+
+That gate was added on 2026-08-21, after the devin review found the two halves had drifted
+apart: `archive` was consulted only by the two backfill resolvers, so a declining source still
+went through `pin` → `ensureSynced`, which single-file-copies `upstreamPath`. For a source
+whose sessions all report the same shared-database path that meant copying the whole store
+once per starred session, re-copied whenever the live CLI moved its stat. If you are reading
+this because you declined `archive`, starring still works — `toggleFavorite` records it
+before `pin` is reached — you simply get no filesystem archive, which is what the field means.
+
+**Fixtures for a database-backed source (§1 item 2, §3).** A source whose entire store is one
+SQLite file may build its schema in-test instead of committing anything under
+`Resources/Fixtures/stage0/agents/<source>/`; devin is the worked example, in
+`DevinSqliteReaderTests.buildFixture`. Excerpting one session out of a multi-gigabyte store
+means reconstructing the schema anyway, and a committed binary `.db` is worse evidence than
+the CREATE TABLE statements a reader can actually check. The obligation does not disappear:
+the fixture still has to cover the positive and the malformed-or-unsupported cases, and the
+support-matrix entry still needs an `evidence_fixtures` key naming the in-test builder so the
+row is not silently missing a field every other source has.
 
 ---
 
