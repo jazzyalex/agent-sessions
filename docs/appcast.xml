@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.0.1</title>
-            <pubDate>Tue, 18 Aug 2026 16:39:32 -0700</pubDate>
+            <title>5.0.2</title>
+            <pubDate>Sat, 22 Aug 2026 14:22:21 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,15 +27,18 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.0.1</h2>
+<h2>What&#x27;s New in 5.0.2</h2>
+<h3>Improvements</h3>
+<ul>
+<li><strong>Cursor stops re-reading its database on every refresh.</strong> Sessions that live only in <code>store.db</code> were being run through the JSONL transcript parser on each pass, which could never find anything there.</li>
+</ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Resume works when you launch the app from Finder.</strong> Pi, Kimi Code and Qwen Code ship as <code>#!/usr/bin/env node</code> scripts, and Finder hands the app a PATH with no Homebrew in it, so the probe died before the CLI ever ran and the app decided the CLI had no resume flags. Grok CLI is native and never hit that, but cached the same dead verdict. All four now probe with your login shell&#x27;s PATH, and a probe that could not run is no longer mistaken for a CLI without features. (<a href="https://github.com/jazzyalex/agent-sessions/issues/58">#58</a>)</li>
-<li><strong>Node version managers no longer hide your CLI.</strong> Probes read nvm&#x27;s and fnm&#x27;s default alias straight from disk, so an rc file that only loads them in a real terminal is no longer a dead end.</li>
-<li><strong>Qwen takes a second look at a custom binary.</strong> A failed probe could record &quot;supports nothing&quot; against a path you picked yourself, and nothing ever retried it. That verdict is dropped and re-probed at launch.</li>
-<li><strong>Codex sessions keep their origin.</strong> Search indexing overwrote it on every pass, so Desktop sessions wore a <code>cli</code> pill and could change label as they finished loading. Existing libraries repair themselves once on upgrade.</li>
-<li><strong>Codex CLI and <code>codex exec</code> sessions stop claiming to be Desktop.</strong> Recent Codex builds stamp every session &quot;Codex Desktop&quot;, so the surface now comes from the session&#x27;s own <code>source</code> instead.</li>
-<li><strong>Side chats say &quot;side&quot; and inherit their parent&#x27;s origin.</strong> They claimed Desktop before, whatever they actually branched from.</li>
+<li><strong>OpenCode and Copilot sessions carry their own ID again.</strong> OpenCode moved to a single shared <code>opencode.db</code>, and the transcript toolbar still read the ID off the file path — so every OpenCode session called itself &quot;code&quot; and Copy Session ID handed you <code>opencode</code>. Both now read the session&#x27;s own id.</li>
+<li><strong>A live OpenCode or Hermes session keeps growing while you watch it.</strong> Their freshness check looked at the database file&#x27;s timestamp, but SQLite writes land in the <code>-wal</code> sidecar first, so a transcript you had open froze at whatever it held when you selected it. Cursor was checked the same way.</li>
+<li><strong>Subagent reports read as text, not as an envelope.</strong> An OpenCode <code>task</code>, a Hermes <code>delegate_task</code> and a Qwen tool result each arrive wrapped — raw <code>&lt;task_result&gt;</code> XML or a one-key JSON blob — and the transcript rendered the wrapper. The report itself is shown now, with the child session&#x27;s id on the OpenCode card. Sessions indexed before this update pick it up when they are next re-read.</li>
+<li><strong>Copy Session ID on an OpenClaw session pastes the id.</strong> It came with the <code>openclaw:&lt;agent&gt;:</code> prefix Agent Sessions uses to keep its agents apart, which nothing outside the app accepts.</li>
+<li><strong>Pi subagent runs nest under the session that spawned them.</strong> Pi records the parent id with the transcript filename&#x27;s timestamp still on the front, so the match never landed and subagents sat at the top level.</li>
 </ul>
 <h3>Reminder: What You Got in 5.0</h3>
 <ul>
@@ -44,13 +47,13 @@
 <li><strong>The app asks for help adding your agent — once.</strong> A dismissible card points long-time users at the proposal form and contributing guide. It shows up late, takes no for an answer, and reads and sends nothing.</li>
 <li><strong>Disabled agents no longer sneak into filter-view search results.</strong> The search allow-list was hand-written and stopped short of several agents; it now derives from the same enablement everything else reads.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.1</a></p>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.2">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.0.2</a></p>
 </div>
             ]]></description>
-            <sparkle:version>69</sparkle:version>
-            <sparkle:shortVersionString>5.0.1</sparkle:shortVersionString>
+            <sparkle:version>70</sparkle:version>
+            <sparkle:shortVersionString>5.0.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.1/AgentSessions-5.0.1.dmg" length="22736389" type="application/octet-stream" sparkle:edSignature="tJZ2htpF3NrAbFcoXst92jA7hXm1duwSqunbWDzt2cO8v6/LjzBUOqAi4mAOkGFJxfz56QfELATDAXQtJwTsAw=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.2/AgentSessions-5.0.2.dmg" length="22825258" type="application/octet-stream" sparkle:edSignature="Z4gxydTEkifoBAHRMb/JYL4oB5FK2gXLikOXhvyNqPMsegM+jG6dyhsPgx1LGFZj70SYkeqeERC0E60VxndjCw=="/>
         </item>
     </channel>
 </rss>
