@@ -1,3 +1,18 @@
+## 2026-08-21 14:42 · format-check-2026-08-21 · QA re-stamped after follow-up fixes
+status: done
+
+**State:** Release-ready. QA stamp written against HEAD `80b51b9b` (version 5.0.1, all five checks green), stamp head == HEAD, tree clean, `main` synced, 0 uncommitted. Five commits pushed `44d09021..80b51b9b`. All 12 agents at `unknown_types=[]` / `unknown_keys={}`.
+
+**Decided / don't redo:**
+- The QA stamp binds to an exact HEAD. Committing the handover invalidated the previous stamp and forced a re-run — commit everything FIRST, then `deploy qa` last.
+- Both self-review findings are closed: matrix header refreshed to 5.0.1 / 2026-08-21 / `111df518` (it was stale in three ways — version, as_of, and a note claiming Qwen was not yet in a release ledger), and antigravity `truncated_fields` restored to the real `["content"]`.
+- Redaction lesson: `truncated_fields` holds FIELD-NAME discriminators. The redactor preserves only `type`/`role`/`subtype`/`model`, so the placeholder made the `GENERIC` record assert the UNMARKED path through `markTruncated`. Not cosmetic.
+
+**Next:**
+1. Re-run `tools/release/deploy qa` before deploying if anything else lands — the stamp no longer certifies `main` once HEAD moves.
+2. Do NOT install Hermes 0.20.5; Qwen stays blocked on a paid plan.
+3. Backlog candidates filed but unimplemented — codex `memory_citation`/`parsed_cmd`, claude `bridge-session`, kimi `agentId`/`token_counting.*`, plus the `rebuild_stage0_baseline.py` `db_roots` blind spot.
+
 ## 2026-08-21 14:31 · format-check-2026-08-21 · Format sweep closed — QA stamped, release-ready
 status: done
 
