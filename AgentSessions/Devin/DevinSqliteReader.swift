@@ -62,7 +62,7 @@ enum DevinSqliteReader {
         guard let db = open(databasePath) else { return nil }
         defer { sqlite3_close(db) }
 
-        let chainCounts = mainChainCounts(db: db)
+        guard let chainCounts = mainChainCounts(db: db) else { return nil }
 
         // `hidden` marks sessions the CLI has retired; they stay in the table
         // but never appear in `devin list`, so they are excluded here too.
@@ -79,6 +79,10 @@ enum DevinSqliteReader {
         var sessions: [Session] = []
         var step = sqlite3_step(stmt)
         while step == SQLITE_ROW {
+            // Advance in a `defer` so every exit from the body — including the
+            // `continue` below — moves the cursor. Advancing only on the happy
+            // path turns a single unusable row into an infinite loop.
+            defer { step = sqlite3_step(stmt) }
             let id = text(stmt, 0)
             guard !id.isEmpty else { continue }
             let title = text(stmt, 1)
@@ -99,7 +103,6 @@ enum DevinSqliteReader {
                                         eventCount: chainCounts[id] ?? 0,
                                         events: [],
                                         databasePath: databasePath))
-            step = sqlite3_step(stmt)
         }
         // A lock or IO error ends the loop exactly like SQLITE_DONE, and the rows
         // read so far are indistinguishable from a complete answer. Returning them
@@ -122,7 +125,7 @@ enum DevinSqliteReader {
     /// 247 visible chains in ~2s on a 5.4 GB store. The count matters because
     /// a raw `COUNT(*)` over `message_nodes` would overstate a session's length
     /// roughly eightfold.
-    private static func mainChainCounts(db: OpaquePointer?) -> [String: Int] {
+    private static func mainChainCounts(db: OpaquePointer?) -> [String: Int]? {
         let sql = """
             WITH RECURSIVE chain(session_id, node_id, parent_node_id, depth) AS (
                 SELECT s.id, m.node_id, m.parent_node_id, 0
@@ -138,13 +141,20 @@ enum DevinSqliteReader {
             SELECT session_id, COUNT(*) FROM chain GROUP BY session_id;
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
         var counts: [String: Int] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             counts[text(stmt, 0)] = Int(sqlite3_column_int64(stmt, 1))
+            step = sqlite3_step(stmt)
         }
+        // Same contract as the session scan: a partial count set is not a
+        // smaller answer, it is no answer. Returning it would give every
+        // unreached session eventCount 0, which `hideZeroMessageSessions`
+        // hides — an empty Devin list with no error anywhere.
+        guard step == SQLITE_DONE else { return nil }
         return counts
     }
 

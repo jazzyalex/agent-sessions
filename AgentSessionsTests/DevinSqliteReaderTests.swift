@@ -201,6 +201,26 @@ final class DevinSqliteReaderTests: XCTestCase {
         XCTAssertEqual(result?.count, 0)
     }
 
+    /// The scan skips a row with no usable id. It must also advance the cursor
+    /// while doing so — a `continue` that leaves `sqlite3_step` un-advanced
+    /// re-reads the same row forever. This test hangs rather than fails if that
+    /// regresses.
+    func testRowWithEmptyIDIsSkippedWithoutStalling() throws {
+        try exec(openFixtureDB(), "INSERT INTO sessions VALUES ('', '/tmp/x', 'Windsurf', 'm', 'bypass', 1, 2, 'No id', NULL, 0);")
+
+        let sessions = try XCTUnwrap(DevinSqliteReader.listSessionsIfReadable(databasePath: dbPath))
+        XCTAssertEqual(sessions.map(\.id), ["bald-ketch"], "the id-less row is skipped, the real one still returned")
+    }
+
+    /// Reopens the fixture built in `setUpWithError` for a test that needs an
+    /// extra row. Caller owns nothing; the file is removed by the teardown block.
+    private func openFixtureDB() throws -> OpaquePointer? {
+        var db: OpaquePointer?
+        guard sqlite3_open(dbPath, &db) == SQLITE_OK else { throw NSError(domain: "fixture", code: 3) }
+        addTeardownBlock { sqlite3_close(db) }
+        return db
+    }
+
     // MARK: - Cycle safety
 
     /// `message_nodes` is a forest and nothing in the schema forbids a cycle, so
