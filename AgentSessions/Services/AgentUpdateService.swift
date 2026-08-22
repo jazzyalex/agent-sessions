@@ -459,6 +459,11 @@ private extension AgentUpdateService {
             // Qwen Code's installed package was observed locally, but the source
             // integration does not claim an update channel from that one machine.
             return nil
+        case .devin:
+            // Devin CLI installs through its own bootstrapper (npm or an install
+            // script depending on version); no stable package-manager mapping was
+            // verified, so no update channel is claimed.
+            return nil
         }
     }
 

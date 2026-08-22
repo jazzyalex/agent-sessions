@@ -234,4 +234,14 @@ final class WhatsNewCatalogTests: XCTestCase {
         XCTAssertEqual(items.last?.kind, .support)
         XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.0"))
     }
+
+    /// 5.1 ships the Devin provider row via `versionIntroduced`; the authored
+    /// highlights are written at release time, so the teaser plus the
+    /// auto-generated row are the whole surface until then.
+    func testDevinReleaseHas51TeaserAndProviderHighlight() {
+        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.1"))
+        XCTAssertTrue(WhatsNewCatalog.assemble(for: "5.1").contains {
+            $0.kind == .highlight && $0.title == "New: Devin CLI"
+        })
+    }
 }

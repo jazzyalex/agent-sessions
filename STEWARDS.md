@@ -67,6 +67,7 @@ writes a redacted sample you can attach to an issue.
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
+| Devin CLI | steward wanted | 2026-08-18 · 3000.3.27 (see note) | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),
@@ -78,6 +79,12 @@ but the agent is excluded from active format checks and takes no steward.
 
 Two honest footnotes:
 
+- **Devin CLI.** Verified against the installed CLI 3000.3.27 (0becb483) with a schema
+  probe over 253 on-disk sessions in the shared `sessions.db`. Resume is implemented from
+  installed help and reader evidence with hermetic tests, not an end-to-end run, because
+  authentication blocked a disposable run; it stays untested until someone with an
+  authenticated Devin login closes it. Devin is also not yet in the weekly format
+  monitoring set.
 - **Qwen Code.** Verified against 0.14.3 transcripts. The installed CLI is 0.21.13, but the
   Qwen OAuth free tier was discontinued on 2026-04-15, so no newer transcript can be
   captured on this machine without a paid plan or an alternate provider. Newer Qwen builds

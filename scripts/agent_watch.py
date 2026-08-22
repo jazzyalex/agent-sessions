@@ -586,6 +586,7 @@ MATRIX_KEY_FOR_AGENT: dict[str, str] = {
     "kimi": "kimi_code",
     "grok": "grok_cli",
     "qwen": "qwen_code",
+    "devin": "devin_cli",
     "droid": "droid",
 }
 

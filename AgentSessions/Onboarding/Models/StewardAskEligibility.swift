@@ -46,7 +46,8 @@ enum StewardAskEligibility {
         StewardAgent(source: .grok, stewardName: "Grok CLI"),
         StewardAgent(source: .openclaw, stewardName: "OpenClaw"),
         StewardAgent(source: .hermes, stewardName: "Hermes"),
-        StewardAgent(source: .qwen, stewardName: "Qwen Code")
+        StewardAgent(source: .qwen, stewardName: "Qwen Code"),
+        StewardAgent(source: .devin, stewardName: "Devin CLI")
     ]
 
     /// The sources worth counting while scanning the index — everything else can
