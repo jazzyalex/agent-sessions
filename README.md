@@ -78,36 +78,30 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 5.0
+## What's New in 5.1
 
-**TL;DR** - Agents are now plug-in adapters instead of hand wiring across every surface,
-which is why this release is 5.0. Qwen Code joins as the thirteenth source, and adding a
-fourteenth is a documented recipe: 26 shared-file edits before, 12 now, each one listed.
+**TL;DR** - Two more coding agents: Devin CLI and fx (vercel-labs). Fifteen agents now put
+their local history in one searchable list, each with a Settings pane and a resume command.
 
-New in 5.0:
-- **Plug-in adapters for every agent** — the session list, search, the filter pills,
-  Analytics, the Settings panes and the launch state each carried their own hand-written
-  list of agents, so an agent could appear in one and be quietly missing from another.
-  They all derive from a single source description now. Switching an agent off reaches
-  every surface at once, and adding an agent is a documented, tested recipe rather than
-  fourteen scattered edits.
-- **Qwen Code, the thirteenth agent source** — local JSONL chats in browsing, search,
-  filtering, Analytics and the transcript view, with reasoning and tool activity, rewound
-  branches reconstructed along the active parent chain, and Settings controls for binary
-  and storage root. Active chats offer `--resume`; archived histories stay browse-only.
-  Format verified against real 0.14.3 transcripts.
-- **Add the agent you use** — a proposal form, an implementation brief you can hand to
-  your own coding agent, and a PR template, surfaced once from inside the app by a
-  dismissible card. Shipped agents can pick up a steward who keeps their format verified
-  as the CLI moves.
-- **The agent switches reach everywhere** — disabled agents no longer surface in
-  filter-view search results, Kimi and Grok report when their loading has finished, and
-  OpenClaw stops marking Analytics out of date on every launch.
-- **OpenCode and Hermes transcripts are searchable** — both store sessions in SQLite
-  behind one shared file path, and search ingest could not tell their sessions apart, so
-  their transcript text was never indexed.
+New in 5.1:
+- **Devin CLI, the fourteenth agent source** — browsing, search, filtering, Analytics and
+  the transcript view over Devin's shared SQLite store. Devin keeps every retry and edit as
+  a branch, so a session shows the live conversation rather than every path it took to get
+  there. Settings adds binary and storage-root controls, and Copy Resume Command produces
+  `devin --resume <id>`. Devin keeps only active sessions, so there is no archived history
+  to browse, and image extraction is not yet supported.
+- **fx (vercel-labs), the fifteenth** — one directory per session under `~/.fx/sessions`,
+  with every kind of turn rendered: ordinary replies and their narrated tool steps,
+  background commands and where their output went, the summary that replaces auto-compacted
+  history, and interrupted turns with whatever finished before the cut. Text fx stored as
+  raw bytes rather than UTF-8 decodes back to readable output instead of disappearing.
+- **Both agents are contributed, not ported** — @thedavidweng added them against the
+  documented recipe from 5.0, which is the first real test of whether that recipe works for
+  someone outside the project. Both stay `steward wanted` until someone running the CLI
+  confirms resume end to end; the support matrix says so on every surface.
 
-**Recent releases** — 4.8: Grok CLI joins as the eleventh agent source, and Analytics
+
+**Recent releases** — 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
 counts every agent you have enabled. 4.7: Kimi Code joins as the tenth source, and active
 Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit
 retired, leaving the Quota Meter as the only mode. 4.6: paste-a-cookie Claude web usage,
