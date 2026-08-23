@@ -101,12 +101,18 @@ def sqlite_freelist(db: Path) -> dict:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     page_size = con.execute("PRAGMA page_size").fetchone()[0]
     freelist_pages = con.execute("PRAGMA freelist_count").fetchone()[0]
+    # Denominator must come from the same connection snapshot as the freelist
+    # count: PRAGMA page_count sees uncheckpointed WAL frames, st_size on the
+    # main file does not, and a live writer's un-checkpointed store would push
+    # the share past 100% if the two were mixed.
+    page_count = con.execute("PRAGMA page_count").fetchone()[0]
     con.close()
     file_bytes = db.stat().st_size
     freelist_bytes = page_size * freelist_pages
     return {"path": str(db), "file_bytes": file_bytes, "page_size": page_size,
+            "page_count": page_count, "db_bytes": page_size * page_count,
             "freelist_pages": freelist_pages, "freelist_bytes": freelist_bytes,
-            "freelist_share_pct": round(100.0 * freelist_bytes / max(file_bytes, 1), 1)}
+            "freelist_share_pct": round(100.0 * freelist_pages / max(page_count, 1), 1)}
 
 
 def sqlite_newest_snapshot_share(db: Path, table: str, key_expr: str,
@@ -119,12 +125,11 @@ def sqlite_newest_snapshot_share(db: Path, table: str, key_expr: str,
     a collapse that has to be re-proven per group does not qualify."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     where = f"WHERE {where_expr}" if where_expr else ""
-    total = con.execute(
-        f"SELECT COALESCE(SUM({bytes_expr}),0) FROM {table} {where}").fetchone()[0]
-    kept = con.execute(
-        f"SELECT COALESCE(SUM(b),0) FROM (SELECT {bytes_expr} AS b, "
+    total, kept = con.execute(
+        f"SELECT COALESCE(SUM(b),0), COALESCE(SUM(CASE WHEN rn = 1 THEN b END),0) "
+        f"FROM (SELECT {bytes_expr} AS b, "
         f"ROW_NUMBER() OVER (PARTITION BY {key_expr} ORDER BY {order_expr} DESC) AS rn "
-        f"FROM {table} {where}) WHERE rn = 1").fetchone()[0]
+        f"FROM {table} {where})").fetchone()
     con.close()
     removed = total - kept
     return {"path": str(db), "total_row_bytes": total, "kept_row_bytes": kept,
@@ -155,11 +160,11 @@ def main(argv: list[str]) -> int:
     if args.freelist:
         results.append(sqlite_freelist(Path(args.freelist)))
     if args.collapse_newest_per_key:
-        missing = [n for n, v in (("table", args.collapse_table),
-                                  ("key expr", args.collapse_key),
-                                  ("bytes expr", args.collapse_bytes)) if not v]
+        missing = [f for f, v in (("--collapse-table", args.collapse_table),
+                                  ("--collapse-key", args.collapse_key),
+                                  ("--collapse-bytes", args.collapse_bytes)) if not v]
         if missing:
-            raise SystemExit(f"--collapse-newest-per-key needs --collapse-{' and --collapse-'.join(missing)}")
+            raise SystemExit(f"--collapse-newest-per-key needs {' and '.join(missing)}")
         results.append(sqlite_newest_snapshot_share(
             Path(args.collapse_newest_per_key), args.collapse_table,
             args.collapse_key, args.collapse_order, args.collapse_bytes,

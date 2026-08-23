@@ -15,11 +15,10 @@
       "probe_records": 25,
       "corpus_content_share": 30.8,
       "max_fixed_record_bytes": 41601,
-      "superseded_share_pct": 90.6,
       "notes": {
         "max_fixed_record_bytes": "largest world_state line across 5 newest real rollouts",
         "corpus_content_share": "inflated by world_state context snapshots whose text falls under content-like keys; per-event classification is a 1.0 milestone",
-        "superseded_share_pct": "rule: PRAGMA incremental_vacuum — logs_2.sqlite is 519 MB with 470 MB (90.6%) on the freelist while the logs table holds 43 MB; auto_vacuum is already INCREMENTAL but never run (upstream openai/codex#35823). A further 167 MB superseded pre-migration store (~/.codex/sqlite/logs_2.sqlite, last written 2026-06-15) sits outside this number. Measured 2026-08-22"
+        "superseded_share_pct": "no qualifying rule for the session store itself: Codex sessions are rollout JSONL, and the measured waste sits in the sqlite logs/tracing store (~/.codex/sqlite/logs_2.sqlite: 519 MB with 470 MB, 90.6%, on the freelist; auto_vacuum is already INCREMENTAL but never run, upstream openai/codex#35823) plus a 167 MB superseded pre-migration copy at the old store location — store-maintenance state and migration leftovers outside the session-store contract this bench scores, not properties of the session format: one PRAGMA incremental_vacuum on the reader's machine would change the number with no vendor change. Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22"
       },
       "observed_since": "2026-03-31"
     },
@@ -64,8 +63,8 @@
       "notes": {
         "probe_bytes": "probe ran, but only logical row bytes (4,982) are known; a physical before/after store diff (db+WAL) comparable to the JSONL harnesses is not yet measured. Cold-start db creation was 274,432 bytes.",
         "cold_start_bytes": "274432",
-        "max_fixed_record_bytes": "no fixed-cost dump records found: largest rows are tool outputs (max 730,941 B) and user-message diff summaries (max 1,051,302 B) \u2014 variable work-derived data, not system-prompt/tool-catalog dumps (queried 2026-08-05)",
-        "superseded_share_pct": "rule: keep the newest snapshot per message — the event table stores a full message snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless; drops intermediate per-event timestamps. Upstream anomalyco/opencode#33356. Measured 2026-08-22"
+        "max_fixed_record_bytes": "no fixed-cost dump records found: largest rows are tool outputs (max 730,941 B) and user-message diff summaries (max 1,051,302 B) — variable work-derived data, not system-prompt/tool-catalog dumps (queried 2026-08-05)",
+        "superseded_share_pct": "rule: keep the newest snapshot per message — the event table stores a full message snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless: surviving events keep their timestamps (C1 is unaffected); what is lost is the timestamps of the superseded intermediate snapshots. Upstream anomalyco/opencode#33356. Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22"
       },
       "fixed_dump_found": false,
       "observed_since": "2026-03-31"

@@ -118,4 +118,24 @@ def test_collapse_cli_requires_key_and_bytes(tmp_path):
          "--collapse-newest-per-key", str(db), "--collapse-table", "t"],
         capture_output=True, text=True)
     assert r.returncode != 0
-    assert "--collapse-" in r.stderr
+    assert "--collapse-key" in r.stderr and "--collapse-bytes" in r.stderr
+    assert "--collapse-key expr" not in r.stderr  # flag names, not human labels
+
+
+def test_sqlite_freelist_bounded_on_live_wal_store(tmp_path):
+    # A writer holding an un-checkpointed WAL: freelist_count sees the WAL
+    # frames but the main file's st_size does not. The share must still be
+    # computed from one consistent snapshot and stay within 0..100.
+    db = tmp_path / "wal.db"
+    con = sqlite3.connect(db)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA wal_autocheckpoint=0")
+    con.execute("CREATE TABLE t (x)")
+    con.executemany("INSERT INTO t VALUES (?)", [("a" * 1000,)] * 3000)
+    con.commit()
+    con.execute("DELETE FROM t")
+    con.commit()  # writer stays open: WAL is not checkpointed
+    r = sqlite_freelist(db)
+    con.close()
+    assert r["freelist_pages"] > 0
+    assert 0 < r["freelist_share_pct"] <= 100.0

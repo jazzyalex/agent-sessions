@@ -131,8 +131,11 @@ def test_s4_fail_evidence_names_the_rule(tmp_path):
     by_slug = {a["slug"]: a for a in data["agents"]}
     assert by_slug["opencode"]["results"]["S4"] == "fail"
     assert "newest snapshot per message" in by_slug["opencode"]["notes"]["S4"]
-    assert by_slug["codex"]["results"]["S4"] == "fail"
-    assert "freelist" in by_slug["codex"]["notes"]["S4"]
+    # Codex's measured waste sits in the sqlite logs/tracing store, not the
+    # rollout JSONL session store this bench scores — S4 is not_run with a
+    # note that says exactly that.
+    assert by_slug["codex"]["results"]["S4"] == "not_run"
+    assert "outside the session-store contract" in by_slug["codex"]["notes"]["S4"]
 
 
 def test_s4_not_run_when_no_rule_measured(tmp_path):

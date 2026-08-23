@@ -99,12 +99,12 @@ tolerance) is defined but unscored pending a real cross-harness
 truncation experiment.</p>
 
 <details class="bench-poster">
-  <summary>View or download the Session-Bench v0.3 poster</summary>
+  <summary>View or download the Session-Bench v0.3 poster (historical — the rubric is now v0.4 with twenty gates)</summary>
   <figure>
     <a href="{{ '/assets/session-bench-poster.png' | relative_url }}" title="Open the full-resolution Session-Bench poster">
       <img src="{{ '/assets/session-bench-poster.png' | relative_url }}"
            width="1024" height="1536"
-           alt="Session-Bench v0.3 poster ranking ten CLI coding-agent session formats across nineteen scoring gates"
+           alt="Historical Session-Bench v0.3 poster ranking ten CLI coding-agent session formats across the nineteen scoring gates of that rubric version"
            loading="lazy">
     </a>
     <figcaption class="bench-note">Open the image for the full-resolution 1024 × 1536 poster.</figcaption>
@@ -221,22 +221,33 @@ sidecar (gates O1, O2, P3).
   of live data. OpenCode passes S1-S3 honestly, yet its event table stores a
   full message snapshot per streaming update — 17,940 `message.updated.1`
   rows for 4,639 distinct messages, 378 MB where keeping the newest per
-  message is 16 MB (95.8% superseded) — and Codex never reclaims its SQLite
-  freelist: 470 MB of a 519 MB store (90.6%). The redundant snapshots live
-  under content keys (S2 counts them as work product) and each is under the
-  S3 record cap, so both harnesses scored cleanly while filling disks. S4
-  scores the fraction of stored bytes a provably lossless collapse would
-  remove, with a 20% limit, measured on the real corpus; the evidence names
-  the rule per source. Only rules proven lossless for an entire source
-  qualify — OpenCode's newest-snapshot-per-message and Codex's incremental
-  vacuum do; Grok tool-call folding does not, because its prefix property
-  holds for only 66% of tool-call groups (one 8,359-event group looked
-  pathological but carried genuine deltas from a render log), so a collapse
-  there is a per-file audit, not a format property, and can never define the
-  gate. Hermes' one-shot pre-update snapshot (1,008 MB) holds credentials and
-  is flagged, not scored. Sources with no qualifying measured rule score
-  not_run: Codex 12→12/19 and OpenCode 11→11/18 now carry an S4 fail; every
-  other harness gains a not_run cell.
+  message is 16 MB (95.8% superseded). The redundant snapshots live under
+  content keys (S2 counts them as work product) and each is under the S3
+  record cap, so the harness scored cleanly while filling disks. S4 scores
+  the fraction of stored bytes a final-state-lossless collapse would remove,
+  with a 20% limit, measured on the real corpus; the evidence names the rule
+  per source and says what the collapse discards (for OpenCode: timestamps
+  on superseded intermediate snapshots — surviving events keep theirs, so C1
+  is unaffected). A rule must hold for an entire source: Grok tool-call
+  folding does not qualify, because its prefix property holds for only 66%
+  of tool-call groups (one 8,359-event group looked pathological but carried
+  genuine deltas from a render log), so a collapse there is a per-file
+  audit, not a format property. Waste outside the session store itself does
+  not score the gate: Codex's unreclaimed SQLite freelist (470 MB of a
+  519 MB logs/tracing store, 90.6%, upstream openai/codex#35823) sits in a
+  log database, not the rollout JSONL this bench scores, and one
+  `PRAGMA incremental_vacuum` on the reader's machine would change it with
+  no vendor change — Codex scores not_run with that note, as does Hermes,
+  whose one-shot pre-update snapshot (1,008 MB) holds credentials and is an
+  upgrade artifact. Score and rank movement from this change: OpenCode
+  11/17 → 11/18 (64.7% → 61.1%), now tied with Kimi at rank 5 (Kimi moves
+  6 → 5); Codex and every other harness keep their percentage but gain an
+  S4 not_run cell, which makes all ten ranks provisional — the † best/worst
+  ranges treat an unmeasured S4 as a hypothetical pass or fail, so they
+  widened for most harnesses (e.g. Hermes best case 5 → 3). Absence of a
+  qualifying rule is still not leanness; the ranges are enumeration
+  arithmetic, not evidence. Raw commands and reported values:
+  [receipts-2026-08-22-s4.md](https://github.com/jazzyalex/agent-sessions/blob/main/scripts/session_bench/receipts-2026-08-22-s4.md).
 
 - **2026-08-12 — O3 (documented schema) was originally scored fail for all
   ten harnesses. That was wrong.** An external re-check found real vendor
@@ -293,8 +304,11 @@ raw artifacts to extraction — is the 1.0 milestone, and until it lands
 this page does not claim to be a push-button-reproducible benchmark. The benchmark's canonical home is
 [github.com/jazzyalex/session-bench]({{ site.data.session_bench.methodology_url }})
 — methodology, data, evaluator, tests, and the public corrections
-changelog. To dispute a score, open an issue there with the measurement or
-evidence you contest, and re-run the evaluator.
+changelog; it syncs after each rubric change, so between a correction
+landing here and the mirror updating, the evaluator in this repository's
+`scripts/session_bench/` is the current-version reference. To dispute a
+score, open an issue there with the measurement or evidence you contest,
+and re-run the evaluator.
 
 The probe is one identical prompt — "{{ site.data.session_bench.probe_prompt }}" —
 attempted through each harness's {{ site.data.session_bench.surface }};

@@ -72,14 +72,18 @@ gates:
 - id: S4
   area: Signal
   name: Superseded share
-  desc: 'The share of stored bytes a provably lossless collapse would remove stays
-    ≤ 20% on the real corpus; evidence names the rule per source (added in v0.4 —
-    S1-S3 cannot see superseded copies of live data under content keys). Only rules
-    proven lossless for an ENTIRE source qualify: OpenCode keep-newest-snapshot-per-message
-    and Codex SQLite freelist reclaim do; Grok tool-call folding does not — its prefix
-    property holds for only 66% of tool-call groups, so a collapse there is a per-file
-    audit, not a format property, and can never define this gate. Sources with no
-    qualifying measured rule score not_run.'
+  desc: 'The share of stored bytes a final-state-lossless collapse would remove stays
+    ≤ 20% on the real corpus; evidence names the rule per source and says what the
+    collapse discards (added in v0.4 — S1-S3 cannot see superseded copies of live
+    data under content keys). Final-state-lossless means every byte of final content
+    survives and surviving events keep the timestamps C1 scores; only metadata on
+    superseded copies (e.g. intermediate snapshot timestamps) may be lost, and the
+    evidence must say so. A rule must hold for an ENTIRE source: OpenCode keep-newest-snapshot-per-message
+    qualifies; Grok tool-call folding does not — its prefix property holds for only
+    66% of tool-call groups, so it is not even final-state-lossless there, and a collapse
+    that must be re-proven per file is an audit, not a format property. Waste in stores
+    outside the session store itself (tracing logs, upgrade snapshots) does not score
+    this gate. Sources with no qualifying measured rule score not_run.'
 - id: C1
   area: Completeness
   name: Per-event timestamps
@@ -367,18 +371,18 @@ agents:
   rank: 3
   provisional: true
   rank_best: 3
-  rank_worst: 4
+  rank_worst: 5
 - slug: codex
   name: Codex
   short: Codex
   format: Nested-envelope JSONL
   version: 0.146.0
   cleared: 12
-  scored: 19
-  not_run: 0
-  score_pct: 63.2
+  scored: 18
+  not_run: 1
+  score_pct: 66.7
   area_scores:
-    Signal: 1/4
+    Signal: 1/3
     Completeness: 6/7
     Stability: 1/2
     Openness: 3/4
@@ -387,7 +391,7 @@ agents:
     S1: fail
     S2: pass
     S3: fail
-    S4: fail
+    S4: not_run
     C1: pass
     C2: pass
     C3: pass
@@ -412,12 +416,15 @@ agents:
       is a 1.0 milestone
     S3: largest bookkeeping record 41,601 bytes (limit 25,600) — largest world_state
       line across 5 newest real rollouts
-    S4: 'lossless collapse would remove 90.6% of stored bytes (limit 20.0%) — rule:
-      PRAGMA incremental_vacuum — logs_2.sqlite is 519 MB with 470 MB (90.6%) on the
-      freelist while the logs table holds 43 MB; auto_vacuum is already INCREMENTAL
-      but never run (upstream openai/codex#35823). A further 167 MB superseded pre-migration
-      store (~/.codex/sqlite/logs_2.sqlite, last written 2026-06-15) sits outside
-      this number. Measured 2026-08-22'
+    S4: 'no qualifying rule for the session store itself: Codex sessions are rollout
+      JSONL, and the measured waste sits in the sqlite logs/tracing store (~/.codex/sqlite/logs_2.sqlite:
+      519 MB with 470 MB, 90.6%, on the freelist; auto_vacuum is already INCREMENTAL
+      but never run, upstream openai/codex#35823) plus a 167 MB superseded pre-migration
+      copy at the old store location — store-maintenance state and migration leftovers
+      outside the session-store contract this bench scores, not properties of the
+      session format: one PRAGMA incremental_vacuum on the reader''s machine would
+      change the number with no vendor change. Receipt: receipts-2026-08-22-s4.md.
+      Measured 2026-08-22'
     C1: timestamp on every line (fixture codex/small.jsonl)
     C2: turn_context / thread_settings events per turn
     C3: event_msg/token_count with cumulative usage
@@ -448,7 +455,10 @@ agents:
     P2: 'A truncated final write costs at most one record. UNSCORED in v0.2: asserted
       by format family only; needs a cross-harness truncation experiment (a 1.0 milestone).'
     P3: cwd/instructions in session_meta; no sidecar
-  rank: 4
+  rank: 3
+  provisional: true
+  rank_best: 3
+  rank_worst: 5
 - slug: kimi
   name: Kimi Code
   short: Kimi
@@ -572,9 +582,10 @@ agents:
     S4: 'lossless collapse would remove 95.8% of stored bytes (limit 20.0%) — rule:
       keep the newest snapshot per message — the event table stores a full message
       snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct
-      messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless;
-      drops intermediate per-event timestamps. Upstream anomalyco/opencode#33356.
-      Measured 2026-08-22'
+      messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless:
+      surviving events keep their timestamps (C1 is unaffected); what is lost is the
+      timestamps of the superseded intermediate snapshots. Upstream anomalyco/opencode#33356.
+      Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22'
     C1: time.created on session/message/part rows
     C2: model{providerID,modelID} on message rows
     C3: token fields on message rows
