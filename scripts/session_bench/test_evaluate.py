@@ -121,3 +121,50 @@ def test_t2_not_run_makes_t3_not_run(tmp_path):
     assert cursor["results"]["T2"] == "not_run"
     assert cursor["results"]["T3"] == "not_run"
     assert "unresolved" in cursor["notes"]["T3"]
+
+
+def test_s4_fail_evidence_names_the_rule(tmp_path):
+    import yaml
+    r, out = run_eval(tmp_path)
+    assert r.returncode == 0, r.stderr
+    data = yaml.safe_load(out.read_text())
+    by_slug = {a["slug"]: a for a in data["agents"]}
+    assert by_slug["opencode"]["results"]["S4"] == "fail"
+    assert "newest snapshot per message" in by_slug["opencode"]["notes"]["S4"]
+    assert by_slug["codex"]["results"]["S4"] == "fail"
+    assert "freelist" in by_slug["codex"]["notes"]["S4"]
+
+
+def test_s4_not_run_when_no_rule_measured(tmp_path):
+    import yaml
+    r, out = run_eval(tmp_path)
+    assert r.returncode == 0, r.stderr
+    data = yaml.safe_load(out.read_text())
+    by_slug = {a["slug"]: a for a in data["agents"]}
+    assert by_slug["claude"]["results"]["S4"] == "not_run"
+    assert "lossless" in by_slug["claude"]["notes"]["S4"]
+    # Hermes carries an explicit reason: flagged snapshot, no rule for the ledger.
+    assert "snapshot" in by_slug["hermes"]["notes"]["S4"]
+
+
+def test_s4_passes_below_limit(tmp_path):
+    import yaml
+    meas = json.loads((HERE / "measurements-2026-08-04.json").read_text())
+    meas["agents"]["claude"]["superseded_share_pct"] = 5.0
+    meas["agents"]["claude"]["notes"]["superseded_share_pct"] = \
+        "rule: hypothetical whole-source lossless collapse (fixture)"
+    m = tmp_path / "m.json"
+    m.write_text(json.dumps(meas))
+    out = tmp_path / "o.yml"
+    r = subprocess.run(
+        [sys.executable, str(HERE / "evaluate.py"),
+         "--measurements", str(m),
+         "--checklist", str(HERE / "checklist-2026-08-04.yml"),
+         "--out", str(out)],
+        capture_output=True, text=True, cwd=REPO)
+    assert r.returncode == 0, r.stderr
+    data = yaml.safe_load(out.read_text())
+    claude = next(a for a in data["agents"] if a["slug"] == "claude")
+    assert claude["results"]["S4"] == "pass"
+    assert claude["notes"]["S4"].startswith(
+        "lossless collapse would remove 5.0%")

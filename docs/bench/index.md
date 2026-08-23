@@ -11,7 +11,7 @@ image: /assets/bench-social-card.png
 preserve a useful, inspectable, and portable record of their work — the
 session files they write to disk. SWE-bench measures whether the agent
 completed the work; Session-Bench measures what the harness preserved
-after the work was done. Nineteen scored pass/fail gates across five
+after the work was done. Twenty scored pass/fail gates across five
 areas, each backed by a measurement, a fixture, or a monitoring-ledger
 entry. No partial credit: a gate is pass, fail, or explicitly
 <em>not run</em> — never averaged.</p>
@@ -88,7 +88,10 @@ share a rank. A gate whose measurement could not be taken for a harness is
 marked <em>not run</em> and drops out of that harness's denominator — an
 authentication failure is not evidence about a format, and an observation
 window too short to judge stability (Kimi, onboarded 2026-07-25) is not
-evidence of stability. Ranks marked †
+evidence of stability. S4 is likewise not run wherever no collapse rule has
+been proven lossless for an entire source and measured on the corpus:
+absence of a qualifying rule is not leanness, and the two S4 fails measured
+so far are the largest waste numbers in the bench. Ranks marked †
 are provisional: hover for the best/worst range pending the missing
 measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash
@@ -211,6 +214,29 @@ sidecar (gates O1, O2, P3).
 {% endfor %}
 
 ## Corrections
+
+- **2026-08-23 — v0.3 → v0.4: S4 (superseded share) joins the Signal area,
+  prompted by [external disk-usage measurements](https://github.com/jazzyalex/agent-sessions/discussions/54).**
+  S1-S3 could not see the waste that actually fills disks: superseded copies
+  of live data. OpenCode passes S1-S3 honestly, yet its event table stores a
+  full message snapshot per streaming update — 17,940 `message.updated.1`
+  rows for 4,639 distinct messages, 378 MB where keeping the newest per
+  message is 16 MB (95.8% superseded) — and Codex never reclaims its SQLite
+  freelist: 470 MB of a 519 MB store (90.6%). The redundant snapshots live
+  under content keys (S2 counts them as work product) and each is under the
+  S3 record cap, so both harnesses scored cleanly while filling disks. S4
+  scores the fraction of stored bytes a provably lossless collapse would
+  remove, with a 20% limit, measured on the real corpus; the evidence names
+  the rule per source. Only rules proven lossless for an entire source
+  qualify — OpenCode's newest-snapshot-per-message and Codex's incremental
+  vacuum do; Grok tool-call folding does not, because its prefix property
+  holds for only 66% of tool-call groups (one 8,359-event group looked
+  pathological but carried genuine deltas from a render log), so a collapse
+  there is a per-file audit, not a format property, and can never define the
+  gate. Hermes' one-shot pre-update snapshot (1,008 MB) holds credentials and
+  is flagged, not scored. Sources with no qualifying measured rule score
+  not_run: Codex 12→12/19 and OpenCode 11→11/18 now carry an S4 fail; every
+  other harness gains a not_run cell.
 
 - **2026-08-12 — O3 (documented schema) was originally scored fail for all
   ten harnesses. That was wrong.** An external re-check found real vendor
