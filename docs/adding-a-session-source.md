@@ -382,15 +382,37 @@ once per starred session, re-copied whenever the live CLI moved its stat. If you
 this because you declined `archive`, starring still works — `toggleFavorite` records it
 before `pin` is reached — you simply get no filesystem archive, which is what the field means.
 
-**Fixtures for a database-backed source (§1 item 2, §3).** A source whose entire store is one
-SQLite file may build its schema in-test instead of committing anything under
-`Resources/Fixtures/stage0/agents/<source>/`; devin is the worked example, in
-`DevinSqliteReaderTests.buildFixture`. Excerpting one session out of a multi-gigabyte store
-means reconstructing the schema anyway, and a committed binary `.db` is worse evidence than
-the CREATE TABLE statements a reader can actually check. The obligation does not disappear:
-the fixture still has to cover the positive and the malformed-or-unsupported cases, and the
-support-matrix entry still needs an `evidence_fixtures` key naming the in-test builder so the
-row is not silently missing a field every other source has.
+**Fixtures for a database-backed source (§1 item 2, §3).** Do not commit a binary `.db`.
+Excerpting one session out of a multi-gigabyte store means reconstructing the schema anyway,
+and a `.db` blob is worse evidence than records a reviewer can read in the diff. Split it the
+way opencode and devin do:
+
+- **Tests** build the schema in-test — `DevinSqliteReaderTests.buildFixture` is the worked
+  example. This is what covers the positive and malformed-or-unsupported cases.
+- **`Resources/Fixtures/stage0/agents/<source>/` still gets a fixture**, as JSON: the logical
+  projection of the records your reader consumes, one file for the normal shape and a
+  `schema_drift` one for the sentinel. `agents/devin/small.json` is the sessions row plus its
+  main-chain `message_nodes` payloads.
+
+The second half is not optional and an earlier revision of this section wrongly implied it
+was. `scripts/agent_watch.py` diffs the live store against **fixture-derived** baseline
+type-keys (`_baseline_type_keys_for_agent`), so a source with no fixture can be fingerprinted
+but never drift-checked — which silently disqualifies it from weekly monitoring and therefore
+from the `Steward-verified` tier, since a steward's whole job is running that check. Skipping
+the fixture does not save work, it removes the feature.
+
+So a DB-backed source owes two fingerprint functions in `agent_watch.py`, both normalizing
+into the same buckets: `_<source>_fixture_file_schema_fingerprint` for the JSON baseline and
+`_<source>_sqlite_latest_session_schema_fingerprint` for the live database, plus a
+`local_schema` kind wiring them together. Bucket by the unit drift actually matters in —
+devin uses `session` and `node.<role>`, opencode uses `session` / `message.<role>` /
+`part.<type>` — so a new record kind shows up as an unknown type rather than vanishing into a
+generic bucket. Walk the live store exactly as the app does: devin's fingerprint follows
+`main_chain_id` back through `parent_node_id`, because fingerprinting every row would report
+drift from abandoned branches the app never renders.
+
+The support-matrix entry needs an `evidence_fixtures` key naming both the JSON fixtures and
+the in-test builder, so the row is not silently missing a field every other source has.
 
 ---
 

@@ -83,8 +83,9 @@ Two honest footnotes:
   probe over 253 on-disk sessions in the shared `sessions.db`. Resume is implemented from
   installed help and reader evidence with hermetic tests, not an end-to-end run, because
   authentication blocked a disposable run; it stays untested until someone with an
-  authenticated Devin login closes it. Devin is also not yet in the weekly format
-  monitoring set.
+  authenticated Devin login closes it. Devin is in the weekly format monitoring set as of
+  2026-08-22, so `./scripts/steward_check.py devin` runs — but only on a machine with the
+  CLI installed, which is the same authenticated login the resume check needs.
 - **Qwen Code.** Verified against 0.14.3 transcripts. The installed CLI is 0.21.13, but the
   Qwen OAuth free tier was discontinued on 2026-04-15, so no newer transcript can be
   captured on this machine without a paid plan or an alternate provider. Newer Qwen builds

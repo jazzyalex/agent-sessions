@@ -1,0 +1,46 @@
+{
+  "_fixture": "Synthetic Devin CLI record set. Devin keeps every session in one shared SQLite database (~/.local/share/devin/cli/sessions.db), so there is no per-session file to sanitize and excerpting one would mean rebuilding the schema anyway. This file is the logical projection the Swift reader consumes -- the sessions row plus the main-chain message_nodes payloads -- written as JSON so the baseline is readable and diffable. agent_watch normalizes the live database into these same buckets. Shapes verified with scripts/devin_sessions_schema_probe.py against CLI 3000.3.27 (0becb483). No real prompt, output, path, id or credential appears here.",
+  "session": {
+    "id": "bald-ketch",
+    "title": "Fix the broken checks",
+    "working_directory": "/tmp/as-agent-lab/devin/project",
+    "backend_type": "Windsurf",
+    "model": "swe-1-7",
+    "agent_mode": "bypass",
+    "created_at": 1786004275,
+    "last_activity_at": 1786004400,
+    "main_chain_id": 5,
+    "hidden": 0
+  },
+  "nodes": [
+    {
+      "message_id": "m1",
+      "role": "system",
+      "content": "You are Devin.",
+      "metadata": {}
+    },
+    {
+      "message_id": "m2",
+      "role": "user",
+      "content": "Fix the broken checks.",
+      "metadata": { "is_user_input": true }
+    },
+    {
+      "message_id": "m3",
+      "role": "assistant",
+      "content": "Reading the file.",
+      "thinking": { "signature": "sig", "thinking": "I should read it first." },
+      "tool_calls": [
+        { "id": "call_1", "index": 0, "kind": "function", "name": "read_file", "arguments": { "path": "hello.py" } }
+      ],
+      "metadata": { "num_tokens": 42 }
+    },
+    {
+      "message_id": "m4",
+      "role": "tool",
+      "content": "print(\"hello\")",
+      "tool_call_id": "call_1",
+      "metadata": {}
+    }
+  ]
+}

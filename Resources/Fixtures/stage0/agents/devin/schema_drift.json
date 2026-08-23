@@ -1,0 +1,39 @@
+{
+  "_fixture": "Drift sentinel, deliberately excluded from the baseline by agent_watch (any path containing 'schema_drift' is filtered out). Same shape as small.json with plausible future additions -- a renamed timestamp, a new node role, an extra tool_calls field -- so a reviewer can see what drift looks like without it being treated as the current normal.",
+  "session": {
+    "id": "future-otter",
+    "title": "Renamed columns",
+    "working_directory": "/tmp/as-agent-lab/devin/other",
+    "backend_type": "Windsurf",
+    "model": "swe-2-0",
+    "agent_mode": "plan",
+    "created_at_ms": 1786004275000,
+    "last_activity_at_ms": 1786004400000,
+    "main_chain_id": 3,
+    "hidden": 0,
+    "workspace_id": "ws-1"
+  },
+  "nodes": [
+    {
+      "message_id": "d1",
+      "role": "user",
+      "content": [{ "type": "text", "text": "content as parts, not a string" }],
+      "metadata": { "is_user_input": true }
+    },
+    {
+      "message_id": "d2",
+      "role": "planner",
+      "content": "a role the reader does not know",
+      "metadata": {}
+    },
+    {
+      "message_id": "d3",
+      "role": "assistant",
+      "content": "with a new call field",
+      "tool_calls": [
+        { "id": "call_9", "index": 0, "kind": "function", "name": "read_file", "arguments": {}, "timeout_ms": 30000 }
+      ],
+      "metadata": {}
+    }
+  ]
+}

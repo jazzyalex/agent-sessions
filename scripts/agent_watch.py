@@ -1673,6 +1673,183 @@ def _opencode_storage_session_tree_schema_fingerprint(
     }
 
 
+def _devin_node_bucket(obj: dict[str, Any]) -> str:
+    """
+    Bucket a `message_nodes.chat_message` payload by its role.
+
+    The Swift reader branches on `role` and reads the sibling keys, so role is
+    the unit drift matters in: a new role, or a new key on an existing one, is
+    exactly what would silently lose transcript content.
+    """
+    role = obj.get("role")
+    return f"node.{role}" if isinstance(role, str) and role else "node"
+
+
+def _devin_fixture_file_schema_fingerprint(path: Path) -> dict[str, Any]:
+    """
+    Fingerprint the synthetic Devin fixture.
+
+    Devin stores every session in one shared SQLite database, so there is no
+    per-session file to sanitize and the fixture is a JSON projection of the
+    same logical records: the `sessions` row plus its main-chain
+    `message_nodes` payloads. The live fingerprint below normalizes into these
+    same buckets, so a diff reports real format drift rather than the
+    difference between a table and a JSON file. Same split OpenCode uses.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, v in obj.items():
+            if v is not None and k != "_fixture":
+                ks.add(k)
+
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 1}
+    if not isinstance(obj, dict):
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 0}
+
+    session = obj.get("session")
+    if isinstance(session, dict):
+        _add("session", session)
+    nodes = obj.get("nodes")
+    if isinstance(nodes, list):
+        for node in nodes:
+            if isinstance(node, dict):
+                _add(_devin_node_bucket(node), node)
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parse_errors": 0,
+    }
+
+
+def _devin_sqlite_latest_session_schema_fingerprint(
+    db_path: Path, *, max_nodes: int
+) -> dict[str, Any]:
+    """
+    Fingerprint the newest visible session in Devin's shared `sessions.db`.
+
+    `message_nodes` is a forest: `sessions.main_chain_id` names the tip of the
+    live conversation and the rest are abandoned retries, so this walks
+    `parent_node_id` back from the tip exactly as the Swift reader does —
+    fingerprinting every row would report drift from branches the app never
+    renders. The walk carries a depth bound because nothing in the schema
+    forbids a cycle.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+    parse_errors = 0
+    node_rows_parsed = 0
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, v in obj.items():
+            if v is not None:
+                ks.add(k)
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except Exception as exc:
+        return {
+            "file": str(db_path),
+            "type_counts": {},
+            "type_keys": {},
+            "node_rows_parsed": 0,
+            "parse_errors": 1,
+            "error": f"sqlite_open_failed: {exc}",
+        }
+
+    try:
+        session_row = conn.execute(
+            """
+            SELECT id, title, working_directory, backend_type, model, agent_mode,
+                   created_at, last_activity_at, main_chain_id, hidden
+            FROM sessions
+            WHERE hidden = 0
+            ORDER BY last_activity_at DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+        if session_row is None:
+            return {
+                "file": str(db_path),
+                "type_counts": {},
+                "type_keys": {},
+                "node_rows_parsed": 0,
+                "parse_errors": 0,
+                "warning": "no_sessions_found",
+            }
+
+        _add("session", {k: session_row[k] for k in session_row.keys()})
+        session_id = str(session_row["id"])
+        tip = session_row["main_chain_id"]
+        if tip is None:
+            return {
+                "file": str(db_path),
+                "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+                "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+                "node_rows_parsed": 0,
+                "parse_errors": 0,
+                "warning": "session_has_no_main_chain",
+            }
+
+        node_rows = conn.execute(
+            """
+            WITH RECURSIVE chain(node_id, parent_node_id, chat_message, depth) AS (
+                SELECT node_id, parent_node_id, chat_message, 0
+                FROM message_nodes WHERE session_id = ?1 AND node_id = ?2
+              UNION ALL
+                SELECT m.node_id, m.parent_node_id, m.chat_message, c.depth + 1
+                FROM chain c
+                JOIN message_nodes m ON m.session_id = ?1 AND m.node_id = c.parent_node_id
+                WHERE c.depth < 50000
+            )
+            SELECT chat_message FROM chain ORDER BY depth DESC LIMIT ?3;
+            """,
+            (session_id, tip, max(0, int(max_nodes))),
+        ).fetchall()
+
+        for row in node_rows:
+            try:
+                node_obj = json.loads(str(row["chat_message"]))
+            except Exception:
+                parse_errors += 1
+                continue
+            if not isinstance(node_obj, dict):
+                continue
+            _add(_devin_node_bucket(node_obj), node_obj)
+            node_rows_parsed += 1
+    except Exception as exc:
+        parse_errors += 1
+        return {
+            "file": str(db_path),
+            "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+            "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+            "node_rows_parsed": node_rows_parsed,
+            "parse_errors": parse_errors,
+            "error": f"sqlite_query_failed: {exc}",
+        }
+    finally:
+        conn.close()
+
+    return {
+        "file": str(db_path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "node_rows_parsed": node_rows_parsed,
+        "parse_errors": parse_errors,
+    }
+
+
 def _opencode_sqlite_latest_session_schema_fingerprint(
     db_path: Path, *, max_messages: int, max_parts: int
 ) -> dict[str, Any]:
@@ -1881,6 +2058,16 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_hermes_session_json_schema_fingerprint(bp, max_messages=5000))
+    elif agent_name == "devin":
+        # The fixture is a JSON projection of the shared database's records, so
+        # the baseline reads it directly while the live pass normalizes SQLite
+        # rows into the same buckets. Same split as opencode.
+        for p in filtered:
+            if not p.endswith(".json"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_devin_fixture_file_schema_fingerprint(bp))
     elif agent_name == "opencode":
         for p in filtered:
             if not p.endswith(".json"):
@@ -3538,6 +3725,14 @@ def main(argv: list[str]) -> int:
                             local_fp = _opencode_storage_session_tree_schema_fingerprint(
                                 newest, max_messages=max_messages, max_parts=max_parts
                             )
+                elif kind == "devin_latest_session":
+                    max_nodes = int(local_schema_cfg.get("max_nodes") or 500)
+                    db_roots = list(local_schema_cfg.get("db_roots") or ["~/.local/share/devin/cli/sessions.db"])
+                    db_candidates = [_expand_path(str(x)) for x in db_roots if isinstance(x, str)]
+                    db_candidates = [x for x in db_candidates if x.exists()]
+                    if db_candidates:
+                        newest = max(db_candidates, key=lambda x: x.stat().st_mtime)
+                        local_fp = _devin_sqlite_latest_session_schema_fingerprint(newest, max_nodes=max_nodes)
                 elif kind == "cursor_transcript_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)
