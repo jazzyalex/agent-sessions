@@ -70,8 +70,16 @@ struct DevinResumeCommandBuilder {
     }
 
     /// Picks `--resume <id>` when the session carries an id, else falls back to
-    /// `--continue`, which reopens the most recent session for the working
-    /// directory.
+    /// `--continue`.
+    ///
+    /// The installed help says only "Continue the most recent conversation" — it
+    /// promises nothing about scoping that to a directory, unlike Kimi's and
+    /// Grok's equivalents, which is where the earlier "directory-scoped" wording
+    /// here came from. The launcher still `cd`s into the session's working
+    /// directory first, which is the best we can do, but it is not a guarantee
+    /// the CLI resolves per directory. That is why the coordinator refuses this
+    /// strategy outright when no working directory is known, and why callers
+    /// should prefer `--resume <id>` whenever an id exists.
     func strategy(forSessionID sessionID: String) -> Strategy {
         sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? .continueMostRecent

@@ -51,13 +51,24 @@ final class DevinSettings: ObservableObject {
         resolvedBinaryPath = defaults.string(forKey: Keys.resolvedBinaryPath) ?? ""
         resolvedSupportsResume = defaults.bool(forKey: Keys.resolvedSupportsResume)
         resolvedSupportsContinue = defaults.bool(forKey: Keys.resolvedSupportsContinue)
-        // Heal a cache written before the writer guard existed: an entry naming a
-        // binary that advertises neither flag came from a probe that could not
-        // execute the CLI. Dropping it here rather than at the first read is what
-        // lets the warm below rebuild it — including for a custom path, which has
-        // nothing else that would ever reprobe it.
-        if !resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           !resolvedSupportsResume, !resolvedSupportsContinue {
+        // Heal a stale cache here, at launch, because this is now the only place
+        // that does. Two entries are stale:
+        //
+        //   1. One naming a binary that advertises neither flag — it came from a
+        //      probe that could not execute the CLI at all.
+        //   2. One naming a binary that is no longer executable, because the CLI
+        //      was moved, upgraded to a different path, or uninstalled.
+        //
+        // Both used to be repaired lazily by `validatedCachedResolvedBinaryPath`,
+        // which `canCopyResumeCommand` reached on every context-menu render. That
+        // call is now the pure `canBuildCopyCommandPlan`, so nothing repairs them
+        // mid-session — and case 2 would otherwise survive a relaunch too, since
+        // `warmResolvedBinaryPathIfNeeded` only rebuilds an *empty* path. For a
+        // custom binary that meant no way out but retyping the path.
+        let cached = resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cached.isEmpty,
+           (!resolvedSupportsResume && !resolvedSupportsContinue)
+            || !FileManager.default.isExecutableFile(atPath: cached) {
             clearResolvedBinary()
         }
         if warmResolvedBinaryCache { warmResolvedBinaryPathIfNeeded() }
@@ -181,6 +192,50 @@ final class DevinSettings: ObservableObject {
                 _ = self?.acceptProbeCompletion(result, for: request)
             }
         }
+    }
+
+    /// Whether `copyCommandPlan` would return a plan — decided without touching
+    /// anything.
+    ///
+    /// `copyCommandPlan` is not a predicate: on a stale cache entry it calls
+    /// `clearResolvedBinary()`, which writes three `@Published` properties, and
+    /// `warmResolvedBinaryPathIfNeeded()`, which spawns a probe. SwiftUI
+    /// evaluates the menu's `.disabled(...)` inside a ViewBuilder, and
+    /// `PreferencesView` observes this object — so calling it from there mutates
+    /// observed state during view update and can kick a background probe once per
+    /// row rendered. This mirrors the same decision with no writes and no I/O
+    /// beyond the executable check the cached path already implies.
+    ///
+    /// Deliberately duplicates rather than shares the branch structure below:
+    /// factoring out the common core would mean threading a "may I mutate" flag
+    /// through the healing paths, and a healing routine that sometimes does not
+    /// heal is a worse thing to own than eight lines of parallel logic.
+    func canBuildCopyCommandPlan(sessionID: String) -> Bool {
+        let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let custom = binaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = resolvedBinaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let usableBinary: Bool
+        if !custom.isEmpty {
+            usableBinary = !resolved.isEmpty
+                && pathsReferToSameBinary(custom, resolved)
+                && FileManager.default.isExecutableFile(atPath: resolved)
+                && (resolvedSupportsResume || resolvedSupportsContinue)
+        } else if !resolved.isEmpty {
+            usableBinary = FileManager.default.isExecutableFile(atPath: resolved)
+                && (resolvedSupportsResume || resolvedSupportsContinue)
+        } else {
+            // Nothing probed yet: `copyCommandPlan` falls back to a bare `devin`
+            // and always yields a strategy.
+            return true
+        }
+
+        guard usableBinary else {
+            // The auto branch heals and retries with a bare `devin`; the custom
+            // branch has no fallback, so a dead custom entry means no plan.
+            return custom.isEmpty
+        }
+        return (!trimmedSessionID.isEmpty && resolvedSupportsResume) || resolvedSupportsContinue
     }
 
     private func validatedCachedResolvedBinaryPath() -> String? {

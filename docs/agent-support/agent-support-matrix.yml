@@ -233,7 +233,7 @@ agents:
       - "live/active status"
       - "images"
       - "archive (Devin stores only active sessions in the sessions.db; archived history is not retained by the CLI)"
-      - "custom storage root with an arbitrary structure (the devin data directory, cli directory, or the sessions.db file itself are accepted)"
+      - "custom storage root with an arbitrary structure (point it at the devin data directory or the cli directory containing sessions.db; the Settings field accepts directories only)"
     notes:
       - "The installed Devin CLI is 3000.3.27 (0becb483). Storage is a single shared SQLite database at ~/.local/share/devin/cli/sessions.db; the reader parses the main-chain message tree (user/assistant/tool_result records) and derives cwd from the sessions table's working_directory column. resume --help advertises -c/--continue and -r/--resume <id>; session ids are human-readable slugs (sessions.id primary key) passed through verbatim."
       - "Model execution was authentication-blocked, so no fresh end-to-end resume is claimed; the copied/launched command plans are tested against probe-advertised capabilities, and installed help and reader behavior justify the explicitly untested resume integration."

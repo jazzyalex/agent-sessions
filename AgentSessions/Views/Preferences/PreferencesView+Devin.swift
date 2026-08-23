@@ -52,7 +52,7 @@ extension PreferencesView {
                                     Text("Devin CLI not found")
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                    Text("Install it from code.devin.com and ensure `devin` is on PATH.")
+                                    Text("Install it from devin.ai and ensure `devin` is on PATH.")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
@@ -148,7 +148,7 @@ extension PreferencesView {
                             .foregroundStyle(.red)
                     }
 
-                    Text("Devin keeps every session in one SQLite database (sessions.db) under its CLI data directory. Override only when that data lives outside the default location; the root may point at the devin data directory, the cli directory, or the sessions.db file itself.")
+                    Text("Devin keeps every session in one SQLite database (sessions.db) under its CLI data directory. Override only when that data lives outside the default location; point it at the devin data directory or the cli directory that contains sessions.db.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

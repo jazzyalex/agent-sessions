@@ -1510,7 +1510,10 @@ struct UnifiedSessionsView: View {
             // directly. `--continue` remains the fallback when it is absent.
             // A probe that advertised neither flag yields no plan; mirror that
             // here so the menu item disables instead of silently doing nothing.
-            return DevinSettings.shared.copyCommandPlan(sessionID: session.id) != nil
+            // Must stay the pure predicate: `copyCommandPlan` heals a stale cache
+            // by writing published state and spawning a probe, which is not
+            // something a ViewBuilder may do.
+            return DevinSettings.shared.canBuildCopyCommandPlan(sessionID: session.id)
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
