@@ -69,4 +69,63 @@ final class DevinSessionParserTests: XCTestCase {
         XCTAssertEqual(events[2].toolInput, expected)
         XCTAssertEqual(events[2].messageID, "call_9")
     }
+
+    // MARK: - Tolerated shapes
+
+    /// Every node in the 253-session survey had a string `content`, but nothing
+    /// in the store enforces it. Read as a string only, a parts array becomes a
+    /// contentless assistant node, which falls through to the `.meta` fallback —
+    /// and the default filters hide meta, so the turn leaves the transcript
+    /// silently rather than rendering badly.
+    func testAssistantContentAsPartsArrayStillRenders() {
+        let message = json(["role": "assistant",
+                            "message_id": "m4",
+                            "content": [["type": "text", "text": "first"],
+                                        ["type": "image"],
+                                        ["type": "text", "text": "second"]]])
+
+        let events = DevinSessionParser.events(fromChatMessage: message, nodeID: 11, time: nil)
+
+        XCTAssertEqual(events.map(\.kind), [.assistant])
+        XCTAssertEqual(events[0].text, "first\n[image]\nsecond")
+    }
+
+    func testUserContentAsPartsArrayStillRenders() {
+        let message = json(["role": "user",
+                            "message_id": "m5",
+                            "content": [["type": "text", "text": "hello"]]])
+
+        let events = DevinSessionParser.events(fromChatMessage: message, nodeID: 12, time: nil)
+
+        XCTAssertEqual(events.map(\.kind), [.user])
+        XCTAssertEqual(events[0].text, "hello")
+    }
+
+    /// A parts array of nothing renderable is not text; it must not become an
+    /// empty assistant bubble.
+    func testAssistantContentWithNoRenderablePartsFallsBackToMeta() {
+        let message = json(["role": "assistant",
+                            "message_id": "m6",
+                            "content": [["type": "audio"]]])
+
+        let events = DevinSessionParser.events(fromChatMessage: message, nodeID: 13, time: nil)
+
+        XCTAssertEqual(events.map(\.kind), [.meta])
+    }
+
+    /// The parser has a malformed-payload branch; nothing exercised it.
+    func testMalformedPayloadBecomesOneRawMetaEvent() {
+        let events = DevinSessionParser.events(fromChatMessage: "{not json", nodeID: 14, time: nil)
+
+        XCTAssertEqual(events.map(\.kind), [.meta])
+        XCTAssertEqual(events[0].rawJSON, "{not json", "the unparseable text is preserved for the raw view")
+        XCTAssertNil(events[0].text)
+    }
+
+    /// A payload that parses as JSON but is not an object also has no role.
+    func testNonObjectPayloadBecomesOneRawMetaEvent() {
+        let events = DevinSessionParser.events(fromChatMessage: "[1,2,3]", nodeID: 15, time: nil)
+
+        XCTAssertEqual(events.map(\.kind), [.meta])
+    }
 }

@@ -21,12 +21,31 @@ That is the whole job. One agent, your own installation, your own sessions.
 - No support rota, no response deadline. If you're busy, say so or say nothing — the agent
   moves to best-effort and that's fine.
 - No sharing of real transcripts. The check tool redacts before anything leaves your Mac,
-  and you decide what to attach.
+  and you decide what to attach. Nothing in the job above ever publishes your session
+  content.
+
+## Sometimes asked, never expected
+
+Two things occasionally come up that are **not** part of the job. Both are one-off, both are
+opt-in, and "no" is a complete answer that changes nothing about your stewardship.
+
+- **An end-to-end resume check.** Some agents are supported from their installed help and
+  reader evidence, but nobody on the project could authenticate the CLI to confirm that
+  Resume actually reopens a session. If you can run it once and say whether it worked, that
+  closes the last hole in the support matrix. The footnotes under the table below name the
+  agents waiting on this.
+- **A screenshot for the release page.** Agent Sessions can only show an agent someone
+  actually runs, so the maintainer cannot capture a session for an agent he does not have.
+  This one is different from everything else here: **a screenshot is unredacted transcript.**
+  The redaction promise above covers the check tool, and it cannot cover a picture. So if you
+  are asked, you choose what is on screen, you take the capture, you look at it, and nothing
+  is published until you say so. Declining is genuinely fine — a release does not need it.
 
 ## What a steward gets
 
 Named credit in the table below, and on the project site's support page as it is built out.
-Every verification run is a public, dated record with your handle on it.
+Every verification run is a public, dated record with your handle on it. Anything from the
+optional list above is credited the same way.
 
 ## Sign up
 
@@ -68,6 +87,7 @@ writes a redacted sample you can attach to an issue.
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | steward wanted | 2026-08-18 · 3000.3.27 (see note) | Best-effort |
+| fx (vercel-labs) | steward wanted | 2026-08-20 · 0.0.4 (see note) | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),
@@ -77,7 +97,7 @@ matrix is right.
 Droid is not in the table on purpose: it is legacy-only — existing sessions still read,
 but the agent is excluded from active format checks and takes no steward.
 
-Two honest footnotes:
+Honest footnotes:
 
 - **Devin CLI.** Verified against the installed CLI 3000.3.27 (0becb483) with a schema
   probe over 253 on-disk sessions in the shared `sessions.db`. Resume is implemented from
@@ -93,3 +113,12 @@ Two honest footnotes:
   the single most useful agent to adopt.
 - **Hermes.** Held at 0.17.0 since 2026-06-24. The automated driver stopped producing a
   usable sample, so newer Hermes builds have no fresh evidence either way.
+- **fx (vercel-labs).** Verified against the installed fx 0.0.4 with a schema survey of
+  the on-disk sessions under `~/.fx/sessions`: transcripts come from each session's
+  `checkpoint.json`, sidecars carry identity/workspace/title/model, and `fx --help`
+  advertises `--resume <id>` and `--continue`. Resume is implemented from that help and
+  reader evidence with hermetic tests, not an end-to-end run; it stays untested until
+  someone with an authenticated fx login closes it. fx is in the weekly format
+  monitoring set as of 2026-08-23, so `./scripts/steward_check.py fx` runs — but only
+  on a machine with fx sessions on disk. The format is young (schema_version 3
+  sidecars, event_log_v1 storage), so drift is likelier than for the older agents.

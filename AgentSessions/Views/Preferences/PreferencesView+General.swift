@@ -472,6 +472,7 @@ private extension PreferencesView {
         case .grok:        return $grokAgentEnabled
         case .qwen:        return $qwenAgentEnabled
         case .devin:       return $devinAgentEnabled
+        case .fx:          return $fxAgentEnabled
         }
     }
 

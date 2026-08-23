@@ -62,7 +62,7 @@ enum DevinSqliteReader {
         guard let db = open(databasePath) else { return nil }
         defer { sqlite3_close(db) }
 
-        guard let chainCounts = mainChainCounts(db: db) else { return nil }
+        guard let chainCounts = mainChainTotals(db: db) else { return nil }
 
         // `hidden` marks sessions the CLI has retired; they stay in the table
         // but never appear in `devin list`, so they are excluded here too.
@@ -100,7 +100,8 @@ enum DevinSqliteReader {
                                         created: created,
                                         lastActivity: lastActivity,
                                         agentMode: agentMode,
-                                        eventCount: chainCounts[id] ?? 0,
+                                        eventCount: chainCounts[id]?.events ?? 0,
+                                        commands: chainCounts[id]?.commands,
                                         events: [],
                                         databasePath: databasePath))
         }
@@ -119,35 +120,76 @@ enum DevinSqliteReader {
         listSessionsIfReadable(databasePath: databasePath) ?? []
     }
 
-    /// Main-chain length for every visible session in one recursive pass.
+    /// Rendered-event and tool-call totals for every visible session in one
+    /// recursive pass.
     ///
     /// Per-session walks would issue one query per session; this resolves all
-    /// 247 visible chains in ~2s on a 5.4 GB store. The count matters because
-    /// a raw `COUNT(*)` over `message_nodes` would overstate a session's length
-    /// roughly eightfold.
-    private static func mainChainCounts(db: OpaquePointer?) -> [String: Int]? {
+    /// 247 visible chains in ~2s on a 5.4 GB store. Both numbers come from the
+    /// same pass because the expensive part is the walk, not the arithmetic.
+    ///
+    /// **The event total must never exceed what a full parse produces**, or a
+    /// session visible in the list vanishes the moment it is opened: the reload
+    /// replaces the estimate with the real non-meta count and
+    /// `passesLowMessageVisibilityFilter` re-tests it mid-view. A plain
+    /// `COUNT(*)` of chain nodes overcounts twice over — it counts `system`
+    /// nodes and contentless assistant nodes, which render as `.meta` and so
+    /// contribute nothing — so this mirrors `DevinSessionParser`'s own
+    /// accounting instead: `user` and `tool` yield one event each, an
+    /// `assistant` node yields one per tool call plus one if it has text.
+    /// Where the two could disagree it undercounts on purpose; a low estimate
+    /// is invisible, a high one hides the row.
+    ///
+    /// JSON1 (`json_extract`, `json_type`, `json_array_length`) is unconditional
+    /// in SQLite 3.38+, and the deployment target is macOS 14, which ships 3.43 —
+    /// so this needs no non-JSON fallback.
+    ///
+    /// Every JSON call is guarded by `json_valid`, and that guard is load-bearing
+    /// rather than defensive: SQLite raises "malformed JSON" as a *runtime error*,
+    /// so one unparseable `chat_message` on any one chain would fail the step, trip
+    /// the terminal-status check below, and report the entire database as
+    /// unreadable. `COUNT(*)` never opened the payload, so this hazard arrived with
+    /// the JSON accounting. Zero is also the right answer for such a row —
+    /// `DevinSessionParser` renders it as a single `.meta` event.
+    private static func mainChainTotals(db: OpaquePointer?) -> [String: (events: Int, commands: Int)]? {
         let sql = """
-            WITH RECURSIVE chain(session_id, node_id, parent_node_id, depth) AS (
-                SELECT s.id, m.node_id, m.parent_node_id, 0
+            WITH RECURSIVE chain(session_id, node_id, parent_node_id, chat_message, depth) AS (
+                SELECT s.id, m.node_id, m.parent_node_id, m.chat_message, 0
                 FROM sessions s
                 JOIN message_nodes m ON m.session_id = s.id AND m.node_id = s.main_chain_id
                 WHERE s.hidden = 0
               UNION ALL
-                SELECT c.session_id, m.node_id, m.parent_node_id, c.depth + 1
+                SELECT c.session_id, m.node_id, m.parent_node_id, m.chat_message, c.depth + 1
                 FROM chain c
                 JOIN message_nodes m ON m.session_id = c.session_id AND m.node_id = c.parent_node_id
                 WHERE c.depth < \(maxChainDepth)
             )
-            SELECT session_id, COUNT(*) FROM chain GROUP BY session_id;
+            SELECT session_id,
+                   SUM(CASE WHEN NOT json_valid(chat_message) THEN 0
+                            ELSE (CASE json_extract(chat_message, '$.role')
+                                    WHEN 'user' THEN 1
+                                    WHEN 'tool' THEN 1
+                                    WHEN 'assistant' THEN
+                                         (CASE WHEN json_type(chat_message, '$.content') = 'text'
+                                                AND json_extract(chat_message, '$.content') <> ''
+                                               THEN 1 ELSE 0 END)
+                                         + COALESCE(json_array_length(chat_message, '$.tool_calls'), 0)
+                                    ELSE 0
+                                  END)
+                       END),
+                   SUM(CASE WHEN json_valid(chat_message)
+                            THEN COALESCE(json_array_length(chat_message, '$.tool_calls'), 0)
+                            ELSE 0 END)
+            FROM chain GROUP BY session_id;
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
 
-        var counts: [String: Int] = [:]
+        var counts: [String: (events: Int, commands: Int)] = [:]
         var step = sqlite3_step(stmt)
         while step == SQLITE_ROW {
-            counts[text(stmt, 0)] = Int(sqlite3_column_int64(stmt, 1))
+            counts[text(stmt, 0)] = (events: Int(sqlite3_column_int64(stmt, 1)),
+                                     commands: Int(sqlite3_column_int64(stmt, 2)))
             step = sqlite3_step(stmt)
         }
         // Same contract as the session scan: a partial count set is not a
@@ -181,10 +223,22 @@ enum DevinSqliteReader {
         let created = sqlite3_column_int64(stmt, 3)
         let lastActivity = sqlite3_column_int64(stmt, 4)
         let agentMode = text(stmt, 5)
+        // `main_chain_id` is nullable, and `sqlite3_column_int64` reports NULL as 0.
+        // Feeding that to the CTE anchors the walk at `node_id = 0`, which matches
+        // nothing and yields a silently empty transcript that looks like a parse
+        // failure. A session with no live chain has no events — say so directly
+        // rather than asking the database a question with a predetermined answer.
+        let hasChain = sqlite3_column_type(stmt, 6) != SQLITE_NULL
         let mainChainID = sqlite3_column_int64(stmt, 6)
         sqlite3_finalize(stmt)
 
-        guard let events = mainChainEvents(db: db, sessionID: sessionID, mainChainID: mainChainID) else { return nil }
+        let events: [SessionEvent]
+        if hasChain {
+            guard let walked = mainChainEvents(db: db, sessionID: sessionID, mainChainID: mainChainID) else { return nil }
+            events = walked
+        } else {
+            events = []
+        }
         return makeSession(id: sessionID,
                            title: title,
                            cwd: cwd,
@@ -193,6 +247,7 @@ enum DevinSqliteReader {
                            lastActivity: lastActivity,
                            agentMode: agentMode,
                            eventCount: events.filter { $0.kind != .meta }.count,
+                           commands: events.filter { $0.kind == .tool_call }.count,
                            events: events,
                            databasePath: databasePath)
     }
@@ -253,6 +308,7 @@ enum DevinSqliteReader {
                                     lastActivity: Int64,
                                     agentMode: String,
                                     eventCount: Int,
+                                    commands: Int?,
                                     events: [SessionEvent],
                                     databasePath: String) -> Session {
         let start = created > 0 ? Date(timeIntervalSince1970: Double(created)) : nil
@@ -275,7 +331,10 @@ enum DevinSqliteReader {
                        cwd: trimmedCwd,
                        repoName: trimmedCwd.map { URL(fileURLWithPath: $0).lastPathComponent },
                        lightweightTitle: trimmedTitle.isEmpty ? nil : trimmedTitle,
-                       lightweightCommands: nil,
+                       // Filled from the same chain pass as `eventCount`. While this
+                       // was nil the has-commands filter treated every unopened Devin
+                       // session as command-free and hid the lot.
+                       lightweightCommands: commands,
                        surface: .cli,
                        reasoningEffort: agentMode.isEmpty ? nil : agentMode)
     }

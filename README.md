@@ -10,7 +10,7 @@
 <td>
 
 **Live per-session quota burn for Codex and Claude — see *which* session is eating your 5-hour and weekly limits, priced per model.**
-Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [OpenCode](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, Devin CLI, Antigravity CLI, [Hermes](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide), and [OpenClaw](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide), with image browsing and one-click resume where the source supports them. macOS, local-only.
+Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-sessions/guides/codex-local-history.html?campaign=github&ref=readme-guide), [Claude](https://jazzyalex.github.io/agent-sessions/guides/claude-code-jsonl-history.html?campaign=github&ref=readme-guide), [OpenCode](https://jazzyalex.github.io/agent-sessions/guides/opencode-sqlite-history.html?campaign=github&ref=readme-guide), [Cursor](https://jazzyalex.github.io/agent-sessions/guides/cursor-agent-local-history.html?campaign=github&ref=readme-guide), GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, Devin CLI, fx, Antigravity CLI, [Hermes](https://jazzyalex.github.io/agent-sessions/guides/hermes-agent-state-db-history.html?campaign=github&ref=readme-guide), and [OpenClaw](https://jazzyalex.github.io/agent-sessions/guides/openclaw-local-agent-history.html?campaign=github&ref=readme-guide), with image browsing and one-click resume where the source supports them. macOS, local-only.
 
 [**Session-Bench**](https://jazzyalex.github.io/agent-sessions/bench/?campaign=github&ref=readme): how ten agents' session formats score — 20 pass/fail gates, evidence behind every cell.
 
@@ -42,7 +42,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
 
 Run three agents at once and a normal quota meter tells you "60% used" — not which one spent it. Agent Sessions attributes burn to the **individual session**, live, against your Codex and Claude 5-hour and weekly windows. Pick the lens you want (5-hour, weekly, tokens/hour, or dollars); the `$` lens prices each model in a session at its own rate, so an Opus orchestrator driving Sonnet subagents is costed per model instead of blended into one number.
 
-It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, and Devin CLI histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
+It's also a local-first Mac app for finding useful work coding agents already wrote to disk — Codex, Claude, OpenCode, Cursor Agent, Hermes, OpenClaw, Antigravity, GitHub Copilot CLI, Pi, Kimi Code, Grok CLI, Qwen Code, Devin CLI, and fx histories in one searchable view, with transcript inspection, image browsing, saved-session recovery, and resume commands for supported CLIs.
 
 <div align="center">
   <p style="margin:0 0 0px 0;"><em>Session Runway — read the same burn as % of quota, tokens/hour, or cost/hour</em></p>
@@ -78,36 +78,30 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 5.0
+## What's New in 5.1
 
-**TL;DR** - Agents are now plug-in adapters instead of hand wiring across every surface,
-which is why this release is 5.0. Qwen Code joins as the thirteenth source, and adding a
-fourteenth is a documented recipe: 26 shared-file edits before, 12 now, each one listed.
+**TL;DR** - Two more coding agents: Devin CLI and fx (vercel-labs). Both land in the same
+searchable list as the rest, each with a Settings pane and a resume command.
 
-New in 5.0:
-- **Plug-in adapters for every agent** — the session list, search, the filter pills,
-  Analytics, the Settings panes and the launch state each carried their own hand-written
-  list of agents, so an agent could appear in one and be quietly missing from another.
-  They all derive from a single source description now. Switching an agent off reaches
-  every surface at once, and adding an agent is a documented, tested recipe rather than
-  fourteen scattered edits.
-- **Qwen Code, the thirteenth agent source** — local JSONL chats in browsing, search,
-  filtering, Analytics and the transcript view, with reasoning and tool activity, rewound
-  branches reconstructed along the active parent chain, and Settings controls for binary
-  and storage root. Active chats offer `--resume`; archived histories stay browse-only.
-  Format verified against real 0.14.3 transcripts.
-- **Add the agent you use** — a proposal form, an implementation brief you can hand to
-  your own coding agent, and a PR template, surfaced once from inside the app by a
-  dismissible card. Shipped agents can pick up a steward who keeps their format verified
-  as the CLI moves.
-- **The agent switches reach everywhere** — disabled agents no longer surface in
-  filter-view search results, Kimi and Grok report when their loading has finished, and
-  OpenClaw stops marking Analytics out of date on every launch.
-- **OpenCode and Hermes transcripts are searchable** — both store sessions in SQLite
-  behind one shared file path, and search ingest could not tell their sessions apart, so
-  their transcript text was never indexed.
+New in 5.1:
+- **Devin CLI, the fourteenth agent source** — browsing, search, filtering, Analytics and
+  the transcript view over Devin's shared SQLite store. Devin keeps every retry and edit as
+  a branch, so a session shows the live conversation rather than every path it took to get
+  there. Settings adds binary and storage-root controls, and Copy Resume Command produces
+  `devin --resume <id>`. Devin keeps only active sessions, so there is no archived history
+  to browse, and image extraction is not yet supported.
+- **fx (vercel-labs), the fifteenth** — one directory per session under `~/.fx/sessions`,
+  with every kind of turn rendered: ordinary replies and their narrated tool steps,
+  background commands and where their output went, the summary that replaces auto-compacted
+  history, and interrupted turns with whatever finished before the cut. Text fx stored as
+  raw bytes rather than UTF-8 decodes back to readable output instead of disappearing.
+- **Both agents are contributed, not ported** — @thedavidweng added them against the
+  documented recipe from 5.0, which is the first real test of whether that recipe works for
+  someone outside the project. Both stay `steward wanted` until someone running the CLI
+  confirms resume end to end; the support matrix says so on every surface.
 
-**Recent releases** — 4.8: Grok CLI joins as the eleventh agent source, and Analytics
+
+**Recent releases** — 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
 counts every agent you have enabled. 4.7: Kimi Code joins as the tenth source, and active
 Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit
 retired, leaving the Quota Meter as the only mode. 4.6: paste-a-cookie Claude web usage,
@@ -123,6 +117,7 @@ no CLI or Full Disk Access needed. Full history in the [changelog](docs/CHANGELO
 - Pi CLI sessions now participate in browsing, search, filtering, and resume workflows.
 - Qwen Code sessions (new in 5.0) participate in browsing, search, filtering, and Analytics, including active-chain tool calls and reasoning recorded in local JSONL history. Active-chat resume actions are implemented from the installed CLI's help and reader behavior, but remain end-to-end untested because authentication blocked a disposable 0.21.13 run; archived Qwen histories remain browse-only. Qwen image extraction is not yet supported.
 - Devin CLI sessions (new in 5.1) participate in browsing, search, filtering, Analytics, and resume workflows from the shared SQLite `sessions.db` under the CLI data directory, with working directories read from the sessions table's `working_directory` column. Devin keeps only active sessions in that database, so there is no archived-history surface; the records carry inline base64 images, but image extraction is not yet supported. Resume command plans are tested against probe-advertised capabilities, but remain end-to-end untested because authentication blocked a disposable run.
+- fx (vercel-labs) sessions (new in 5.1) participate in browsing, search, filtering, Analytics, and resume workflows from the per-session `checkpoint.json` transcripts under `~/.fx/sessions`, with working directories read from each session's `session.json`. Resume command plans are tested against probe-advertised capabilities but remain end-to-end untested against an authenticated run; image extraction is not yet supported.
 - Unified browsing across supported agents, with strict filtering, saved sessions, and a single session list.
 - Unified Search and Image Browser across sessions, plus in-session Find for fast transcript navigation.
 - Readable tool calls/outputs and navigation between prompts, tools, and errors.

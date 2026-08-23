@@ -442,6 +442,9 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published var includeDevin: Bool = UnifiedSessionIndexer.storedInclude(.devin) {
         didSet { applyInclude(.devin, includeDevin) }
     }
+    @Published var includeFx: Bool = UnifiedSessionIndexer.storedInclude(.fx) {
+        didSet { applyInclude(.fx, includeFx) }
+    }
 
     // Global agent enablement (drives app-wide availability). These twelve are read-only
     // mirrors of `enablementBySource` for the views that bind to them by name; the
@@ -464,6 +467,7 @@ final class UnifiedSessionIndexer: ObservableObject {
     @Published private(set) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     @Published private(set) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @Published private(set) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
+    @Published private(set) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
 
     /// Providers detected on disk that the user hasn't been notified about yet.
     @Published private(set) var newlyAvailableProviders: [SessionSource] = []
@@ -959,6 +963,7 @@ final class UnifiedSessionIndexer: ObservableObject {
         if value(.grok) != grokAgentEnabled { grokAgentEnabled = value(.grok) }
         if value(.qwen) != qwenAgentEnabled { qwenAgentEnabled = value(.qwen) }
         if value(.devin) != devinAgentEnabled { devinAgentEnabled = value(.devin) }
+        if value(.fx) != fxAgentEnabled { fxAgentEnabled = value(.fx) }
     }
 
     /// Detects providers whose data exists on disk but the user has not yet
@@ -2259,9 +2264,10 @@ final class UnifiedSessionIndexer: ObservableObject {
 
     /// Backs the "has commands" quick filter.
     ///
-    /// Every JSONL provider is judged on real tool-call evidence. Claude and
-    /// Antigravity are stricter: an unparsed session counts as command-free
-    /// because their lightweight pass does not populate `lightweightCommands`.
+    /// Every JSONL provider is judged on real tool-call evidence. Claude,
+    /// Antigravity and fx are stricter: an unparsed session counts as
+    /// command-free because their lightweight pass does not populate
+    /// `lightweightCommands` (fx only sets it on a full parse).
     static func passesHasCommandsFilter(_ session: Session) -> Bool {
         switch session.source {
         case .codex, .opencode, .hermes, .copilot, .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin:
@@ -2272,7 +2278,7 @@ final class UnifiedSessionIndexer: ObservableObject {
                 return session.hasToolCallEvent
             }
             return (session.lightweightCommands ?? 0) > 0
-        case .claude, .antigravity:
+        case .claude, .antigravity, .fx:
             if session.events.isEmpty { return false }
             return session.hasToolCallEvent
         }

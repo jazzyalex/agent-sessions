@@ -44,7 +44,9 @@ def main() -> int:
 
     total, hidden = db.execute(
         "SELECT COUNT(*), COALESCE(SUM(hidden), 0) FROM sessions").fetchone()
-    print("database: %s (%.1f GB)" % (path, os.path.getsize(path) / 1e9))
+    # Collapse $HOME so a pasted report does not carry the operator's username.
+    shown_path = path.replace(os.path.expanduser("~"), "~", 1)
+    print("database: %s (%.1f GB)" % (shown_path, os.path.getsize(path) / 1e9))
     print("sessions: %d (%d hidden)" % (total, hidden))
 
     def dump(title, rows):
@@ -104,7 +106,13 @@ def main() -> int:
     roles = collections.Counter()
     keys = collections.Counter()
     content_kinds = collections.Counter()
-    samples = {}
+    # Value *types* per key, never values. This script is listed under
+    # `evidence_tools` in the support matrix, which means a steward runs it and
+    # pastes the output into a public issue — so nothing derived from a real
+    # `chat_message` may reach stdout. Knowing that `assistant.content` is a str
+    # and `user.images` is a list is what the reader actually needs; the text
+    # itself was only ever incidental.
+    value_types = collections.Counter()
     for row in db.execute(
         "SELECT chat_message FROM message_nodes ORDER BY row_id DESC LIMIT 20000"
     ):
@@ -124,21 +132,13 @@ def main() -> int:
                     content_kinds["%s:%s" % (role, part.get("type", "?"))] += 1
         elif isinstance(content, str):
             content_kinds["%s:str" % role] += 1
-        if role not in samples:
-            samples[role] = {
-                k: (json.dumps(v, ensure_ascii=False)[:110])
-                for k, v in msg.items()
-            }
+        for k, v in msg.items():
+            value_types["%s.%s: %s" % (role, k, type(v).__name__)] += 1
 
     dump("chat_message roles (last 20k nodes)", roles.most_common())
     dump("keys by role", keys.most_common(30))
     dump("content part kinds", content_kinds.most_common(20))
-
-    print("\n--- one sample per role ---")
-    for role, fields in samples.items():
-        print("\n  ### %s" % role)
-        for k, v in fields.items():
-            print("      %-18s %s" % (k, v))
+    dump("value types by key", value_types.most_common(40))
 
     return 0
 

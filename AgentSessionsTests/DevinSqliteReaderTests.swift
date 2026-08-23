@@ -112,6 +112,116 @@ final class DevinSqliteReaderTests: XCTestCase {
         XCTAssertEqual(session.eventCount, 5)
     }
 
+    /// The load-bearing invariant: a session visible in the list must not vanish
+    /// when it is opened. The list estimate is compared against the same filter
+    /// input the full parse produces, so an estimate above the real non-meta
+    /// count would hide the row mid-view.
+    func testListEstimateNeverExceedsLoadedNonMetaCount() throws {
+        let listed = try XCTUnwrap(DevinSqliteReader.listSessions(databasePath: dbPath).first)
+        let loaded = try XCTUnwrap(DevinSqliteReader.loadFullSession(databasePath: dbPath, sessionID: "bald-ketch"))
+        let loadedNonMeta = loaded.events.filter { $0.kind != .meta }.count
+        XCTAssertLessThanOrEqual(listed.eventCount, loadedNonMeta,
+                                 "estimate \(listed.eventCount) > loaded \(loadedNonMeta): the row disappears on open")
+        XCTAssertEqual(listed.eventCount, loadedNonMeta, "fixture should be exact, not merely bounded")
+    }
+
+    /// A chain of nothing but nodes that render as `.meta` must estimate zero.
+    /// A plain node count would say three, so the row would show in the list and
+    /// then vanish the moment it was opened.
+    func testMetaOnlyChainEstimatesZeroNotNodeCount() throws {
+        let path = try makeAuxiliaryDatabase(sessionID: "meta-only", mainChainID: 3, rows: """
+              ('meta-only', 1, NULL, '{"role":"system","content":"You are Devin."}', 1),
+              ('meta-only', 2, 1, '{"role":"assistant","content":"","tool_calls":[]}', 2),
+              ('meta-only', 3, 2, '{"role":"toolbox","content":"unknown role"}', 3)
+            """)
+        let listed = try XCTUnwrap(DevinSqliteReader.listSessions(databasePath: path).first)
+        let loaded = try XCTUnwrap(DevinSqliteReader.loadFullSession(databasePath: path, sessionID: "meta-only"))
+
+        XCTAssertEqual(listed.eventCount, 0)
+        XCTAssertEqual(loaded.events.filter { $0.kind != .meta }.count, 0)
+        XCTAssertEqual(loaded.events.count, 3, "the nodes still render, they are just all meta")
+    }
+
+    /// `lightweightCommands` drives the has-commands filter for unopened
+    /// sessions. While it was nil every unopened Devin session was treated as
+    /// command-free and hidden by that filter.
+    func testListReportsToolCallCountForUnopenedSessions() throws {
+        let session = try XCTUnwrap(DevinSqliteReader.listSessions(databasePath: dbPath).first)
+        XCTAssertEqual(session.lightweightCommands, 1)
+        XCTAssertTrue(session.events.isEmpty, "still the lightweight pass")
+        XCTAssertTrue(UnifiedSessionIndexer.passesHasCommandsFilter(session))
+    }
+
+    /// SQLite raises "malformed JSON" as a runtime error, not a NULL — so the
+    /// JSON accounting in the counts query can fail the step on a single bad row.
+    /// Unguarded, that trips the terminal-status check and reports the whole
+    /// database as unreadable, which for an identity-backed source is the
+    /// difference between "one broken turn" and "this agent has no sessions".
+    func testMalformedChatMessageDoesNotMakeTheDatabaseUnreadable() throws {
+        let path = try makeAuxiliaryDatabase(sessionID: "bad-json", mainChainID: 3, rows: """
+              ('bad-json', 1, NULL, '{"role":"user","content":"real question"}', 1),
+              ('bad-json', 2, 1, '{not json at all', 2),
+              ('bad-json', 3, 2, '{"role":"assistant","content":"real answer"}', 3)
+            """)
+
+        let listed = try XCTUnwrap(DevinSqliteReader.listSessionsIfReadable(databasePath: path),
+                                   "one malformed row must not retire the whole store")
+        XCTAssertEqual(listed.count, 1)
+        // user + assistant = 2; the malformed node renders as meta and counts 0.
+        XCTAssertEqual(listed[0].eventCount, 2)
+
+        let loaded = try XCTUnwrap(DevinSqliteReader.loadFullSession(databasePath: path, sessionID: "bad-json"))
+        XCTAssertEqual(loaded.events.filter { $0.kind != .meta }.count, 2)
+        XCTAssertLessThanOrEqual(listed[0].eventCount, loaded.events.filter { $0.kind != .meta }.count)
+    }
+
+    /// `main_chain_id` is nullable. Read as an int it becomes 0, which anchors
+    /// the CTE at a node that cannot exist, so the session used to load as an
+    /// empty transcript that looked like a parse failure.
+    func testNullMainChainIDLoadsAnEmptySessionNotAFailure() throws {
+        let path = try makeAuxiliaryDatabase(sessionID: "no-chain", mainChainID: nil, rows: """
+              ('no-chain', 1, NULL, '{"role":"user","content":"orphaned"}', 1)
+            """)
+        let loaded = try XCTUnwrap(DevinSqliteReader.loadFullSession(databasePath: path, sessionID: "no-chain"),
+                                   "a session with no live chain is empty, not unreadable")
+        XCTAssertEqual(loaded.events.count, 0)
+        XCTAssertEqual(loaded.eventCount, 0)
+        XCTAssertEqual(loaded.lightweightTitle, "No chain")
+    }
+
+    /// Builds a second single-session database so a test can pick its own chain
+    /// shape without disturbing the shared fixture.
+    private func makeAuxiliaryDatabase(sessionID: String, mainChainID: Int?, rows: String) throws -> String {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("devin-aux-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("sessions.db").path
+
+        var db: OpaquePointer?
+        guard sqlite3_open(path, &db) == SQLITE_OK else { throw NSError(domain: "fixture", code: 4) }
+        defer { sqlite3_close(db) }
+        try exec(db, """
+            CREATE TABLE sessions (
+              id TEXT PRIMARY KEY, working_directory TEXT NOT NULL, backend_type TEXT NOT NULL,
+              model TEXT NOT NULL, agent_mode TEXT NOT NULL, created_at INTEGER NOT NULL,
+              last_activity_at INTEGER NOT NULL, title TEXT, main_chain_id INTEGER,
+              hidden INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE message_nodes (
+              row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+              node_id INTEGER NOT NULL, parent_node_id INTEGER, chat_message TEXT NOT NULL,
+              created_at INTEGER NOT NULL, metadata TEXT, UNIQUE(session_id, node_id));
+            """)
+        try exec(db, """
+            INSERT INTO sessions VALUES
+              ('\(sessionID)', '/tmp/x', 'Windsurf', 'swe-1-7', 'bypass', 1, 2,
+               '\(mainChainID == nil ? "No chain" : "Chained")',
+               \(mainChainID.map(String.init) ?? "NULL"), 0);
+            """)
+        try exec(db, "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at) VALUES \(rows);")
+        return path
+    }
+
     // MARK: - Full session
 
     func testFullSessionRendersOnlyTheMainChain() throws {

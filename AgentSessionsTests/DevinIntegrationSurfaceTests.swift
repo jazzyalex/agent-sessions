@@ -150,6 +150,87 @@ final class DevinIntegrationSurfaceTests: XCTestCase {
         XCTAssertFalse(settings.resolvedSupportsContinue)
     }
 
+    /// A cached path whose binary is gone is equally stale, and this case is the
+    /// one that used to survive a relaunch: init only dropped capability-free
+    /// entries, and `warmResolvedBinaryPathIfNeeded` only rebuilds an *empty*
+    /// path. It was repaired lazily from a ViewBuilder instead, which is exactly
+    /// what `canBuildCopyCommandPlan` stopped doing.
+    @MainActor
+    func testInitHealsCacheEntryWhoseBinaryNoLongerExists() {
+        let suite = "DevinIntegrationSurfaceTests.healMissing"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("/nonexistent/devin", forKey: DevinSettings.Keys.resolvedBinaryPath)
+        defaults.set(true, forKey: DevinSettings.Keys.resolvedSupportsResume)
+        defaults.set(true, forKey: DevinSettings.Keys.resolvedSupportsContinue)
+
+        let settings = DevinSettings.makeForTesting(defaults: defaults)
+
+        XCTAssertEqual(settings.resolvedBinaryPath, "", "a vanished binary must not stay cached")
+        XCTAssertFalse(settings.resolvedSupportsResume)
+    }
+
+    // MARK: - Copy-resume predicate
+
+    /// `canCopyResumeCommand` is evaluated inside a ViewBuilder, so it must not
+    /// call `copyCommandPlan` — that heals stale caches by writing published
+    /// state and spawning a probe. The predicate has to give the same answer
+    /// without doing either, so pin the agreement across the states that matter.
+    @MainActor
+    func testPredicateAgreesWithPlanAcrossBinaryStates() {
+        let binaryURL = makeExecutableBinary()
+
+        // 1. Nothing probed yet — the bare-binary fallback always yields a plan.
+        let fresh = makeSettings()
+        XCTAssertEqual(fresh.canBuildCopyCommandPlan(sessionID: "bald-ketch"),
+                       fresh.copyCommandPlan(sessionID: "bald-ketch") != nil)
+        XCTAssertTrue(fresh.canBuildCopyCommandPlan(sessionID: "bald-ketch"))
+
+        // 2. Probed custom binary advertising both flags.
+        let probed = makeSettings()
+        probed.setBinaryPath(binaryURL.path)
+        probed.setResolvedBinary(binaryURL.path, supportsResume: true, supportsContinue: true)
+        XCTAssertEqual(probed.canBuildCopyCommandPlan(sessionID: "bald-ketch"),
+                       probed.copyCommandPlan(sessionID: "bald-ketch") != nil)
+        XCTAssertTrue(probed.canBuildCopyCommandPlan(sessionID: "bald-ketch"))
+
+        // 3. Custom binary advertising neither flag — no plan, and no fallback.
+        let dead = makeSettings()
+        dead.setBinaryPath(binaryURL.path)
+        dead.setResolvedBinary(binaryURL.path, supportsResume: false, supportsContinue: false)
+        XCTAssertFalse(dead.canBuildCopyCommandPlan(sessionID: "bald-ketch"))
+        XCTAssertNil(dead.copyCommandPlan(sessionID: "bald-ketch"))
+
+        // 4. Only --continue advertised and no session id: `--resume` is
+        //    unavailable, so the plan falls through to continue.
+        let continueOnly = makeSettings()
+        continueOnly.setBinaryPath(binaryURL.path)
+        continueOnly.setResolvedBinary(binaryURL.path, supportsResume: false, supportsContinue: true)
+        XCTAssertEqual(continueOnly.canBuildCopyCommandPlan(sessionID: ""),
+                       continueOnly.copyCommandPlan(sessionID: "") != nil)
+    }
+
+    /// The point of the predicate: asking must change nothing.
+    @MainActor
+    func testPredicateDoesNotMutatePublishedState() {
+        let binaryURL = makeExecutableBinary()
+        let settings = makeSettings()
+        settings.setBinaryPath(binaryURL.path)
+        settings.setResolvedBinary(binaryURL.path, supportsResume: true, supportsContinue: true)
+        try? FileManager.default.removeItem(at: binaryURL)   // now a stale entry
+
+        let pathBefore = settings.resolvedBinaryPath
+        let resumeBefore = settings.resolvedSupportsResume
+        let continueBefore = settings.resolvedSupportsContinue
+
+        for _ in 0..<5 { _ = settings.canBuildCopyCommandPlan(sessionID: "bald-ketch") }
+
+        XCTAssertEqual(settings.resolvedBinaryPath, pathBefore)
+        XCTAssertEqual(settings.resolvedSupportsResume, resumeBefore)
+        XCTAssertEqual(settings.resolvedSupportsContinue, continueBefore)
+    }
+
     /// K1: these strings freeze at release. `resolvedSupportsResume` was
     /// briefly mapped onto Kimi's `...SupportsSession` suffix before launch;
     /// Devin's flag is `--resume`, and the literal below is the shipped form.

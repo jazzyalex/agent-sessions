@@ -3,8 +3,10 @@ import Foundation
 /// Turns a Devin `message_nodes.chat_message` payload into `SessionEvent`s.
 ///
 /// Shapes verified with `scripts/devin_sessions_schema_probe.py` against 253
-/// real sessions at CLI 3000.3.27 (`0becb483`). Unlike Grok, `content` is
-/// always a plain string; the structure lives in sibling keys instead:
+/// real sessions at CLI 3000.3.27 (`0becb483`). In that survey `content` was
+/// always a plain string and the structure lived in sibling keys — but nothing
+/// in the store enforces that, and a provider that sends parts arrays would be
+/// read as a turn with no content, so `textContent` accepts both shapes:
 ///
 /// - `system` — `{message_id, role, content, metadata}`
 /// - `user` — same, plus an optional `images` array and
@@ -25,7 +27,7 @@ enum DevinSessionParser {
         }
 
         let role = object["role"] as? String ?? "?"
-        let content = object["content"] as? String
+        let content = textContent(from: object["content"])
         let messageID = object["message_id"] as? String
 
         switch role {
@@ -85,6 +87,27 @@ enum DevinSessionParser {
         default:
             return [meta(nodeID: nodeID, suffix: "m", role: role, text: content, time: time, raw: json)]
         }
+    }
+
+    /// `content` is a plain string in every node the 253-session survey saw, but
+    /// the OpenAI-shaped parts array is the other form providers send and the
+    /// store does not constrain it. Reading only the string form turns such a
+    /// node into a contentless turn — for an assistant node that means falling
+    /// through to the `meta` fallback, which the default filters hide, so the
+    /// turn disappears from the transcript rather than rendering wrong. Same
+    /// tolerance as `GrokSessionParser.textContent`.
+    private static func textContent(from content: Any?) -> String? {
+        if let string = content as? String { return string }
+        guard let parts = content as? [[String: Any]] else { return nil }
+        let chunks: [String] = parts.compactMap { part in
+            switch part["type"] as? String {
+            case "text": return part["text"] as? String
+            case "image", "image_url": return "[image]"
+            default: return nil
+            }
+        }
+        let joined = chunks.joined(separator: "\n")
+        return joined.isEmpty ? nil : joined
     }
 
     private static func meta(nodeID: Int64, suffix: String, role: String?, text: String?, time: Date?, raw: String) -> SessionEvent {

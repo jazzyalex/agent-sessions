@@ -1730,6 +1730,90 @@ def _devin_fixture_file_schema_fingerprint(path: Path) -> dict[str, Any]:
     }
 
 
+def _fx_turn_bucket(obj: dict[str, Any]) -> str:
+    """
+    Bucket one `state.history[]` entry by its `kind`.
+
+    FxSessionParser switches on kind and reads that kind's own sibling keys, so
+    kind is the unit drift matters in. A fifth kind, or a new key on one of the
+    four, is exactly what would silently lose transcript content — the review of
+    PR #59 caught the parser handling two of the four.
+    """
+    kind = obj.get("kind")
+    return f"turn.{kind}" if isinstance(kind, str) and kind else "turn"
+
+
+def _fx_checkpoint_schema_fingerprint(path: Path) -> dict[str, Any]:
+    """
+    Fingerprint one fx `checkpoint.json`.
+
+    Unlike Devin, fx's live store is already JSON files in the shape the reader
+    parses, so the baseline and the live pass share this one function — there is
+    no projection to keep in step. The nested execution records are bucketed too:
+    a turn's content lives under `execution.tool_steps[]`, and drift there is
+    just as silent as drift on the turn itself.
+    """
+    type_keys: dict[str, set[str]] = {}
+    type_counts: dict[str, int] = {}
+
+    def _add(event_type: str, obj: dict[str, Any]) -> None:
+        type_counts[event_type] = type_counts.get(event_type, 0) + 1
+        ks = type_keys.setdefault(event_type, set())
+        for k, v in obj.items():
+            if v is not None:
+                ks.add(k)
+
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 1}
+    if not isinstance(obj, dict):
+        return {"file": str(path), "type_counts": {}, "type_keys": {}, "parse_errors": 0}
+
+    # The sidecar carries identity/workspace/model; it sits beside the checkpoint.
+    sidecar = path.parent / "session.json"
+    if sidecar.exists():
+        try:
+            sc = json.loads(sidecar.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(sc, dict):
+                _add("session", sc)
+        except Exception:
+            pass
+
+    state = obj.get("state")
+    history = state.get("history") if isinstance(state, dict) else None
+    if isinstance(history, list):
+        for turn in history:
+            if not isinstance(turn, dict):
+                continue
+            _add(_fx_turn_bucket(turn), turn)
+            user = turn.get("user")
+            if isinstance(user, dict):
+                _add("user", user)
+                for image in user.get("images") or []:
+                    if isinstance(image, dict):
+                        _add("user.image", image)
+            execution = turn.get("execution")
+            steps = execution.get("tool_steps") if isinstance(execution, dict) else None
+            for step in steps or []:
+                if not isinstance(step, dict):
+                    continue
+                _add("tool_step", step)
+                for call in step.get("tool_calls") or []:
+                    if isinstance(call, dict):
+                        _add("tool_call", call)
+                for result in step.get("tool_results") or []:
+                    if isinstance(result, dict):
+                        _add("tool_result", result)
+
+    return {
+        "file": str(path),
+        "type_counts": {k: type_counts[k] for k in sorted(type_counts)},
+        "type_keys": {k: sorted(list(type_keys[k])) for k in sorted(type_keys)},
+        "parse_errors": 0,
+    }
+
+
 def _devin_sqlite_latest_session_schema_fingerprint(
     db_path: Path, *, max_nodes: int
 ) -> dict[str, Any]:
@@ -2068,6 +2152,15 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
             bp = Path(p)
             if bp.exists():
                 fps.append(_devin_fixture_file_schema_fingerprint(bp))
+    elif agent_name == "fx":
+        # fx's live store is JSON in the same shape as the fixture, so baseline
+        # and live share one fingerprint — no projection to keep in step.
+        for p in filtered:
+            if not p.endswith("checkpoint.json"):
+                continue
+            bp = Path(p)
+            if bp.exists():
+                fps.append(_fx_checkpoint_schema_fingerprint(bp))
     elif agent_name == "opencode":
         for p in filtered:
             if not p.endswith(".json"):
@@ -3733,6 +3826,10 @@ def main(argv: list[str]) -> int:
                     if db_candidates:
                         newest = max(db_candidates, key=lambda x: x.stat().st_mtime)
                         local_fp = _devin_sqlite_latest_session_schema_fingerprint(newest, max_nodes=max_nodes)
+                elif kind == "fx_latest_session":
+                    newest = _newest_file(roots, glob)
+                    if newest:
+                        local_fp = _fx_checkpoint_schema_fingerprint(newest)
                 elif kind == "cursor_transcript_newest":
                     max_lines = int(local_schema_cfg.get("max_lines") or 2500)
                     newest = _newest_file(roots, glob)

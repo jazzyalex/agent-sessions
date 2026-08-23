@@ -577,6 +577,12 @@ unrelated changes, and support claims not established by local evidence. Confirm
 README, changelog, monthly summary, support matrix, and public-agents data describe the same
 capabilities and limitations.
 
+A green suite proves the fixtures parse; it does not prove the app reads your agent. Before
+marking the PR ready, run the app against your own sessions and answer the checklist in
+[docs/CONTRIBUTING.md](CONTRIBUTING.md) → "Testing your source against your own sessions".
+Most of it nobody else can do for you — a maintainer without the agent installed cannot tell
+whether Resume actually reopens a session.
+
 ---
 
 ## 8. Proof: what the registry actually removed

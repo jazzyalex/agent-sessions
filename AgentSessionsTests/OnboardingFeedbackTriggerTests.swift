@@ -235,13 +235,18 @@ final class WhatsNewCatalogTests: XCTestCase {
         XCTAssertTrue(WhatsNewCatalog.hasContent(for: "5.0"))
     }
 
-    /// 5.1 ships the Devin provider row via `versionIntroduced`; the authored
+    /// 5.1 ships two provider rows via `versionIntroduced`; the authored
     /// highlights are written at release time, so the teaser plus the
-    /// auto-generated row are the whole surface until then.
-    func testDevinReleaseHas51TeaserAndProviderHighlight() {
-        XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.1"))
-        XCTAssertTrue(WhatsNewCatalog.assemble(for: "5.1").contains {
-            $0.kind == .highlight && $0.title == "New: Devin CLI"
-        })
+    /// auto-generated rows are the whole surface until then. Both sources
+    /// declare 5.1, so a teaser naming only one of them would be wrong.
+    func testDevinAndFxReleaseHave51TeaserAndProviderHighlights() {
+        let teaser = WhatsNewCatalog.teaser(for: "5.1")
+        XCTAssertNotNil(teaser)
+        XCTAssertTrue(teaser?.contains("Devin CLI") ?? false, "teaser: \(teaser ?? "nil")")
+        XCTAssertTrue(teaser?.contains("fx") ?? false, "teaser: \(teaser ?? "nil")")
+
+        let items = WhatsNewCatalog.assemble(for: "5.1")
+        XCTAssertTrue(items.contains { $0.kind == .highlight && $0.title == "New: Devin CLI" })
+        XCTAssertTrue(items.contains { $0.kind == .highlight && $0.title == "New: fx" })
     }
 }
