@@ -22,6 +22,7 @@ struct PreferencesView: View {
     @ObservedObject var grokSettings = GrokSettings.shared
     @ObservedObject var qwenSettings = QwenSettings.shared
     @ObservedObject var devinSettings = DevinSettings.shared
+    @ObservedObject var fxSettings = FxSettings.shared
     @State var showingResetConfirm: Bool = false
     @AppStorage(PreferencesKey.showUsageStrip) var showUsageStrip: Bool = false
     // Codex tracking master toggle
@@ -71,6 +72,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.grokCLIAvailable) var grokCLIAvailable: Bool = true
     @AppStorage(QwenPreferencesKey.cliAvailable) var qwenCLIAvailable: Bool = true
     @AppStorage(DevinPreferencesKey.cliAvailable) var devinCLIAvailable: Bool = true
+    @AppStorage(FxPreferencesKey.cliAvailable) var fxCLIAvailable: Bool = true
     // Global agent enablement
     @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
     @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
@@ -86,6 +88,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Agents.grokEnabled) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)
     @AppStorage(QwenPreferencesKey.enabled) var qwenAgentEnabled: Bool = AgentEnablement.isEnabled(.qwen)
     @AppStorage(DevinPreferencesKey.enabled) var devinAgentEnabled: Bool = AgentEnablement.isEnabled(.devin)
+    @AppStorage(FxPreferencesKey.enabled) var fxAgentEnabled: Bool = AgentEnablement.isEnabled(.fx)
     // Menu bar prefs
     @AppStorage(PreferencesKey.menuBarEnabled) var menuBarEnabled: Bool = false
     @AppStorage(PreferencesKey.menuBarScope) var menuBarScopeRaw: String = MenuBarScope.both.rawValue
@@ -252,6 +255,11 @@ struct PreferencesView: View {
     @State var qwenVersionString: String? = nil
     @State var qwenResolvedPath: String? = nil
     @State var qwenProbeDebounce: DispatchWorkItem? = nil
+    @State var fxProbeState: ProbeState = .idle
+    @State var fxVersionString: String? = nil
+    @State var fxResolvedPath: String? = nil
+    @State var fxProbeDebounce: DispatchWorkItem? = nil
+    @State var fxActiveProbeRequest: FxProbeRequest? = nil
     @State var qwenActiveProbeRequest: QwenProbeRequest? = nil
     @State var devinProbeState: ProbeState = .idle
     @State var devinVersionString: String? = nil
@@ -301,6 +309,9 @@ struct PreferencesView: View {
     @State var grokSessionsPathValid: Bool = true
     @State var grokSessionsPathDebounce: DispatchWorkItem? = nil
     @AppStorage(QwenPreferencesKey.sessionsRootOverride) var qwenSessionsPath: String = ""
+    @AppStorage(FxPreferencesKey.sessionsRootOverride) var fxSessionsPath: String = ""
+    @State var fxSessionsPathValid: Bool = true
+    @State var fxSessionsPathDebounce: DispatchWorkItem? = nil
     @State var qwenSessionsPathValid: Bool = true
     @State var qwenSessionsPathDebounce: DispatchWorkItem? = nil
     @AppStorage(DevinPreferencesKey.sessionsRootOverride) var devinSessionsPath: String = ""
@@ -460,6 +471,8 @@ struct PreferencesView: View {
                 qwenTab
             case .devin:
                 devinTab
+            case .fx:
+                fxTab
             case .about:
                 aboutTab
             }
@@ -783,6 +796,8 @@ struct PreferencesView: View {
         qwenSettings.clearResolvedBinary()
         devinSettings.setBinaryPath("")
         devinSettings.clearResolvedBinary()
+        fxSettings.setBinaryPath("")
+        fxSettings.clearResolvedBinary()
         droidSettings.setBinaryPath("")
         openClawBinaryPath = ""
         validateOpenClawBinaryPath()
@@ -797,6 +812,7 @@ struct PreferencesView: View {
         grokSessionsPath = ""
         qwenSessionsPath = ""
         devinSessionsPath = ""
+        fxSessionsPath = ""
         validateDroidSessionsPath()
         validateDroidProjectsPath()
         validateOpenClawSessionsPath()
@@ -805,6 +821,7 @@ struct PreferencesView: View {
         validateGrokSessionsPath()
         validateQwenSessionsPath()
         validateDevinSessionsPath()
+        validateFxSessionsPath()
 
         cockpitReduceTransparency = true
         usageLimitCockpitProjectionEnabled = true
@@ -828,6 +845,7 @@ struct PreferencesView: View {
         schedulePiProbe()
         scheduleQwenProbe()
         scheduleDevinProbe()
+        scheduleFxProbe()
     }
 
     func closeWindow() {
@@ -953,6 +971,7 @@ struct PreferencesView: View {
         case .grok: scheduleGrokProbe()
         case .qwen: scheduleQwenProbe()
         case .devin: scheduleDevinProbe()
+        case .fx: scheduleFxProbe()
         }
     }
 
@@ -986,6 +1005,8 @@ struct PreferencesView: View {
             return qwenResolvedPath
         case .devin:
             return devinResolvedPath
+        case .fx:
+            return fxResolvedPath
         }
     }
 
@@ -1032,6 +1053,9 @@ struct PreferencesView: View {
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         case .devin:
             let value = devinSettings.binaryPath
+            return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+        case .fx:
+            let value = fxSettings.binaryPath
             return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
         }
     }
@@ -1171,6 +1195,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case grok
     case qwen
     case devin
+    case fx
     case about
 
     var id: String { rawValue }
@@ -1199,6 +1224,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .grok: return "Grok CLI"
         case .qwen: return "Qwen Code"
         case .devin: return "Devin CLI"
+        case .fx: return "fx"
         case .about: return "About"
         }
     }
@@ -1227,6 +1253,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .grok: return "g.circle"
         case .qwen: return "q.circle"
         case .devin: return "cpu"
+        case .fx: return "f.circle"
         case .about: return "info.circle"
         }
     }
@@ -1259,6 +1286,7 @@ extension PreferencesTab {
         case .grok:        self = .grok
         case .qwen:        self = .qwen
         case .devin:       self = .devin
+        case .fx:          self = .fx
         }
     }
 
@@ -1284,6 +1312,7 @@ extension PreferencesTab {
         case .grok:            return .grok
         case .qwen:            return .qwen
         case .devin:           return .devin
+        case .fx:              return .fx
         }
     }
 
@@ -1299,7 +1328,7 @@ extension PreferencesTab {
     /// that forgets its row fails there instead of vanishing from Settings.
     static let sidebarAgentSources: [SessionSource] = [
         .codex, .claude, .opencode, .antigravity, .copilot,
-        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw
+        .cursor, .pi, .kimi, .grok, .qwen, .devin, .hermes, .openclaw, .fx
     ]
 
     static var sidebarAgentTabs: [PreferencesTab] {
@@ -1572,6 +1601,48 @@ extension PreferencesView {
         startQwenProbe(qwenSettings.currentProbeRequest(), resetPresentation: true)
     }
 
+    func probeFx() {
+        guard fxActiveProbeRequest == nil else { return }
+        startFxProbe(fxSettings.currentProbeRequest(), resetPresentation: true)
+    }
+
+    private func startFxProbe(_ request: FxProbeRequest, resetPresentation: Bool) {
+        fxActiveProbeRequest = request
+        if resetPresentation {
+            fxProbeState = .probing
+            fxVersionString = nil
+            fxResolvedPath = nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = FxCLIEnvironment().probe(customPath: request.binaryOverride)
+            DispatchQueue.main.async {
+                guard self.fxActiveProbeRequest == request else { return }
+                switch self.fxSettings.acceptProbeCompletion(result, for: request) {
+                case .stale(let currentRequest):
+                    // Keep the presentation in its existing probing state. The stale
+                    // result must not flash success/failure or change persisted flags.
+                    self.startFxProbe(currentRequest, resetPresentation: false)
+                    return
+                case .accepted:
+                    self.fxActiveProbeRequest = nil
+                }
+
+                switch result {
+                case .success(let resolved):
+                    self.fxVersionString = resolved.versionString
+                    self.fxResolvedPath = resolved.binaryURL.path
+                    self.fxProbeState = .success
+                    self.fxCLIAvailable = true
+                case .failure:
+                    self.fxVersionString = nil
+                    self.fxResolvedPath = nil
+                    self.fxProbeState = .failure
+                    self.fxCLIAvailable = false
+                }
+            }
+        }
+    }
+
     private func startQwenProbe(_ request: QwenProbeRequest, resetPresentation: Bool) {
         qwenActiveProbeRequest = request
         if resetPresentation {
@@ -1705,6 +1776,8 @@ extension PreferencesView {
             if qwenVersionString == nil && qwenProbeState != .probing { probeQwen() }
         case .devin:
             if devinVersionString == nil && devinProbeState != .probing { probeDevin() }
+        case .fx:
+            if fxVersionString == nil && fxProbeState != .probing { probeFx() }
         case .menuBar, .limitAlerts, .usageProbes, .general, .unified, .advanced, .agentCockpit, .about:
             break
         }
@@ -1784,6 +1857,13 @@ extension PreferencesView {
         devinProbeDebounce?.cancel()
         let work = DispatchWorkItem { probeDevin() }
         devinProbeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func scheduleFxProbe() {
+        fxProbeDebounce?.cancel()
+        let work = DispatchWorkItem { probeFx() }
+        fxProbeDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 

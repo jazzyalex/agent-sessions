@@ -350,6 +350,7 @@ struct UnifiedSessionsView: View {
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
     private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
+    private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
     @EnvironmentObject var codexUsageModel: CodexUsageModel
     @EnvironmentObject var claudeUsageModel: ClaudeUsageModel
     @Environment(CodexActiveSessionsModel.self) var activeCodexSessions
@@ -622,7 +623,10 @@ struct UnifiedSessionsView: View {
         let afterDevin = afterQwen
             .onChange(of: unified.includeDevin) { _, _ in restartSearchIfRunning() }
 
-        let afterActiveOnly = afterDevin
+        let afterFx = afterDevin
+            .onChange(of: unified.includeFx) { _, _ in restartSearchIfRunning() }
+
+        let afterActiveOnly = afterFx
             .onChange(of: showActiveSessionsOnly) { _, _ in
                 if !liveSessionsFeatureEnabled {
                     showActiveSessionsOnly = false
@@ -1514,6 +1518,16 @@ struct UnifiedSessionsView: View {
             // by writing published state and spawning a probe, which is not
             // something a ViewBuilder may do.
             return DevinSettings.shared.canBuildCopyCommandPlan(sessionID: session.id)
+        case .fx:
+            // session.id is the on-disk session directory name, which
+            // `--resume <id>` accepts directly. `--continue` remains the
+            // fallback when it is absent. A probe that advertised neither flag
+            // yields no plan; mirror that here so the menu item disables
+            // instead of silently doing nothing.
+            // Must stay the pure predicate: `copyCommandPlan` heals a stale cache
+            // by writing published state and spawning a probe, which is not
+            // something a ViewBuilder may do.
+            return FxSettings.shared.canBuildCopyCommandPlan(sessionID: session.id)
         case .antigravity:
             return (antigravityCLISessionID ?? AntigravitySessionIDHelper.deriveSessionID(from: session)) != nil
         case .droid, .openclaw:
@@ -1680,6 +1694,20 @@ struct UnifiedSessionsView: View {
             // user a command that reopens an unrelated session.
             if case .continueMostRecent = plan.strategy, wd == nil { return }
             let builder = DevinResumeCommandBuilder()
+            guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
+                                                          binaryCommand: plan.binary) else { return }
+            let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
+            write(command)
+
+        case .fx:
+            let settings = FxSettings.shared
+            let wd = effectiveWorkingDirectoryURL(for: session)
+            guard let plan = settings.copyCommandPlan(sessionID: session.id) else { return }
+            // Same refusal as FxResumeCoordinator: `--continue` reopens the
+            // latest session for the workspace, so without a `cd` it would hand
+            // the user a command that reopens an unrelated session.
+            if case .continueMostRecent = plan.strategy, wd == nil { return }
+            let builder = FxResumeCommandBuilder()
             guard let core = try? builder.makeCoreCommand(strategy: plan.strategy,
                                                           binaryCommand: plan.binary) else { return }
             let command = wd.map { "cd \(builder.shellQuoteIfNeeded($0.path)) && \(core)" } ?? core
@@ -2004,6 +2032,7 @@ struct UnifiedSessionsView: View {
         case .grok:        return $unified.includeGrok
         case .qwen:        return $unified.includeQwen
         case .devin:       return $unified.includeDevin
+        case .fx:          return $unified.includeFx
         }
     }
 
@@ -2523,6 +2552,8 @@ struct UnifiedSessionsView: View {
             if !unified.includeQwen { unified.includeQwen = true }
         case .devin:
             if !unified.includeDevin { unified.includeDevin = true }
+        case .fx:
+            if !unified.includeFx { unified.includeFx = true }
         }
     }
 
@@ -2587,6 +2618,8 @@ struct UnifiedSessionsView: View {
             if unified.qwenAgentEnabled, let e = qwenIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { qwenIndexer.reloadSession(id: id); return true }
         case .devin:
             if unified.devinAgentEnabled, let e = devinIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { devinIndexer.reloadSession(id: id); return true }
+        case .fx:
+            if unified.fxAgentEnabled, let e = fxIndexer.allSessions.first(where: { $0.id == id }), e.events.isEmpty { fxIndexer.reloadSession(id: id); return true }
         }
         return false
     }
@@ -3222,7 +3255,7 @@ struct UnifiedSessionsView: View {
             return canResumeCodexInCLI(s)
         case .claude:
             return !s.isClaudeWorkflowSubagent
-        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok:
+        case .opencode, .hermes, .copilot, .cursor, .pi, .kimi, .grok, .fx:
             return true
         case .qwen:
             return QwenResumeEligibility.canResume(s)
@@ -3440,6 +3473,26 @@ struct UnifiedSessionsView: View {
                     }
                 }()
                 let coord = DevinResumeCoordinator(env: DevinCLIEnvironment(), builder: DevinResumeCommandBuilder(), launcher: launcher)
+                let result = await coord.resumeInTerminal(input: input, dryRun: false)
+                reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
+            }
+        case .fx:
+            let settings = FxSettings.shared
+            let input = FxResumeInput(
+                sessionID: s.id,
+                workingDirectory: effectiveWorkingDirectoryURL(for: s),
+                binaryOverride: settings.binaryPath.isEmpty ? nil : settings.binaryPath
+            )
+            Task { @MainActor in
+                let launcher: FxTerminalLaunching = {
+                    switch ResumePreferenceHelpers.resolveTerminalKind() {
+                    case .iterm2:                return FxITermLauncher()
+                    case .warp:                  return FxWarpLauncher()
+                    case .warpPreview:           return FxWarpPreviewLauncher()
+                    case .terminalApp, .unknown: return FxTerminalLauncher()
+                    }
+                }()
+                let coord = FxResumeCoordinator(env: FxCLIEnvironment(), builder: FxResumeCommandBuilder(), launcher: launcher)
                 let result = await coord.resumeInTerminal(input: input, dryRun: false)
                 reportResumeFailure(launched: result.launched, error: result.error, source: s.source, in: presentingWindow)
             }
@@ -4081,6 +4134,7 @@ struct TranscriptHostView: View {
     private var grokIndexer: GrokSessionIndexer { catalog.indexer(.grok, as: GrokSessionIndexer.self) }
     private var qwenIndexer: QwenSessionIndexer { catalog.indexer(.qwen, as: QwenSessionIndexer.self) }
     private var devinIndexer: DevinSessionIndexer { catalog.indexer(.devin, as: DevinSessionIndexer.self) }
+    private var fxIndexer: FxSessionIndexer { catalog.indexer(.fx, as: FxSessionIndexer.self) }
 
     var body: some View {
         ZStack { // keep one stable container to avoid split reset
@@ -4143,6 +4197,14 @@ struct TranscriptHostView: View {
                 enableCaching: false
             )
             .opacity(kind == .devin ? 1 : 0)
+            UnifiedTranscriptView(
+                indexer: fxIndexer,
+                sessionID: selection,
+                sessionIDExtractor: { $0.id.isEmpty ? nil : $0.id },
+                sessionIDLabel: "fx",
+                enableCaching: false
+            )
+            .opacity(kind == .fx ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -4157,7 +4219,7 @@ struct TranscriptHostView: View {
     /// compares this set against `SessionSource.allCases`.
     static let coveredSources: Set<SessionSource> = [
         .codex, .claude, .antigravity, .opencode, .hermes, .copilot,
-        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin
+        .droid, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx
     ]
 }
 

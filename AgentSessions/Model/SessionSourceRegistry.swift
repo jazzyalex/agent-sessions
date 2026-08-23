@@ -42,7 +42,8 @@ enum SessionSourceRegistry {
         .kimi,
         .grok,
         .qwen,
-        .devin
+        .devin,
+        .fx
     ])
 
     /// Identity parsing and URL classification are one capability. Keeping the closures

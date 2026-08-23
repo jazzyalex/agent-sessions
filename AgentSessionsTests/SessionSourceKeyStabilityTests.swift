@@ -32,6 +32,7 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(PreferencesKey.Include.grok, "IncludeGrokSessions")
         XCTAssertEqual(QwenPreferencesKey.includeSessions, "IncludeQwenSessions")
         XCTAssertEqual(DevinPreferencesKey.includeSessions, "IncludeDevinSessions")
+        XCTAssertEqual(FxPreferencesKey.includeSessions, "IncludeFxSessions")
 
         // Root-override constants asserted individually the same way (Droid has two —
         // sessions root and projects root, both frozen).
@@ -50,6 +51,7 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(PreferencesKey.Paths.grokSessionsRootOverride, "GrokSessionsRootOverride")
         XCTAssertEqual(QwenPreferencesKey.sessionsRootOverride, "QwenSessionsRootOverride")
         XCTAssertEqual(DevinPreferencesKey.sessionsRootOverride, "DevinSessionsRootOverride")
+        XCTAssertEqual(FxPreferencesKey.sessionsRootOverride, "FxSessionsRootOverride")
 
         // CLI-availability constants, one line per constant. OpenClaw has none — it is
         // never probed as a CLI binary, so `storedBinaryPresence` returns nil for it and
@@ -69,6 +71,8 @@ final class SessionSourceKeyStabilityTests: XCTestCase {
         XCTAssertEqual(QwenPreferencesKey.enabled, "AgentEnabledQwen")
         XCTAssertEqual(DevinPreferencesKey.cliAvailable, "DevinCLIAvailable")
         XCTAssertEqual(DevinPreferencesKey.enabled, "AgentEnabledDevin")
+        XCTAssertEqual(FxPreferencesKey.cliAvailable, "FxCLIAvailable")
+        XCTAssertEqual(FxPreferencesKey.enabled, "AgentEnabledFx")
 
         // The shared include lookup must cover the same complete frozen row table.
         XCTAssertEqual(SourceKeyTable.include.count, SessionSource.allCases.count)
@@ -112,6 +116,7 @@ enum SourceKeyTable {
         Row(source: .grok, enablement: "AgentEnabledGrok", cliAvailable: "GrokCLIAvailable", rootOverrides: ["GrokSessionsRootOverride"], include: "IncludeGrokSessions"),
         Row(source: .qwen, enablement: "AgentEnabledQwen", cliAvailable: "QwenCLIAvailable", rootOverrides: ["QwenSessionsRootOverride"], include: "IncludeQwenSessions"),
         Row(source: .devin, enablement: "AgentEnabledDevin", cliAvailable: "DevinCLIAvailable", rootOverrides: ["DevinSessionsRootOverride"], include: "IncludeDevinSessions"),
+        Row(source: .fx, enablement: "AgentEnabledFx", cliAvailable: "FxCLIAvailable", rootOverrides: ["FxSessionsRootOverride"], include: "IncludeFxSessions"),
     ]
 
     static let include = Dictionary(uniqueKeysWithValues: rows.map { ($0.source, $0.include) })

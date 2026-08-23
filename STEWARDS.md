@@ -87,6 +87,7 @@ writes a redacted sample you can attach to an issue.
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
 | Devin CLI | steward wanted | 2026-08-18 · 3000.3.27 (see note) | Best-effort |
+| fx (vercel-labs) | steward wanted | 2026-08-20 · 0.0.4 (see note) | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),
@@ -112,3 +113,11 @@ Honest footnotes:
   the single most useful agent to adopt.
 - **Hermes.** Held at 0.17.0 since 2026-06-24. The automated driver stopped producing a
   usable sample, so newer Hermes builds have no fresh evidence either way.
+- **fx (vercel-labs).** Verified against the installed fx 0.0.4 with a schema survey of
+  the on-disk sessions under `~/.fx/sessions`: transcripts come from each session's
+  `checkpoint.json`, sidecars carry identity/workspace/title/model, and `fx --help`
+  advertises `--resume <id>` and `--continue`. Resume is implemented from that help and
+  reader evidence with hermetic tests, not an end-to-end run; it stays untested until
+  someone with an authenticated fx login closes it. fx is also not yet in the weekly
+  format monitoring set, and the format is young (schema_version 3 sidecars,
+  event_log_v1 storage) so drift is likelier than for the older agents.

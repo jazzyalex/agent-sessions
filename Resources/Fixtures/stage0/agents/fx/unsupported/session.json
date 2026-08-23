@@ -1,0 +1,19 @@
+{
+  "schema_version": 3,
+  "storage_format": "event_log_v1",
+  "id": "truncated-checkpoint",
+  "authority_id": "fixture",
+  "created_at_ms": 1787261000000,
+  "updated_at_ms": 1787261400000,
+  "origin_workspace_root": "/Users/fx-demo/Projects/beta",
+  "workspace_root": "/Users/fx-demo/Projects/beta",
+  "conversation_language": "en",
+  "history_len": 2,
+  "total_input_tokens": 1200,
+  "total_output_tokens": 340,
+  "preferences": {
+    "model": "demo/model-1",
+    "effort": "auto",
+    "fast_mode": false
+  }
+}
