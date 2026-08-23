@@ -155,18 +155,91 @@ final class FxSessionParserTests: XCTestCase {
         return FxSessionParser.events(forTurn: turn, turnIndex: 0)
     }
 
-    /// Inline base64 images render as `[image]` markers; the payload never
-    /// reaches the rendered text.
+    /// Image references render as `[image]` markers; the referenced file's
+    /// name and path never reach the rendered text. fx writes `{id, path,
+    /// media_type, snapshot_path, snapshot_sha256}` records — the bytes are
+    /// files under the session directory, not payloads in the checkpoint.
     func testUserImagesRenderAsMarkers() throws {
         let events = try makeTurn([
             "kind": "assistant",
-            "user": ["text": "look", "images": [["width": 10, "height": 10, "base64_data": "QUJD"]]],
+            "user": ["text": "look", "images": [[
+                "id": 1,
+                "path": "/Users/fx-demo/Downloads/paste.png",
+                "media_type": "image/png",
+                "snapshot_path": "images/0001-paste.png",
+                "snapshot_sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+            ]]],
             "assistant": "done"
         ])
 
         XCTAssertEqual(events.first?.kind, .user)
         XCTAssertEqual(events.first?.text, "[image]\nlook")
-        XCTAssertFalse(events.first?.text?.contains("QUJD") ?? true)
+        XCTAssertFalse(events.first?.text?.contains("paste.png") ?? true)
+    }
+
+    /// fx's durable-bytes encoder writes non-UTF-8 fields as
+    /// `{"encoding": "base64", "data": …}` objects. Every text-bearing read
+    /// decodes that form, and a result still keys back to its call when both
+    /// ids went through it.
+    func testBase64DurableBytesFieldsDecodeToText() throws {
+        let encoded = ["encoding": "base64", "data": "aGlkZGVuIHByb21wdA=="]
+        let callID = ["encoding": "base64", "data": "Y2FsbF9iNjQ="]
+        let events = try makeTurn([
+            "kind": "assistant",
+            "user": ["text": encoded],
+            "assistant": encoded,
+            "execution": [
+                "tool_steps": [[
+                    "assistant": encoded,
+                    "tool_calls": [["id": callID, "name": encoded, "arguments_json":
+                        ["encoding": "base64", "data": "eyJwYXRoIjoiLiJ9"]]],
+                    "tool_results": [[
+                        "tool_call_id": callID,
+                        "tool_name": encoded,
+                        "status": "success",
+                        "output": encoded,
+                        "created_at_ms": 1787261100000
+                    ]]
+                ]]
+            ]
+        ])
+
+        XCTAssertEqual(events.first?.text, "hidden prompt")
+        XCTAssertEqual(events.filter { $0.kind == .assistant }.compactMap(\.text),
+                       Array(repeating: "hidden prompt", count: 2))
+        let call = try XCTUnwrap(events.first { $0.kind == .tool_call })
+        XCTAssertEqual(call.toolName, "hidden prompt")
+        XCTAssertEqual(call.toolInput, "{\"path\":\".\"}")
+        XCTAssertEqual(call.messageID, "call_b64")
+
+        let result = try XCTUnwrap(events.first { $0.kind == .tool_result })
+        XCTAssertEqual(result.toolOutput, "hidden prompt")
+        XCTAssertEqual(result.messageID, "call_b64")
+    }
+
+    /// Bytes that are not text at all render as an honest marker instead of
+    /// silently dropping the field.
+    func testNonUTF8ToolOutputRendersBinaryMarker() throws {
+        let events = try makeTurn([
+            "kind": "assistant",
+            "user": ["text": "go"],
+            "execution": [
+                "tool_steps": [[
+                    "assistant": "",
+                    "tool_calls": [["id": "c1", "name": "run", "arguments_json": "{}"]],
+                    "tool_results": [[
+                        "tool_call_id": "c1",
+                        "tool_name": "run",
+                        "status": "success",
+                        "output": ["encoding": "base64", "data": "//4="],
+                        "created_at_ms": 1787261100000
+                    ]]
+                ]]
+            ]
+        ])
+
+        let result = try XCTUnwrap(events.first { $0.kind == .tool_result })
+        XCTAssertEqual(result.toolOutput, "[binary output]")
     }
 
     /// Truncated tool output is marked rather than silently clipped.

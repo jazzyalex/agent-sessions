@@ -224,12 +224,12 @@ agents:
     evidence_tests:
       - "AgentSessionsTests/QwenIntegrationTests.swift"
   fx:
-    max_verified_version: "0.0.4"
-    version_field: "session.json schema_version 3 / storage_format event_log_v1 (verified via an on-disk survey of ~/.fx/sessions against the installed CLI)"
+    max_verified_version: "0.0.5"
+    version_field: "session.json schema_version 3 / storage_format event_log_v1 (verified via an on-disk survey of ~/.fx/sessions against the installed CLI, re-checked at upstream tag v0.0.5)"
     support_scope: "tier-2 local per-session checkpoint transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, and analytics"
     unsupported_surfaces:
       - "live/active status"
-      - "image extraction (records carry inline base64 payloads rendered as [image] markers)"
+      - "image extraction (records reference image files under the session directory via user.images[].snapshot_path; transcripts render [image] markers)"
       - "subagent hierarchy (has_managed_children sessions and the subagent/ relationship index are not surfaced)"
       - "weekly session-format monitoring (fx is not yet in the monitored agent set)"
       - "pre-v3 legacy layout (session.json snapshot without checkpoint.json) is invisible to discovery until fx itself migrates the session on next open"
@@ -238,7 +238,8 @@ agents:
       - "tool_calls[].arguments_json is a JSON string on the wire (Grok/Kimi's shape, not Devin's object) and is passed through verbatim. Tool results key back to calls by tool_call_id and carry their own created_at_ms; text events have no per-entry timestamp and inherit nil, so transcripts render with session-level bounds only."
       - "Session ids are the on-disk directory names (<millis>-<nanos>-<hex> composites). resume --help advertises --resume [last|<id>] and -c/--continue (latest workspace session); --continue is only offered when a working directory is known, matching FxResumeCoordinator's refusal rule."
       - "Model execution was not attempted end-to-end, so no fresh resume run is claimed; the copied/launched command plans are tested against probe-advertised capabilities, and installed help and reader behavior justify the explicitly untested resume integration."
-      - "The format is young (0.0.4, event_log_v1) and expected to drift; the checkpoint/state.history shapes above are pinned by FxSessionParserTests against committed fixtures."
+      - "The format is young and expected to drift; the checkpoint/state.history shapes above are pinned by FxSessionParserTests against committed fixtures."
+      - "2026-08-23 review round (upstream shipped 0.0.5 on 2026-08-22): every durable-bytes read now decodes the {\"encoding\": \"base64\", \"data\": …} object form writeDurableBytes emits for non-UTF-8 bytes (previously one non-UTF-8 byte silently dropped that field), and the image wording was corrected — user.images[] are {id, path, media_type, snapshot_path, snapshot_sha256} records pointing at files under the session directory (snapshot_path resolves to images/<basename>), not inline payloads. max_verified_version bumped 0.0.4 -> 0.0.5 from source inspection of session_codec.zig/session.zig at tag v0.0.5: same four history kinds, arguments_json still a JSON string via durable bytes, tool_results still keyed by tool_call_id with created_at_ms, interrupted gains optional cancelled_command (ignored additively). Installed CLI remains 0.0.4; resume stays end-to-end untested."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json (+ session.json, display.json)"
       - "Resources/Fixtures/stage0/agents/fx/unsupported/checkpoint.json (malformed; sidecar facts must survive)"

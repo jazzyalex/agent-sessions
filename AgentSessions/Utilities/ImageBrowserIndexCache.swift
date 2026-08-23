@@ -283,9 +283,11 @@ actor ImageBrowserIndexCache {
             return built
 
         case .droid, .qwen, .fx:
-            // Deliberately no image extraction (fx records inline base64 payloads,
-            // but its parser renders them as [image] markers and never reads the
-            // payload). Exhaustive on purpose — this used to be a `default:`, which
+            // Deliberately no image extraction (fx stores its images as files
+            // under the session directory, which its parser renders as [image]
+            // markers and never opens; unlike droid/qwen it is a file-shaped
+            // source, so extraction belongs on the .file(fileURL:) path Grok
+            // and Cursor use once it is built). Exhaustive on purpose — this used to be a `default:`, which
             // silently gave every unlisted provider an empty index: Grok, Kimi, Pi,
             // Hermes and Cursor all landed here and showed no images, with nothing
             // to distinguish "this format has none" from "nobody wired it up". A new

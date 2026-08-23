@@ -253,9 +253,10 @@ enum SessionInlineImageMapper {
             case .antigravity:
                 return AntigravityMarkdownImageScanner.fileContainsLocalMarkdownImage(at: sessionFileURL, shouldCancel: shouldCancel)
             case .droid, .qwen, .fx:
-                // fx embeds image payloads inside checkpoint.json's user.images
-                // arrays without a data-URI prefix, so the generic scanner has
-                // nothing to find; extraction is not implemented.
+                // fx references images as files under the session directory
+                // (user.images[].snapshot_path resolves to images/<basename>),
+                // so there is no inline payload for the generic scanner to
+                // find; extraction is not implemented.
                 return false
             }
         }()

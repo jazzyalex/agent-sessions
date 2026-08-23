@@ -9,7 +9,8 @@ import Foundation
 /// so text events inherit nil and only tool results carry their own
 /// `created_at_ms`.
 ///
-/// Shapes verified against the on-disk sessions at fx 0.0.4:
+/// Shapes verified against the on-disk sessions at fx 0.0.4 and re-checked
+/// line-by-line against upstream v0.0.5 (`session_codec.zig`, `session.zig`):
 ///
 /// - `checkpoint.json` — `{schema_version, session_id, log_generation,
 ///   through_seq, state}`. `state.history[]` is the transcript; the sibling
@@ -33,8 +34,15 @@ import Foundation
 ///   is a JSON string** on the wire (Grok/Kimi's shape, not Devin's object).
 /// - `tool_results[]` — `{tool_call_id, tool_name, status, output, preview,
 ///   truncated, created_at_ms, …}`, keyed back to its call by id.
-/// - `user.images` — an array of image payloads; rendered as `[image]`
-///   markers so the payload never reaches the transcript body.
+/// - Text-bearing fields are written through fx's durable-bytes encoder:
+///   valid UTF-8 lands as a plain JSON string, anything else as
+///   `{"encoding": "base64", "data": …}`. Every text read here goes through
+///   `durableString`, so one non-UTF-8 byte degrades that field to a
+///   `[binary output]` marker instead of erasing it.
+/// - `user.images` — `{id, path, media_type, snapshot_path, snapshot_sha256}`
+///   records whose bytes live in files under the session directory
+///   (`snapshot_path` resolves to `images/<basename>`); rendered as
+///   `[image]` markers and never opened.
 enum FxSessionParser {
     static let defaultFullParseMaxBytes = 50 * 1024 * 1024
 
@@ -157,8 +165,8 @@ enum FxSessionParser {
             // an ordinary turn (fx only appends `assistant`/`execution` once
             // there is something to record), plus where its output went.
             var detail: [String] = []
-            if let logPath = turn["log_path"] as? String, !logPath.isEmpty { detail.append("log \(logPath)") }
-            if let url = turn["url"] as? String, !url.isEmpty { detail.append(url) }
+            if let logPath = durableString(turn["log_path"]), !logPath.isEmpty { detail.append("log \(logPath)") }
+            if let url = durableString(turn["url"]), !url.isEmpty { detail.append(url) }
             let note = detail.isEmpty ? "[background command]"
                                       : "[background command — \(detail.joined(separator: " · "))]"
             out.append(event(turnIndex: turnIndex, suffix: "b", kind: .meta, role: "system",
@@ -173,7 +181,7 @@ enum FxSessionParser {
             let removed = int(turn["removed_turn_count"]) ?? 0
             let generation = int(turn["compaction_count"]) ?? 0
             lines.append("[context compacted: \(removed) earlier turn\(removed == 1 ? "" : "s") removed (compaction #\(generation))]")
-            if let summary = turn["summary"] as? String, !summary.isEmpty {
+            if let summary = durableString(turn["summary"]), !summary.isEmpty {
                 lines.append(summary)
             }
             if let roots = turn["root_user_messages"] as? [String], !roots.isEmpty {
@@ -194,7 +202,7 @@ enum FxSessionParser {
             let reason = turn["terminal_reason"] as? String ?? "interrupted"
             var text = "[interrupted: \(reason)]"
             if turn["execution"] == nil,
-               let completed = turn["completed_tool_names"] as? [String], !completed.isEmpty {
+               let completed = durableStrings(turn["completed_tool_names"]), !completed.isEmpty {
                 // Degenerate shape: tools completed but their steps were not
                 // persisted, so the names are the only surviving evidence.
                 text = "[interrupted: \(reason) — completed: \(completed.joined(separator: ", "))]"
@@ -225,7 +233,7 @@ enum FxSessionParser {
                 out.append(contentsOf: toolStepEvents(from: step, turnIndex: turnIndex, stepIndex: stepIndex))
             }
         }
-        if let reply = turn["assistant"] as? String, !reply.isEmpty {
+        if let reply = durableString(turn["assistant"]), !reply.isEmpty {
             out.append(event(turnIndex: turnIndex, suffix: "a", kind: .assistant, role: "assistant", text: reply,
                              messageID: nil, raw: jsonEncode(turn)))
         }
@@ -233,7 +241,7 @@ enum FxSessionParser {
     }
 
     private static func userEvents(from user: [String: Any], turnIndex: Int) -> [SessionEvent] {
-        let text = user["text"] as? String
+        let text = durableString(user["text"])
         let images = user["images"] as? [[String: Any]] ?? []
         var rendered = text
         if !images.isEmpty {
@@ -247,7 +255,7 @@ enum FxSessionParser {
 
     private static func toolStepEvents(from step: [String: Any], turnIndex: Int, stepIndex: Int) -> [SessionEvent] {
         var out: [SessionEvent] = []
-        if let narration = step["assistant"] as? String, !narration.isEmpty {
+        if let narration = durableString(step["assistant"]), !narration.isEmpty {
             out.append(event(turnIndex: turnIndex, suffix: "s\(stepIndex)a", kind: .assistant, role: "assistant", text: narration,
                              messageID: nil, raw: jsonEncode(step)))
         }
@@ -264,25 +272,25 @@ enum FxSessionParser {
 
     private static func toolCallEvent(from call: [String: Any], turnIndex: Int, suffix: String) -> SessionEvent {
         event(turnIndex: turnIndex, suffix: suffix, kind: .tool_call, role: "assistant", text: nil,
-              toolName: call["name"] as? String,
+              toolName: durableString(call["name"]),
               // `arguments_json` is already a JSON string on the wire.
-              toolInput: call["arguments_json"] as? String,
+              toolInput: durableString(call["arguments_json"]),
               toolOutput: nil,
-              messageID: call["id"] as? String,
+              messageID: durableString(call["id"]),
               raw: jsonEncode(call))
     }
 
     private static func toolResultEvent(from result: [String: Any], turnIndex: Int, suffix: String) -> SessionEvent {
-        var output = result["output"] as? String
-        if output == nil, let preview = result["preview"] as? String { output = preview }
+        var output = durableString(result["output"])
+        if output == nil, let preview = durableString(result["preview"]) { output = preview }
         if let truncated = result["truncated"] as? Bool, truncated, output != nil {
             output! += "\n[truncated]"
         }
         return event(turnIndex: turnIndex, suffix: suffix, kind: .tool_result, role: "tool", text: nil,
-                     toolName: result["tool_name"] as? String,
+                     toolName: durableString(result["tool_name"]),
                      toolInput: nil,
                      toolOutput: output,
-                     messageID: result["tool_call_id"] as? String,
+                     messageID: durableString(result["tool_call_id"]),
                      time: (result["created_at_ms"] as? NSNumber).flatMap { msDate($0.int64Value) },
                      raw: jsonEncode(result))
     }
@@ -291,7 +299,7 @@ enum FxSessionParser {
     /// turns still carry a real prompt, so they qualify like any other.
     private static func promptText(fromTurn turn: [String: Any]) -> String? {
         guard let user = turn["user"] as? [String: Any] else { return nil }
-        return user["text"] as? String
+        return durableString(user["text"])
     }
 
     // MARK: - Sidecars
@@ -350,6 +358,29 @@ enum FxSessionParser {
     /// exactly 1 (`history_len: 1`, `compaction_count: 1`, …) reads as absent.
     private static func isJSONBool(_ value: Any) -> Bool {
         CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
+    }
+
+    /// Reads a field fx wrote through its durable-bytes encoder: a plain JSON
+    /// string when the bytes were valid UTF-8, else an
+    /// `{"encoding": "base64", "data": …}` object. The object form decodes
+    /// back to text, or to an honest marker when the bytes are not text at
+    /// all. Without this, one non-UTF-8 byte in a tool result answered nil to
+    /// `as? String` and the whole field vanished — prompt, reply, output, or
+    /// the id a result is keyed back to its call by. Two binary ids decode to
+    /// the same marker, so call/result keying survives even there.
+    private static func durableString(_ value: Any?) -> String? {
+        if let string = value as? String { return string }
+        guard let object = value as? [String: Any],
+              (object["encoding"] as? String) == "base64",
+              let encoded = object["data"] as? String,
+              let data = Data(base64Encoded: encoded) else { return nil }
+        return String(data: data, encoding: .utf8) ?? "[binary output]"
+    }
+
+    /// `durableString` across a list — `completed_tool_names[]`. Elements that
+    /// decode drop out; plain strings pass through untouched.
+    private static func durableStrings(_ value: Any?) -> [String]? {
+        (value as? [Any])?.compactMap { durableString($0) }
     }
 
     private static func int(_ value: Any?) -> Int? {
