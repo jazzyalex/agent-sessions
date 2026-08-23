@@ -118,6 +118,7 @@ Honest footnotes:
   `checkpoint.json`, sidecars carry identity/workspace/title/model, and `fx --help`
   advertises `--resume <id>` and `--continue`. Resume is implemented from that help and
   reader evidence with hermetic tests, not an end-to-end run; it stays untested until
-  someone with an authenticated fx login closes it. fx is also not yet in the weekly
-  format monitoring set, and the format is young (schema_version 3 sidecars,
-  event_log_v1 storage) so drift is likelier than for the older agents.
+  someone with an authenticated fx login closes it. fx is in the weekly format
+  monitoring set as of 2026-08-23, so `./scripts/steward_check.py fx` runs — but only
+  on a machine with fx sessions on disk. The format is young (schema_version 3
+  sidecars, event_log_v1 storage), so drift is likelier than for the older agents.

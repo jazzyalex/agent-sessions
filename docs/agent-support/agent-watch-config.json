@@ -680,6 +680,31 @@
           ]
         }
       }
+    },
+    "fx": {
+      "cadence": { "daily": false, "weekly": true },
+      "installed_version_cmd": ["fx", "--version"],
+      "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.fx.max_verified_version",
+      "upstream": [],
+      "risk_keywords": {
+        "schema": [
+          "session", "checkpoint", "schema", "migration", "format", "storage",
+          "history", "transcript", "durable", "compaction", "event_log"
+        ],
+        "usage": []
+      },
+      "weekly": {
+        "local_schema": {
+          "kind": "fx_latest_session",
+          "roots": ["~/.fx/sessions"],
+          "glob": "*/checkpoint.json"
+        },
+        "freshness_window_days": 30,
+        "discovery_path_contract": {
+          "description": "fx keeps one directory per session under ~/.fx/sessions; checkpoint.json is the transcript and session.json the sidecar. The sibling events.jsonl is write-ahead infrastructure and is never read.",
+          "patterns": ["/\\.fx/sessions/[^/]+/checkpoint\\.json$"]
+        }
+      }
     }
   }
 }
