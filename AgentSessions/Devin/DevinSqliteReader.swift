@@ -184,7 +184,7 @@ enum DevinSqliteReader {
         let mainChainID = sqlite3_column_int64(stmt, 6)
         sqlite3_finalize(stmt)
 
-        let events = mainChainEvents(db: db, sessionID: sessionID, mainChainID: mainChainID)
+        guard let events = mainChainEvents(db: db, sessionID: sessionID, mainChainID: mainChainID) else { return nil }
         return makeSession(id: sessionID,
                            title: title,
                            cwd: cwd,
@@ -198,7 +198,7 @@ enum DevinSqliteReader {
     }
 
     /// Walks `main_chain_id` back to its root, then renders root-to-tip.
-    private static func mainChainEvents(db: OpaquePointer?, sessionID: String, mainChainID: Int64) -> [SessionEvent] {
+    private static func mainChainEvents(db: OpaquePointer?, sessionID: String, mainChainID: Int64) -> [SessionEvent]? {
         let sql = """
             WITH RECURSIVE chain(node_id, parent_node_id, chat_message, created_at, depth) AS (
                 SELECT node_id, parent_node_id, chat_message, created_at, 0
@@ -212,7 +212,7 @@ enum DevinSqliteReader {
             SELECT node_id, chat_message, created_at FROM chain ORDER BY depth DESC;
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, (sessionID as NSString).utf8String, -1, transient)
         sqlite3_bind_int64(stmt, 2, mainChainID)
@@ -223,9 +223,17 @@ enum DevinSqliteReader {
         // of the query instead of an assumption about CTE emission order, which is
         // not guaranteed and broke on duplicate `node_id` rows.
         var rows: [(nodeID: Int64, json: String, createdAt: Int64)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             rows.append((sqlite3_column_int64(stmt, 0), text(stmt, 1), sqlite3_column_int64(stmt, 2)))
+            step = sqlite3_step(stmt)
         }
+        // Same contract as the session scan, and it matters more here: a truncated
+        // chain is a plausible-looking transcript, `reloadSession` treats a
+        // successful reload as authoritative and overwrites the complete one, and
+        // search ingest would record the short text under the current revision — so
+        // for a session that never changes again the truncation sticks.
+        guard step == SQLITE_DONE else { return nil }
 
         var events: [SessionEvent] = []
         for row in rows {

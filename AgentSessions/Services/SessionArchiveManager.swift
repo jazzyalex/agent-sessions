@@ -399,9 +399,12 @@ final class SessionArchiveManager: ObservableObject, @unchecked Sendable {
     /// Each source's `archive.sessionForBackfill` carries its old arm verbatim, including the
     /// four parsers that take a `forcedID` and codex's deliberate metadata-free minimal
     /// session. The `minimalSession` fallback is unchanged too — it just lives on
-    /// `SessionArchiveBackfill` now (one copy, formerly a private twin here). A source that
-    /// declines archiving still gets one, so a pinned session of an archive-less source is
-    /// backfilled with its upstream path rather than dropped.
+    /// `SessionArchiveBackfill` now (one copy, formerly a private twin here).
+    ///
+    /// The `?? minimalSession` fallback no longer reaches a source that declines archiving:
+    /// `syncPinnedSessions` skips those per source before any backfill arm runs, and `pin`
+    /// returns early. It stays because a source *with* an `ArchiveCapability` whose
+    /// `sessionForBackfill` returns nil still needs a session to pin.
     private func resolveSessionForBackfill(source: SessionSource, sessionID: String, upstreamURL: URL) -> Session? {
         SessionSourceRegistry.descriptor(for: source).archive?.sessionForBackfill(sessionID, upstreamURL)
             ?? SessionArchiveBackfill.minimalSession(source: source, id: sessionID, url: upstreamURL)
