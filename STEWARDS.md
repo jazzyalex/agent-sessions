@@ -21,12 +21,31 @@ That is the whole job. One agent, your own installation, your own sessions.
 - No support rota, no response deadline. If you're busy, say so or say nothing — the agent
   moves to best-effort and that's fine.
 - No sharing of real transcripts. The check tool redacts before anything leaves your Mac,
-  and you decide what to attach.
+  and you decide what to attach. Nothing in the job above ever publishes your session
+  content.
+
+## Sometimes asked, never expected
+
+Two things occasionally come up that are **not** part of the job. Both are one-off, both are
+opt-in, and "no" is a complete answer that changes nothing about your stewardship.
+
+- **An end-to-end resume check.** Some agents are supported from their installed help and
+  reader evidence, but nobody on the project could authenticate the CLI to confirm that
+  Resume actually reopens a session. If you can run it once and say whether it worked, that
+  closes the last hole in the support matrix. The footnotes under the table below name the
+  agents waiting on this.
+- **A screenshot for the release page.** Agent Sessions can only show an agent someone
+  actually runs, so the maintainer cannot capture a session for an agent he does not have.
+  This one is different from everything else here: **a screenshot is unredacted transcript.**
+  The redaction promise above covers the check tool, and it cannot cover a picture. So if you
+  are asked, you choose what is on screen, you take the capture, you look at it, and nothing
+  is published until you say so. Declining is genuinely fine — a release does not need it.
 
 ## What a steward gets
 
 Named credit in the table below, and on the project site's support page as it is built out.
-Every verification run is a public, dated record with your handle on it.
+Every verification run is a public, dated record with your handle on it. Anything from the
+optional list above is credited the same way.
 
 ## Sign up
 
@@ -77,7 +96,7 @@ matrix is right.
 Droid is not in the table on purpose: it is legacy-only — existing sessions still read,
 but the agent is excluded from active format checks and takes no steward.
 
-Two honest footnotes:
+Honest footnotes:
 
 - **Devin CLI.** Verified against the installed CLI 3000.3.27 (0becb483) with a schema
   probe over 253 on-disk sessions in the shared `sessions.db`. Resume is implemented from

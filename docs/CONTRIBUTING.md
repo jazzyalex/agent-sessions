@@ -125,6 +125,56 @@ New Swift files must be added with `scripts/xcode_add_file.rb`; the source guide
 the exact commands. Do not hand-edit the Xcode project unless the guide explicitly requires
 it.
 
+## Testing your source against your own sessions
+
+A green build and a green suite prove the code compiles and the fixtures parse. They do not
+prove the app reads *your* agent. Only you can check that, because in most cases the
+maintainer does not have the agent installed — that is usually the whole reason your
+contribution matters.
+
+Do this once before marking a PR ready, and again if a reviewer changes your parser.
+
+**1. Launch a build you did not test with.**
+
+```bash
+xcodebuild -project AgentSessions.xcodeproj -scheme AgentSessions \
+  -configuration Debug -derivedDataPath .deriveddata-run build
+open .deriveddata-run/Build/Products/Debug/AgentSessions.app
+```
+
+Use a derived-data path **separate from the one `xcodebuild test` writes to**. Test runs
+re-sign the bundle and embed the XCTest runner; launching that copy gives you a live process
+with no window and no Dock icon, which looks exactly like a catastrophic bug and is not one.
+
+**2. Make sure your source is switched on.** If your descriptor says
+`defaultEnabled: .whenAvailable` — the recommended setting for a new source — the app leaves
+your agent off until it detects one. So when the rows are missing, check Settings → your
+agent's pane before you suspect the parser. That pane is also where the
+storage-root override lives, so you can point the app at a copy of your sessions instead of
+your live store.
+
+**3. Answer these. Each one has been wrong in a shipped source at least once.**
+
+- Sessions appear in the list, and the count looks right for what you have on disk.
+- Titles are the ones you would recognise, not file names or `Untitled`.
+- Opening a session renders user turns, assistant replies and tool calls — with no blank
+  turns and nothing obviously missing from the middle.
+- Timestamps and durations are plausible; nothing sits in 1970.
+- Search finds a distinctive string you can see on screen in that transcript.
+- The has-commands filter keeps sessions that used tools and drops the ones that did not.
+- Analytics counts your agent when it is enabled and stops when it is not.
+- Copy Resume Command produces something you can paste into a terminal.
+- **Resume actually reopens the session.** This is the one that most often cannot be
+  verified by anyone but you, and the one most often assumed rather than run.
+
+**4. Report what you found, including the boring parts.** "All nine pass" is a useful
+result. So is "eight pass, timestamps are off by an hour" — that is a real finding, not a
+failure on your part.
+
+Never paste a real transcript, an API key, or a private file path into an issue or a PR.
+Screenshots are welcome only when they show source-specific behaviour and contain nothing
+private; you decide what is on screen.
+
 ## Pull requests
 
 Start with a draft PR and use the
