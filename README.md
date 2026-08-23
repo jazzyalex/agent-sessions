@@ -80,8 +80,8 @@ Details: `docs/PRIVACY.md` and `docs/security.md`.
 
 ## What's New in 5.1
 
-**TL;DR** - Two more coding agents: Devin CLI and fx (vercel-labs). Fifteen agents now put
-their local history in one searchable list, each with a Settings pane and a resume command.
+**TL;DR** - Two more coding agents: Devin CLI and fx (vercel-labs). Both land in the same
+searchable list as the rest, each with a Settings pane and a resume command.
 
 New in 5.1:
 - **Devin CLI, the fourteenth agent source** — browsing, search, filtering, Analytics and
