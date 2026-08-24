@@ -734,9 +734,14 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
   sessions, and where bench gate S4 applies — "N MB reclaimable by rule X —
   upstream issue Y". Flagged-but-untouchable items (Hermes' credential-bearing
   pre-update snapshot) are shown with the reason nothing touches them.
-- **Where:** new surface; aggregation over `Session.fileSizeBytes`, which every
-  source already fills (Codex: [SessionIndexer.swift:2100](../AgentSessions/Services/SessionIndexer.swift),
-  Claude: [ClaudeSessionParser.swift:133](../AgentSessions/Services/ClaudeSessionParser.swift)),
+- **Where:** new surface; aggregation over `Session.fileSizeBytes` for the
+  file-backed sources (Codex: [SessionIndexer.swift:2100](../AgentSessions/Services/SessionIndexer.swift),
+  Claude: [ClaudeSessionParser.swift:133](../AgentSessions/Services/ClaudeSessionParser.swift)) —
+  but NOT the shared-database ones: Devin sets it `nil` unconditionally
+  ([DevinSqliteReader.swift:328](../AgentSessions/Devin/DevinSqliteReader.swift)), and
+  Hermes/Cursor nil it on placeholder paths, so shared-DB sources need a
+  per-source store-size rule (report the shared db's size whole or apportioned)
+  before the rollup can claim per-source coverage —
   plus the S4 collapse-rule definitions in
   [measure.py](../scripts/session_bench/measure.py) and the seeded numbers in
   [measurements-2026-08-04.json](../scripts/session_bench/measurements-2026-08-04.json).
@@ -872,6 +877,45 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 ---
 
 ## QM / Runway (Claude)
+
+### Model-scoped weekly limit ("Current week (Fable)") is never read or shown
+> **open** · sev: med · urg: low · verified 2026-08-22
+
+- **What:** `claude` now reports a third window — *Current week (Fable)* (59–60% on the
+  owner's account on 2026-08-22, vs 87% all-models). AS shows only 5h + weekly-all, so a
+  user can be throttled on the model-scoped window while the QM still reads comfortable.
+- **Where:** the OAuth usage response (`GET api.anthropic.com/api/oauth/usage`) carries it
+  in a **new `limits[]` array**, not as a top-level key:
+  `{kind: "weekly_scoped", group: "weekly", percent: 60, scope: {model: {display_name:
+  "Fable"}}, resets_at, is_active}`. The legacy top-level keys `seven_day_opus` /
+  `seven_day_sonnet` are `null` on this account. The decoder
+  [ClaudeOAuthUsageClient.swift:15-22](../AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeOAuthUsageClient.swift:15)
+  only knows the top-level keys; the normalizer
+  [ClaudeUsageNormalizer.swift:30](../AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageNormalizer.swift:30)
+  maps `seven_day_opus` into `weekOpusUsedRatio`, and `ClaudeUsageModel.weekOpusRemainingPercent`
+  is then rendered by **no view** (grep: only `ClaudeStatusService` / `ClaudeUsageModel`).
+- **Bonus in the same payload:** `limits[].is_active` is the server's own "this is the
+  binding window" flag (weekly_all was `is_active: true` at 87%), and `severity`
+  (`normal`/`warning`). Today the QM derives the bottleneck locally
+  ([AgentCockpitHUDView.swift:4633](../AgentSessions/Views/AgentCockpitHUDView.swift:4633),
+  `fiveHourLeft <= weekLeft`); it could defer to the server flag.
+- **Fix shape:** decode `limits[]` (tolerant — unknown `kind`/`scope` values must not
+  fail the whole fetch); generalise the single Opus slot into a list of scoped weekly
+  windows keyed by `scope.model.display_name`; include scoped windows in the bottleneck
+  pick; render as a third QM column / dropdown row only when present.
+  Keep `seven_day_opus` as a fallback for older payloads.
+- **UI decision (owner, 2026-08-22):** no setting, no permanent row. In the compact HUD
+  the scoped window is shown **only when it is the bottleneck** (server `is_active`, or
+  lowest remaining); label it with the server's `display_name` ("Wk Fable: 10%") so its
+  appearance reads as a different window, not the weekly number jumping. Where space is
+  free (menu-bar dropdown, QM detail panel) always list it. A preference is the fallback
+  only if the appearing/disappearing row proves confusing in practice.
+- **Why deferred:** the owner's real confusion on 2026-08-22 was 5h-vs-week reading, not
+  this window; the scoped window was not the binding one.
+- **Risk if wrong:** a user hits a model-scoped cap while AS reports headroom — wrong data
+  class, hence sev med.
+- **To close:** fixture with `limits[]` incl. a `weekly_scoped` entry; normalizer test;
+  HUD renders the scoped row and picks it as bottleneck when it is the lowest.
 
 ### Claude runway rows intermittently show tokens/hour instead of weekly-share in Weekly mode
 > **open** · sev: med · urg: low · verified 2026-08-16

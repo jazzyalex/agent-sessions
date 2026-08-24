@@ -89,9 +89,9 @@ marked <em>not run</em> and drops out of that harness's denominator — an
 authentication failure is not evidence about a format, and an observation
 window too short to judge stability (Kimi, onboarded 2026-07-25) is not
 evidence of stability. S4 is likewise not run wherever no collapse rule has
-been proven lossless for an entire source and measured on the corpus:
-absence of a qualifying rule is not leanness, and the two S4 fails measured
-so far are the largest waste numbers in the bench. Ranks marked †
+been shown final-state-lossless for an entire source and measured on the
+corpus: absence of a qualifying rule is not leanness, and the one S4 fail
+measured so far is the largest waste number in the bench. Ranks marked †
 are provisional: hover for the best/worst range pending the missing
 measurement. Every gate carries equal weight within the composite; the
 per-area columns are there so you can re-weight by eye. One gate (crash

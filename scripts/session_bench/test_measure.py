@@ -102,10 +102,37 @@ def test_newest_snapshot_share_keeps_one_row_per_key(tmp_path):
     r = sqlite_newest_snapshot_share(db, "event", key_expr="key",
                                      order_expr="id", bytes_expr="LENGTH(data)")
     con.close()
-    assert r["total_row_bytes"] == 270
+    assert r["filtered_total_row_bytes"] == 270
+    assert r["table_total_row_bytes"] == 270  # no filter: both totals agree
     assert r["kept_row_bytes"] == 170
     assert r["removed_row_bytes"] == 100
     assert r["superseded_share_pct"] == 37.0
+
+
+def test_newest_snapshot_share_fails_closed_on_empty_match(tmp_path):
+    import pytest
+    db = tmp_path / "s.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE e (k, d BLOB)")
+    con.execute("INSERT INTO e VALUES ('m1', x'61')")
+    con.commit(); con.close()
+    # A filter that matches nothing must refuse to score, never report 0%.
+    with pytest.raises(SystemExit, match="matched no rows"):
+        sqlite_newest_snapshot_share(db, "e", "k", "rowid", "length(CAST(d AS BLOB))",
+                                     where_expr="k = 'renamed.type'")
+
+
+def test_sqlite_freelist_reports_auto_vacuum_mode(tmp_path):
+    # auto_vacuum=NONE (SQLite default): pages are only reclaimable by a full
+    # VACUUM, and the output must say so instead of implying incremental_vacuum.
+    db = tmp_path / "n.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE t (x)")
+    con.executemany("INSERT INTO t VALUES (?)", [("z" * 2000,)] * 200)
+    con.commit(); con.execute("DELETE FROM t"); con.commit(); con.close()
+    r = sqlite_freelist(db)
+    assert r["auto_vacuum"] == "none"
+    assert 0 < r["freelist_share_pct"] <= 100.0
 
 
 def test_collapse_cli_requires_key_and_bytes(tmp_path):

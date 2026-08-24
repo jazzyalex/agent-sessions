@@ -30,8 +30,8 @@ S1_MAX_BYTES = 10 * 1024
 S2_MIN_CONTENT_SHARE = 25.0
 S3_MAX_FIXED_RECORD = 25 * 1024
 S4_MAX_SUPERSEDED_SHARE = 20.0
-S4_DEFAULT_NOTE = ("no provably lossless collapse rule identified for this "
-                   "format; nothing measured")
+S4_DEFAULT_NOTE = ("no final-state-lossless collapse rule has been evaluated "
+                   "for this format; nothing measured")
 
 AGENT_META = {
     "pi":          ("Pi", "Pi", "Flat parent-linked JSONL"),
@@ -91,7 +91,7 @@ def compute_signal(agent: str, m: dict) -> dict:
         # not qualify — they are per-file audits, not format properties.
         out["S4"] = {"state": "not_run", "evidence": s4_note or S4_DEFAULT_NOTE}
     else:
-        ev = (f"lossless collapse would remove {s4}% of stored bytes "
+        ev = (f"final-state-lossless collapse would remove {s4}% of stored bytes "
               f"(limit {S4_MAX_SUPERSEDED_SHARE}%)")
         if s4_note:
             ev += f" — {s4_note}"

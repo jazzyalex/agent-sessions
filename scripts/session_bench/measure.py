@@ -12,7 +12,7 @@ Usage:
   python3 scripts/session_bench/measure.py <path.jsonl> [more paths...]
   python3 scripts/session_bench/measure.py --sqlite <db> --tables t1,t2 --json-col data
 
-Superseded-share extractors (S4): how many stored bytes a provably lossless
+Superseded-share extractors (S4): how many stored bytes a final-state-lossless
 collapse rule would remove.
   python3 scripts/session_bench/measure.py --freelist <db>
   python3 scripts/session_bench/measure.py --collapse-newest-per-key <db> \
@@ -94,13 +94,21 @@ def measure_sqlite(db: Path, tables: list[str], json_col: str) -> dict:
     return out
 
 
+AUTO_VACUUM_MODES = {0: "none", 1: "full", 2: "incremental"}
+
+
 def sqlite_freelist(db: Path) -> dict:
-    """Bytes sitting on the SQLite freelist — pages already deleted from,
-    and provably recoverable by the writer without touching any live row
-    (e.g. `PRAGMA incremental_vacuum` when auto_vacuum is INCREMENTAL)."""
+    """Pages sitting on the SQLite freelist — already deleted from, holding
+    no live row. How the writer reclaims them depends on auto_vacuum, which
+    this function reads and reports: `incremental` (or `full`) means a
+    `PRAGMA incremental_vacuum` frees them in place; `none` (SQLite's
+    default) means only a full `VACUUM` — a rewrite of the whole store —
+    reclaims them, so treat the share as waste-observed, not
+    waste-reclaimable-by-rule."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     page_size = con.execute("PRAGMA page_size").fetchone()[0]
     freelist_pages = con.execute("PRAGMA freelist_count").fetchone()[0]
+    auto_vacuum = con.execute("PRAGMA auto_vacuum").fetchone()[0]
     # Denominator must come from the same connection snapshot as the freelist
     # count: PRAGMA page_count sees uncheckpointed WAL frames, st_size on the
     # main file does not, and a live writer's un-checkpointed store would push
@@ -111,6 +119,7 @@ def sqlite_freelist(db: Path) -> dict:
     freelist_bytes = page_size * freelist_pages
     return {"path": str(db), "file_bytes": file_bytes, "page_size": page_size,
             "page_count": page_count, "db_bytes": page_size * page_count,
+            "auto_vacuum": AUTO_VACUUM_MODES.get(auto_vacuum, str(auto_vacuum)),
             "freelist_pages": freelist_pages, "freelist_bytes": freelist_bytes,
             "freelist_share_pct": round(100.0 * freelist_pages / max(page_count, 1), 1)}
 
@@ -121,7 +130,7 @@ def sqlite_newest_snapshot_share(db: Path, table: str, key_expr: str,
     """Share of row bytes that keeping only the newest snapshot per key would
     remove (the OpenCode superseded-message rule). The caller supplies SQL
     expressions so the extractor stays format-agnostic; the RULE itself must
-    be proven lossless for the whole source before its number may score S4 —
+    be shown final-state-lossless for the whole source before its number may score S4 —
     a collapse that has to be re-proven per group does not qualify."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     where = f"WHERE {where_expr}" if where_expr else ""
@@ -130,11 +139,24 @@ def sqlite_newest_snapshot_share(db: Path, table: str, key_expr: str,
         f"FROM (SELECT {bytes_expr} AS b, "
         f"ROW_NUMBER() OVER (PARTITION BY {key_expr} ORDER BY {order_expr} DESC) AS rn "
         f"FROM {table} {where})").fetchone()
+    # The whole-table total is always emitted alongside so a WHERE filter can
+    # never silently become the denominator of record: the share below is of
+    # the *filtered* rows, and the evidence that quotes it must say so.
+    table_total = con.execute(
+        f"SELECT COALESCE(SUM({bytes_expr}),0) FROM {table}").fetchone()[0]
     con.close()
+    if total == 0:
+        # Fail closed: zero matching rows means the filter, key or table is
+        # wrong (or the store is empty) — never a 0.0% pass.
+        raise SystemExit(
+            f"--collapse-newest-per-key matched no rows in {table} "
+            f"({'filter: ' + where_expr if where_expr else 'no filter'}); "
+            f"refusing to report 0% — check the table, key and where expressions")
     removed = total - kept
-    return {"path": str(db), "total_row_bytes": total, "kept_row_bytes": kept,
-            "removed_row_bytes": removed,
-            "superseded_share_pct": round(100.0 * removed / max(total, 1), 1)}
+    return {"path": str(db), "filtered_total_row_bytes": total,
+            "table_total_row_bytes": table_total,
+            "kept_row_bytes": kept, "removed_row_bytes": removed,
+            "superseded_share_pct": round(100.0 * removed / total, 1)}
 
 
 def main(argv: list[str]) -> int:

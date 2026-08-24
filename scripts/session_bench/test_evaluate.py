@@ -170,4 +170,4 @@ def test_s4_passes_below_limit(tmp_path):
     claude = next(a for a in data["agents"] if a["slug"] == "claude")
     assert claude["results"]["S4"] == "pass"
     assert claude["notes"]["S4"].startswith(
-        "lossless collapse would remove 5.0%")
+        "final-state-lossless collapse would remove 5.0%")

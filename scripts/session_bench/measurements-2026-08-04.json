@@ -64,7 +64,7 @@
         "probe_bytes": "probe ran, but only logical row bytes (4,982) are known; a physical before/after store diff (db+WAL) comparable to the JSONL harnesses is not yet measured. Cold-start db creation was 274,432 bytes.",
         "cold_start_bytes": "274432",
         "max_fixed_record_bytes": "no fixed-cost dump records found: largest rows are tool outputs (max 730,941 B) and user-message diff summaries (max 1,051,302 B) — variable work-derived data, not system-prompt/tool-catalog dumps (queried 2026-08-05)",
-        "superseded_share_pct": "rule: keep the newest snapshot per message — the event table stores a full message snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless: surviving events keep their timestamps (C1 is unaffected); what is lost is the timestamps of the superseded intermediate snapshots. Upstream anomalyco/opencode#33356. Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22"
+        "superseded_share_pct": "rule: keep the newest snapshot per message — the event table stores a full message snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless: surviving events keep their timestamps (C1 is unaffected); what is lost is the timestamps of the superseded intermediate snapshots. The share's denominator is the event table's message.updated.1 rows, not the whole store. Upstream anomalyco/opencode#33356. Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22"
       },
       "fixed_dump_found": false,
       "observed_since": "2026-03-31"
@@ -79,7 +79,7 @@
       "notes": {
         "probe_bytes": "probe not run: hermes -z one-shot returns 'no final response' for every provider since late June",
         "max_fixed_record_bytes": "sessions.system_prompt column: up to a 35,985-byte system prompt stored in 116 of 118 session rows (queried 2026-08-05)",
-        "superseded_share_pct": "no lossless collapse rule identified for the live ledger; the one-shot pre-update state snapshot found on disk is 1,008 MB but holds credentials (.env, auth.json) — flagged, never removed, and it is an upgrade artifact outside the session-store contract rather than a format property. Measured 2026-08-22"
+        "superseded_share_pct": "no final-state-lossless collapse rule identified for the live ledger; the one-shot pre-update state snapshot found on disk is 1,008 MB but holds credentials (.env, auth.json) — flagged, never removed, and it is an upgrade artifact outside the session-store contract rather than a format property. Measured 2026-08-22"
       },
       "observed_since": "2026-03-31"
     },

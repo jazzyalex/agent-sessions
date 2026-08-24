@@ -207,7 +207,8 @@ agents:
     S1: probe wrote 1,463 bytes (limit 10,240)
     S2: content-key text is 35.5% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 763 bytes (limit 25,600)
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: timestamp on records
     C2: model_change events + responseId
     C3: usage{input,output} on assistant messages
@@ -279,7 +280,8 @@ agents:
     S3: largest bookkeeping record 23,447 bytes (limit 25,600) — largest single line
       across all real sessions, 23,447 B (measured 2026-08-05); under the 25,600 B
       bar
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: timestamp on session/message records
     C2: model_change events with modelId/provider
     C3: usage{input,output,cache,totalTokens} on messages (verified 2026-08-04)
@@ -346,7 +348,8 @@ agents:
     S2: content-key text is 23.9% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 19,695 bytes (limit 25,600) — largest attachment
       line across 5 newest real sessions
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: timestamp per line (fixture claude/small.jsonl)
     C2: message.model on all 36,376 assistant events in corpus
     C3: message.usage per assistant event
@@ -501,7 +504,8 @@ agents:
     S2: content-key text is 7.0% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 70,233 bytes (limit 25,600) — llm.tools_snapshot
       line (full tool catalog)
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: epoch-ms time on every op
     C2: model on llm.request; modelAlias in state
     C3: usage.record ops with token fields (verified 2026-08-04)
@@ -579,13 +583,14 @@ agents:
     S3: 'no fixed-cost dump records found: largest rows are tool outputs (max 730,941
       B) and user-message diff summaries (max 1,051,302 B) — variable work-derived
       data, not system-prompt/tool-catalog dumps (queried 2026-08-05)'
-    S4: 'lossless collapse would remove 95.8% of stored bytes (limit 20.0%) — rule:
-      keep the newest snapshot per message — the event table stores a full message
-      snapshot per streaming update: 17,940 message.updated.1 rows for 4,639 distinct
-      messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless:
+    S4: 'final-state-lossless collapse would remove 95.8% of stored bytes (limit 20.0%)
+      — rule: keep the newest snapshot per message — the event table stores a full
+      message snapshot per streaming update: 17,940 message.updated.1 rows for 4,639
+      distinct messages, 378 MB where keeping the newest per message is 16 MB. Final-state-lossless:
       surviving events keep their timestamps (C1 is unaffected); what is lost is the
-      timestamps of the superseded intermediate snapshots. Upstream anomalyco/opencode#33356.
-      Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22'
+      timestamps of the superseded intermediate snapshots. The share''s denominator
+      is the event table''s message.updated.1 rows, not the whole store. Upstream
+      anomalyco/opencode#33356. Receipt: receipts-2026-08-22-s4.md. Measured 2026-08-22'
     C1: time.created on session/message/part rows
     C2: model{providerID,modelID} on message rows
     C3: token fields on message rows
@@ -655,10 +660,10 @@ agents:
     S3: 'largest bookkeeping record 35,985 bytes (limit 25,600) — sessions.system_prompt
       column: up to a 35,985-byte system prompt stored in 116 of 118 session rows
       (queried 2026-08-05)'
-    S4: no lossless collapse rule identified for the live ledger; the one-shot pre-update
-      state snapshot found on disk is 1,008 MB but holds credentials (.env, auth.json)
-      — flagged, never removed, and it is an upgrade artifact outside the session-store
-      contract rather than a format property. Measured 2026-08-22
+    S4: no final-state-lossless collapse rule identified for the live ledger; the
+      one-shot pre-update state snapshot found on disk is 1,008 MB but holds credentials
+      (.env, auth.json) — flagged, never removed, and it is an upgrade artifact outside
+      the session-store contract rather than a format property. Measured 2026-08-22
     C1: timestamps on messages (4 date formats, but present)
     C2: model at session level only
     C3: input/output/cache/reasoning token columns
@@ -728,7 +733,8 @@ agents:
       classification is a 1.0 milestone
     S3: largest bookkeeping record 52,236 bytes (limit 25,600) — system.message line
       carrying the full system prompt
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: timestamp on every event
     C2: model on assistant events + selectedModel
     C3: usage_checkpoint + shutdown tokenDetails
@@ -800,7 +806,8 @@ agents:
     S1: probe wrote 6,820 bytes (limit 10,240)
     S2: content-key text is 79.4% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 3,957 bytes (limit 25,600)
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: created_at on every record (verified 2026-08-04, 3 files)
     C2: no model field; parser regexes 'Model Selection' text out of USER_INPUT
     C3: zero token/usage keys in format (verified 2026-08-04)
@@ -867,7 +874,8 @@ agents:
     S1: probe wrote 1,915 bytes (limit 10,240)
     S2: content-key text is 51.0% of corpus bytes (floor 25.0%)
     S3: largest bookkeeping record 367 bytes (limit 25,600)
-    S4: no provably lossless collapse rule identified for this format; nothing measured
+    S4: no final-state-lossless collapse rule has been evaluated for this format;
+      nothing measured
     C1: no timestamps in transcript; session times from file mtimes (parser falls
       back to ctime/mtime)
     C2: no model field in transcript; hint lives in store.db
