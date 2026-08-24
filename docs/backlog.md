@@ -727,6 +727,28 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 
 ## Usage Tracking
 
+### Storage rollup in Analytics: bytes per source and S4-eligible waste
+> **open** · sev: low · urg: low · verified 2026-08-23
+
+- **What:** a read-only Analytics surface showing bytes per source, the largest
+  sessions, and where bench gate S4 applies — "N MB reclaimable by rule X —
+  upstream issue Y". Flagged-but-untouchable items (Hermes' credential-bearing
+  pre-update snapshot) are shown with the reason nothing touches them.
+- **Where:** new surface; aggregation over `Session.fileSizeBytes`, which every
+  source already fills (Codex: [SessionIndexer.swift:2100](../AgentSessions/Services/SessionIndexer.swift),
+  Claude: [ClaudeSessionParser.swift:133](../AgentSessions/Services/ClaudeSessionParser.swift)),
+  plus the S4 collapse-rule definitions in
+  [measure.py](../scripts/session_bench/measure.py) and the seeded numbers in
+  [measurements-2026-08-04.json](../scripts/session_bench/measurements-2026-08-04.json).
+- **Why deferred:** owner sequenced it after S4 landed in the bench so the
+  product side reuses one definition instead of inventing a second
+  ([discussion #54](https://github.com/jazzyalex/agent-sessions/discussions/54#discussioncomment-18121398)).
+  Reclamation in any form was declined outright — same thread.
+- **Risk if wrong:** a second, divergent definition of "superseded bytes"
+  between the bench and the product.
+- **To close:** Analytics shows per-source byte totals, largest sessions, and
+  per-source reclaimable-by-rule figures traceable to the bench manifest.
+
 ### Kimi reports measured token counts per turn and nothing reads them
 > **open** · sev: low · urg: low · verified 2026-08-21
 

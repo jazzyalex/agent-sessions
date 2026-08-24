@@ -1,4 +1,4 @@
-# Session-Bench manual-gate checklist. Signal gates (S1-S3) are computed by
+# Session-Bench manual-gate checklist. Signal gates (S1-S4) are computed by
 # evaluate.py from measurements-*.json; every verdict here is a checklist item
 # with its evidence. P2 is globally untested (excluded from scoring) until a
 # cross-harness truncation experiment exists.
@@ -13,6 +13,8 @@ gates:
      desc: "Strings under a published list of content-like keys (text, content, message, thinking, output, result, …) are ≥ 25% of stored bytes (corpus measurement). This heuristic captures real work product — messages, reasoning, tool output — but also counts bookkeeping stored under those keys, noted per-agent where known (Codex world_state, Copilot system prompt). Format-specific per-event classifiers are a 1.0 milestone."}
   - {id: S3, area: Signal, name: No fixed-cost dumps, computed: true,
      desc: "No single per-session bookkeeping record over 25 KB (system-prompt dumps, tool-catalog snapshots, context snapshots) in recent real sessions."}
+  - {id: S4, area: Signal, name: Superseded share, computed: true,
+     desc: "The share of stored bytes a final-state-lossless collapse would remove stays ≤ 20% on the real corpus; evidence names the rule per source and says what the collapse discards (added in v0.4 — S1-S3 cannot see superseded copies of live data under content keys). Final-state-lossless means every byte of final content survives and surviving events keep the timestamps C1 scores; only metadata on superseded copies (e.g. intermediate snapshot timestamps) may be lost, and the evidence must say so. A rule must hold for an ENTIRE source: OpenCode keep-newest-snapshot-per-message qualifies; Grok tool-call folding does not — its prefix property holds for only 66% of tool-call groups, so it is not even final-state-lossless there, and a collapse that must be re-proven per file is an audit, not a format property. Waste in stores outside the session store itself (tracing logs, upgrade snapshots) does not score this gate. Sources with no qualifying measured rule score not_run."}
   - {id: C1, area: Completeness, name: Per-event timestamps,
      desc: "Every event carries a timestamp."}
   - {id: C2, area: Completeness, name: Model attributable,

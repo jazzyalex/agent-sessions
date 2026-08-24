@@ -333,4 +333,4 @@ every number here are in the repo, and the companion post on the exact disk
 locations is [here]({% post_url 2026-07-11-where-agents-store-history %}).
 This field study later grew into a standing benchmark:
 [Session-Bench]({{ '/bench/' | relative_url }}) now scores ten formats on
-nineteen pass/fail gates, with the evidence behind every cell.
+twenty pass/fail gates, with the evidence behind every cell.

@@ -29,6 +29,9 @@ except ImportError:  # pragma: no cover
 S1_MAX_BYTES = 10 * 1024
 S2_MIN_CONTENT_SHARE = 25.0
 S3_MAX_FIXED_RECORD = 25 * 1024
+S4_MAX_SUPERSEDED_SHARE = 20.0
+S4_DEFAULT_NOTE = ("no provably lossless collapse rule identified for this "
+                   "format; nothing measured")
 
 AGENT_META = {
     "pi":          ("Pi", "Pi", "Flat parent-linked JSONL"),
@@ -47,7 +50,7 @@ AREAS = ["Signal", "Completeness", "Stability", "Openness", "Tooling"]
 
 
 def compute_signal(agent: str, m: dict) -> dict:
-    """Return {gate_id: {state, evidence}} for S1-S3 from measurements."""
+    """Return {gate_id: {state, evidence}} for S1-S4 from measurements."""
     out = {}
     notes = m.get("notes") or {}
     pb = m.get("probe_bytes")
@@ -79,6 +82,21 @@ def compute_signal(agent: str, m: dict) -> dict:
         if "max_fixed_record_bytes" in notes:
             ev += f" — {notes['max_fixed_record_bytes']}"
         out["S3"] = {"state": "pass" if mx <= S3_MAX_FIXED_RECORD else "fail", "evidence": ev}
+    s4 = m.get("superseded_share_pct")
+    s4_note = notes.get("superseded_share_pct")
+    if s4 is None:
+        # A source only scores S4 when a collapse rule has been PROVEN lossless
+        # for the whole source and measured on the real corpus. Per-group rules
+        # (Grok tool-call folding: prefix property holds for 66% of groups) do
+        # not qualify — they are per-file audits, not format properties.
+        out["S4"] = {"state": "not_run", "evidence": s4_note or S4_DEFAULT_NOTE}
+    else:
+        ev = (f"lossless collapse would remove {s4}% of stored bytes "
+              f"(limit {S4_MAX_SUPERSEDED_SHARE}%)")
+        if s4_note:
+            ev += f" — {s4_note}"
+        out["S4"] = {"state": "pass" if s4 <= S4_MAX_SUPERSEDED_SHARE else "fail",
+                     "evidence": ev}
     return out
 
 
