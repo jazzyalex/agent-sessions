@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [5.1] - 2026-08-27
+
 ### Highlights
 - **Devin CLI and fx join the lineup.** Two more coding agents put their local history in the same searchable list as the rest, each with a Settings pane and a resume command.
 
