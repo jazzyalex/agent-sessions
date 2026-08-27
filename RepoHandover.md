@@ -1,3 +1,247 @@
+## 2026-08-27 18:10 · release-5.1-gate-closed · QA in, gate closed, 5.1 unblocked
+status: in-progress
+
+**State:** @thedavidweng delivered the nine-point QA on 2026-08-27 (comments 5433779336 +
+5434043335). **Devin 9/9 — resume verified end-to-end** (`devin --resume stump-zebu -p`,
+assistant reply, exit 0, authenticated 3000.5.20, 247-visible/253-row store). **fx 8/9** —
+`expect` of `fx --resume <id>` reaches `UnableToReadTerminalSize`, which proves flag parsed and
+session id resolved; only a TTY is missing. #62 and #60 both **closed** (#60 ticked 19/19).
+The blocking rule of 2026-08-24 is **satisfied**, not waived. Release is unblocked pending #63.
+
+**Decided:**
+- **Gate closed on 9/9 Devin + 8/9 fx.** A missing TTY is the harness, not the format or the
+  command we build; nothing further would be learned by driving it to a prompt.
+- **fx stewardship given to @thedavidweng** (he offered and left it to the owner); he keeps
+  Devin too. #63 already flips Devin in STEWARDS.md — the fx row still needs setting, either by
+  him in #63 or by us after merge.
+- **Screenshot REQUESTED from him** — I first declined it on his behalf ("promo assets are the
+  owner's job"), which inverted D2 and the whole premise of the program: the owner installs no
+  further agent harnesses, so a real Devin/fx screenshot can ONLY come from a steward. Reversed
+  same day; #62 comment edited and the ask reposted on #63 (edits don't notify). Framed per D2 —
+  optional, declinable, credited, he picks what's on screen. **Do not re-decline this.**
+- **Watcher `trig_01C3hyjVM4AjMziMHuDW5yeD` DISABLED** — it watched for a QA report that has
+  arrived. Re-enable only with a new purpose.
+
+**PR #63 review (`fix(agent-watch): include devin and fx …`) — sound, verified not trusted:**
+Three real bugs in `scripts/agent_watch.py`, all confirmed by running the code:
+1. `MATRIX_KEY_FOR_AGENT` lacked `"fx"`. Matrix key is `fx` (line 252), so `.get("fx")` resolves.
+2. `verified_map` lacked devin and fx — `steward_check.py devin` reported `verified=unknown`.
+3. The fx baseline arm checked `p.endswith("checkpoint.json")` against the *matrix string*, which
+   carries a sidecar note — `"…/small/checkpoint.json (+ session.json, display.json)"`. Both fx
+   fixtures have parentheticals, so the check failed for both and the baseline was **always
+   empty**: `steward_check.py fx` had never once actually compared anything.
+   Proven: `_baseline_type_keys_for_agent("fx", raw)` → `{}`; with his `split(" (")[0]` strip →
+   9 buckets (session, tool_call, tool_result, tool_step, turn.{assistant,background_command,
+   compacted_summary,interrupted}, user).
+
+**Investigated and REFUTED — do not re-raise:** the strip makes the *deliberately malformed*
+`fx/unsupported/checkpoint.json` pass the `endswith` check too (`filtered` only drops
+`schema_drift` paths). Harmless: it fingerprints to `{"type_counts":{},"type_keys":{},
+"parse_errors":1}` and `_merge_type_keys` skips empty `type_keys`, so it contributes nothing.
+Also checked: no `sparkle_release_notes.py --lint` blocked words in any of the 22 added lines,
+and the CHANGELOG bullets sit above `## [5.0.2]`, i.e. correctly in the unreleased section.
+
+**Next:**
+1. Merge #63 (add the fx STEWARDS row first, or set it after).
+2. Bump 5.0.2/build 70 → 5.1, `deploy qa`, deploy on GO.
+3. Optional, non-blocking: refresh `Resources/Fixtures/stage0/agents/fx/small/*` to the 0.0.5
+   shape so weekly `unknown_keys` noise stops. `steward_check.py fx` currently reports additive
+   `format_drift_detected` at 0.0.5 with no missing render path.
+4. Document the fx quirk he found: a session fx itself calls `InvalidSessionFormat` (wants
+   `fx session recover`) is still browsable in Agent Sessions, because the parser reads
+   `checkpoint.json` directly instead of going through `fx session`.
+5. #57 (Grok build, rodion-m) still silent since 2026-08-18.
+
+## 2026-08-24 03:10 · bench-s4-gate · S4 gate merged and hardened; 5.1 still waits on #60 only
+status: in-progress
+
+**State:** Discussion #54 (thedavidweng, "session slimming") is answered and closed out into
+one shipped thing: the **S4 · Superseded share** gate, bench v0.4, 20 gates. PR #61 merged as
+`4c7dce6d`, then cold-reviewed *again* post-merge and fixed as `89aafa36` (pushed). Bench
+python suite 23/23; `docs/_data/session_bench.yml` regenerates byte-identical from the
+checked-in inputs; leaderboard ranks unchanged. Working tree clean apart from this file.
+Release 5.1 is still content-complete and held on one thing only: @thedavidweng's #60 reply.
+
+**Decided / don't redo:**
+- **Reclamation is refused in every form**, including the narrow "archived + hash-verified →
+  upstream to Trash". The app stays read-only on upstream session data; the hash cap therefore
+  needs no lift. What #54 got instead: the S4 gate (done) + a read-only Analytics storage
+  rollup (backlogged).
+- **The gate is "final-state-lossless", not "provably lossless".** The qualifying OpenCode rule
+  drops superseded-snapshot timestamps, which C1 rewards storing — as "provably lossless" the
+  two gates would be unsatisfiable together. That wording is now in the checklist `desc`, the
+  evidence strings, the receipt and the bench page; don't let "provably" creep back.
+- **Codex scores S4 `not_run`, not `fail`.** Its measured waste lives in
+  `~/.codex/sqlite/logs_2.sqlite` (a tracing/logs store), not the rollout-JSONL session store
+  the bench scores, and one `PRAGMA incremental_vacuum` on the *reader's own* machine would
+  flip it with no vendor change. Waste outside the session store does not score.
+- **No third review round on the bench work.** Round-2 fixes were prose + fail-closed guards,
+  each covered by a test or by `test_matches_checked_in_data` (which pins the generated yml to
+  evaluator output). Scores and ranks provably unchanged.
+- `measurements-*.json` and `checklist-*.yml` are **hand-authored inputs**; only
+  `docs/_data/session_bench.yml` is generated. Never hand-edit the yml.
+
+**Traps this cost real time:**
+- `PRAGMA freelist_count` divided by the main file's `st_size` is **unbounded** on a live WAL
+  store — reproduced 75,200% and 150,300%. Denominator must be `PRAGMA page_count` from the
+  same connection snapshot.
+- `length(data)` in SQLite counts *characters*; bytes need `LENGTH(CAST(data AS BLOB))`.
+- The collapse extractor now **fails closed** when the filter matches no rows, instead of
+  reporting a flattering 0%.
+- My own fix commit shipped 5 defects that only the post-merge cold pass caught (stale "the two
+  S4 fails", "provably lossless" surviving in 7 published cells, "nineteen gates" in the launch
+  post, char-vs-byte receipt, a receipt number the changed extractor no longer prints). The
+  lesson from `feedback_fix_verification_is_not_review` held: review the *merged result* cold.
+
+**Key files:** `scripts/session_bench/{measure.py,evaluate.py,checklist-2026-08-04.yml,
+measurements-2026-08-04.json,receipts-2026-08-22-s4.md,test_measure.py,test_evaluate.py}`,
+`docs/bench/index.md`, `docs/_posts/2026-08-07-session-bench-launch.md`.
+
+**Watcher:** `trig_01C3hyjVM4AjMziMHuDW5yeD` — renamed **"Watcher: contributor QA for Devin + fx
+(5.1 release blocker)"**, twice daily at `19 9,21 * * *` UTC (09:19 / 21:19 — dropped from
+every 2h on 2026-08-25; a blocked release does not need 12 checks a day). Reads **#62 first** (the gate — it counts ticked
+boxes per source, not just comments), then #60, #59 and #56 in case he replies where the
+conversation already was; classifies per agent QA PASS / QA PARTIAL / QA FAIL / NOT QA, and
+reports one of four **angle-bracket sentinels** on line 1 — `<<QA_REPORTED>>`,
+`<<CONTRIBUTOR_REPLIED>>`, `<<NO_CHANGE>>`, `<<STILL_BLOCKED>>` — pushing on all but
+`<<NO_CHANGE>>`. Bare English verdicts were tried twice and **failed twice**: runs emitted
+`GATE ANSWERED — no. NO CHANGE` and `QA REPORTED status check: … this is a NO CHANGE result`,
+both times the trigger word heading a sentence that meant the opposite. Don't go back to plain
+words. The ship-as-is DEADLINE branch was **deleted**; a 2026-08-31 `STILL BLOCKED`
+notice replaces it and is explicitly instructed never to suggest shipping. Routines are
+server-side — this paragraph is the only record.
+
+**RELEASE RULE CHANGED 2026-08-24 (owner):** *"we cant ship until devin and fx will get real
+qa with real sessions from pr author."* 5.1 is **blocked**, not held. The earlier "hard stop
+2026-08-26 → ship as-is" decision is **void — do not act on it.** Both new sources need the
+`docs/CONTRIBUTING.md` §"Testing your source against your own sessions" nine-point pass run by
+@thedavidweng against his real stores, resume included. Consequences: #60's status block still
+says the resume item "does not block 5.1" and is now wrong on the public issue; **fx QA is
+tracked nowhere at all** (#59 is merged, no open item); and @thedavidweng authored all three
+PRs (#56, #59, #61), so one person owns every remaining gate.
+
+**Nudge posted 2026-08-26** on #62 (`issuecomment-5432386879`) after three days of silence:
+points out the gate went up as a NEW issue rather than a reply on a thread he was already in,
+says partial answers count, and deliberately offers a graceful exit ("say so and I'll work out
+another route") — a request that accepts a no gets answered faster than one that only accepts
+a yes.
+
+**Watcher gotcha, 2026-08-25:** a `RemoteTrigger update` returned `"enabled": false` and the
+watcher would have silently stopped firing; re-enabled with `{"enabled": true}`. Two earlier
+updates the same day returned `true` from near-identical bodies, so the cause is unconfirmed.
+**`next_run_at` still shows a future time while disabled — read `enabled`, not the schedule,
+after every routine edit.**
+
+**Acted on the rule, 2026-08-24:**
+- Opened **#62 "5.1 release gate: real-session QA for Devin and fx"** — the release gate and
+  fx's first tracking home. Two nine-point checklists (one per source) transcribed from
+  `docs/CONTRIBUTING.md`, @thedavidweng named as the one person who can close it, no deadline
+  stated, plus an open call for any other Devin/fx user so it is not hostage to one volunteer.
+  The @-mention in #62 is what notifies him — a body edit would not have.
+- **Corrected #60's status block**: it said the resume item "does not block 5.1"; it now carries
+  a dated correction saying it does, and points at #62. Verified 19 checkboxes before *and*
+  after (the failure mode from the last edit), body grew only; the sole diff on read-back is a
+  trailing newline GitHub appends. Pre-edit body kept at `scratchpad/60-pre.md`.
+- Watcher rewritten to match — see below.
+
+**Next:**
+1. GitHub is quiet as of 2026-08-24 03:05Z — no #60 reply (last comment there is still mine,
+   `IC_kwDOPzTAC88AAAABQS14hA`), nothing post-merge on #61, no new issues/PRs/discussion
+   replies. Open items are exactly #60 and #57.
+2. **On a #60 reply:** pass → drop the two "not yet confirmed end-to-end" hedges in
+   `docs/CHANGELOG.md` (Devin + fx) and flip the STEWARDS/README rows if `steward_check.py
+   devin` was run; fail → reword to actual behaviour. Either way: commit docs, bump
+   5.0.2/build 70 → 5.1, `deploy qa`, deploy on GO.
+3. ~~Hard stop 2026-08-26 — ship as-is.~~ **Void** — superseded by the blocking rule above.
+4. #57 (Grok build, rodion-m) is 6 days silent after the contribute-or-evidence offer; nudge
+   or stale-close, not a release blocker.
+5. The external `github.com/jazzyalex/session-bench` mirror still needs its own v0.4 sync —
+   the bench page calls it canonical, and until it syncs this repo's `scripts/session_bench/`
+   is the current-version reference (the page says so).
+
+## 2026-08-23 14:25 · steward-ask-card · Steward ask card shipped in 5.0.2
+status: done
+
+**State:** Shipped. The session list can ask a long-time user to steward an unstewarded agent
+their own history shows they run. Live in 5.0.2 (`3d324207` + `29427ce9`, both ancestors of
+`v5.0.2`); nothing of mine uncommitted. 49 steward tests green, including after the other
+session added `.devin` and `.fx` to the list.
+
+**Decided / don't redo:**
+- **Not announced.** Owner's call: a card is not a feature. It sits under `### Maintenance`,
+  which `sparkle_release_notes.py` drops, and it shipped as a patch (5.0.2), not a minor.
+- The stewardless list is **compiled in, never fetched**. `StewardAskEligibilityTests` parses
+  the `STEWARDS.md` table and fails the build on drift — that is what silently absorbed the
+  Devin and fx rows correctly. Names there are the signup form's spelling, not `displayName`
+  ("Cursor Agent", "GitHub Copilot CLI").
+- Steward outranks contribute in the slot but is a **separate ask** — spending one does not
+  spend the other.
+- **Do not "fix" the round-end slot handoff with `didConsumeTopSlotAskThisLaunch`.** It is
+  `@Published`, so writing it from `.onAppear` rebuilds the list and the card vanishes on the
+  very launch it was shown. The non-publishing `didEndAnAskRoundThisLaunch` flag is the fix.
+- `ImageRenderer` cannot rasterize `.buttonStyle(.link)` — those render as yellow slashed
+  boxes. `.buttonStyle(.plain)` is fine. Only the width link buttons reserve is meaningful.
+
+**Key files:**
+- `AgentSessions/Onboarding/Models/StewardAskEligibility.swift` — the list, the 3-session bar,
+  Qwen's queue jump.
+- `AgentSessions/Onboarding/Views/OnboardingListTopSlot.swift` — `WrappingSlotCard` (shared by
+  the steward and contribute cards, wraps actions under the text below 560pt),
+  `TopSlotDebugOverride`, and a `#Preview` matrix at three pane widths.
+- To see any card in the running app, no UserDefaults surgery:
+  `open <built>.app --args -AgentSessionsDebugTopSlotCard qwen` (or `contribute`). Volatile
+  argument domain, DEBUG-only, wired to no ask lifecycle.
+
+**Next:** Nothing required. Two known, deliberate loose ends if ever wanted:
+1. The four single-line cards (star, feedback, Quota Meter, What's New) still truncate their
+   *titles* in a narrow pane. Cosmetic — their bodies are `lineLimit(1)` and degrade cleanly.
+2. `paneWidth` defaults to 0 and 0 means wide, so a call site that forgets it silently gets
+   the pre-fix squeezed layout.
+
+## 2026-08-23 14:04 · release-5.1-two-agents · fx merged; 5.1 content-complete, release held
+status: in-progress
+
+**State:** Devin CLI and fx are both on `main` as the fourteenth and fifteenth sources. Suite
+2245, 0 failures; everything pushed through `a8f2f4a3`. Issue #60 is 18/19. Version is still
+5.0.2 / build 70 — the release is deliberately held (see below), not blocked.
+
+**Decided / don't redo:**
+- **Stewards own format checks, end-to-end resume runs AND promo screenshots.** The owner
+  installs no further agent harnesses — this is a principle, not a cost question. Do not
+  re-propose installing fx (it *is* freely obtainable via `fx login codex`; the answer is
+  still no) or generating screenshots from fixtures.
+- Release held ~3 days for @thedavidweng's reply. If he runs the two resume checks, both
+  "not confirmed end to end" lines upgrade and the STEWARDS rows flip from `steward wanted`
+  — a one-line edit each and a materially better release. Ship as-is if he goes quiet.
+- `DevinCLIEnvironmentTests` was deferred to 5.1.1 by the plan, then written anyway (`1488c116`)
+  since it was the last in-house item.
+- **Never script the devin/fx conflict resolution again.** A resolver claimed "78 auto, 0
+  manual" and silently ate closing braces, made a duplicate `"5.1"` dict key, and broke JSON.
+  Only the compiler caught the brace damage.
+- After any multi-source merge, diff **every line each side added vs the merge base against
+  the result**. That is how `AgentUpdateService` was caught giving fx's reason for Devin —
+  invisible to both the compiler and the suite.
+
+**Key files:**
+- `docs/superpowers/plans/2026-08-23-release-5.1-two-agents-PLAN.md` — the plan, with D1–D4
+  recorded in §5 and a status banner marking §A–D done.
+- `docs/CHANGELOG.md` — `[Unreleased]` is already curated into `### Highlights` + `### Features`;
+  `tools/release/sparkle_release_notes.py` generates the Sparkle/GitHub notes from *this*, not
+  the README. Preview with `--out-text --lint`.
+- `AgentSessionsTests/DevinSqliteReaderTests.swift` — note `testMalformedChatMessage…`: SQLite
+  raises malformed JSON as a runtime error, so every JSON call over `chat_message` needs a
+  `json_valid` guard or one bad row reports the whole store unreadable.
+
+**Next:**
+1. Wait for @thedavidweng on [PR #59](https://github.com/jazzyalex/agent-sessions/pull/59)
+   (comment `issuecomment-5387979809`): resume runs, stewardship for either agent, optional
+   screenshot. All four asks are separately declinable.
+2. Release 5.1: bump `MARKETING_VERSION` 5.0.2 → 5.1 and `CURRENT_PROJECT_VERSION` 70 → 71,
+   run `deploy qa` for the stamp, then the deploy skill.
+3. If he replies with resume results, update README + matrix + STEWARDS + CHANGELOG together —
+   the same caveat appears on all four.
+4. `docs/backlog.md` is the owner's own uncommitted work. Never stage it.
+
 ## 2026-08-21 14:42 · format-check-2026-08-21 · QA re-stamped after follow-up fixes
 status: done
 
