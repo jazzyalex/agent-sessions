@@ -97,7 +97,9 @@ New in 5.1:
   raw bytes rather than UTF-8 decodes back to readable output instead of disappearing.
 - **Both agents are contributed, not ported** — @thedavidweng added them against the
   documented recipe from 5.0, which is the first real test of whether that recipe works for
-  someone outside the project. Devin resume is now verified (`fix/agent-watch` + `issuecomment-5433779336`); fx remains `steward wanted` and resume is `expect`-probed to the TTY gate (full interactive reopen needs a TTY).
+  someone outside the project. He stewards both, and checked each against his own sessions:
+  Devin's resume was confirmed end to end, while fx's reaches the TTY gate — the flag and
+  session id resolve, but a full interactive reopen needs a terminal.
 
 
 **Recent releases** — 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
@@ -143,7 +145,8 @@ reading correct as the agent's format changes.
 | OpenClaw | Steward wanted |
 | Hermes | Steward wanted |
 | Qwen Code | Steward wanted |
-| Devin CLI | Steward wanted |
+| Devin CLI | Steward-verified |
+| fx (vercel-labs) | Steward-verified |
 
 **Maintained** — the maintainer verifies it himself. **Steward-verified** — a named steward
 re-checks the format. **Steward wanted** — nobody has adopted it yet. Names, dates, and
