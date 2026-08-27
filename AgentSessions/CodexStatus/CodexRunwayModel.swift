@@ -118,8 +118,8 @@ enum RunwayDeadline: Equatable, Sendable {
 enum RunwayRateUnit: Equatable, Sendable {
     case quotaMinutesPerHour
     case tokensPerHour
-    /// Per-session share of the weekly average burn, expressed as % of the weekly
-    /// window per hour. Used by the "weekly" runway presentation.
+    /// Per-session share of the most recent measured weekly quota tick, expressed
+    /// as % of the weekly window per hour.
     case weeklyPercentPerHour
     /// Per-session API-equivalent cost per hour (tokens × per-model prices). Used
     /// by the "$" presentation; falls back to token when no price table is usable.
@@ -169,7 +169,7 @@ struct RunwayProviderBaseline: Equatable, Sendable {
     }
 
     /// A copy with a different rate unit — used for snapshot-wide fallback (e.g.
-    /// weekly → token when the weekly average is unmeasurable) so the whole
+    /// weekly → token while a recent quota tick is unavailable) so the whole
     /// snapshot stays single-unit.
     func with(rateUnit newUnit: RunwayRateUnit) -> RunwayProviderBaseline {
         RunwayProviderBaseline(source: source, remainingPercent: remainingPercent, resetAt: resetAt,
@@ -530,9 +530,9 @@ enum CodexRunwaySnapshotLoader {
                         )
                     }
                 case .weeklyPercentPerHour:
-                    // Per-session share of the weekly average burn. When the weekly
-                    // average is unmeasurable (fresh window / 0% used) fall back to
-                    // token throughput snapshot-wide (P6) with a token baseline.
+                    // Per-session share of a recent weekly quota tick. Until two
+                    // valid same-reset samples exist, fall back to token throughput
+                    // snapshot-wide with a token baseline.
                     if let weekly = CodexRunwayCalculator.weeklySnapshot(
                         baseline: request.baseline,
                         activities: activities,
@@ -937,13 +937,11 @@ enum CodexRunwayCalculator {
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
 
-    /// Weekly-mode snapshot: each session's **share of the weekly average burn**,
-    /// as % of the weekly window per hour. The provider weekly rate comes from the
-    /// baseline (remaining% ÷ time-to-weekly-runout — the smoothed average-burn set
-    /// by the builder), attributed per session by token share. Returns `nil` when
-    /// the weekly average is unmeasurable (0% used / no run-out) so the loader can
-    /// fall back to token mode snapshot-wide. Historical share, not instantaneous
-    /// pace (labeled as such in the UI).
+    /// Weekly-mode snapshot: each session's share of the provider's most recent
+    /// same-reset weekly quota tick, as % of the weekly window per hour. The
+    /// builder encodes that measured tick rate in the baseline; this function only
+    /// attributes it by current token share. Returns `nil` until the rate or token
+    /// activity is measurable so the loader can fall back to token mode.
     static func weeklySnapshot(baseline: RunwayProviderBaseline,
                                activities: [RunwaySessionActivity],
                                maxRows: Int) -> CodexRunwaySnapshot? {

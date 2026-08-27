@@ -3168,6 +3168,7 @@ enum HUDRunwayRequestBuilder {
                         presentation: RunwayPresentation = .fiveHour,
                         weekRemainingPercent: Int = 0,
                         weekResetText: String = "",
+                        weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil,
                         now: Date,
                         maxRows: Int,
                         forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -3220,9 +3221,18 @@ enum HUDRunwayRequestBuilder {
         // Weekly-window fields are only needed for the weekly presentation.
         let weekResetAt = presentation == .weekly
             ? UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now) : nil
-        let weeklyRunout = weekResetAt.flatMap {
-            RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
-                                                 resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
+        let weeklyRunout: (runoutAt: Date, observedAt: Date)? = weekResetAt.flatMap { resetAt in
+            guard let estimate = weeklyBurnRateEstimate,
+                  now <= estimate.validUntil,
+                  abs(estimate.resetAt.timeIntervalSince(resetAt)) < 120,
+                  estimate.percentPerSecond > 0,
+                  estimate.percentPerSecond.isFinite else { return nil }
+            return (
+                estimate.sampleEnd.addingTimeInterval(
+                    Double(weekRemainingPercent) / estimate.percentPerSecond
+                ),
+                estimate.sampleEnd
+            )
         }
         let resolved = effectivePresentation(
             preferred: presentation,
@@ -3238,8 +3248,8 @@ enum HUDRunwayRequestBuilder {
                 source: .codex,
                 remainingPercent: Double(weekRemainingPercent),
                 resetAt: weekResetAt,
-                currentRunoutAt: weeklyRunout,
-                observedAt: now,
+                currentRunoutAt: weeklyRunout.runoutAt,
+                observedAt: weeklyRunout.observedAt,
                 hasProjectedRunout: true,
                 windowMinutes: 10080,
                 rateUnit: .weeklyPercentPerHour)
@@ -3273,6 +3283,7 @@ enum HUDRunwayRequestBuilder {
                               presentation: RunwayPresentation = .fiveHour,
                               weekRemainingPercent: Int = 0,
                               weekResetText: String = "",
+                              weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil,
                               now: Date,
                               maxRows: Int,
                               forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -3315,9 +3326,18 @@ enum HUDRunwayRequestBuilder {
         // unchanged. Weekly uses the all-models weekly window fields.
         let weekResetAt = presentation == .weekly
             ? UsageResetText.resetDate(kind: "Wk", source: .claude, raw: weekResetText, now: now) : nil
-        let weeklyRunout = weekResetAt.flatMap {
-            RunwayBaselineMath.averageBurnRunout(remainingPercent: Double(weekRemainingPercent),
-                                                 resetAt: $0, windowLength: TimeInterval(10080 * 60), now: now)
+        let weeklyRunout: (runoutAt: Date, observedAt: Date)? = weekResetAt.flatMap { resetAt in
+            guard let estimate = weeklyBurnRateEstimate,
+                  now <= estimate.validUntil,
+                  abs(estimate.resetAt.timeIntervalSince(resetAt)) < 120,
+                  estimate.percentPerSecond > 0,
+                  estimate.percentPerSecond.isFinite else { return nil }
+            return (
+                estimate.sampleEnd.addingTimeInterval(
+                    Double(weekRemainingPercent) / estimate.percentPerSecond
+                ),
+                estimate.sampleEnd
+            )
         }
         let resolved = effectivePresentation(
             preferred: presentation,
@@ -3333,8 +3353,8 @@ enum HUDRunwayRequestBuilder {
                 source: .claude,
                 remainingPercent: Double(weekRemainingPercent),
                 resetAt: weekResetAt,
-                currentRunoutAt: weeklyRunout,
-                observedAt: now,
+                currentRunoutAt: weeklyRunout.runoutAt,
+                observedAt: weeklyRunout.observedAt,
                 hasProjectedRunout: true,
                 windowMinutes: 10080,
                 rateUnit: .weeklyPercentPerHour)
@@ -3380,6 +3400,7 @@ private struct HUDLimitsRowsPanel: View {
                               presentation: RunwayPresentation = .fiveHour,
                               weekRemainingPercent: Int = 0,
                               weekResetText: String = "",
+                              weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil,
                               now: Date,
                               maxRows: Int,
                               forceVisible: Bool = false) -> CodexRunwaySnapshotRequest? {
@@ -3396,6 +3417,7 @@ private struct HUDLimitsRowsPanel: View {
             presentation: presentation,
             weekRemainingPercent: weekRemainingPercent,
             weekResetText: weekResetText,
+            weeklyBurnRateEstimate: weeklyBurnRateEstimate,
             now: now,
             maxRows: maxRows,
             forceVisible: forceVisible
@@ -3699,6 +3721,7 @@ private struct HUDLimitsRowsPanel: View {
             presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
             weekRemainingPercent: codexUsageModel.weekRemainingPercent,
             weekResetText: codexUsageModel.weekResetText,
+            weeklyBurnRateEstimate: codexUsageModel.weeklyBurnRateEstimate,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn
@@ -3718,6 +3741,7 @@ private struct HUDLimitsRowsPanel: View {
             presentation: RunwayPresentation.current(raw: runwayPresentationRaw),
             weekRemainingPercent: claudeUsageModel.weekAllModelsRemainingPercent,
             weekResetText: claudeUsageModel.weekAllModelsResetText,
+            weeklyBurnRateEstimate: claudeUsageModel.weeklyBurnRateEstimate,
             now: clockNow,
             maxRows: 4,
             forceVisible: runwayVisibility == .alwaysOn

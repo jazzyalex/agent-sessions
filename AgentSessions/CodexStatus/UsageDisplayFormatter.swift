@@ -78,6 +78,136 @@ struct UsageLimitProjectionEstimate: Equatable {
     let observedAt: Date
 }
 
+/// A measured account-level quota burn between two provider samples. Weekly
+/// Session Runway uses this recent tick interval instead of averaging every
+/// percentage point consumed since the weekly reset.
+struct UsageLimitBurnRateEstimate: Equatable {
+    let percentPerSecond: Double
+    let sampleStart: Date
+    let sampleEnd: Date
+    let resetAt: Date
+    let validUntil: Date
+}
+
+/// Tracks coarse weekly quota ticks without shortening the interval on unchanged
+/// polls. If a provider reports 90% repeatedly and later 89%, the 1% burn is
+/// divided by the full time since 90% was first observed, not by the last poll.
+struct UsageLimitBurnRateTracker {
+    private var previous: ResolvedSample?
+    private var lastEstimate: UsageLimitBurnRateEstimate?
+
+    private static let minimumInterval: TimeInterval = 60
+    /// Session attribution uses current token activity, so an account-level tick
+    /// must age out before a materially different set of sessions can inherit it.
+    private static let retentionWindow: TimeInterval = 3 * 60
+
+    mutating func update(with sample: UsageLimitProjectionSample,
+                         now: Date = Date()) -> UsageLimitBurnRateEstimate? {
+        // Reject delayed/equal callbacks before validating their payload. An old
+        // response can carry an expired reset or a stale availability verdict;
+        // it must not clear newer state.
+        if let previous, sample.observedAt <= previous.observedAt {
+            return retainedEstimate(now: now)
+        }
+        guard sample.hasRateLimit,
+              sample.freshness.allowsProjectedDisplay,
+              !isResetInfoUnavailable(raw: sample.resetText),
+              let resetAt = UsageResetText.resetDate(
+                kind: "Wk",
+                source: sample.source,
+                raw: sample.resetText,
+                now: sample.observedAt
+              ),
+              resetAt > sample.observedAt,
+              resetAt > now else {
+            reset()
+            return nil
+        }
+
+        let current = ResolvedSample(
+            remainingPercent: Self.remainingPercent(for: sample),
+            resetAt: resetAt,
+            observedAt: sample.observedAt
+        )
+        guard let previous else {
+            self.previous = current
+            return nil
+        }
+        guard abs(previous.resetAt.timeIntervalSince(current.resetAt)) < 120 else {
+            self.previous = current
+            lastEstimate = nil
+            return nil
+        }
+        guard current.remainingPercent <= previous.remainingPercent else {
+            self.previous = current
+            lastEstimate = nil
+            return nil
+        }
+
+        let elapsed = current.observedAt.timeIntervalSince(previous.observedAt)
+        let burned = previous.remainingPercent - current.remainingPercent
+        guard burned > 0 else {
+            // Deliberately keep `previous`: advancing it on every unchanged poll
+            // turns a coarse 1% tick into an artificial last-poll spike.
+            return retainedEstimate(for: current, now: now)
+        }
+        guard elapsed >= Self.minimumInterval else {
+            return retainedEstimate(for: current, now: now)
+        }
+
+        let rate = burned / elapsed
+        guard rate > 0, rate.isFinite else {
+            return retainedEstimate(for: current, now: now)
+        }
+        let estimate = UsageLimitBurnRateEstimate(
+            percentPerSecond: rate,
+            sampleStart: previous.observedAt,
+            sampleEnd: current.observedAt,
+            resetAt: current.resetAt,
+            validUntil: current.observedAt.addingTimeInterval(Self.retentionWindow)
+        )
+        self.previous = current
+        lastEstimate = estimate
+        return estimate
+    }
+
+    mutating func reset() {
+        previous = nil
+        lastEstimate = nil
+    }
+
+    private mutating func retainedEstimate(for current: ResolvedSample,
+                                           now: Date) -> UsageLimitBurnRateEstimate? {
+        guard let estimate = lastEstimate,
+              now <= estimate.validUntil,
+              abs(estimate.resetAt.timeIntervalSince(current.resetAt)) < 120 else {
+            lastEstimate = nil
+            return nil
+        }
+        return estimate
+    }
+
+    private mutating func retainedEstimate(now: Date) -> UsageLimitBurnRateEstimate? {
+        guard let estimate = lastEstimate, now <= estimate.validUntil else {
+            lastEstimate = nil
+            return nil
+        }
+        return estimate
+    }
+
+    private static func remainingPercent(for sample: UsageLimitProjectionSample) -> Double {
+        let fallback = Double(clampPercent(sample.remainingPercent))
+        guard let exact = sample.remainingPercentExact, exact.isFinite else { return fallback }
+        return max(0, min(100, exact))
+    }
+
+    private struct ResolvedSample: Equatable {
+        let remainingPercent: Double
+        let resetAt: Date
+        let observedAt: Date
+    }
+}
+
 struct UsageLimitProjectionTracker {
     private var previous: ResolvedSample?
     private var lastProjection: Projection?

@@ -75,12 +75,16 @@ final class ClaudeUsageModel: ObservableObject {
     /// Set while a measured burn projects run-out at/after reset ("on track,
     /// fits the 5h window"); drives the smile glyph in the Quota Meter row.
     @Published var fiveHourOnTrackObservedAt: Date? = nil
+    /// Recent same-reset weekly quota tick used by Session Runway.
+    @Published var weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil
 
     private var sourceManager: ClaudeUsageSourceManager?
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
+    private var weeklyBurnRateTracker = UsageLimitBurnRateTracker()
+    private var weeklyBurnRateSource: ClaudeUsageSource?
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -289,6 +293,9 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
         fiveHourOnTrackObservedAt = nil
+        weeklyBurnRateTracker.reset()
+        weeklyBurnRateEstimate = nil
+        weeklyBurnRateSource = nil
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
@@ -526,6 +533,7 @@ final class ClaudeUsageModel: ObservableObject {
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
         let now = Date()
         let freshness = Self.alertFreshness(for: s, now: now)
+        prepareWeeklyBurnRateTracker(for: s.source)
         sessionRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weeklyRemainingPercent)
         weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
@@ -553,6 +561,15 @@ final class ClaudeUsageModel: ObservableObject {
             observedAt: s.fetchedAt,
             now: now
         )
+        weeklyBurnRateEstimate = weeklyBurnRateTracker.update(with: UsageLimitProjectionSample(
+            source: .claude,
+            remainingPercent: s.weeklyRemainingPercent,
+            remainingPercentExact: s.weeklyUsedRatio.map { 100 - ($0 * 100) },
+            resetText: s.weeklyResetText,
+            hasRateLimit: !s.weeklyResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            freshness: freshness,
+            observedAt: s.fetchedAt
+        ), now: now)
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.fiveHourRemainingPercent,
             fiveHourRemainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },
@@ -599,6 +616,7 @@ final class ClaudeUsageModel: ObservableObject {
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
         let now = Date()
+        prepareWeeklyBurnRateTracker(for: .tmuxUsage)
         sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)
         weekOpusRemainingPercent = s.weekOpusRemainingPercent.map(clampPercent)
@@ -617,6 +635,14 @@ final class ClaudeUsageModel: ObservableObject {
             observedAt: now,
             now: now
         )
+        weeklyBurnRateEstimate = weeklyBurnRateTracker.update(with: UsageLimitProjectionSample(
+            source: .claude,
+            remainingPercent: s.weekAllModelsRemainingPercent,
+            resetText: s.weekAllModelsResetText,
+            hasRateLimit: !s.weekAllModelsResetText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            freshness: .fresh,
+            observedAt: now
+        ), now: now)
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.sessionRemainingPercent,
             fiveHourRemainingPercentExact: nil,
@@ -637,7 +663,20 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourProjectedRunoutAt = nil
         fiveHourProjectionObservedAt = nil
         fiveHourOnTrackObservedAt = nil
+        weeklyBurnRateTracker.reset()
+        weeklyBurnRateEstimate = nil
+        weeklyBurnRateSource = nil
         recordProjectionDiagnostics(diagnostics, estimate: nil)
+    }
+
+    /// Different Claude sources can disagree by a fraction because OAuth/Web
+    /// expose exact ratios while the CLI probe is integer-rounded. Never turn a
+    /// source transition into an apparent quota tick.
+    private func prepareWeeklyBurnRateTracker(for source: ClaudeUsageSource) {
+        guard weeklyBurnRateSource != source else { return }
+        weeklyBurnRateTracker.reset()
+        weeklyBurnRateEstimate = nil
+        weeklyBurnRateSource = source
     }
 
     private func updateFiveHourProjection(remainingPercent: Int,

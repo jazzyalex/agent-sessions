@@ -1326,6 +1326,105 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.remainingPercent, 60)
     }
 
+    func testWeeklyBurnRateTrackerKeepsFirstUnchangedSampleAsTickAnchor() throws {
+        var tracker = UsageLimitBurnRateTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let unchangedTime = firstTime.addingTimeInterval(10 * 60)
+        let tickTime = firstTime.addingTimeInterval(15 * 60)
+        let reset = firstTime.addingTimeInterval(5 * 24 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+        func sample(_ remaining: Int, at date: Date) -> UsageLimitProjectionSample {
+            UsageLimitProjectionSample(
+                source: .codex, remainingPercent: remaining, resetText: resetText,
+                hasRateLimit: true, freshness: .fresh, observedAt: date)
+        }
+
+        XCTAssertNil(tracker.update(with: sample(90, at: firstTime), now: firstTime))
+        XCTAssertNil(tracker.update(with: sample(90, at: unchangedTime), now: unchangedTime))
+        let estimate = try XCTUnwrap(tracker.update(with: sample(89, at: tickTime), now: tickTime))
+
+        XCTAssertEqual(estimate.sampleStart, firstTime)
+        XCTAssertEqual(estimate.sampleEnd, tickTime)
+        XCTAssertEqual(estimate.percentPerSecond * 3600, 4.0, accuracy: 0.001)
+    }
+
+    func testWeeklyBurnRateTrackerUsesFractionalProviderSamples() throws {
+        var tracker = UsageLimitBurnRateTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondTime = firstTime.addingTimeInterval(10 * 60)
+        let reset = firstTime.addingTimeInterval(5 * 24 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+        let first = UsageLimitProjectionSample(
+            source: .claude, remainingPercent: 91, remainingPercentExact: 90.8,
+            resetText: resetText, hasRateLimit: true, freshness: .fresh,
+            observedAt: firstTime)
+        let second = UsageLimitProjectionSample(
+            source: .claude, remainingPercent: 90, remainingPercentExact: 90.2,
+            resetText: resetText, hasRateLimit: true, freshness: .fresh,
+            observedAt: secondTime)
+
+        XCTAssertNil(tracker.update(with: first, now: firstTime))
+        let estimate = try XCTUnwrap(tracker.update(with: second, now: secondTime))
+        XCTAssertEqual(estimate.percentPerSecond * 3600, 3.6, accuracy: 0.001)
+    }
+
+    func testWeeklyBurnRateTrackerClearsOnResetChangeAndExpiry() throws {
+        var tracker = UsageLimitBurnRateTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let tickTime = firstTime.addingTimeInterval(15 * 60)
+        let reset = firstTime.addingTimeInterval(5 * 24 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+        func sample(_ remaining: Int, resetText: String, at date: Date) -> UsageLimitProjectionSample {
+            UsageLimitProjectionSample(
+                source: .codex, remainingPercent: remaining, resetText: resetText,
+                hasRateLimit: true, freshness: .fresh, observedAt: date)
+        }
+
+        XCTAssertNil(tracker.update(with: sample(90, resetText: resetText, at: firstTime), now: firstTime))
+        let estimate = try XCTUnwrap(tracker.update(
+            with: sample(89, resetText: resetText, at: tickTime), now: tickTime))
+        XCTAssertEqual(estimate.validUntil.timeIntervalSince(estimate.sampleEnd), 3 * 60)
+        let expiredAt = estimate.validUntil.addingTimeInterval(1)
+        XCTAssertNil(tracker.update(
+            with: sample(89, resetText: resetText, at: expiredAt), now: expiredAt))
+
+        let nextReset = reset.addingTimeInterval(7 * 24 * 60 * 60)
+        XCTAssertNil(tracker.update(
+            with: sample(100, resetText: formatResetISO8601(nextReset), at: expiredAt),
+            now: expiredAt))
+    }
+
+    func testWeeklyBurnRateTrackerIgnoresOutOfOrderRecoveryAndReset() throws {
+        var tracker = UsageLimitBurnRateTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let tickTime = firstTime.addingTimeInterval(15 * 60)
+        let reset = firstTime.addingTimeInterval(5 * 24 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+        func sample(_ remaining: Int, resetText: String, at date: Date) -> UsageLimitProjectionSample {
+            UsageLimitProjectionSample(
+                source: .codex, remainingPercent: remaining, resetText: resetText,
+                hasRateLimit: true, freshness: .fresh, observedAt: date)
+        }
+
+        XCTAssertNil(tracker.update(with: sample(90, resetText: resetText, at: firstTime), now: firstTime))
+        let live = try XCTUnwrap(tracker.update(
+            with: sample(89, resetText: resetText, at: tickTime), now: tickTime))
+
+        let delayedTime = firstTime.addingTimeInterval(5 * 60)
+        let oldReset = reset.addingTimeInterval(-7 * 24 * 60 * 60)
+        XCTAssertEqual(tracker.update(
+            with: sample(95, resetText: resetText, at: delayedTime), now: tickTime), live)
+        XCTAssertEqual(tracker.update(
+            with: sample(95, resetText: formatResetISO8601(oldReset), at: delayedTime),
+            now: tickTime), live)
+
+        let nextTick = tickTime.addingTimeInterval(15 * 60)
+        let next = try XCTUnwrap(tracker.update(
+            with: sample(88, resetText: resetText, at: nextTick), now: nextTick))
+        XCTAssertEqual(next.sampleStart, tickTime)
+        XCTAssertEqual(next.percentPerSecond * 3600, 4.0, accuracy: 0.001)
+    }
+
     func testUsageLimitProjectionTrackerFormatsCompactRunoutToken() {
         var tracker = UsageLimitProjectionTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
@@ -2827,6 +2926,40 @@ final class CodexUsageParserTests: XCTestCase {
     }
 
     @MainActor
+    func testClaudeWeeklyBurnRateDoesNotCrossUsageSources() throws {
+        let model = ClaudeUsageModel()
+        let firstTime = Date().addingTimeInterval(-3 * 60)
+        let cliTime = firstTime.addingTimeInterval(60)
+        let oauthTime = cliTime.addingTimeInterval(60)
+        let tickTime = oauthTime.addingTimeInterval(60)
+        let resetText = formatResetISO8601(firstTime.addingTimeInterval(5 * 24 * 60 * 60))
+        func snapshot(at date: Date, source: ClaudeUsageSource,
+                      weeklyUsedRatio: Double) -> ClaudeLimitSnapshot {
+            ClaudeLimitSnapshot(
+                fetchedAt: date, source: source, health: .live,
+                fiveHourUsedRatio: 0.1, fiveHourResetText: resetText,
+                weeklyUsedRatio: weeklyUsedRatio, weeklyResetText: resetText,
+                weekOpusUsedRatio: nil, weekOpusResetText: nil, rawPayloadHash: nil)
+        }
+
+        model.applyLimitSnapshotForTesting(
+            snapshot(at: firstTime, source: .oauthEndpoint, weeklyUsedRatio: 0.098))
+        model.applyLimitSnapshotForTesting(
+            snapshot(at: cliTime, source: .tmuxUsage, weeklyUsedRatio: 0.10))
+        XCTAssertNil(model.weeklyBurnRateEstimate,
+                     "OAuth 90.2% -> rounded CLI 90% must not manufacture burn")
+
+        model.applyLimitSnapshotForTesting(
+            snapshot(at: oauthTime, source: .oauthEndpoint, weeklyUsedRatio: 0.098))
+        XCTAssertNil(model.weeklyBurnRateEstimate,
+                     "switching back to OAuth must seed a new exact-ratio interval")
+        model.applyLimitSnapshotForTesting(
+            snapshot(at: tickTime, source: .oauthEndpoint, weeklyUsedRatio: 0.108))
+        let estimate = try XCTUnwrap(model.weeklyBurnRateEstimate)
+        XCTAssertEqual(estimate.percentPerSecond * 3600, 60.0, accuracy: 0.001)
+    }
+
+    @MainActor
     func testCodexUsageModelRecordsProjectionDiagnosticsToInjectedDefaults() {
         let defaults = makeAlertDefaults()
         CodexUsageModel.projectionDiagnosticsDefaultsForTesting = defaults
@@ -4176,8 +4309,8 @@ final class CodexUsageParserTests: XCTestCase {
     func testWeeklySnapshotAttributesPaceByTokenShare() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(5 * 24 * 3600)
-        let runout = RunwayBaselineMath.averageBurnRunout(remainingPercent: 80, resetAt: reset,
-                        windowLength: TimeInterval(10080 * 60), now: now)!
+        // A recent quota tick measured 4 percentage points/hour.
+        let runout = now.addingTimeInterval(80 / (4.0 / 3600))
         let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
                         currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
                         windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
@@ -4188,7 +4321,7 @@ final class CodexUsageParserTests: XCTestCase {
         let snap = CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [a, b], maxRows: 5)
         XCTAssertEqual(snap?.rows.map(\.id), ["a", "b"])
         let total = (snap?.rows.first?.displayRate ?? 0) + (snap?.rows.last?.displayRate ?? 0)
-        XCTAssertGreaterThan(total, 0)
+        XCTAssertEqual(total, 4.0, accuracy: 0.001)
         // a burns 3× b → 75% of the provider weekly pace.
         XCTAssertEqual((snap?.rows.first?.displayRate ?? 0) / total, 0.75, accuracy: 0.01)
     }
@@ -4196,8 +4329,7 @@ final class CodexUsageParserTests: XCTestCase {
     func testWeeklySnapshotNilWhenNoActivity() {
         let now = Date(timeIntervalSince1970: 2_000_000)
         let reset = now.addingTimeInterval(5 * 24 * 3600)
-        let runout = RunwayBaselineMath.averageBurnRunout(remainingPercent: 80, resetAt: reset,
-                        windowLength: TimeInterval(10080 * 60), now: now)!
+        let runout = now.addingTimeInterval(80 / (4.0 / 3600))
         let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
                         currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
                         windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
@@ -4209,17 +4341,20 @@ final class CodexUsageParserTests: XCTestCase {
         let t = RunwayPriceTable.makeForTesting()
         XCTAssertFalse(t.isEmpty)
         // Tier keys cover every current generation via longest-prefix (verified
-        // 2026-07-14 against the official pricing pages).
-        XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.outputPerMTok, 15.0)
+        // 2026-08-26 against the official pricing pages). Sonnet 5's permanent
+        // lower price must not change the Sonnet 4.x fallback.
+        XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.outputPerMTok, 10.0)
+        XCTAssertEqual(t.price(forModel: "claude-sonnet-5")?.inputPerMTok, 2.0)
         XCTAssertEqual(t.price(forModel: "claude-sonnet-4-5-20250929")?.outputPerMTok, 15.0)
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.outputPerMTok, 25.0)   // Opus dropped to $5/$25
         XCTAssertEqual(t.price(forModel: "claude-opus-4-8")?.inputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-haiku-4-5-20251001")?.outputPerMTok, 5.0)
         XCTAssertEqual(t.price(forModel: "claude-fable-5")?.outputPerMTok, 50.0)     // Fable 5 frontier $10/$50
         // Codex tiers price distinctly via longest-prefix.
-        XCTAssertEqual(t.price(forModel: "gpt-5.6-sol")?.outputPerMTok, 30.0)
-        XCTAssertEqual(t.price(forModel: "gpt-5.6-terra")?.outputPerMTok, 15.0)
-        XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.outputPerMTok, 6.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-sol")?.outputPerMTok, 20.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-terra")?.outputPerMTok, 12.0)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.outputPerMTok, 1.2)
+        XCTAssertEqual(t.price(forModel: "gpt-5.6-luna")?.cachedInputPerMTok, 0.02)
         XCTAssertEqual(t.price(forModel: "gpt-5.4-mini")?.inputPerMTok, 0.75)        // longer prefix beats gpt-5.4
         XCTAssertEqual(t.price(forModel: "gpt-5-codex")?.inputPerMTok, 1.25)         // falls back to gpt-5
         XCTAssertNil(t.price(forModel: "totally-unknown-model"))
@@ -4341,7 +4476,7 @@ final class CodexUsageParserTests: XCTestCase {
     /// Regression: after a mid-session `/model` switch, tokens must be priced at the
     /// CURRENT model. Resolving from the file's FIRST turn_context returned the model
     /// the session started with, so a switch to a cheap tier stayed billed at the
-    /// expensive one for the rest of a long turn (gpt-5.6-sol $5/$30 vs luna $1/$6).
+    /// expensive one for the rest of a long turn (gpt-5.6-sol $4/$20 vs luna $0.2/$1.2).
     func testCodexRunwayModelUsesLatestTurnContextAfterModelSwitch() throws {
         CodexRunwayTokenActivityParser.resetModelCacheForTesting()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("codex-runway-switch-\(UUID().uuidString)")
@@ -4462,8 +4597,8 @@ final class CodexUsageParserTests: XCTestCase {
         // Totals derive from components — they cannot drift from what $ prices.
         XCTAssertEqual(activity.outputPerSecond, 200)
 
-        // Correct: 100*25 (opus out) + 100*15 (sonnet out), per second → /1e6 * 3600.
-        let expected: Double = (100.0 * 25.0 + 100.0 * 15.0) / 1_000_000.0 * 3600.0
+        // Correct: 100*25 (opus out) + 100*10 (sonnet out), per second → /1e6 * 3600.
+        let expected: Double = (100.0 * 25.0 + 100.0 * 10.0) / 1_000_000.0 * 3600.0
         let snap = CodexRunwayCalculator.dollarSnapshot(
             baseline: baseline, activities: [activity], priceTable: table, maxRows: 5)
         XCTAssertEqual(snap?.snapshot.rows.first?.displayRate ?? 0, expected, accuracy: 1e-9)
@@ -4514,10 +4649,10 @@ final class CodexUsageParserTests: XCTestCase {
                        "each path must keep its own model, not collapse to the first")
         XCTAssertEqual(activity?.outputPerSecond ?? 0, 20, accuracy: 0.001, "totals still sum both paths")
 
-        // sol out $30/MTok, luna out $6/MTok → 10*30 + 10*6, NOT 20*30.
+        // sol out $20/MTok, luna out $1.20/MTok → 10*20 + 10*1.2, NOT 20*20.
         let table = RunwayPriceTable.makeForTesting()
-        let expected: Double = (10.0 * 30.0 + 10.0 * 6.0) / 1_000_000.0 * 3600.0
-        let blended: Double = (20.0 * 30.0) / 1_000_000.0 * 3600.0
+        let expected: Double = (10.0 * 20.0 + 10.0 * 1.2) / 1_000_000.0 * 3600.0
+        let blended: Double = (20.0 * 20.0) / 1_000_000.0 * 3600.0
         let rate = CodexRunwayCalculator.dollarsPerHour(for: activity!, priceTable: table)
         XCTAssertEqual(rate ?? 0, expected, accuracy: 1e-9)
         XCTAssertLessThan(rate ?? 0, blended, "blending the child into the parent's model overstates cost")
@@ -4553,7 +4688,7 @@ final class CodexUsageParserTests: XCTestCase {
 
     /// A stale cached manifest must never shadow a corrected bundled table.
     func testPriceTableIgnoresOlderCachedManifest() {
-        let t = RunwayPriceTable.makeForTesting()   // bundled, updated 2026-07-14
+        let t = RunwayPriceTable.makeForTesting()   // bundled, updated 2026-08-26
         let opusBefore = t.price(forModel: "claude-opus-4-8")?.outputPerMTok
         let stale = #"{"version":1,"updated":"2020-01-01","models":{"claude-opus":{"inputPerMTok":99,"cachedInputPerMTok":9,"outputPerMTok":999}}}"#
         XCTAssertFalse(t.loadForTesting(json: Data(stale.utf8)),

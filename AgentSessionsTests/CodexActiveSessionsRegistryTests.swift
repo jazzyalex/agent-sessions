@@ -2454,11 +2454,17 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
     }
 
     func testWeeklyPresentationBuildsWeeklyBaseline() {
-        // Preferred .weekly with a measurable weekly window → weekly baseline
+        // Preferred .weekly with a recent same-reset quota tick → weekly baseline
         // (10080-min window, weeklyPercentPerHour), even while the 5h window is present.
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let fiveReset = now.addingTimeInterval(3 * 60 * 60)
         let weekReset = now.addingTimeInterval(5 * 24 * 60 * 60)
+        let tick = UsageLimitBurnRateEstimate(
+            percentPerSecond: 1.0 / (15 * 60),
+            sampleStart: now.addingTimeInterval(-15 * 60),
+            sampleEnd: now,
+            resetAt: weekReset,
+            validUntil: now.addingTimeInterval(30 * 60))
         let row = makeHUDRow(id: "active-row", project: "Alpha", name: "Active Work",
                              state: .active, resolvedSessionID: "active-session", logPath: "/tmp/active.jsonl")
         let request = HUDRunwayRequestBuilder.request(
@@ -2467,10 +2473,31 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
             windowMinutes: 300, presentation: .weekly,
             weekRemainingPercent: 73, weekResetText: iso8601(weekReset),
+            weeklyBurnRateEstimate: tick,
             now: now, maxRows: 5)
         XCTAssertEqual(request?.baseline.rateUnit, .weeklyPercentPerHour)
         XCTAssertEqual(request?.baseline.windowMinutes, 10080)
         XCTAssertEqual(request?.baseline.remainingPercent, 73)
+        let rate = (request?.baseline.remainingPercent ?? 0)
+            / (request?.baseline.currentRunoutAt.timeIntervalSince(request?.baseline.observedAt ?? now) ?? 1)
+            * 3600
+        XCTAssertEqual(rate, 4.0, accuracy: 0.001)
+    }
+
+    func testWeeklyPresentationFallsBackToTokenWithoutRecentTick() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [], projectedRunoutEnabled: true,
+            codexAgentEnabled: true, codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67,
+            fiveHourResetText: iso8601(now.addingTimeInterval(3 * 60 * 60)),
+            fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
+            windowMinutes: 300, presentation: .weekly,
+            weekRemainingPercent: 73,
+            weekResetText: iso8601(now.addingTimeInterval(5 * 24 * 60 * 60)),
+            now: now, maxRows: 5, forceVisible: true)
+
+        XCTAssertEqual(request?.baseline.rateUnit, .tokensPerHour)
     }
 
     func testRunwayRequestIDChangesWhenDisplayNameChanges() {

@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "updated": "2026-08-03",
-  "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn (no user data is sent). Verified 2026-07-14 from platform.claude.com/docs/en/about-claude/pricing and developers.openai.com/api/docs/pricing. Keyed by TIER so longest-prefix covers every generation (claude-sonnet → claude-sonnet-5, gpt-5.6-sol exact, gpt-5 → any other gpt-5.x); legacy keys are kept so an older model is priced rather than dropped from the $ view. cachedInputPerMTok = cache-hit read (0.1x input); cacheWritePerMTok = 5-minute cache write (1.25x input) — only ever consumed for Claude, since Codex logs carry no cache-creation tokens. Sonnet 5 is at introductory $2/$10 through 2026-08-31; the stable $3/$15 is listed here — set claude-sonnet to 2.0/0.2/10.0/2.5 if you want the promo reflected, and revert on 2026-09-01. codex-auto-review is Codex's internal auto-review label, not a published model; it bills real tokens, so without a key here every session containing an auto-review turn is dropped from $ entirely (any unpriced contributing slice makes the whole session unpriceable). Priced at the gpt-5.6/sol default on the same reasoning as gpt-5.6-codex — OpenAI publishes no separate rate, and overstating a tier beats silently losing the session. Rates below were last verified against the official pages on 2026-07-14. IMPORTANT: clients only accept a manifest whose 'updated' is >= their bundled table's, so always advance 'updated' when editing. Edit this file to update clients with no app release.",
+  "updated": "2026-08-26",
+  "_note": "USD per million tokens. Served read-only to Agent Sessions' Session Runway $ burn; no user data is sent. Verified 2026-08-26 from platform.claude.com/docs/en/about-claude/pricing and developers.openai.com/api/docs/pricing. Longest-prefix matching keeps Sonnet 5 at its permanent $2/$10 while Sonnet 4.x stays at $3/$15. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default so a contributing review slice is not silently dropped. Clients only accept a manifest whose updated date is at least as new as the bundled table, so advance updated on every edit.",
   "models": {
     "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25 },
+    "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5 },
     "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
     "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25 },
     "claude-fable":    { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5 },
@@ -12,14 +13,14 @@
     "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
     "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
     "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0 },
-    "gpt-5.6-sol":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 },
-    "gpt-5.6-terra":   { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.125 },
-    "gpt-5.6-luna":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 6.0,  "cacheWritePerMTok": 1.25 },
-    "gpt-5.6":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 },
+    "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
+    "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5 },
+    "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25 },
+    "gpt-5.6":         { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
     "gpt-5.5":         { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 30.0, "cacheWritePerMTok": null },
     "gpt-5.4-mini":    { "inputPerMTok": 0.75, "cachedInputPerMTok": 0.075, "outputPerMTok": 4.5,  "cacheWritePerMTok": null },
     "gpt-5.4":         { "inputPerMTok": 2.5,  "cachedInputPerMTok": 0.25,  "outputPerMTok": 15.0, "cacheWritePerMTok": null },
     "gpt-5":           { "inputPerMTok": 1.25, "cachedInputPerMTok": 0.125, "outputPerMTok": 10.0, "cacheWritePerMTok": null },
-    "codex-auto-review": { "inputPerMTok": 5.0, "cachedInputPerMTok": 0.5,  "outputPerMTok": 30.0, "cacheWritePerMTok": 6.25 }
+    "codex-auto-review": { "inputPerMTok": 4.0, "cachedInputPerMTok": 0.4,  "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 }
   }
 }
