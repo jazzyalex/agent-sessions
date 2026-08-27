@@ -86,8 +86,8 @@ writes a redacted sample you can attach to an issue.
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
-| Devin CLI | steward wanted | 2026-08-18 · 3000.3.27 (see note) | Best-effort |
-| fx (vercel-labs) | steward wanted | 2026-08-20 · 0.0.4 (see note) | Best-effort |
+| Devin CLI | @thedavidweng | 2026-08-27 · 3000.5.20 | Best-effort |
+| fx (vercel-labs) | steward wanted | 2026-08-27 · 0.0.5 (see note) | Best-effort |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),
@@ -99,13 +99,8 @@ but the agent is excluded from active format checks and takes no steward.
 
 Honest footnotes:
 
-- **Devin CLI.** Verified against the installed CLI 3000.3.27 (0becb483) with a schema
-  probe over 253 on-disk sessions in the shared `sessions.db`. Resume is implemented from
-  installed help and reader evidence with hermetic tests, not an end-to-end run, because
-  authentication blocked a disposable run; it stays untested until someone with an
-  authenticated Devin login closes it. Devin is in the weekly format monitoring set as of
-  2026-08-22, so `./scripts/steward_check.py devin` runs — but only on a machine with the
-  CLI installed, which is the same authenticated login the resume check needs.
+- **Devin CLI.** Verified 2026-08-27 on CLI 3000.5.20 (2d902011) with a schema
+  probe over 247 visible sessions (253 total, 6 `hidden=1`) in `~/.local/share/devin/cli/sessions.db` and the 9-point checklist against a running `upstream/main` build (`issuecomment-5433779336`): list count 247, titles recognisable (1 expected `Untitled`), main-chain transcript renders `user/assistant(tool_calls)/tool_result` with no blank middle, timestamps epoch seconds (no 1970), search `Greptile` hits main chain, `has-commands` 241/6, Analytics `devin` counts, Copy Resume `devin --resume <slug>` pasteable and launch-in-terminal uses the same plan. Resume was closed the same night via `devin --resume stump-zebu -p "resume test: say hello"` (exit 0, assistant reply) with `devin auth status` `Logged in via Devin` (`user-b19f15…`). Weekly monitoring: `steward_check.py devin` `All good` (verified 3000.3.27 → 3000.5.20 drift is only the version bump, schema matches).
 - **Qwen Code.** Verified against 0.14.3 transcripts. The installed CLI is 0.21.13, but the
   Qwen OAuth free tier was discontinued on 2026-04-15, so no newer transcript can be
   captured on this machine without a paid plan or an alternate provider. Newer Qwen builds
@@ -113,12 +108,4 @@ Honest footnotes:
   the single most useful agent to adopt.
 - **Hermes.** Held at 0.17.0 since 2026-06-24. The automated driver stopped producing a
   usable sample, so newer Hermes builds have no fresh evidence either way.
-- **fx (vercel-labs).** Verified against the installed fx 0.0.4 with a schema survey of
-  the on-disk sessions under `~/.fx/sessions`: transcripts come from each session's
-  `checkpoint.json`, sidecars carry identity/workspace/title/model, and `fx --help`
-  advertises `--resume <id>` and `--continue`. Resume is implemented from that help and
-  reader evidence with hermetic tests, not an end-to-end run; it stays untested until
-  someone with an authenticated fx login closes it. fx is in the weekly format
-  monitoring set as of 2026-08-23, so `./scripts/steward_check.py fx` runs — but only
-  on a machine with fx sessions on disk. The format is young (schema_version 3
-  sidecars, event_log_v1 storage), so drift is likelier than for the older agents.
+- **fx (vercel-labs).** Re-verified 2026-08-27 on CLI 0.0.5 (df7e624) with 5 dirs under `~/.fx/sessions` (`178719436754…` etc., 3 with history, 2 empty `history_len 0`): `checkpoint.json` + `session.json` + `display.json` layout holds, all four `kind`s still render (live data covers `assistant` + `interrupted`; `background_command`/`compacted_summary` via fixture), `durableString` for `base64` text, `tool_calls[].arguments_json` as JSON string, `tool_result` keyed by `tool_call_id`. 9-point checklist (`issuecomment-5433779336`): count 5 (3 visible after `hideZeroMessageSessions`), titles from `display.json`/first prompt, no 1970, search `Skills: 25` hits, `has-commands` 3/2, Analytics counts, Copy `fx --resume <id>` (`--continue` only with `cwd`). `fx --help` advertises `--resume [last|<id>]`/`-c`; `fx session --id <id> --json` succeeds 3/3 non-corrupt (the fourth `178719436754…` is CLI-reported `InvalidSessionFormat` but browsable via direct `checkpoint.json`); `expect` spawning `fx --resume <id>` reaches `UnableToReadTerminalSize` not unknown-flag, so the flag is valid and the session is found — full interactive reopen needs a TTY and was not driven to a prompt. `steward_check.py fx` now runs (fixed `MATRIX_KEY` + `verified_map` + baseline `checkpoint.json` note) and reports additive 0.0.5 `unknown_keys` (`checkpoint_seq` etc.) with `format_drift_detected` but no missing render path. Format is young (3/`event_log_v1`), so drift is expected.

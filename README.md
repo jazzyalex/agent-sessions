@@ -89,7 +89,7 @@ New in 5.1:
   a branch, so a session shows the live conversation rather than every path it took to get
   there. Settings adds binary and storage-root controls, and Copy Resume Command produces
   `devin --resume <id>`. Devin keeps only active sessions, so there is no archived history
-  to browse, and image extraction is not yet supported.
+  to browse, and image extraction is not yet supported. Resume verified 2026-08-27 on 3000.5.20 via `devin --resume <id> -p` (issuecomment-5433779336).
 - **fx (vercel-labs), the fifteenth** — one directory per session under `~/.fx/sessions`,
   with every kind of turn rendered: ordinary replies and their narrated tool steps,
   background commands and where their output went, the summary that replaces auto-compacted
@@ -97,8 +97,7 @@ New in 5.1:
   raw bytes rather than UTF-8 decodes back to readable output instead of disappearing.
 - **Both agents are contributed, not ported** — @thedavidweng added them against the
   documented recipe from 5.0, which is the first real test of whether that recipe works for
-  someone outside the project. Both stay `steward wanted` until someone running the CLI
-  confirms resume end to end; the support matrix says so on every surface.
+  someone outside the project. Devin resume is now verified (`fix/agent-watch` + `issuecomment-5433779336`); fx remains `steward wanted` and resume is `expect`-probed to the TTY gate (full interactive reopen needs a TTY).
 
 
 **Recent releases** — 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
