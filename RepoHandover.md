@@ -1,3 +1,34 @@
+## 2026-08-27 20:40 · pr63-merged-stewards-fixed · main synced, 5.1 ready to bump
+status: in-progress
+
+**State:** origin/main == local main at `7caca3e0`. PR #63 MERGED (merge commit `3c8ac9f8`).
+Suite **2252 passed / 0 failed / 3 skipped**. Nothing uncommitted. Next action is the release
+itself: bump 5.0.2/build 70 → 5.1, `deploy qa`, deploy on GO.
+
+**#63 would have merged RED — caught pre-merge, don't lose this:**
+`StewardAskEligibility.stewardlessAgents` is compiled in, and
+`testCompiledListMatchesStewardsMarkdown` asserts **exact set equality** with the
+`steward wanted` rows of `STEWARDS.md`. #63 flipped Devin's row to `@thedavidweng` and touched
+no Swift, so the sets went 12 vs 11 and the test fails. Proven before merging by parsing both.
+**Any future steward signup must change the markdown row AND the compiled list together.**
+Fixed in `7caca3e0`, which also gave fx its steward row and repaired the README status table —
+it still had Devin as `Steward wanted` and **no fx row at all** (fx shipped as the fifteenth
+source and was never added).
+
+**Verified, so nobody re-litigates it:**
+- CHANGELOG overlap between the runway commit and #63 was a non-issue: `git merge-tree
+  --write-tree main FETCH_HEAD` came back CLEAN against *local* main, the merged Unreleased
+  section is Highlights → Features → Bug Fixes (Bug Fixes last, which the linter requires), and
+  rendering it as 5.1 through `sparkle_release_notes.py --lint` exits **0**. Release notes are
+  ready as they stand.
+- Merged locally rather than with the GitHub button specifically so origin/main never held the
+  red state between the merge and the steward fix. GitHub still attributed the PR correctly.
+
+**Next:** bump to 5.1 / build 71, `deploy qa`, deploy on GO. Non-blocking follow-ups unchanged:
+refresh `Resources/Fixtures/stage0/agents/fx/small/*` to 0.0.5 shape, document the fx
+`InvalidSessionFormat`-still-browsable quirk, #57 (Grok build) still silent, and
+@thedavidweng owes nothing — the screenshot ask on #63 is optional and declinable.
+
 ## 2026-08-27 18:10 · release-5.1-gate-closed · QA in, gate closed, 5.1 unblocked
 status: in-progress
 
