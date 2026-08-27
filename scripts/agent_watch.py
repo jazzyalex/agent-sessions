@@ -587,6 +587,7 @@ MATRIX_KEY_FOR_AGENT: dict[str, str] = {
     "grok": "grok_cli",
     "qwen": "qwen_code",
     "devin": "devin_cli",
+    "fx": "fx",
     "droid": "droid",
 }
 
@@ -2156,9 +2157,12 @@ def _baseline_type_keys_for_agent(agent_name: str, baseline_paths: list[str]) ->
         # fx's live store is JSON in the same shape as the fixture, so baseline
         # and live share one fingerprint — no projection to keep in step.
         for p in filtered:
-            if not p.endswith("checkpoint.json"):
+            # Matrix records the fixture as "…/checkpoint.json (+ session.json, display.json)"
+            # so the sidecar note must be stripped before the path check.
+            base = p.split(" (")[0].strip()
+            if not base.endswith("checkpoint.json"):
                 continue
-            bp = Path(p)
+            bp = Path(base)
             if bp.exists():
                 fps.append(_fx_checkpoint_schema_fingerprint(bp))
     elif agent_name == "opencode":
@@ -3577,6 +3581,8 @@ def main(argv: list[str]) -> int:
         "kimi": matrix_versions.get("kimi_code"),
         "grok": matrix_versions.get("grok_cli"),
         "qwen": matrix_versions.get("qwen_code"),
+        "devin": matrix_versions.get("devin_cli"),
+        "fx": matrix_versions.get("fx"),
     }
 
     # Extract evidence fixtures from matrix YAML (minimal parser for `agents.*.evidence_fixtures:` lists).
