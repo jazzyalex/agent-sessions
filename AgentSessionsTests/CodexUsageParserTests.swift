@@ -1348,6 +1348,30 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(estimate.percentPerSecond * 3600, 4.0, accuracy: 0.001)
     }
 
+    func testWeeklyBurnRateTrackerReanchorsAfterSleepSizedGap() throws {
+        // An 8h gap (Mac asleep) must not divide the burn across it into a
+        // "recent tick"; the post-wake sample becomes a fresh anchor instead.
+        var tracker = UsageLimitBurnRateTracker()
+        let firstTime = Date(timeIntervalSince1970: 1_800_000_000)
+        let wakeTime = firstTime.addingTimeInterval(8 * 60 * 60)
+        let tickTime = wakeTime.addingTimeInterval(15 * 60)
+        let reset = firstTime.addingTimeInterval(5 * 24 * 60 * 60)
+        let resetText = formatResetISO8601(reset)
+        func sample(_ remaining: Int, at date: Date) -> UsageLimitProjectionSample {
+            UsageLimitProjectionSample(
+                source: .codex, remainingPercent: remaining, resetText: resetText,
+                hasRateLimit: true, freshness: .fresh, observedAt: date)
+        }
+
+        XCTAssertNil(tracker.update(with: sample(90, at: firstTime), now: firstTime))
+        XCTAssertNil(tracker.update(with: sample(84, at: wakeTime), now: wakeTime),
+                     "burn across a sleep gap must not publish as a recent tick")
+        let estimate = try XCTUnwrap(tracker.update(with: sample(83, at: tickTime), now: tickTime))
+        XCTAssertEqual(estimate.sampleStart, wakeTime,
+                       "the post-wake sample is the new anchor")
+        XCTAssertEqual(estimate.percentPerSecond * 3600, 4.0, accuracy: 0.001)
+    }
+
     func testWeeklyBurnRateTrackerUsesFractionalProviderSamples() throws {
         var tracker = UsageLimitBurnRateTracker()
         let firstTime = Date(timeIntervalSince1970: 1_800_000_000)

@@ -84,7 +84,6 @@ final class ClaudeUsageModel: ObservableObject {
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var weeklyBurnRateTracker = UsageLimitBurnRateTracker()
-    private var weeklyBurnRateSource: ClaudeUsageSource?
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -295,7 +294,6 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourOnTrackObservedAt = nil
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
-        weeklyBurnRateSource = nil
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
@@ -665,18 +663,18 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourOnTrackObservedAt = nil
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
-        weeklyBurnRateSource = nil
         recordProjectionDiagnostics(diagnostics, estimate: nil)
     }
 
     /// Different Claude sources can disagree by a fraction because OAuth/Web
     /// expose exact ratios while the CLI probe is integer-rounded. Never turn a
-    /// source transition into an apparent quota tick.
+    /// source transition into an apparent quota tick. Runs before the caller
+    /// overwrites `currentSource`, so that field still holds the previous
+    /// poll's source here.
     private func prepareWeeklyBurnRateTracker(for source: ClaudeUsageSource) {
-        guard weeklyBurnRateSource != source else { return }
+        guard currentSource != source else { return }
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
-        weeklyBurnRateSource = source
     }
 
     private func updateFiveHourProjection(remainingPercent: Int,

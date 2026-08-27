@@ -241,6 +241,7 @@ final class CodexUsageModel: ObservableObject {
     private let limitNotifier = UsageLimitNotifier.shared
     private var fiveHourProjectionTracker = UsageLimitProjectionTracker()
     private var weeklyBurnRateTracker = UsageLimitBurnRateTracker()
+    private var weeklyBurnRateSource: CodexLimitsSource?
     private var isEnabled: Bool = false
     private var stripVisible: Bool = false
     private var menuVisible: Bool = false
@@ -557,6 +558,7 @@ final class CodexUsageModel: ObservableObject {
         fiveHourOnTrackObservedAt = nil
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
+        weeklyBurnRateSource = nil
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil, provider: .codex)
     }
 
@@ -627,6 +629,14 @@ final class CodexUsageModel: ObservableObject {
         fiveHourProjectedRunoutAt = projectionEstimate?.runoutAt
         fiveHourProjectionObservedAt = projectionEstimate?.observedAt
         fiveHourOnTrackObservedAt = fiveHourProjectionTracker.lastOnTrackObservedAt
+        // Codex limits sources (OAuth, CLI-RPC, status probe, JSONL fallback)
+        // compute the weekly percent through different paths and can flip
+        // between polls; never turn a source transition into an apparent tick.
+        if weeklyBurnRateSource != s.weekLimitsSource {
+            weeklyBurnRateTracker.reset()
+            weeklyBurnRateEstimate = nil
+            weeklyBurnRateSource = s.weekLimitsSource
+        }
         weeklyBurnRateEstimate = weeklyBurnRateTracker.update(with: UsageLimitProjectionSample(
             source: .codex,
             remainingPercent: s.weekRemainingPercent,

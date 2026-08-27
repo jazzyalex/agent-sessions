@@ -3221,18 +3221,9 @@ enum HUDRunwayRequestBuilder {
         // Weekly-window fields are only needed for the weekly presentation.
         let weekResetAt = presentation == .weekly
             ? UsageResetText.resetDate(kind: "Wk", source: .codex, raw: weekResetText, now: now) : nil
-        let weeklyRunout: (runoutAt: Date, observedAt: Date)? = weekResetAt.flatMap { resetAt in
-            guard let estimate = weeklyBurnRateEstimate,
-                  now <= estimate.validUntil,
-                  abs(estimate.resetAt.timeIntervalSince(resetAt)) < 120,
-                  estimate.percentPerSecond > 0,
-                  estimate.percentPerSecond.isFinite else { return nil }
-            return (
-                estimate.sampleEnd.addingTimeInterval(
-                    Double(weekRemainingPercent) / estimate.percentPerSecond
-                ),
-                estimate.sampleEnd
-            )
+        let weeklyRunout = weekResetAt.flatMap { resetAt in
+            weeklyBurnRateEstimate?.projectedRunout(
+                remainingPercent: weekRemainingPercent, resetAt: resetAt, now: now)
         }
         let resolved = effectivePresentation(
             preferred: presentation,
@@ -3326,18 +3317,9 @@ enum HUDRunwayRequestBuilder {
         // unchanged. Weekly uses the all-models weekly window fields.
         let weekResetAt = presentation == .weekly
             ? UsageResetText.resetDate(kind: "Wk", source: .claude, raw: weekResetText, now: now) : nil
-        let weeklyRunout: (runoutAt: Date, observedAt: Date)? = weekResetAt.flatMap { resetAt in
-            guard let estimate = weeklyBurnRateEstimate,
-                  now <= estimate.validUntil,
-                  abs(estimate.resetAt.timeIntervalSince(resetAt)) < 120,
-                  estimate.percentPerSecond > 0,
-                  estimate.percentPerSecond.isFinite else { return nil }
-            return (
-                estimate.sampleEnd.addingTimeInterval(
-                    Double(weekRemainingPercent) / estimate.percentPerSecond
-                ),
-                estimate.sampleEnd
-            )
+        let weeklyRunout = weekResetAt.flatMap { resetAt in
+            weeklyBurnRateEstimate?.projectedRunout(
+                remainingPercent: weekRemainingPercent, resetAt: resetAt, now: now)
         }
         let resolved = effectivePresentation(
             preferred: presentation,

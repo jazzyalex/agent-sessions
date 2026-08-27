@@ -87,6 +87,25 @@ struct UsageLimitBurnRateEstimate: Equatable {
     let sampleEnd: Date
     let resetAt: Date
     let validUntil: Date
+
+    /// Weekly runout the request builders encode into the baseline. The
+    /// returned `runoutAt` is anchored at `sampleEnd` so the calculator can
+    /// re-derive the measured rate — it is a rate carrier, not a wall-clock
+    /// deadline. Returns nil once the tick aged out, when it was measured
+    /// against a different reset, or when nothing remains to project.
+    func projectedRunout(remainingPercent: Int,
+                         resetAt: Date,
+                         now: Date) -> (runoutAt: Date, observedAt: Date)? {
+        guard now <= validUntil,
+              abs(self.resetAt.timeIntervalSince(resetAt)) < 120,
+              percentPerSecond > 0,
+              percentPerSecond.isFinite,
+              remainingPercent > 0 else { return nil }
+        return (
+            sampleEnd.addingTimeInterval(Double(remainingPercent) / percentPerSecond),
+            sampleEnd
+        )
+    }
 }
 
 /// Tracks coarse weekly quota ticks without shortening the interval on unchanged
@@ -97,6 +116,9 @@ struct UsageLimitBurnRateTracker {
     private var lastEstimate: UsageLimitBurnRateEstimate?
 
     private static let minimumInterval: TimeInterval = 60
+    /// A gap this large means polling was suspended (sleep, app quiescence);
+    /// the burn across it is a long-window average, not a recent tick.
+    private static let maximumInterval: TimeInterval = 30 * 60
     /// Session attribution uses current token activity, so an account-level tick
     /// must age out before a materially different set of sessions can inherit it.
     private static let retentionWindow: TimeInterval = 3 * 60
@@ -145,6 +167,11 @@ struct UsageLimitBurnRateTracker {
         }
 
         let elapsed = current.observedAt.timeIntervalSince(previous.observedAt)
+        guard elapsed <= Self.maximumInterval else {
+            self.previous = current
+            lastEstimate = nil
+            return nil
+        }
         let burned = previous.remainingPercent - current.remainingPercent
         guard burned > 0 else {
             // Deliberately keep `previous`: advancing it on every unchanged poll
