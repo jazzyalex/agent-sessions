@@ -113,6 +113,30 @@ enum WhatsNewCatalog {
     ]
 
     private static let bundled: [String: [WhatsNewItem]] = [
+        "5.1": [
+            // Devin and fx are NOT authored here: `providerHighlights(for:)` generates
+            // their rows from `versionIntroduced == "5.1"`, same split as 5.0 and 4.8.
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "person.2.badge.plus",
+                title: "Contributed, not ported",
+                body: "Both new agents were added by @thedavidweng against the recipe 5.0 documented — the first real test of that path by someone outside the project. He stewards both formats, and verified each against his own live sessions before this release."
+            ),
+            WhatsNewItem(
+                kind: .highlight,
+                iconSystemName: "speedometer",
+                title: "Weekly pace is measured, not averaged",
+                body: "The weekly Session Runway used to divide everything burned since the weekly reset by the time elapsed, so one heavy day set the displayed pace for days after. It now measures the burn between recent quota readings, and shows token throughput until it has a real reading to attribute."
+            ),
+            WhatsNewItem(
+                kind: .support,
+                iconSystemName: "heart.fill",
+                title: "Support the project",
+                body: "Agent Sessions is local-first, independent, and actively maintained. A GitHub star or sponsorship keeps it going.",
+                linkTitle: "Sponsor on GitHub",
+                linkURL: githubSponsorsURL
+            )
+        ],
         "5.0": [
             // Qwen itself is NOT authored here: `providerHighlights(for:)` generates its
             // row from `SessionSource.qwen.versionIntroduced == "5.0"`. Same split as 4.7

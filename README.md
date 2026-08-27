@@ -25,7 +25,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.2/AgentSessions-5.0.2.dmg"><b>Download Agent Sessions 5.0.2 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1/AgentSessions-5.1.dmg"><b>Download Agent Sessions 5.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -36,7 +36,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
   <a href="#development">Development</a>
 </p>
 
-> **New in 5.0** — agents are now plug-in adapters, Qwen Code joins as the thirteenth source, and adding the agent you use is a documented recipe (26 shared files before, 12 now). [See what's new ↓](#whats-new-in-50)
+> **New in 5.1** — Devin CLI and fx (vercel-labs) join as the fourteenth and fifteenth sources, both contributed and stewarded by @thedavidweng against the 5.0 recipe. [See what's new ↓](#whats-new-in-51)
 
 ## Overview
 
@@ -202,7 +202,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-5.0.2.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.0.2/AgentSessions-5.0.2.dmg)
+1. [Download AgentSessions-5.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1/AgentSessions-5.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
