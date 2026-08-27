@@ -86,8 +86,8 @@ writes a redacted sample you can attach to an issue.
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
-| Devin CLI | @thedavidweng | 2026-08-27 · 3000.5.20 | Best-effort |
-| fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Best-effort |
+| Devin CLI | @thedavidweng | 2026-08-27 · 3000.5.20 (see note) | Steward-verified |
+| fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
 
 Dates and versions come from
 [docs/agent-support/agent-support-matrix.yml](docs/agent-support/agent-support-matrix.yml),

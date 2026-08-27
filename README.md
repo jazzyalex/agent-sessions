@@ -89,7 +89,7 @@ New in 5.1:
   a branch, so a session shows the live conversation rather than every path it took to get
   there. Settings adds binary and storage-root controls, and Copy Resume Command produces
   `devin --resume <id>`. Devin keeps only active sessions, so there is no archived history
-  to browse, and image extraction is not yet supported. Resume verified 2026-08-27 on 3000.5.20 via `devin --resume <id> -p` (issuecomment-5433779336).
+  to browse, and image extraction is not yet supported. Resume verified 2026-08-27 on 3000.5.20 via `devin --resume <id> -p` ([verification report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)).
 - **fx (vercel-labs), the fifteenth** — one directory per session under `~/.fx/sessions`,
   with every kind of turn rendered: ordinary replies and their narrated tool steps,
   background commands and where their output went, the summary that replaces auto-compacted
