@@ -1,5 +1,47 @@
-## 2026-08-27 20:40 · pr63-merged-stewards-fixed · main synced, 5.1 ready to bump
+## 2026-08-28 12:33 · growth-1k-stars · 5.1 shipped; growth work fanned out, docs uncommitted
 status: in-progress
+
+**State:** 5.1 released 2026-08-27 22:28Z (tag `v5.1`), 819 stars. Three growth workstreams
+ran as subagents; all output is in the working tree, **nothing committed**. Full suite green
+at 2262 / 0 failures.
+
+**Decided / don't redo:**
+- **Star goal is 1,000 by END OF 2026**, not 2026-09-01. At ~71/mo that lands ~mid-November —
+  do not tell the owner he is behind. Memory corrected.
+- **Social does not move stars** (measured: 5-day campaign left the rate at ~2.6/day). Google
+  is the #1 referrer, one ecosystem listing is #2. Growth spend goes to SEO guides + listings.
+- **Guide download buttons point at the site, never a versioned DMG.** All 8 now use
+  `?campaign=guide&ref=<slug>`; hardcoding a version is what rotted them to v3.9.3.
+- **The OpenCode PR was NOT just a template problem** — #37446 died to compliance in 2h,
+  #37567 died 32 days later to a repo-wide sweep that closes any PR with <2 reactions. A
+  third fresh PR would meet the same fate. Reopen-request on #37567 is the cheap path.
+- **Antigravity sessions-root override moves the markdown brain store only.** The two roots
+  are siblings with different names; one path cannot move both, and availability/presence
+  already key off `sessionsRoot()` alone. Preferences copy now says so.
+- The in-app star ask **already exists** (25 sessions or 30 days) — STATUS.md's "highest-leverage
+  open item" is closed.
+- STATUS.md's "3% star-per-download, starring is broken" finding is probably meaningless:
+  downloads include Sparkle auto-updates from existing users.
+
+**Key files:**
+- `Marketing/PROMPT_OPENCODE_PR.md`, `Marketing/PROMPT_LISTINGS.md` — self-contained session
+  prompts, ready to paste, both gated on owner approval before anything is posted.
+- `docs/guides/{copilot-cli,antigravity-cli}-local-history.html` — new, wired into
+  `docs/index.html` + README.
+- `AgentSessionsTests/AntigravitySessionsRootOverrideTests.swift` — 5 tests; the enablement key
+  is `AgentEnabledAntigravity`, NOT `IncludeAntigravitySessions`, or `refresh()` early-returns.
+
+**Next:**
+1. Commit the uncommitted work — docs/guides, the Antigravity override fix, and the parallel
+   session's Copilot `|-` title fix are three separable commits.
+2. Owner call on OpenCode: reopen #37567 vs new PR. Then run `PROMPT_OPENCODE_PR.md`.
+3. Owner go on listings, one target at a time: awesome-mac first, then QwenLM, then 0xNyk.
+4. Flag for owner: `rohitg00/awesome-claude-code-toolkit` publicly claims we support Gemini
+   CLI (false), plus stale stars and a retired feature.
+5. #57 (Grok build, rodion-m) still silent since 2026-08-18.
+
+## 2026-08-27 20:40 · pr63-merged-stewards-fixed · main synced, 5.1 ready to bump
+status: superseded-by:2026-08-28
 
 **State:** origin/main == local main at `7caca3e0`. PR #63 MERGED (merge commit `3c8ac9f8`).
 Suite **2252 passed / 0 failed / 3 skipped**. Nothing uncommitted. Next action is the release
