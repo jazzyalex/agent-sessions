@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Antigravity CLI Local History - Where Antigravity Stores Sessions on macOS</title>
+  <meta name="description" content="Where Antigravity CLI stores session history on macOS: ~/.gemini/antigravity-cli/brain transcripts, ~/.gemini/antigravity/brain markdown artifacts, the record shape, and the truncation you need to know about.">
+  <meta name="keywords" content="Antigravity CLI history, Antigravity sessions, agy CLI, ~/.gemini/antigravity/brain, antigravity-cli transcript.jsonl, Antigravity brain artifacts, transcript_full.jsonl, macOS AI coding agent history, Agent Sessions">
+  <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/antigravity-cli-local-history.html">
+  <link rel="icon" href="../assets/app-icon-32.png">
+  <link rel="stylesheet" href="guide.css">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Antigravity CLI Local History">
+  <meta property="og:description" content="Where Antigravity CLI keeps session history on disk, how to read the transcript by hand, and the file that holds the untruncated text.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Antigravity CLI Local History">
+  <meta name="twitter:description" content="Search local Antigravity CLI session history on macOS with Agent Sessions.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png">
+  <script defer src="guide.js"></script>
+  <!-- GoatCounter: cookieless, privacy-first analytics -->
+  <script data-goatcounter="https://agent-sessions.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="../index.html">
+        <img src="../assets/app-icon-512.png" alt="Agent Sessions icon">
+        Agent Sessions
+      </a>
+      <div class="nav-links">
+        <a href="../blog/">The Rollout</a>
+        <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="github-stars-container" style="display:none;"> <span class="gh-star-icon">★</span> <span id="github-stars">–</span></span></a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="guide-shell">
+    <p class="eyebrow">Local History Guide / Antigravity CLI</p>
+    <h1>Antigravity CLI Local History: Where Antigravity Stores Sessions on macOS</h1>
+    <p class="lede">Antigravity keeps local history in two unrelated shapes, under a directory that does not have "antigravity" first in its path. The CLI writes a step-by-step JSONL transcript. The editor writes Markdown artifacts (task lists, plans, walkthroughs), one folder per conversation. Both live under <code>~/.gemini</code>. This guide covers the exact paths, the record shape, and the one file most people miss when their transcript looks cut off.</p>
+    <p class="note">Agent Sessions reads Antigravity's local files in read-only mode. It does not upload transcripts and does not write into Antigravity's state.</p>
+    <div class="button-row">
+      <a class="btn primary" href="https://jazzyalex.github.io/agent-sessions/?campaign=guide&amp;ref=antigravity-cli-local-history">Download Agent Sessions</a>
+      <a class="btn secondary" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+      <a class="btn secondary" href="../index.html">Product page</a>
+    </div>
+
+    <!-- SCREENSHOT: Agent Sessions with the Antigravity filter active, showing a CLI transcript and a brain markdown artifact. Drop at docs/assets/marketing/screenshots/agent-sessions-antigravity-history.png and add the hero-image tag here. -->
+
+    <section class="meta-grid" aria-label="Antigravity CLI support summary">
+      <div class="meta-card"><strong>CLI transcripts</strong><code>~/.gemini/antigravity-cli/brain</code></div>
+      <div class="meta-card"><strong>Editor artifacts</strong><code>~/.gemini/antigravity/brain</code></div>
+      <div class="meta-card"><strong>Verified format</strong>Antigravity 1.1.14. The transcript does not stamp its own version.</div>
+    </section>
+
+    <h2>Where Antigravity Stores Local Data</h2>
+    <p>Antigravity's command line is <code>agy</code>, and its history lives under Gemini's config directory rather than one named after the product. The CLI transcript is nested three levels inside the conversation folder:</p>
+    <pre><code>~/.gemini/antigravity-cli/brain/&lt;conversation-id&gt;/.system_generated/logs/transcript.jsonl</code></pre>
+    <p>The editor keeps a separate store, one folder per conversation, holding Markdown artifacts instead of a transcript:</p>
+    <pre><code>~/.gemini/antigravity/brain/&lt;conversation-id&gt;/*.md</code></pre>
+    <p>The files you find there are named for what they are: <code>task.md</code>, <code>implementation_plan.md</code>, <code>walkthrough.md</code>, <code>proposal.md</code>, each with <code>.metadata.json</code> and <code>.resolved</code> siblings, plus any screenshots the agent captured. There is no message log in that folder. The artifacts are the record.</p>
+    <p>The conversation ID is a UUID, it is the folder name in both stores, and it is what <code>agy --conversation</code> takes.</p>
+    <p>An install that has been upgraded can also grow sibling directories: <code>~/.gemini/antigravity-ide/brain</code> and <code>~/.gemini/antigravity-backup/brain</code>. On a machine we checked, all three held the same four conversation IDs with the same artifacts. If you are grepping by hand, expect duplicate hits. Agent Sessions scans <code>antigravity/brain</code> and <code>antigravity-cli/brain</code> only, so the same conversation does not turn up three times in the list.</p>
+
+    <h2>What an Antigravity Record Looks Like</h2>
+    <p>Each line of <code>transcript.jsonl</code> is one step, not one message:</p>
+    <pre><code>{ "step_index": ..., "source": ..., "type": ..., "status": ...,
+  "created_at": ..., "content": ..., "tool_calls": [...],
+  "thinking": ..., "truncated_fields": [...] }</code></pre>
+    <p><code>step_index</code> is the ordering key and is present on every record, which is the cheapest way to tell an Antigravity transcript from any other JSONL on disk. <code>source</code> is <code>USER_EXPLICIT</code>, <code>MODEL</code>, or <code>SYSTEM</code>. <code>status</code> is <code>DONE</code>, or <code>RUNNING</code> for a step still in flight.</p>
+    <p>The <code>type</code> values worth knowing:</p>
+    <ul>
+      <li><code>USER_INPUT</code>: your prompt, wrapped in <code>&lt;USER_REQUEST&gt;…&lt;/USER_REQUEST&gt;</code>, often followed by <code>&lt;ADDITIONAL_METADATA&gt;</code> or <code>&lt;USER_SETTINGS_CHANGE&gt;</code> blocks. Strip the tags or you will be reading envelope, not prompt.</li>
+      <li><code>PLANNER_RESPONSE</code>: the model's turn. <code>content</code> is the answer, <code>thinking</code> is internal reasoning, and <code>tool_calls[]</code> carries each call's <code>name</code> and <code>args</code>. A record can have any combination of the three.</li>
+      <li><code>RUN_COMMAND</code>, <code>VIEW_FILE</code>, <code>LIST_DIRECTORY</code>, <code>GREP_SEARCH</code>, <code>SEARCH_WEB</code>, <code>CODE_ACTION</code>: the results, one record per tool run, with the output in <code>content</code>.</li>
+      <li><code>CONVERSATION_HISTORY</code>, <code>CHECKPOINT</code>, <code>SYSTEM_MESSAGE</code>, <code>GENERIC</code>: bookkeeping.</li>
+    </ul>
+    <p>Two things are missing from the record that you might expect. There is no version stamp: Antigravity does not write its own version into the transcript, so dating a session means falling back on <code>created_at</code>. And there is no working directory. The model name is recoverable only indirectly, from the <code>USER_SETTINGS_CHANGE</code> line that reports a change to <code>Model Selection</code>.</p>
+
+    <h2>The Truncation, and the File That Fixes It</h2>
+    <p>This is the part worth reading twice. Antigravity clips long tool output before writing <code>transcript.jsonl</code> and names the clipped field in <code>truncated_fields</code>. A clipped record ends with something like <code>(...93 more results not shown)</code>. Nothing else marks it.</p>
+    <p>The untruncated text is in a sibling file:</p>
+    <pre><code>~/.gemini/antigravity-cli/brain/&lt;conversation-id&gt;/.system_generated/logs/transcript_full.jsonl</code></pre>
+    <p>In one real session on disk, both files carry the same 81 records in the same order, but <code>transcript_full.jsonl</code> has no <code>truncated_fields</code> key at all and holds the complete <code>content</code>: 8,896 characters on a <code>GREP_SEARCH</code> record where <code>transcript.jsonl</code> stops at 4,120. Twelve of the 81 records were clipped. If you are hunting for output that is definitely not in the transcript, look there before concluding it was never recorded.</p>
+    <p>List the clipped steps first, then go read the full versions:</p>
+    <pre><code>jq -r 'select(.truncated_fields) | "\(.step_index)\t\(.type)"' \
+  ~/.gemini/antigravity-cli/brain/&lt;conversation-id&gt;/.system_generated/logs/transcript.jsonl</code></pre>
+
+    <h2>Reading It Yourself</h2>
+    <p>Every prompt across every CLI conversation:</p>
+    <pre><code>jq -r 'select(.type=="USER_INPUT") | .content' \
+  ~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl</code></pre>
+    <p>Which tools the agent reaches for, ranked:</p>
+    <pre><code>jq -r 'select(.tool_calls) | .tool_calls[].name' \
+  ~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl \
+  | sort | uniq -c | sort -rn</code></pre>
+    <p>The editor side is plain Markdown, so ordinary tools work on it:</p>
+    <pre><code>grep -ril "the-thing-you-remember" ~/.gemini/antigravity/brain/*/*.md</code></pre>
+
+    <h2>Where Hand-Reading Runs Out</h2>
+    <ul>
+      <li><strong>Prompts arrive wrapped.</strong> <code>USER_INPUT.content</code> mixes your text with metadata blocks in the same string, so a naive dump of the field returns markup around the sentence you wanted.</li>
+      <li><strong>Tool results are one step behind their call.</strong> The call is in a <code>PLANNER_RESPONSE</code>'s <code>tool_calls[]</code>; the output is a later record of a different type. Nothing in the result names the tool that produced it. The link is the position in the sequence.</li>
+      <li><strong>Truncation is silent unless you check.</strong> If you read <code>transcript.jsonl</code> and never look at <code>truncated_fields</code>, a clipped transcript reads as a complete one.</li>
+      <li><strong>The two stores do not join.</strong> A CLI transcript and an editor conversation share the same folder-name scheme but sit in different roots with different formats, so "everything I did on this task" is two searches, not one.</li>
+      <li><strong>No working directory.</strong> Neither store records the project. On the Markdown side you can sometimes recover it from file paths mentioned inside an artifact; on the CLI side there is nothing to recover it from.</li>
+    </ul>
+
+    <h2>What Agent Sessions Does</h2>
+    <ul>
+      <li>Lists Antigravity CLI transcripts and editor Markdown artifacts beside Codex, Claude Code, Copilot, Cursor, OpenCode, Hermes, OpenClaw, and the other supported agents.</li>
+      <li>Unwraps <code>&lt;USER_REQUEST&gt;</code> so prompts read as prompts, and titles each session from its first prompt line.</li>
+      <li>Renders <code>PLANNER_RESPONSE</code> answers, reasoning, and tool calls as a timeline, with <code>RUN_COMMAND</code>, <code>VIEW_FILE</code>, <code>LIST_DIRECTORY</code>, <code>CODE_ACTION</code>, and <code>SEARCH_WEB</code> shown as tool results rather than raw records.</li>
+      <li>Marks clipped text explicitly: a record whose <code>truncated_fields</code> names <code>content</code> is labelled as truncated instead of shown as if it were whole.</li>
+      <li>Recovers the model name from the <code>Model Selection</code> settings-change line when a session has one.</li>
+      <li>Titles Markdown artifacts from their first heading and infers a project by walking up from local paths mentioned in the file to the nearest git root.</li>
+      <li>Pulls screenshots referenced by Markdown image links into the Image Browser, resolved relative to the artifact's own folder.</li>
+      <li>Refuses JSONL that lacks <code>step_index</code>, so foreign transcripts under the same roots are not mis-claimed as Antigravity sessions.</li>
+      <li>Builds resume commands (<code>agy --conversation &lt;conversation-id&gt;</code>, or <code>agy --continue</code> for the most recent) and can launch them in Terminal.app, iTerm2, or Warp.</li>
+    </ul>
+    <p>Antigravity session-format support has been verified through Antigravity 1.1.14, and the format is re-checked weekly against fresh sessions.</p>
+
+    <h2>What This Does Not Do</h2>
+    <ul>
+      <li>Read <code>transcript_full.jsonl</code>. Agent Sessions indexes <code>transcript.jsonl</code> and flags what the CLI clipped; the untruncated text stays where Antigravity put it.</li>
+      <li>Render <code>GREP_SEARCH</code> results as tool output. They currently show as metadata records, and they are searchable, but they do not get the tool-result treatment the other five types do.</li>
+      <li>Reconstruct a conversation's working directory when nothing in the files names one.</li>
+      <li>Merge a CLI transcript and an editor conversation that share an ID into a single session.</li>
+      <li>Write into Antigravity's state, or upload transcripts to a hosted search service.</li>
+    </ul>
+
+    <h2>Related Guides</h2>
+    <ul>
+      <li><a href="copilot-cli-local-history.html">GitHub Copilot CLI local history</a></li>
+      <li><a href="codex-local-history.html">Codex local history</a></li>
+      <li><a href="claude-code-jsonl-history.html">Claude Code JSONL history</a></li>
+      <li><a href="cursor-agent-local-history.html">Cursor Agent local history</a></li>
+    </ul>
+
+    <h2>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/AntigravitySessionDiscovery.swift">Antigravity discovery</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/AntigravityTranscriptParser.swift">Antigravity CLI transcript parser</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/AntigravitySessionParser.swift">Antigravity Markdown artifact parser</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/AntigravitySourceDescriptor.swift">Antigravity source descriptor</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/AntigravityResume/AntigravityResumeCommandBuilder.swift">Antigravity resume command builder</a></li>
+    </ul>
+  </main>
+
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
+</body>
+</html>

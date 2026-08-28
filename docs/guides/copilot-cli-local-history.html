@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitHub Copilot CLI Local History - Where Copilot Stores Sessions on macOS</title>
+  <meta name="description" content="Where GitHub Copilot CLI stores session history on macOS: ~/.copilot/session-state/&lt;session-id&gt;/events.jsonl, the event envelope, jq recipes, and what Agent Sessions reads.">
+  <meta name="keywords" content="Copilot CLI history, GitHub Copilot CLI sessions, copilot session-state, events.jsonl, ~/.copilot/session-state, Copilot CLI transcript, Copilot session-store.db, macOS AI coding agent history, Agent Sessions">
+  <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html">
+  <link rel="icon" href="../assets/app-icon-32.png">
+  <link rel="stylesheet" href="guide.css">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="GitHub Copilot CLI Local History">
+  <meta property="og:description" content="Where GitHub Copilot CLI keeps session history on disk, how to read events.jsonl by hand, and where that runs out.">
+  <meta property="og:image" content="https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="GitHub Copilot CLI Local History">
+  <meta name="twitter:description" content="Search local GitHub Copilot CLI session history on macOS with Agent Sessions.">
+  <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png">
+  <script defer src="guide.js"></script>
+  <!-- GoatCounter: cookieless, privacy-first analytics -->
+  <script data-goatcounter="https://agent-sessions.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="nav-brand" href="../index.html">
+        <img src="../assets/app-icon-512.png" alt="Agent Sessions icon">
+        Agent Sessions
+      </a>
+      <div class="nav-links">
+        <a href="../blog/">The Rollout</a>
+        <a href="https://github.com/jazzyalex/agent-sessions">GitHub<span class="nav-star" id="github-stars-container" style="display:none;"> <span class="gh-star-icon">★</span> <span id="github-stars">–</span></span></a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="guide-shell">
+    <p class="eyebrow">Local History Guide / GitHub Copilot CLI</p>
+    <h1>GitHub Copilot CLI Local History: Where Copilot Stores Sessions on macOS</h1>
+    <p class="lede">GitHub Copilot CLI writes every session to a JSONL event log in your home directory. That file is the only place the prompts, tool calls, shell output, and errors of a finished session survive. Copilot's own SQLite store keeps just the user message and the final answer per turn. This guide covers the exact paths, the event shape, how to read it with <code>jq</code>, and where hand-reading stops being practical.</p>
+    <p class="note">Agent Sessions reads Copilot's local event logs in read-only mode. It does not upload Copilot transcripts and does not write into Copilot's state.</p>
+    <div class="button-row">
+      <a class="btn primary" href="https://jazzyalex.github.io/agent-sessions/?campaign=guide&amp;ref=copilot-cli-local-history">Download Agent Sessions</a>
+      <a class="btn secondary" href="https://github.com/jazzyalex/agent-sessions">View on GitHub</a>
+      <a class="btn secondary" href="../index.html">Product page</a>
+    </div>
+
+    <!-- SCREENSHOT: Agent Sessions with the Copilot filter active, showing Copilot rows and a transcript. Drop at docs/assets/marketing/screenshots/agent-sessions-copilot-history.png and add the hero-image tag here. -->
+
+    <section class="meta-grid" aria-label="GitHub Copilot CLI support summary">
+      <div class="meta-card"><strong>Primary storage</strong><code>~/.copilot/session-state/*/events.jsonl</code></div>
+      <div class="meta-card"><strong>Legacy layout</strong><code>~/.copilot/session-state/*.jsonl</code> (before Copilot CLI 1.0.11)</div>
+      <div class="meta-card"><strong>Verified format</strong>Copilot CLI 1.0.80 event logs.</div>
+    </section>
+
+    <h2>Where GitHub Copilot CLI Stores Local Data</h2>
+    <p>Current Copilot CLI builds give every session its own directory and write the transcript inside it:</p>
+    <pre><code>~/.copilot/session-state/&lt;session-id&gt;/events.jsonl</code></pre>
+    <p>Copilot CLI 1.0.11 introduced that layout. Before it, sessions were flat files in the same folder:</p>
+    <pre><code>~/.copilot/session-state/&lt;session-id&gt;.jsonl</code></pre>
+    <p>The session ID is a UUID, and it is the same ID <code>copilot --resume</code> takes. Agent Sessions reads both layouts, so an install that predates the change still shows its old sessions.</p>
+    <p>The per-session directory holds more than the transcript. Alongside <code>events.jsonl</code> you will typically find <code>workspace.yaml</code>, <code>session.db</code>, and the <code>checkpoints/</code>, <code>files/</code>, <code>research/</code>, and <code>rewind-file-snapshots/</code> folders. <code>workspace.yaml</code> is the useful one for orientation, because it carries the session's <code>cwd</code>, <code>git_root</code>, <code>repository</code>, and <code>branch</code>:</p>
+    <pre><code>grep -H '^cwd:' ~/.copilot/session-state/*/workspace.yaml</code></pre>
+    <p>One directory per session also means a directory can exist without a transcript. On a machine we checked, 20 of 32 session folders held only <code>workspace.yaml</code> and their sidecar directories: no <code>events.jsonl</code>, and no prompt recorded in <code>workspace.yaml</code> either. A folder in that state has nothing to read, and Agent Sessions lists a session only where <code>events.jsonl</code> exists.</p>
+
+    <h2>Copilot's Own SQLite Store Is Not the Transcript</h2>
+    <p>Copilot keeps a separate database at the config root:</p>
+    <pre><code>~/.copilot/session-store.db</code></pre>
+    <p>Here is what it holds. The <code>sessions</code> table has <code>id</code>, <code>cwd</code>, <code>repository</code>, <code>host_type</code>, <code>branch</code>, and <code>summary</code>. The <code>turns</code> table has one row per turn with <code>user_message</code> and <code>assistant_response</code>. There is an FTS5 table, <code>search_index</code>, but on inspection it indexes only turn rows: the same user-message-plus-answer pair.</p>
+    <p>So the database is a fast index over the conversation, and nothing else. Tool calls, tool arguments, command output, errors, reasoning, model switches, and truncation events exist only in <code>events.jsonl</code>. If you are looking for the command that broke the build, the database will not have it. Agent Sessions reads the event log for the same reason.</p>
+
+    <h2>What a Copilot Event Looks Like</h2>
+    <p>Each line of <code>events.jsonl</code> is one JSON object with a fixed envelope and a type-specific payload:</p>
+    <pre><code>{ "type": ..., "data": { ... }, "id": ..., "parentId": ..., "timestamp": ... }</code></pre>
+    <p>Timestamps are ISO 8601, usually with fractional seconds. The types you will actually meet in a real log:</p>
+    <ul>
+      <li><code>session.start</code>: carries <code>sessionId</code>, <code>copilotVersion</code>, <code>selectedModel</code>, and a <code>context</code> object. This is where the format version is stamped.</li>
+      <li><code>user.message</code>: <code>content</code> is the prompt as typed; <code>attachments[]</code> lists files by absolute path.</li>
+      <li><code>assistant.message</code>: <code>content</code> is the visible answer, and <code>toolRequests[]</code> carries the tool calls the model asked for, each with a <code>toolCallId</code>, <code>name</code>, and <code>arguments</code>.</li>
+      <li><code>tool.execution_start</code> / <code>tool.execution_complete</code>: the actual run. The result lands in <code>data.result.content</code>, with a <code>success</code> boolean.</li>
+      <li><code>assistant.turn_start</code> / <code>assistant.turn_end</code>, <code>assistant.reasoning</code>, <code>system.message</code>, <code>system.notification</code>, <code>hook.start</code> / <code>hook.end</code>.</li>
+      <li><code>subagent.started</code> / <code>subagent.completed</code>: subagent work is joined to its parent through <code>parentToolCallId</code>.</li>
+      <li><code>session.model_change</code>, <code>session.info</code>, <code>session.error</code>, <code>session.resume</code>, <code>session.truncation</code>, <code>session.shutdown</code>, and the router/usage telemetry pair <code>session.auto_mode_resolved</code> and <code>session.usage_checkpoint</code>.</li>
+    </ul>
+
+    <h2>Reading It Yourself</h2>
+    <p>The format is friendly to command-line tools. Newest session first:</p>
+    <pre><code>ls -t ~/.copilot/session-state/*/events.jsonl | head -1</code></pre>
+    <p>Every prompt you have ever typed at Copilot CLI:</p>
+    <pre><code>jq -r 'select(.type=="user.message") | .data.content' \
+  ~/.copilot/session-state/*/events.jsonl</code></pre>
+    <p>Every command Copilot actually ran, with its arguments:</p>
+    <pre><code>jq -r 'select(.type=="tool.execution_start")
+       | "\(.data.toolName)\t\(.data.arguments|tostring)"' \
+  ~/.copilot/session-state/*/events.jsonl</code></pre>
+    <p>Which session mentioned a thing, since one file is one session:</p>
+    <pre><code>grep -l "the-thing-you-remember" ~/.copilot/session-state/*/events.jsonl</code></pre>
+    <p>That last one is the reason the layout is pleasant to work with: <code>grep -l</code> answers "which session was that" directly, and the directory name is the resume ID.</p>
+
+    <h2>Where Hand-Reading Runs Out</h2>
+    <p>Four things get tedious fast, and they are the honest case for a reader.</p>
+    <ul>
+      <li><strong>Tool results are not next to their tool calls.</strong> The name and arguments arrive on <code>assistant.message.toolRequests[]</code> or <code>tool.execution_start</code>; the output arrives later on <code>tool.execution_complete</code>. They are joined by <code>toolCallId</code>, which means reconstructing "what did this command print" is a join, not a grep.</li>
+      <li><strong>Some of the assistant payload is opaque.</strong> <code>assistant.message</code> can carry <code>encryptedContent</code> (several kilobytes) and <code>reasoningOpaque</code> beside the plaintext <code>content</code>. Those blobs are for the provider, not for you. When <code>reasoningText</code> is present it is plaintext and readable; when it is not, the reasoning is in a blob nobody local can open.</li>
+      <li><strong>Escapes.</strong> Tool output arrives with literal <code>\n</code> and <code>\t</code> sequences inside the JSON string, so raw output looks like one long line until something un-escapes it.</li>
+      <li><strong>The transcript does not know what project it is.</strong> The working directory is in <code>workspace.yaml</code> and in <code>session.start</code>'s <code>context</code>, not on the events. Cross-referencing sessions to repositories is a second pass over a second file.</li>
+    </ul>
+    <p>Copilot also truncates long conversations itself. A <code>session.truncation</code> event records how many messages and tokens were dropped from the model's context. Those messages stay in the event log, but the model stopped seeing them, which explains a session whose later answers look forgetful.</p>
+
+    <h2>What Agent Sessions Does</h2>
+    <ul>
+      <li>Lists Copilot CLI sessions beside Codex, Claude Code, Cursor, OpenCode, Hermes, OpenClaw, and the other supported agents in one list.</li>
+      <li>Full-text searches prompts, assistant text, tool names, tool arguments, command output, and error text across every session at once.</li>
+      <li>Joins <code>tool.execution_start</code> and <code>tool.execution_complete</code> by <code>toolCallId</code> so a tool call and its output read as one block, with failures marked as errors rather than results.</li>
+      <li>Un-escapes tool output and renders the transcript as a timeline instead of raw JSONL.</li>
+      <li>Extracts image attachments referenced by path from <code>user.message</code> into the Image Browser.</li>
+      <li>Reads both the current <code>&lt;session-id&gt;/events.jsonl</code> layout and the legacy flat <code>&lt;session-id&gt;.jsonl</code> files.</li>
+      <li>Builds resume commands (<code>copilot --resume=&lt;session-id&gt;</code>, or <code>copilot --continue</code> for the most recent) and can launch them in Terminal.app, iTerm2, or Warp.</li>
+      <li>Lets you point it at a different sessions root in Preferences if your Copilot state does not live under <code>~/.copilot</code>.</li>
+    </ul>
+    <p>Copilot CLI session-format support has been verified through Copilot CLI 1.0.80, and the format is re-checked weekly against fresh sessions.</p>
+
+    <h2>What This Does Not Do</h2>
+    <ul>
+      <li>Decrypt <code>encryptedContent</code> or <code>reasoningOpaque</code>. Those are opaque blobs; no local tool opens them.</li>
+      <li>Recover a session that has no <code>events.jsonl</code>, or context Copilot dropped during truncation.</li>
+      <li>Read <code>~/.copilot/session-store.db</code>. Agent Sessions reads the event log, which is the fuller record.</li>
+      <li>Write into Copilot's state, or replace Copilot's own session picker.</li>
+      <li>Upload Copilot transcripts to a hosted search service.</li>
+    </ul>
+
+    <h2>Related Guides</h2>
+    <ul>
+      <li><a href="antigravity-cli-local-history.html">Antigravity CLI local history</a></li>
+      <li><a href="claude-code-jsonl-history.html">Claude Code JSONL history</a></li>
+      <li><a href="codex-local-history.html">Codex local history</a></li>
+      <li><a href="cursor-agent-local-history.html">Cursor Agent local history</a></li>
+    </ul>
+
+    <h2>Sources</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/SessionDiscovery.swift">Copilot session discovery</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/CopilotSessionParser.swift">Copilot event parser</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Copilot/CopilotSourceDescriptor.swift">Copilot source descriptor</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/CopilotResume/CopilotResumeCommandBuilder.swift">Copilot resume command builder</a></li>
+      <li><a href="https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Utilities/CopilotAttachmentScanner.swift">Copilot attachment scanner</a></li>
+    </ul>
+  </main>
+
+  <footer class="site-footer">&copy; <span id="year"></span> Agent Sessions. Local-first, open source, and independent.</footer>
+</body>
+</html>
