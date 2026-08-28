@@ -102,12 +102,16 @@ final class FxSessionIndexer: ObservableObject, SessionIndexerProtocol, @uncheck
 
         let requestedPriority: TaskPriority = executionProfile.deferNonCriticalWork ? .utility : .userInitiated
         let prio: TaskPriority = FeatureFlags.lowerQoSForBackgroundIngest ? .utility : requestedPriority
+        // Snapshot for the detached scan below. A later refresh() can reassign
+        // `discovery` on the caller's thread while that scan is still enumerating,
+        // and the scan must keep reading the root it started with.
+        let scanDiscovery = discovery
         Task.detached(priority: prio) { [weak self, token, executionProfile] in
             guard let self else { return }
 
             let config = SessionIndexingEngine.ScanConfig(
                 source: .fx,
-                discoverFiles: { self.discovery.discoverSessionFiles() },
+                discoverFiles: { scanDiscovery.discoverSessionFiles() },
                 parseLightweight: { FxSessionParser.parseFile(at: $0) },
                 shouldThrottleProgress: FeatureFlags.throttleIndexingUIUpdates,
                 throttler: self.progressThrottler,
