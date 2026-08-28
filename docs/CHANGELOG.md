@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **Copilot sessions carry their real title again.** Copilot stores a session's title in `workspace.yaml`, and writes a multi-line title as a YAML block scalar — so the list read the `|-` block indicator as the title itself. Eight of the twelve Copilot sessions on the development machine were listed as `|-`.
+- **A custom Antigravity brain directory is actually read.** The sessions-root override reached availability, presence and archive backfill, but never the indexer, which always scanned the default root — so a custom path made Antigravity look available while listing nothing from it. The setting now takes effect on the next refresh instead of at the next launch, and Settings states that the override moves the brain directory only; CLI transcripts are always read from `~/.gemini/antigravity-cli/brain`.
+
 ## [5.1] - 2026-08-27
 
 ### Highlights
