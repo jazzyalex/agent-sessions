@@ -113,7 +113,11 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
             lastSessionsRootOverride = currentOverride
         }
 
-        let root = discovery.sessionsRoot()
+        // Snapshot for the detached scan below. A later refresh() can reassign
+        // `discovery` on the caller's thread while that scan is still enumerating,
+        // and the scan must keep reading the root it started with.
+        let scanDiscovery = discovery
+        let root = scanDiscovery.sessionsRoot()
         #if DEBUG
         print("\nANTIGRAVITY INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")
         #endif
@@ -138,7 +142,7 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
 	            let config = SessionIndexingEngine.ScanConfig(
 		                source: .antigravity,
 		                discoverFiles: {
-		                    let files = self.discovery.discoverSessionFiles()
+		                    let files = scanDiscovery.discoverSessionFiles()
 	                    LaunchProfiler.log("Antigravity.refresh: file enumeration done (files=\(files.count))")
 	                    return files
 	                },
