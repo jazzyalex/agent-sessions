@@ -421,56 +421,84 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 `testSidebarAgentSourcesAreEveryRegistrySourceExceptTheHiddenOnes`.
 
 ### Registry program follow-ups (final whole-branch review, 2026-08-16)
-> **open** · sev: low · urg: low · verified 2026-08-16
+> **partial** · sev: low · urg: low · verified 2026-08-28
 
-- **What:** the six low-severity residues the program's final review triaged as
-  follow-ups rather than must-fixes (0 must-fix / 6 follow-up / 18 accept-as-is):
-  1. Guide-rot sentinel: [adding-a-session-source.md](adding-a-session-source.md) §6 is a
+- **Closed 2026-08-28** (four of the original six):
+  - **2. Stale header comment** — found already correct on re-check;
+    [SessionSourceRegistry.swift:21](../AgentSessions/Model/SessionSourceRegistry.swift:21)
+    names the sidebar ordering as the second hand-maintained list. The entry had rotted.
+  - **3. Dead `?? same-key` double-reads** — deleted at `PresenceEngine.swift` in
+    `claudeSessionsRoots`, `claudeSessionScanRoots` and `opencodeSessionsRoots`. Each read
+    the same key twice, so the second read could never contribute.
+  - **4. `AvailabilityContext.live()`** — still zero callers, so it is now
+    `@available(*, unavailable)` with the reason
+    ([SessionSourceDescriptor.swift:125](../AgentSessions/Model/SessionSourceDescriptor.swift:125)).
+    Fenced rather than deleted: two comments elsewhere cite it by name as the uncached
+    detector, and a compile error stops a hot-path adopter better than a comment does.
+  - **6. `@AppStorage` enablement-default islands** — all three views now take their
+    defaults from `AgentEnablement.isEnabled`. **The filed paths were wrong**: the views
+    are [AnalyticsView.swift](../AgentSessions/Analytics/Views/AnalyticsView.swift) and
+    [FirstRunSetupView.swift](../AgentSessions/Onboarding/Views/FirstRunSetupView.swift),
+    and the third island is not `PreferencesView+General` but the properties it renders,
+    declared at [PreferencesView.swift:77](../AgentSessions/Views/PreferencesView.swift:77).
+    Worse than filed, too: `hermes` and `cursor` were literal `true` and `openclaw`
+    literal `false`, but all three are `.whenAvailable` sources, so the literals disagreed
+    with the canonical default in *both* directions. Analytics gates its per-source rows on
+    these, so an installed OpenClaw could be counted in the main window and silently
+    excluded from Analytics.
+- **Still open (two):**
+  1. **Guide-rot sentinel:** [adding-a-session-source.md](adding-a-session-source.md) §6 is a
      hand snapshot; two review rounds each found omissions in it. Fix shape: a test that
      brace-matches exhaustive `SessionSource` switches in `AgentSessions/` against a
      pinned file list, failing when a new switch appears unlisted.
-  2. Stale header comment: [SessionSourceRegistry.swift:21](../AgentSessions/Model/SessionSourceRegistry.swift:21)
-     still says "THE one remaining hand-maintained per-source list" — `sidebarAgentSources`
-     is a second (SPEC §6.A′.16 has the correct statement).
-  3. Dead `?? same-key` double-read fallbacks at `PresenceEngine.swift:1564,1573,1595`
-     (the fourth site died with Task 7's rewrite). Provably dead; delete.
-  4. `AvailabilityContext.live()` (AgentEnablement.swift) has zero callers and is the
-     UNCACHED detector — a hot-path adopter would reintroduce PATH sweeps. Delete or
-     doc-fence it.
   5. `testAllowedSearchSourcesIsEnabledAndIncluded` needs a non-emptiness pin + one
      unconditional positive-membership assertion (two legs are tautological).
-  6. `@AppStorage` enablement-default islands: `AnalyticsView`/`FirstRunSetupView`/
-     `PreferencesView+General` keep literal defaults (hermes/cursor `true`, openclaw
-     `false`) while their pi/kimi/grok rows use `AgentEnablement.isEnabled`; on upgrade
-     installs with absent keys these three views can disagree with the (converged) main
-     window. Mechanical: route all rows through `AgentEnablement`.
-- **Why deferred:** none affects a fresh install or changes shipped behavior; the program's
-  correctness bar was behavior preservation, and each of these is cleanup beyond it.
-- **Risk if wrong:** low — worst case is the documented upgrade-cohort UI asymmetry (item 6)
-  and doc rot (items 1-2); nothing corrupts data or search.
-- **To close:** items 2-5 are one small mechanical PR; items 1 and 6 are each a short
-  self-contained task.
+- **Why the rest were deferred:** none affected a fresh install; the program's correctness
+  bar was behavior preservation, and each was cleanup beyond it.
+- **Risk if wrong:** low — the two survivors are a doc-rot sentinel and a test-strength gap;
+  neither corrupts data or search.
+- **To close:** each remaining item is a short self-contained task.
 
 ### Three per-source behaviors the registry refactor deliberately preserved
-> **open** · sev: low · urg: low · verified 2026-08-16
+> **partial** · sev: low · urg: low · verified 2026-08-28
 
 - **Where / what:** SPEC §8 items 6–8, each found during the refactor and left as-is so the
   program stayed behavior-preserving —
   - `UnifiedSessionIndexer.triggerRefresh` drops `mode` / `trigger` / `executionProfile`
     for OpenCode only (now inside that source's `ProviderHandle` wrapper,
     [OpenCodeSourceDescriptor.swift:88](../AgentSessions/OpenCode/OpenCodeSourceDescriptor.swift:88)).
-  - Droid's Preferences pane is implemented and reachable but hidden from the sidebar
-    (`PreferencesTab.sidebarHiddenSources = [.droid]`,
-    [PreferencesView.swift:1232](../AgentSessions/Views/PreferencesView.swift:1232)).
+    **Open.**
+  - **RULED 2026-08-28 — Droid's hidden pane stays hidden.** Owner: Droid is not a supported
+    source and will not be until a steward takes it on; there is no subscription here to test
+    sessions against, so shipping a configuration pane would advertise support that has never
+    been exercised. `PreferencesTab.sidebarHiddenSources = [.droid]` is therefore correct, at
+    [PreferencesView.swift:1322](../AgentSessions/Views/PreferencesView.swift:1322) (the filed
+    line 1232 had drifted). Verified the same day that this strands nothing: Settings → General
+    builds its agent rows from `SessionSourceRegistry.ordered`
+    ([PreferencesView+General.swift:80](../AgentSessions/Views/Preferences/PreferencesView+General.swift:80)),
+    not from `sidebarAgentSources`, so Droid still has a reachable on/off toggle — only the
+    per-agent paths pane is hidden.
   - `effectiveWorkingDirectoryURL(for:)` has no kimi/grok arm, so both fall to the generic
-    `session.cwd` via its `default:`.
+    `session.cwd` via its `default:`. **Open.**
 - **Why deferred:** each is an owner decision, not a defect — the refactor's whole
   correctness argument was bit-for-bit preservation, so changing any of them there would
   have been unreviewable.
-- **Risk if wrong:** low — all three are the pre-refactor behaviors, unchanged; the risk is
-  only that they stay unexamined (droid's finished pane stays invisible, OpenCode refresh
-  triggers stay coarser than the other eleven) because nothing but this entry tracks them.
-- **To close:** an owner ruling on each. Droid's is the only user-visible one.
+- **Risk if wrong:** low — both survivors are the pre-refactor behaviors, unchanged; the risk
+  is only that they stay unexamined (OpenCode refresh triggers stay coarser than the other
+  fourteen) because nothing but this entry tracks them.
+- **To close:** an owner ruling on the two that remain. Neither is user-visible.
+- **Follow-on, RULED and shipped 2026-08-28:** Droid was `defaultEnabled: .always`, so it was
+  on for every user including those with no Droid install. Now `.whenAvailable`
+  ([DroidSourceDescriptor.swift:43](../AgentSessions/Droid/DroidSourceDescriptor.swift:43)).
+  The `.always` was never a product call — only a mirror of pre-refactor runtime behavior
+  (K7). Scope was narrower than it looks: `seedIfNeeded` writes every source's key from
+  availability on first run, so only installs seeded *before* droid joined the registry ever
+  reached the default, leaving upgraders as the one affected cohort. Explicit choices are
+  untouched — `isEnabled` reads a stored preference first. Four pinning sites updated
+  (`SessionSourceRegistryTests.testDefaultEnablementSemanticsPreserved`, and three in
+  `NewProviderDiscoverabilityTests` including `testIsEnabled_droidIsOffByDefaultWhenItIsNotAvailable`,
+  rewritten to carry the ruling). The registry SPEC/PLAN still describe K7 as preserved; they
+  are the historical record of that program and were deliberately not rewritten.
 
 ---
 

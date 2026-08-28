@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 - **Copilot sessions carry their real title again.** Copilot stores a session's title in `workspace.yaml`, and writes a multi-line title as a YAML block scalar — so the list read the `|-` block indicator as the title itself. Eight of the twelve Copilot sessions on the development machine were listed as `|-`.
 - **A custom Antigravity brain directory is actually read.** The sessions-root override reached availability, presence and archive backfill, but never the indexer, which always scanned the default root — so a custom path made Antigravity look available while listing nothing from it. The setting now takes effect on the next refresh instead of at the next launch, and Settings states that the override moves the brain directory only; CLI transcripts are always read from `~/.gemini/antigravity-cli/brain`.
+- **Analytics counts the same agents the session list does.** Analytics, the first-run setup screen and Settings each carried their own hardcoded idea of which agents start enabled, while the main window worked it out from whether the agent is actually installed. Until you touched an agent toggle the two could disagree in either direction — an installed OpenClaw counted in the session list and left out of Analytics, or Hermes and Cursor counted as on without being present.
+- **Droid is only on for people who actually run Droid.** It was enabled for everyone, including anyone who has never installed it, and it is not a source we can support until a steward takes it on. It now follows the same rule as every other optional agent: on when detected on disk, off otherwise. If you had already turned Droid on or off yourself, your choice is kept.
 
 ## [5.1] - 2026-08-27
 
