@@ -74,15 +74,15 @@ struct PreferencesView: View {
     @AppStorage(DevinPreferencesKey.cliAvailable) var devinCLIAvailable: Bool = true
     @AppStorage(FxPreferencesKey.cliAvailable) var fxCLIAvailable: Bool = true
     // Global agent enablement
-    @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) var antigravityAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.hermesEnabled) var hermesAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = false
-    @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.codexEnabled) var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) var antigravityAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) var hermesAgentEnabled: Bool = AgentEnablement.isEnabled(.hermes)
+    @AppStorage(PreferencesKey.Agents.copilotEnabled) var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
+    @AppStorage(PreferencesKey.Agents.droidEnabled) var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
+    @AppStorage(PreferencesKey.Agents.openClawEnabled) var openClawAgentEnabled: Bool = AgentEnablement.isEnabled(.openclaw)
+    @AppStorage(PreferencesKey.Agents.cursorEnabled) var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
     @AppStorage(PreferencesKey.Agents.piEnabled) var piAgentEnabled: Bool = AgentEnablement.isEnabled(.pi)
     @AppStorage(PreferencesKey.Agents.kimiEnabled) var kimiAgentEnabled: Bool = AgentEnablement.isEnabled(.kimi)
     @AppStorage(PreferencesKey.Agents.grokEnabled) var grokAgentEnabled: Bool = AgentEnablement.isEnabled(.grok)

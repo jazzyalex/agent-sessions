@@ -4,13 +4,13 @@ import SwiftUI
 struct AnalyticsView: View {
     @ObservedObject var service: AnalyticsService
     @AppStorage("AppAppearance") private var appAppearanceRaw: String = AppAppearance.system.rawValue
-    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = true
-    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.codexEnabled) private var codexAgentEnabled: Bool = AgentEnablement.isEnabled(.codex)
+    @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabled: Bool = AgentEnablement.isEnabled(.claude)
+    @AppStorage(PreferencesKey.Agents.antigravityEnabled) private var antigravityAgentEnabled: Bool = AgentEnablement.isEnabled(.antigravity)
+    @AppStorage(PreferencesKey.Agents.openCodeEnabled) private var openCodeAgentEnabled: Bool = AgentEnablement.isEnabled(.opencode)
+    @AppStorage(PreferencesKey.Agents.hermesEnabled) private var hermesAgentEnabled: Bool = AgentEnablement.isEnabled(.hermes)
+    @AppStorage(PreferencesKey.Agents.copilotEnabled) private var copilotAgentEnabled: Bool = AgentEnablement.isEnabled(.copilot)
+    @AppStorage(PreferencesKey.Agents.droidEnabled) private var droidAgentEnabled: Bool = AgentEnablement.isEnabled(.droid)
     // Pi and Kimi default to their availability probe, not `true`: `AgentEnablement`
     // gates both on the CLI actually being present, so a literal would show their
     // agent filters to everyone whenever `seedIfNeeded` has not written an explicit
@@ -25,8 +25,8 @@ struct AnalyticsView: View {
     // UnifiedSessionsView already use for these keys. The default only applies
     // before `seedIfNeeded` writes an explicit value, and two views disagreeing
     // about the same unset key is worse than either answer.
-    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = false
-    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = true
+    @AppStorage(PreferencesKey.Agents.openClawEnabled) private var openClawAgentEnabled: Bool = AgentEnablement.isEnabled(.openclaw)
+    @AppStorage(PreferencesKey.Agents.cursorEnabled) private var cursorAgentEnabled: Bool = AgentEnablement.isEnabled(.cursor)
 
     @State private var dateRange: AnalyticsDateRange = .last7Days
     @State private var agentFilter: AnalyticsAgentFilter = .all
