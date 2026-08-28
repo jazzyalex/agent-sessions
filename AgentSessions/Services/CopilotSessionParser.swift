@@ -445,11 +445,18 @@ private func readWorkspaceName(near eventsURL: URL) -> String? {
     let dir = eventsURL.deletingLastPathComponent()
     let ws = dir.appendingPathComponent("workspace.yaml")
     guard let raw = try? String(contentsOf: ws, encoding: .utf8) else { return nil }
-    for line in raw.components(separatedBy: .newlines) {
+    let lines = raw.components(separatedBy: .newlines)
+    for (index, line) in lines.enumerated() {
         // Top-level only: line must start with `name:` (no leading whitespace)
         guard line.hasPrefix("name:") else { continue }
         var value = String(line.dropFirst("name:".count))
             .trimmingCharacters(in: .whitespaces)
+        // Copilot often writes the title as a block scalar (`name: |-`). The value on this
+        // line is then only the header — the title lives in the indented lines below it.
+        // Returning nil when the block is empty also keeps a bare indicator out of titles.
+        if isBlockScalarHeader(value) {
+            return firstBlockScalarLine(in: lines, after: index)
+        }
         // Strip surrounding quotes if present
         if value.count >= 2,
            (value.hasPrefix("\"") && value.hasSuffix("\"")) ||
@@ -457,6 +464,40 @@ private func readWorkspaceName(near eventsURL: URL) -> String? {
             value = String(value.dropFirst().dropLast())
         }
         if !value.isEmpty { return value }
+    }
+    return nil
+}
+
+/// True when a `name:` value is a YAML block-scalar header rather than the title itself:
+/// `|` or `>` plus an optional indentation digit and chomping indicator in either order
+/// (`|`, `|-`, `|+`, `>`, `>-`, `>+`, `|2`, `|2-`, `|-2`).
+private func isBlockScalarHeader(_ value: String) -> Bool {
+    guard let style = value.first, style == "|" || style == ">" else { return false }
+    var sawChomping = false
+    var sawIndentation = false
+    for ch in value.dropFirst() {
+        if ch == "-" || ch == "+" {
+            if sawChomping { return false }
+            sawChomping = true
+        } else if ch.isASCII, ch.isNumber {
+            if sawIndentation { return false }
+            sawIndentation = true
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+/// First non-empty line of the block scalar opened at `headerIndex`, trimmed of its indentation.
+/// One line is enough for a title. The block ends at the first non-empty line that is not
+/// indented (the next top-level key), which means the scalar carried no content.
+private func firstBlockScalarLine(in lines: [String], after headerIndex: Int) -> String? {
+    for line in lines.dropFirst(headerIndex + 1) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { continue }
+        guard line.first == " " || line.first == "\t" else { return nil }
+        return trimmed
     }
     return nil
 }

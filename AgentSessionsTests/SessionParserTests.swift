@@ -4232,6 +4232,84 @@ final class SessionParserTests: XCTestCase {
         XCTAssertEqual(session?.id, "aaaabbbb-1111-2222-3333-ccccddddeeee")
     }
 
+    /// Builds a directory-layout Copilot session with the given `workspace.yaml`
+    /// and returns the `customTitle` the parser derives from it.
+    private func copilotCustomTitle(workspaceYAML: String) throws -> String? {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-WorkspaceName-\(UUID().uuidString)", isDirectory: true)
+        let uuidDir = root.appendingPathComponent("aaaabbbb-1111-2222-3333-ccccddddeeee", isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createDirectory(at: uuidDir, withIntermediateDirectories: true)
+
+        let eventsURL = uuidDir.appendingPathComponent("events.jsonl")
+        try writeText(#"{"type":"user.message","data":{"content":"hello"},"timestamp":"2025-01-01T00:00:00Z"}"# + "\n", to: eventsURL)
+        try writeText(workspaceYAML, to: uuidDir.appendingPathComponent("workspace.yaml"))
+
+        return CopilotSessionParser.parseFile(at: eventsURL)?.customTitle
+    }
+
+    func testCopilotWorkspaceNameReadsBlockScalarTitle() throws {
+        // Shape Copilot actually writes for a multi-line title: the `name:` line carries
+        // only the block indicator, and the title starts on the next indented line.
+        let yaml = """
+        id: aaaabbbb-1111-2222-3333-ccccddddeeee
+        cwd: /tmp/repo
+        client_name: github/cli
+        name: |-
+          List the files in the current directory, then say hello in one sentence.
+
+          Include this exact marker in your final answer: AGENT_WATCH_PREBUMP_ffd32f46
+        user_named: false
+        summary_count: 0
+        """
+
+        let title = try copilotCustomTitle(workspaceYAML: yaml)
+        XCTAssertEqual(title, "List the files in the current directory, then say hello in one sentence.")
+        XCTAssertNotEqual(title, "|-", "Block indicator must never leak through as the title")
+    }
+
+    func testCopilotWorkspaceNameReadsAllBlockScalarHeaderForms() throws {
+        for header in ["|", "|-", "|+", ">", ">-", ">+", "|2", "|2-", "|-2"] {
+            let yaml = """
+            name: \(header)
+              Block title
+            user_named: false
+            """
+            XCTAssertEqual(try copilotCustomTitle(workspaceYAML: yaml), "Block title",
+                           "Failed for block scalar header `\(header)`")
+        }
+    }
+
+    func testCopilotWorkspaceNameKeepsPlainScalarTitles() throws {
+        XCTAssertEqual(try copilotCustomTitle(workspaceYAML: "name: Run ls.\nuser_named: false\n"), "Run ls.")
+        XCTAssertEqual(try copilotCustomTitle(workspaceYAML: "name: \"Quoted title\"\n"), "Quoted title")
+        XCTAssertEqual(try copilotCustomTitle(workspaceYAML: "name: 'Quoted title'\n"), "Quoted title")
+        // `client_name` must not be mistaken for the top-level `name` key.
+        XCTAssertNil(try copilotCustomTitle(workspaceYAML: "client_name: github/cli\nuser_named: false\n"))
+        XCTAssertNil(try copilotCustomTitle(workspaceYAML: "id: abc\ncwd: /tmp/repo\n"))
+    }
+
+    func testCopilotWorkspaceNameTreatsEmptyBlockScalarAsNoTitle() throws {
+        // Block indicator with no indented content: the next top-level key ends the block.
+        XCTAssertNil(try copilotCustomTitle(workspaceYAML: "name: |-\nuser_named: false\n"))
+        // Block indicator at end of file.
+        XCTAssertNil(try copilotCustomTitle(workspaceYAML: "id: abc\nname: |-\n"))
+    }
+
+    func testCopilotWorkspaceNameIgnoredForLegacyFlatLayout() throws {
+        let fm = FileManager.default
+        let sessionStateDir = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Copilot-FlatWorkspace-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: sessionStateDir) }
+        try fm.createDirectory(at: sessionStateDir, withIntermediateDirectories: true)
+
+        // A shared workspace.yaml beside legacy flat files must not title every session.
+        try writeText("name: |-\n  Shared workspace title\n", to: sessionStateDir.appendingPathComponent("workspace.yaml"))
+        let flatURL = sessionStateDir.appendingPathComponent("legacy-session.jsonl")
+        try writeText(#"{"type":"user.message","data":{"content":"hello"},"timestamp":"2025-01-01T00:00:00Z"}"# + "\n", to: flatURL)
+
+        XCTAssertNil(CopilotSessionParser.parseFile(at: flatURL)?.customTitle)
+    }
+
     func testDroidDiscoveryIncludesSessionStoreAndStreamJSON() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AgentSessions-Droid-Discovery-\(UUID().uuidString)", isDirectory: true)
