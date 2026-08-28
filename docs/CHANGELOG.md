@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **Claude's model-scoped weekly limit is visible.** Claude now reports a third window alongside the 5-hour and weekly ones — a weekly budget for a single model, shown on Claude's side as "Current week (Fable)". Agent Sessions could not see it at all: it arrives in a new list in the usage response, while the older named fields it used to read are now empty. The menu-bar dropdown names it under the Claude meters ("Wk Fable: 70% · resets …"). The compact meter's `Wk` figure is unchanged and still the all-models number.
+
 ### Bug Fixes
 - **Copilot sessions carry their real title again.** Copilot stores a session's title in `workspace.yaml`, and writes a multi-line title as a YAML block scalar — so the list read the `|-` block indicator as the title itself. Eight of the twelve Copilot sessions on the development machine were listed as `|-`.
 - **A custom Antigravity brain directory is actually read.** The sessions-root override reached availability, presence and archive backfill, but never the indexer, which always scanned the default root — so a custom path made Antigravity look available while listing nothing from it. The setting now takes effect on the next refresh instead of at the next launch, and Settings states that the override moves the brain directory only; CLI transcripts are always read from `~/.gemini/antigravity-cli/brain`.
