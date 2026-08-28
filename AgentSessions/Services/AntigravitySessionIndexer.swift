@@ -33,7 +33,11 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     @Published var activeSearchUI: SessionIndexer.ActiveSearchUI = .none
 
     // Minimal transcript cache is not needed for MVP indexing; search integration comes later
-    private let discovery: AntigravitySessionDiscovery
+    /// `var`, not `let`: the sessions-root override is re-read on every refresh
+    /// so a Preferences change re-points discovery without an app restart.
+    private var discovery: AntigravitySessionDiscovery
+    @AppStorage(PreferencesKey.Paths.antigravitySessionsRootOverride) var sessionsRootOverride: String = ""
+    private var lastSessionsRootOverride: String = ""
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
     private var previewMTimeByID: [String: Date] = [:]
@@ -50,7 +54,9 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     private var recomputeDefaultsObserver: FilteredDefaultsObserver?
 
     init() {
-        self.discovery = AntigravitySessionDiscovery()
+        let initialOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride) ?? ""
+        self.discovery = AntigravitySessionDiscovery(customRoot: initialOverride.isEmpty ? nil : initialOverride)
+        self.lastSessionsRootOverride = initialOverride
 
         // Debounced filtering similar to Claude indexer
         let inputs = Publishers.CombineLatest4(
@@ -99,6 +105,14 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
                  trigger: IndexRefreshTrigger = .manual,
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
         if !AgentEnablement.isEnabled(.antigravity) { return }
+
+        // Update discovery if override changed
+        let currentOverride = UserDefaults.standard.string(forKey: PreferencesKey.Paths.antigravitySessionsRootOverride) ?? ""
+        if currentOverride != lastSessionsRootOverride {
+            discovery = AntigravitySessionDiscovery(customRoot: currentOverride.isEmpty ? nil : currentOverride)
+            lastSessionsRootOverride = currentOverride
+        }
+
         let root = discovery.sessionsRoot()
         #if DEBUG
         print("\nANTIGRAVITY INDEXING START: root=\(root.path) mode=\(mode) trigger=\(trigger.rawValue)")

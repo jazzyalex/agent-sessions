@@ -449,7 +449,7 @@ extension PreferencesView {
                             antigravitySessionsPathDebounce = work
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                         }
-                        .help("Override the Antigravity artifact directory. Leave blank to use the default location")
+                        .help("Override the Antigravity brain directory, where the markdown artifacts live. CLI transcripts are always read from their own default location. Leave blank to use the defaults")
 
                     Button(action: pickAntigravitySessionsFolder) {
                         Label("Choose…", systemImage: "folder")
@@ -465,8 +465,12 @@ extension PreferencesView {
                         .foregroundStyle(.red)
                 }
 
-	                Text("Default: ~/.gemini/antigravity/brain and ~/.gemini/antigravity-cli/brain")
+	                Text("Brain directory: ~/.gemini/antigravity/brain")
 	                    .font(.system(.caption, design: .monospaced))
+	                    .foregroundStyle(.secondary)
+
+	                Text("A custom path replaces the brain directory only. CLI transcripts are always read from ~/.gemini/antigravity-cli/brain.")
+	                    .font(.caption)
 	                    .foregroundStyle(.secondary)
 	            }
 	            }
