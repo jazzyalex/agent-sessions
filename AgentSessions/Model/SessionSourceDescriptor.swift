@@ -120,7 +120,13 @@ struct AvailabilityContext {
     /// than the process-wide memoized `binaryDetectedCached(_:)`, which is `private` to
     /// `AgentEnablement`. The two agree on every answer; only the caching differs. When
     /// Task 4 moves `AgentEnablement` onto the registry it should build its context
-    /// in-file, where the cached form is visible, and keep this factory for callers outside.
+    /// in-file, where the cached form is visible — which is what `AgentEnablement.availabilityContext`
+    /// now does.
+    ///
+    /// Unavailable on purpose: it has no callers, and its `detectBinary` is the *uncached*
+    /// sweep. Adopting it on a hot path would reintroduce repeated PATH scans, so misuse is
+    /// a compile error rather than a comment someone has to notice.
+    @available(*, unavailable, message: "Uncached PATH detection. Build the context in AgentEnablement, where the memoized detector is in scope.")
     @MainActor
     static func live(defaults: UserDefaults = .standard) -> AvailabilityContext {
         AvailabilityContext(
