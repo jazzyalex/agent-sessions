@@ -3369,6 +3369,22 @@ private enum HUDSharedClock {
     static let fiveSecond = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 }
 
+/// When Claude's model-scoped weekly window ("Current week (Fable)") earns a line in the
+/// Quota Meter. Internal, while the view that uses it stays private, because the *direction*
+/// of this rule is a product decision rather than an implementation detail — and one that
+/// reads both ways: "70% remaining" and "70% used" are opposites, and the wrong reading
+/// compiles and passes every other test. `ScopedWeeklyWindowVisibilityTests` pins it.
+enum ScopedWeeklyWindowVisibility {
+    /// Owner ruling 2026-08-28: surface the window once 70% or less REMAINS — the point is
+    /// to show it while the user is actively spending it, not to wait until it is nearly out.
+    static let thresholdRemainingPercent: Int = 70
+
+    static func shows(remainingPercent: Int?) -> Bool {
+        guard let remainingPercent else { return false }
+        return remainingPercent <= thresholdRemainingPercent
+    }
+}
+
 private struct HUDLimitsRowsPanel: View {
     static func runwayRequest(activeRows: [HUDRow],
                               projectedRunoutEnabled: Bool,
@@ -3411,6 +3427,38 @@ private struct HUDLimitsRowsPanel: View {
     /// The reset-credits line is part of the chrome layer, revealed and hidden
     /// with the toolbar rather than on its own hover.
     let showsChrome: Bool
+
+    /// Claude's model-scoped weekly window ("Current week (Fable)") as an on-demand line
+    /// under the Claude provider row — the same treatment Codex's reset-credits line gets,
+    /// revealed by `showsChrome`.
+    ///
+    /// Deliberately NOT in the provider row: `Wk:` there stays the all-models figure at all
+    /// times, and that row is a fixed-width layout with no spare column.
+    ///
+    /// Owner ruling 2026-08-28: surfaced once 70% or less remains — i.e. once the user is
+    /// actively spending that window. The trigger is remaining, not used; the two readings
+    /// are opposites.
+    private var claudeScopedWeekLine: String? {
+        guard let label = claudeUsageModel.weekScopedLabel,
+              let left = claudeUsageModel.weekOpusRemainingPercent,
+              ScopedWeeklyWindowVisibility.shows(remainingPercent: left) else { return nil }
+        let reset = UsageResetText.displayTextWithPrefix(
+            kind: "Wk",
+            source: .claude,
+            raw: claudeUsageModel.weekOpusResetText ?? "",
+            now: clockNow
+        )
+        return reset.isEmpty ? "Wk \(label): \(left)%" : "Wk \(label): \(left)% · \(reset)"
+    }
+
+    /// True only when `row(entry:)` is rendering the real meter, rather than an auth chip,
+    /// probe, idle or reconnecting cell. The scoped-week line carries a concrete number
+    /// that survives a failed fetch, so it must not sit under a row saying the provider's
+    /// data cannot be trusted. Mirrors the `.live` gate the menu-bar line already applies.
+    private func rowShowsLiveMeter(_ entry: HUDLimitsProviderEntry) -> Bool {
+        guard case .live = entry.presentationState else { return false }
+        return !isProbeVisible(probeCoordinator.displayState(for: entry.source, now: clockNow))
+    }
     @EnvironmentObject private var codexUsageModel: CodexUsageModel
     @EnvironmentObject private var claudeUsageModel: ClaudeUsageModel
     @AppStorage(PreferencesKey.codexUsageEnabled) private var codexUsageEnabled = false
@@ -3580,6 +3628,21 @@ private struct HUDLimitsRowsPanel: View {
                                 .frame(height: 1)
                         }
                         row(entry: entry)
+                        if entry.source == .claude,
+                           showsChrome,
+                           rowShowsLiveMeter(entry),
+                           let scopedLine = claudeScopedWeekLine {
+                            HStack(spacing: 0) {
+                                Text(scopedLine)
+                                    .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: quotaMeterEnlarged), weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.top, 1)
+                            .transition(.opacity)
+                        }
                         if entry.source == .codex,
                            showsChrome,
                            let creditsLine = CodexResetCredits.quotaMeterLine(codexUsageModel.resetCredits, now: clockNow) {

@@ -17,8 +17,16 @@ struct ClaudeLimitSnapshot: Equatable, Codable {
     var fiveHourResetText: String       // Raw reset string for UsageResetText formatting
     var weeklyUsedRatio: Double?        // 0...1, nil = not available
     var weeklyResetText: String
+    /// The model-scoped weekly window. Named `weekOpus` for history and for the persisted
+    /// `Codable` shape: it is no longer Opus-specific. On a current account it is fed from
+    /// the `weekly_scoped` entry of the response's `limits` array, whichever model that
+    /// names — `weekScopedLabel` says which. `seven_day_opus` remains the fallback for
+    /// older payloads, and is null on accounts that report `limits`.
     var weekOpusUsedRatio: Double?      // 0...1, nil = not available
     var weekOpusResetText: String?
+    /// Display name of the model the scoped weekly window covers ("Fable"). nil when the
+    /// window came from the legacy `seven_day_opus` key, which names no model.
+    var weekScopedLabel: String?
     var rawPayloadHash: String?         // SHA256 of raw response body, for change detection
 
     // MARK: - Helpers

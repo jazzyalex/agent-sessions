@@ -278,6 +278,21 @@ final class StatusItemController: NSObject {
                 }
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                // Model-scoped weekly window ("Current week (Fable)"). The compact meter has
+                // a fixed-width Wk column that always shows the all-models figure, so this is
+                // where the scoped window gets named — the dropdown has the room the strip
+                // does not. Shown only when the server names the model: an unlabelled scoped
+                // percentage next to the weekly one reads as a contradiction, not a second
+                // window.
+                // Only while there is a real number to show. The label survives a fetch
+                // failure, and `claudeResetLine` renders a caption instead of a percent in
+                // every non-live state — so without this the dropdown would repeat
+                // "No active session" a third time under a window nobody can act on.
+                if case .live = QuotaData.claude(from: claudeStatus).presentationState,
+                   let scopedLabel = claudeStatus.weekScopedLabel,
+                   let scopedPercent = claudeStatus.weekOpusRemainingPercent {
+                    menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk \(scopedLabel):", percent: scopedPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekOpusResetText ?? "", lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
+                }
                 // Calm idle explainer — the "No active session" reset lines above
                 // say what; this one line says when it comes back. Mirrors the
                 // footer / HUD idle cells' tooltip.

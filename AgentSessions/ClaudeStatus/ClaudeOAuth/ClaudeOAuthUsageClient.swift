@@ -15,11 +15,23 @@ struct ClaudeOAuthRawUsageResponse: Decodable {
     let sevenDayOpus: RawWindow?
     let sevenDaySonnet: RawWindow?  // decoded but not yet surfaced in ClaudeLimitSnapshot
 
+    /// The window list the account actually reports. Observed 2026-08-28 carrying
+    /// `session`, `weekly_all` and `weekly_scoped` entries, while `seven_day_opus` and
+    /// `seven_day_sonnet` were both null — so on a current account the named top-level
+    /// keys are dead and this is the only place a model-scoped weekly window appears.
+    ///
+    /// Every field is optional on purpose. The same payload carries a dozen codenamed
+    /// experiment keys (`tangelo`, `nimbus_quill`, `juniper_tide`, …) and new `kind` or
+    /// `scope` values are expected; an unknown one must degrade to "no scoped window",
+    /// never fail the whole usage fetch.
+    let limits: [RawLimit]?
+
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
+        case limits
     }
 
     struct RawWindow: Decodable {
@@ -29,6 +41,36 @@ struct ClaudeOAuthRawUsageResponse: Decodable {
         enum CodingKeys: String, CodingKey {
             case utilization
             case resetsAt = "resets_at"
+        }
+    }
+
+    struct RawLimit: Decodable {
+        let kind: String?          // "session" | "weekly_all" | "weekly_scoped" | future
+        let group: String?         // "session" | "weekly"
+        let percent: Double?       // percent used (0-100); arrives as a JSON integer
+        let severity: String?      // "normal" | "warning"
+        let resetsAt: String?
+        let isActive: Bool?        // the server's own "this window is the binding one"
+        let scope: RawScope?       // null on unscoped windows
+
+        enum CodingKeys: String, CodingKey {
+            case kind, group, percent, severity, scope
+            case resetsAt = "resets_at"
+            case isActive = "is_active"
+        }
+
+        struct RawScope: Decodable {
+            let model: RawModel?   // `surface` also occurs here and is ignored
+
+            struct RawModel: Decodable {
+                let id: String?
+                let displayName: String?   // "Fable" — the label to show the user
+
+                enum CodingKeys: String, CodingKey {
+                    case id
+                    case displayName = "display_name"
+                }
+            }
         }
     }
 }

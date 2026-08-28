@@ -13,6 +13,9 @@ struct ClaudeUsageSnapshot: Equatable {
     var weekAllModelsResetText: String = ""
     var weekOpusRemainingPercent: Int? = nil
     var weekOpusResetText: String? = nil
+    /// Model the scoped weekly window covers ("Fable"). nil when it came from the legacy
+    /// `seven_day_opus` key, or when no scoped window is reported.
+    var weekScopedLabel: String? = nil
 
     // MARK: - Helper Methods for UI Display
     // Server now reports "remaining" but UI may want to show "used" (e.g., progress bars)
@@ -43,6 +46,7 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var weekAllModelsResetText: String = ""
     @Published var weekOpusRemainingPercent: Int? = nil
     @Published var weekOpusResetText: String? = nil
+    @Published var weekScopedLabel: String? = nil
     @Published var lastUpdate: Date? = nil
     @Published var cliUnavailable: Bool = false
     @Published var tmuxUnavailable: Bool = false
@@ -508,6 +512,7 @@ final class ClaudeUsageModel: ObservableObject {
             weeklyResetText: s.weekAllModelsResetText,
             weekOpusUsedRatio: s.weekOpusRemainingPercent.map { Double(100 - max(0, min(100, $0))) / 100.0 },
             weekOpusResetText: s.weekOpusResetText,
+            weekScopedLabel: s.weekScopedLabel,
             rawPayloadHash: nil
         )
         let mgr = self.sourceManager
@@ -540,6 +545,7 @@ final class ClaudeUsageModel: ObservableObject {
         sessionResetText = s.fiveHourResetText
         weekAllModelsResetText = s.weeklyResetText
         weekOpusResetText = s.weekOpusResetText
+        weekScopedLabel = s.weekScopedLabel
 
         lastUpdate = s.fetchedAt
         // Mark that we have real data so `isInitialLoading` (isUpdating && lastSuccessAt == nil)
@@ -621,6 +627,7 @@ final class ClaudeUsageModel: ObservableObject {
         sessionResetText = s.sessionResetText
         weekAllModelsResetText = s.weekAllModelsResetText
         weekOpusResetText = s.weekOpusResetText
+        weekScopedLabel = s.weekScopedLabel
         lastUpdate = now
         unavailableMessage = nil
         dataIsStale = false
