@@ -34,10 +34,13 @@ extension SessionSourceDescriptor {
                 if ctx.directoryExists(discovery.projectsRoot()) { return true }
                 return isBinaryInstalled(ctx)
             },
-            // K7: droid is default-ON at runtime (`isEnabled`'s `default:` branch) even
-            // though `seedIfNeeded` seeds it from availability. The disagreement is
-            // preserved deliberately — `defaultEnabled` models the runtime rule.
-            defaultEnabled: .always,
+            // Availability-gated since 2026-08-28. Droid is not a supported source: there is
+            // no subscription here to test its sessions against, and it stays unsupported
+            // until a steward takes it on, so it must not be on for users who do not run it.
+            // This was `.always` (K7). That only ever reached installs seeded *before* droid
+            // joined the registry — `seedIfNeeded` writes every other install's key from
+            // availability — so upgraders were the one cohort left with droid silently on.
+            defaultEnabled: .whenAvailable,
             parseFullByPath: { url in DroidSessionParser.parseFileFull(at: url) },
             parseFullByIdentity: nil,
             searchUsesIdentityAtURL: nil,

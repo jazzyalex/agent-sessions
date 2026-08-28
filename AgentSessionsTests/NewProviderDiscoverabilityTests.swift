@@ -43,31 +43,33 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(AgentEnablement.enablementKey(for: .cursor), "AgentEnabledCursor")
     }
 
-    /// K7: droid falls into `isEnabled`'s default-ON cohort even though `seedIfNeeded`
-    /// seeds it from availability. That disagreement is deliberate, and it is the one
-    /// place where "default enabled" and "available" part company — pin it so the
-    /// registry flip cannot quietly collapse droid into the availability-gated cohort.
+    /// Droid is availability-gated, and that is a product ruling rather than a mechanical
+    /// default: it is not a supported source until a steward takes it on, so it must not be
+    /// on for users who do not run it. It was `.always` (K7) purely to mirror pre-refactor
+    /// runtime behavior. Pinned so the cohort cannot be flipped back without reading this.
     ///
     /// Availability is deterministic here: `AppRuntime.isHostedByTooling` is true under
     /// XCTest, so `isAvailable` degrades to a stored-preference read, which an empty
     /// suite answers `false` for every source.
-    func testIsEnabled_droidIsOnByDefaultEvenThoughItIsNotAvailable() {
+    func testIsEnabled_droidIsOffByDefaultWhenItIsNotAvailable() {
         let suite = "test.enabled.droid.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
         XCTAssertFalse(AgentEnablement.isAvailable(.droid, defaults: defaults),
                        "precondition: nothing is available in an empty suite under test hosting")
-        XCTAssertTrue(AgentEnablement.isEnabled(.droid, defaults: defaults),
-                      "droid belongs to the default-ON cohort regardless of availability")
+        XCTAssertFalse(AgentEnablement.isEnabled(.droid, defaults: defaults),
+                       "droid is availability-gated: unsupported until a steward, so off unless installed")
+        XCTAssertEqual(SessionSourceRegistry.descriptor(for: .droid).defaultEnabled, .whenAvailable)
     }
+
 
     func testIsEnabled_availabilityGatedSourceIsOffWhenUnavailable() {
         let suite = "test.enabled.hermes.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
-        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx] {
+        for source in [SessionSource.hermes, .openclaw, .cursor, .pi, .kimi, .grok, .qwen, .devin, .fx, .droid] {
             XCTAssertFalse(AgentEnablement.isEnabled(source, defaults: defaults),
                            "\(source.rawValue) is availability-gated and must stay off when unavailable")
         }
@@ -78,7 +80,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
 
-        for source in [SessionSource.codex, .claude, .antigravity, .opencode, .copilot, .droid] {
+        for source in [SessionSource.codex, .claude, .antigravity, .opencode, .copilot] {
             XCTAssertTrue(AgentEnablement.isEnabled(source, defaults: defaults),
                           "\(source.rawValue) belongs to the default-ON cohort")
         }

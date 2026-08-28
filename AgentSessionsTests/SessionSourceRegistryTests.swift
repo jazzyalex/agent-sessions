@@ -362,7 +362,7 @@ final class SessionSourceRegistryTests: XCTestCase {
     // MARK: - Enablement semantics (SPEC §10.5 / K7)
 
     func testDefaultEnablementSemanticsPreserved() {
-        let alwaysOn: Set<SessionSource> = [.codex, .claude, .antigravity, .opencode, .copilot, .droid]
+        let alwaysOn: Set<SessionSource> = [.codex, .claude, .antigravity, .opencode, .copilot]
         for s in SessionSource.allCases {
             XCTAssertEqual(SessionSourceRegistry.descriptor(for: s).defaultEnabled,
                            alwaysOn.contains(s) ? .always : .whenAvailable, "\(s)")
