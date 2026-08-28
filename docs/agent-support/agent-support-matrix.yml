@@ -146,7 +146,7 @@ agents:
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
-      - "usage/rate-limit tracking"
+      - "quota/rate-limit tracking (Kimi publishes no limit or quota endpoint). NOT the same as token accounting: Kimi 0.38.0 writes per-turn `token_counting.measured` and `token_counting.turn_recorded` records carrying tokens, length, turnId and time. That data is on disk in every session and Agent Sessions does not yet read it — the gap is a missing surface, not a missing source."
       - "subagent hierarchy"
     evidence_docs:
       - "https://github.com/MoonshotAI/kimi-code"
@@ -198,7 +198,7 @@ agents:
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, saved-session backfill, active-session copy-resume command and launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
       - "live/active status"
-      - "usage/rate-limit tracking"
+      - "quota/rate-limit tracking (Qwen publishes no limit or quota endpoint). NOT the same as token accounting: every Qwen transcript carries complete per-call counters in `systemPayload.uiEvent` (input, output, cached, thoughts, tool and total token counts, plus duration_ms and model) — 53 such records in one ordinary local session. That data is on disk and Agent Sessions does not yet read it — the gap is a missing surface, not a missing source."
       - "images"
       - "subagent hierarchy"
       - "automatic QWEN_RUNTIME_DIR discovery (choose that runtime directory's projects folder in Settings)"
