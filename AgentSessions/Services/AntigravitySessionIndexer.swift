@@ -36,7 +36,6 @@ final class AntigravitySessionIndexer: ObservableObject, @unchecked Sendable {
     /// `var`, not `let`: the sessions-root override is re-read on every refresh
     /// so a Preferences change re-points discovery without an app restart.
     private var discovery: AntigravitySessionDiscovery
-    @AppStorage(PreferencesKey.Paths.antigravitySessionsRootOverride) var sessionsRootOverride: String = ""
     private var lastSessionsRootOverride: String = ""
     private let progressThrottler = ProgressThrottler()
     private var cancellables = Set<AnyCancellable>()
