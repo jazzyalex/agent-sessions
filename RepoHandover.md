@@ -1,3 +1,45 @@
+## 2026-08-28 19:36 · scoped-weekly-and-patch-fixes · Claude scoped weekly limit + 5.1.1 fix batch, all pushed
+status: in-progress
+
+**State:** 15 commits pushed to `main` (`0a81ad41..b7344f93`), CI and Pages both green, tree
+clean. Suite 2275/0. App running from `.deriveddata-run`. The 5.1.1 release itself has NOT
+been done — only the fixes that will go in it.
+
+**Decided / don't redo:**
+- **Droid is unsupported until a steward exists.** Its Preferences pane stays out of the
+  sidebar (correct as-is), and `defaultEnabled` moved `.always` → `.whenAvailable` so it is
+  off for anyone without it. Droid keeps its on/off row in Settings → General.
+- **Fable (Claude model-scoped weekly) placement is settled.** `Wk:` in the compact QM row
+  stays the all-models figure at ALL times — non-negotiable. Fable is an on-demand line under
+  the Claude provider row, gated on `showsChrome`, mirroring Codex's reset-credits line.
+  **Do not put it in the provider row** — that was tried, changed shared layout code for both
+  providers, and was rejected.
+- QM right-click → `demandRevealed` → `resolvedShowsCompactToolbar` → passed on as
+  `showsChrome` into `HUDLimitsRowsPanel`, which gates the extra per-provider rows. It is NOT
+  toolbar-only; I asserted that twice and was wrong both times.
+- Fable threshold is **70% REMAINING** (not 70% used — opposite readings). Pinned by
+  `ScopedWeeklyWindowVisibilityTests` because it was implemented backwards once.
+- A real Claude usage payload is readable at `/tmp/claude/statusline-usage-cache.json` — use
+  it rather than building to a quoted shape. `seven_day_opus`/`seven_day_sonnet` are null on a
+  current account; the scoped window only exists in the `limits` array.
+- The `growth-1k-stars` entry below says its docs are uncommitted — they are committed now
+  (`232575a7`), as is its handover (`fd9e9a90`).
+
+**Key files:**
+- `docs/superpowers/plans/2026-08-28-codex-usage-cooldown-PROMPT.md` — ready-to-paste prompt
+  for the Codex cooldown lockout, full automated testing expected of that session.
+- `docs/CHANGELOG.md` `[Unreleased]` — four user-visible entries, ready for the bump.
+
+**Next:**
+1. Ship 5.1.1 (patch, not minor — bug fixes only; never `X.Y.0`): README download links (2),
+   `docs/index.html` button + label + the 3 meta descriptions. WhatsNewCatalog needs nothing —
+   lookups key on major.minor, so 5.1.1 reuses the existing 5.1 rows.
+2. Then `deploy bump patch` → `git push origin main` → `deploy release 5.1.1` → `verify`. QA
+   runs automatically; the manual smoke §3–4 GO/NO-GO is the owner's.
+3. Hand the cooldown prompt to a separate session.
+4. Open backlog candidates for 5.2, in order: Qwen/Kimi self-reported token usage (needs a
+   token dimension in Analytics, which has none today); registry follow-ups 1 and 5.
+
 ## 2026-08-28 12:33 · growth-1k-stars · 5.1 shipped; growth work fanned out, docs uncommitted
 status: in-progress
 
