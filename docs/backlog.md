@@ -906,44 +906,38 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 
 ## QM / Runway (Claude)
 
-### Model-scoped weekly limit ("Current week (Fable)") is never read or shown
-> **open** · sev: med · urg: low · verified 2026-08-22
+### Model-scoped weekly limit is read and shown, but never picked as the bottleneck
+> **partial** · sev: low · urg: low · verified 2026-08-28
 
-- **What:** `claude` now reports a third window — *Current week (Fable)* (59–60% on the
-  owner's account on 2026-08-22, vs 87% all-models). AS shows only 5h + weekly-all, so a
-  user can be throttled on the model-scoped window while the QM still reads comfortable.
-- **Where:** the OAuth usage response (`GET api.anthropic.com/api/oauth/usage`) carries it
-  in a **new `limits[]` array**, not as a top-level key:
-  `{kind: "weekly_scoped", group: "weekly", percent: 60, scope: {model: {display_name:
-  "Fable"}}, resets_at, is_active}`. The legacy top-level keys `seven_day_opus` /
-  `seven_day_sonnet` are `null` on this account. The decoder
-  [ClaudeOAuthUsageClient.swift:15-22](../AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeOAuthUsageClient.swift:15)
-  only knows the top-level keys; the normalizer
-  [ClaudeUsageNormalizer.swift:30](../AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageNormalizer.swift:30)
-  maps `seven_day_opus` into `weekOpusUsedRatio`, and `ClaudeUsageModel.weekOpusRemainingPercent`
-  is then rendered by **no view** (grep: only `ClaudeStatusService` / `ClaudeUsageModel`).
-- **Bonus in the same payload:** `limits[].is_active` is the server's own "this is the
-  binding window" flag (weekly_all was `is_active: true` at 87%), and `severity`
-  (`normal`/`warning`). Today the QM derives the bottleneck locally
-  ([AgentCockpitHUDView.swift:4633](../AgentSessions/Views/AgentCockpitHUDView.swift:4633),
-  `fiveHourLeft <= weekLeft`); it could defer to the server flag.
-- **Fix shape:** decode `limits[]` (tolerant — unknown `kind`/`scope` values must not
-  fail the whole fetch); generalise the single Opus slot into a list of scoped weekly
-  windows keyed by `scope.model.display_name`; include scoped windows in the bottleneck
-  pick; render as a third QM column / dropdown row only when present.
-  Keep `seven_day_opus` as a fallback for older payloads.
-- **UI decision (owner, 2026-08-22):** no setting, no permanent row. In the compact HUD
-  the scoped window is shown **only when it is the bottleneck** (server `is_active`, or
-  lowest remaining); label it with the server's `display_name` ("Wk Fable: 10%") so its
-  appearance reads as a different window, not the weekly number jumping. Where space is
-  free (menu-bar dropdown, QM detail panel) always list it. A preference is the fallback
-  only if the appearing/disappearing row proves confusing in practice.
-- **Why deferred:** the owner's real confusion on 2026-08-22 was 5h-vs-week reading, not
-  this window; the scoped window was not the binding one.
-- **Risk if wrong:** a user hits a model-scoped cap while AS reports headroom — wrong data
-  class, hence sev med.
-- **To close:** fixture with `limits[]` incl. a `weekly_scoped` entry; normalizer test;
-  HUD renders the scoped row and picks it as bottleneck when it is the lowest.
+- **Shipped 2026-08-28 (`0d99ee99`):** the `limits[]` array is decoded tolerantly, and the
+  model-scoped weekly window reaches two surfaces — the menu-bar dropdown always names it
+  under the Claude meters, and the Quota Meter shows it as an on-demand line under the
+  Claude provider row once **70% or less remains**
+  ([`ScopedWeeklyWindowVisibility`](../AgentSessions/Views/AgentCockpitHUDView.swift:3377),
+  threshold pinned by `ScopedWeeklyWindowVisibilityTests` because "70% remaining" and
+  "70% used" are opposite readings that both compile). Selection prefers the server's
+  `is_active` flag and falls back to the most-consumed window
+  ([ClaudeUsageNormalizer.swift:55](../AgentSessions/ClaudeStatus/ClaudeOAuth/ClaudeUsageNormalizer.swift:55));
+  `seven_day_opus` remains the fallback for older payloads. Covered by 8 normalizer tests
+  incl. live-shape fixtures with a `weekly_scoped` entry.
+- **What is still open:** the compact HUD's bottleneck pick still compares only the two
+  original windows —
+  [AgentCockpitHUDView.swift:4707](../AgentSessions/Views/AgentCockpitHUDView.swift:4707),
+  `entry.fiveHourLeft <= entry.weekLeft` — so a scoped window that is the *binding* one
+  (server `is_active`, or lowest remaining) never becomes the headline figure. `Wk:` stays
+  the all-models number at all times, by design for now.
+- **Residual risk:** narrower than when this was filed. A user on a scoped cap now sees the
+  number in the dropdown and, below 70% remaining, in the QM detail line — but the compact
+  meter can still read comfortable while the scoped window is the one throttling them.
+  Visible-but-not-headline, hence sev dropped med → low.
+- **UI decision (owner, 2026-08-28)** supersedes the 2026-08-22 ruling for the compact HUD:
+  no scoped row in the compact meter, no `Wk Fable: 10%` substitution, no setting. The
+  2026-08-22 idea of swapping the compact figure when the scoped window binds is *not*
+  currently wanted — reopen that only with fresh owner intent, not from this entry.
+- **To close:** either (a) owner decides the compact meter should defer to `is_active` and
+  the bottleneck pick learns about scoped windows, with a test proving a binding scoped
+  window wins over both originals; or (b) owner confirms the current split is final and
+  this collapses to a tombstone.
 
 ### Claude runway rows intermittently show tokens/hour instead of weekly-share in Weekly mode
 > **open** · sev: med · urg: low · verified 2026-08-16
