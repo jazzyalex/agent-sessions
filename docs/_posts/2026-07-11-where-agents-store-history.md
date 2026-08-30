@@ -246,7 +246,7 @@ Agent Sessions reads every one of the locations above into a single searchable
 macOS app. It is free, local-only, and has no telemetry; it opens these files
 read-only and never writes back into them. For a measured look at what each of
 these formats actually *records* — verbosity, telemetry, how searchable it is —
-see the companion field study, [How coding agents remember]({% post_url 2026-07-14-how-coding-agents-remember %}).
+see the companion field study, [How coding agents remember]({{ site.baseurl }}{% post_url 2026-07-14-how-coding-agents-remember %}).
 These formats now also have a standing scorecard:
 [Session-Bench]({{ '/bench/' | relative_url }}) ranks ten of them on
 twenty pass/fail gates and re-scores when they drift.

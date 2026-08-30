@@ -106,11 +106,11 @@ every new hire how the coffee machine works and just labeling the buttons.
 
 **The handover file** carries time: what is half-done, what was rejected and
 why, what comes next. It deserves its own discussion, and has one in
-[the handover problem]({% post_url 2026-07-17-the-handover-problem %}).
+[the handover problem]({{ site.baseurl }}{% post_url 2026-07-17-the-handover-problem %}).
 
 **The transcript archive** is the layer you already have whether you
 maintain it or not: every agent writes complete session logs to your disk
-([here, exactly]({% post_url 2026-07-11-where-agents-store-history %})).
+([here, exactly]({{ site.baseurl }}{% post_url 2026-07-11-where-agents-store-history %})).
 Unqueried, it is dead weight. Searchable, it is the answer to "have we hit
 this error before" and "what did we decide in May" — questions the other
 four layers are too terse to answer. A local browser like

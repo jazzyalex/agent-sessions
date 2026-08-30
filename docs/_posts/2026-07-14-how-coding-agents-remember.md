@@ -28,7 +28,7 @@ cosmetic. They decide what the agent can resume, what a tool like a history
 browser can show you, what you can audit six months later, and what is
 silently lost.
 
-A [companion post]({% post_url 2026-07-11-where-agents-store-history %})
+A [companion post]({{ site.baseurl }}{% post_url 2026-07-11-where-agents-store-history %})
 covers where these files live on disk. This one is about what is inside them.
 We measured it.
 
@@ -335,7 +335,7 @@ the instinct is right: the work is worth remembering.
 local-only macOS browser for all six of these stores; it reads them read-only
 and never writes back. The measurement script and raw aggregates behind
 every number here are in the repo, and the companion post on the exact disk
-locations is [here]({% post_url 2026-07-11-where-agents-store-history %}).
+locations is [here]({{ site.baseurl }}{% post_url 2026-07-11-where-agents-store-history %}).
 This field study later grew into a standing benchmark:
 [Session-Bench]({{ '/bench/' | relative_url }}) now scores ten formats on
 twenty pass/fail gates, with the evidence behind every cell.

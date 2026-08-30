@@ -110,7 +110,7 @@ tasks to delegate differently, or not at all.
 
 Three honest reasons. The formats are undocumented, so writing a parser
 means reverse engineering six dialects of JSONL and SQLite (we covered the
-details in [the field study]({% post_url 2026-07-14-how-coding-agents-remember %})).
+details in [the field study]({{ site.baseurl }}{% post_url 2026-07-14-how-coding-agents-remember %})).
 The volumes are awkward: 3.8 GB is too big to grep casually and too small to
 justify a data pipeline. And the tooling is young: the vendors treat these
 files as crash-recovery state, not as a product surface, so nothing ships
