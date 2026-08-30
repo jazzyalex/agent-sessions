@@ -32,10 +32,48 @@ struct WeeklyQuotaBootstrapResult: Equatable, Codable, Sendable {
     let windowStart: Date
     let resetsAt: Date
     let scannedAt: Date
+    /// Price table the dollars were computed under. A measurement priced by a
+    /// stale table describes a different conversion, so it must not be carried
+    /// into a run using a newer one. Nil in records written before this was
+    /// stamped: those are still usable — discarding them would throw away the
+    /// completed windows this cache exists to keep — but they are rescanned.
+    var priceRevision: Int?
+    /// Window layout the plan reported (`5h+weekly` vs `weekly`). A plan change
+    /// alters what a percentage point means, so it invalidates the conversion.
+    var limitShape: String?
 
+    /// Both providers report weekly consumption as whole percentage points, so a
+    /// reported `2` means true consumption somewhere in `[2, 3)`. Taking the floor
+    /// biases every estimate low, worst exactly where the numerator is smallest.
+    static let quantizationMidpoint: Double = 0.5
+
+    /// Whether this measurement may be served under the given conditions. An
+    /// unstamped legacy record passes: it predates the stamp rather than
+    /// contradicting it.
+    func isCompatible(priceRevision: Int, limitShape: String?) -> Bool {
+        if let stamped = self.priceRevision, stamped != priceRevision { return false }
+        if let stamped = self.limitShape, let current = limitShape, stamped != current { return false }
+        return true
+    }
+
+    /// Nil-ness here is the validity test — dollars and consumption must both be
+    /// positive. Use `calibratedPercentPointsPerDollar` for the value to serve.
     var percentPointsPerDollar: Double? {
         guard dollars > 0, usedPercentPoints > 0 else { return nil }
         let value = usedPercentPoints / dollars
+        return value.isFinite && value > 0 ? value : nil
+    }
+
+    /// The ratio to actually serve: numerator at the quantization midpoint.
+    ///
+    /// The midpoint used to live only on the freshening path, so whether a
+    /// measurement got it depended on whether its window happened to match the
+    /// current one — a carried-over bootstrap served the raw floor while a
+    /// current-window one served the midpoint. That made two providers'
+    /// numbers incomparable for no reason other than which code path they took.
+    var calibratedPercentPointsPerDollar: Double? {
+        guard percentPointsPerDollar != nil else { return nil }
+        let value = (usedPercentPoints + Self.quantizationMidpoint) / dollars
         return value.isFinite && value > 0 ? value : nil
     }
 }
@@ -158,7 +196,8 @@ enum CodexWeeklyQuotaBootstrapScanner {
             unpricedVolumeShare: unpricedVolume / totalVolume,
             windowStart: windowStart,
             resetsAt: resetsAt,
-            scannedAt: now
+            scannedAt: now,
+            priceRevision: priceTable.revision
         )
     }
 
@@ -419,7 +458,8 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
             unpricedVolumeShare: unpricedVolume / totalVolume,
             windowStart: windowStart,
             resetsAt: resetsAt,
-            scannedAt: now
+            scannedAt: now,
+            priceRevision: priceTable.revision
         )
     }
 }

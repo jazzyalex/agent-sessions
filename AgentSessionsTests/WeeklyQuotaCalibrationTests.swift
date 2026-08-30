@@ -320,8 +320,10 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertFalse(store.calibrationAbandoned(
             provider: "codex",
             now: t0.addingTimeInterval(WeeklyQuotaCalibrationStore.waitingBudget + 600)))
+        // 20.5/100, not 20/100: the reported integer is a floor, so the served
+        // ratio takes the quantization midpoint on every path.
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
-                       0.2, accuracy: 0.0001)
+                       20.5 / 100, accuracy: 0.0001)
     }
 
     /// A frozen bootstrap drifts high: the numerator is integer-quantized and sits
@@ -540,8 +542,10 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                               usedPercentPoints: 20,
                               now: t0,
                               defaults: suite)
+        // 20.5/100, not 20/100: the reported integer is a floor, so the served
+        // ratio takes the quantization midpoint on every path.
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
-                       0.2, accuracy: 0.0001)
+                       20.5 / 100, accuracy: 0.0001)
     }
 
     func testCalibrationExpiresAfterSevenDays() {
@@ -999,13 +1003,79 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         XCTAssertTrue(store.scanIsCoolingDownForTesting(provider: "codex", now: t0),
                       "failure must back off rather than retire the anchor")
 
-        // Once the backoff elapses the same bucket must be scannable again.
+        // Once the backoff elapses the same bucket must be scannable again. Assert
+        // a SECOND dispatch, not merely that one ever happened: a provider-level
+        // flag is already true from the first attempt, so it cannot fail.
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 1)
         store.clearScanCooldownForTesting(provider: "codex")
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
                               resetsAt: resetsAt, windowMinutes: 10080,
                               usedPercentPoints: 3, now: t0, defaults: suite)
-        XCTAssertTrue(store.scanWasDispatchedForTesting(provider: "codex"),
-                      "a burnt retry leaves the stale ratio in place for the whole window")
+        waitForScan(store, provider: "codex")
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 2,
+                       "a burnt retry leaves the stale ratio in place for the whole window")
+    }
+
+    /// A scan walking hundreds of megabytes can outlive the account it was started
+    /// for. The state dictionaries are keyed by provider, so nothing else stops the
+    /// old account's result from landing in the new account's calibration.
+    func testAScanCompletingAfterAnAccountSwitchIsDiscarded() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
+                            at: t0.addingTimeInterval(3600))
+        let now = t0.addingTimeInterval(7200)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 6,
+                              accountHash: "acct-a", now: now, defaults: suite)
+        // Switch accounts while account A's walk is still in flight.
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 1, accountHash: "acct-b",
+                              now: now, defaults: suite)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline && store.bootstrap(provider: "codex") == nil { usleep(20_000) }
+
+        XCTAssertNil(store.bootstrap(provider: "codex"),
+                     "account A's scan result must not land in account B's state")
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: now))
+    }
+
+    /// A measurement priced under a different table describes a different
+    /// conversion; carrying it forward would let a stale price win purely by
+    /// having reached a larger percentage.
+    func testAnIncompatiblePriceRevisionIsNotMigrated() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        var stale = result(used: 80, dollars: 1000, resetsAt: t0, scannedAt: t0)
+        stale.priceRevision = RunwayPriceTable.shared.revision + 99
+        try store(stale, at: key("codex", "acct-a", t0))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 1, accountHash: "acct-a",
+                              now: t0, defaults: suite)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
+                     "a differently-priced week is not a usable calibration")
+    }
+
+    /// The served ratio must use the quantization midpoint whichever path produces
+    /// it. The midpoint lived only on the freshening path, so a carried-over
+    /// measurement served the raw floor while a current-window one served the
+    /// midpoint — making two providers' numbers incomparable by accident.
+    func testTheMidpointIsAppliedToACarriedMeasurementToo() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.setBestBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 77, dollars: 1239.62, resetsAt: previous, scannedAt: previous))
+        store.recordUsedPercentForTesting(provider: "claude", usedPercentPoints: 1,
+                                          resetsAt: current)
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 77.5 / 1239.62, accuracy: 0.00001,
+                       "reported 77 means [77,78), so serve 77.5 — on every path")
     }
 
     /// The startup dead zone. A window at 0pp has nothing to divide by, so the
@@ -1070,7 +1140,7 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                               windowMinutes: 10080, usedPercentPoints: 40,
                               accountHash: "acct-a", now: t0, defaults: suite)
         XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
-                       40.0 / 100.0, accuracy: 0.001)
+                       40.5 / 100.0, accuracy: 0.001)
 
         // Same process, different account, and nothing cached for it.
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),

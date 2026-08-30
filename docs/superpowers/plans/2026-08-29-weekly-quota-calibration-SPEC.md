@@ -179,10 +179,29 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
   previous account's conversion, so a scope change now clears that provider's
   bootstraps, tracker, ledger and scan bookkeeping.
 - **Both providers quantize weekly percent to whole points**, so the midpoint
-  correction applies to both. Verified against the live payload: Claude's OAuth
-  `utilization` reports `27.0` / `11.0` and `limits[].percent` is a literal JSON
-  integer. `weeklyUsedRatio` is a `Double` only because the normalizer divides by
-  100 — it does not imply sub-point resolution.
+  correction applies to both — and on every path. Verified against the live
+  payload: Claude's OAuth `utilization` reports `27.0` / `11.0` and
+  `limits[].percent` is a literal JSON integer. `weeklyUsedRatio` is a `Double`
+  only because the normalizer divides by 100 — it does not imply sub-point
+  resolution, and Claude's `observeQuota` call accordingly reports
+  `hasExactPercent: false` so it takes the 1pp acceptance floor rather than the
+  0.25pp one.
+- The midpoint previously lived only on the freshening path, so whether a
+  measurement received it depended on whether its window matched the current one:
+  a carried-over bootstrap served the raw floor while a current-window one served
+  the midpoint. Two providers' numbers were incomparable for no reason but which
+  code path they took. It now lives on the measurement
+  (`calibratedPercentPointsPerDollar`).
+- A bootstrap is stamped with the **price revision** and **limit shape** it was
+  measured under, and an incompatible stamp is neither restored nor migrated —
+  otherwise an old plan or a stale price table could win the carry-over slot
+  forever purely by having reached a larger percentage. Records written before the
+  stamp existed decode as `nil` and are still accepted: discarding them would
+  throw away the completed windows the cache exists to keep.
+- A bootstrap scan captures a **scope generation** at dispatch and its result is
+  discarded if the generation has moved. A scan walking hundreds of megabytes can
+  outlive the account it was started for, and the state dictionaries are keyed by
+  provider, so nothing else would stop account A's result landing in account B.
 - Outside usage (another device, an untracked client) drops the account quota
   with no local activity to match, biasing the calibration **high**. Intervals
   with zero local activity are rejected; partial contamination is not detectable.
@@ -210,10 +229,24 @@ disagreement is unexplained and is a reason to distrust short windows, not a
 validation of the model. An earlier revision of this spec cited these as agreeing
 "within quantization" — that claim was wrong and is withdrawn.
 
-Cross-provider, on one $100/month plan with comparable sessions, Codex consumes
-roughly **3.6×** more weekly quota per API-equivalent dollar than Claude. That
-gap survives every correction above and is not a cache-mix artifact — both
-providers ran 93–98% cache reads over the compared windows. It rests on the
+Cross-provider, Codex consumes roughly **3.6–4.0×** more weekly quota per
+API-equivalent dollar than Claude. The range is not hedging — it is the
+quantization policy:
+
+```
+floors     : 4/$17.84 = 0.2242   77/$1239.62 = 0.0621   -> 3.61x
+midpoints  : 4.5/$17.84 = 0.2522   77.5/$1239.62 = 0.0625 -> 4.03x
+```
+
+The app serves the midpoint on both, so **~4.0×** is the consistent figure; the
+earlier 3.61× divided the floors and did not apply this spec's own policy.
+Treat it as a snapshot, not a settled constant: the Codex numerator is only 4pp,
+so quantization alone puts ±12% on it, and it drifts inside the integer quantum
+as the week accrues. Claude's 77pp numerator carries ±0.6%. The gap will be worth
+restating once Codex has a completed window to divide.
+
+The direction survives every correction above and is not a cache-mix artifact —
+both providers ran 93–98% cache reads over the compared windows. It rests on the
 assumption that quota consumption is proportional to API list price, which is
 unverified and may not hold identically across providers.
 

@@ -574,9 +574,12 @@ final class ClaudeUsageModel: ObservableObject {
             freshness: freshness,
             observedAt: s.fetchedAt
         ), now: now)
-        // Weekly %/h calibration — see the Codex counterpart. Claude's OAuth path
-        // supplies a FRACTIONAL weekly percent, so it clears the acceptance floor
-        // (0.25pp) far sooner than Codex's integer-only 1pp quantum.
+        // Weekly %/h calibration — see the Codex counterpart. Claude's weekly
+        // percent is integer-quantized exactly like Codex's: the OAuth payload
+        // returns `utilization` as 27.0 / 11.0 and `limits[].percent` as a literal
+        // JSON integer. `weeklyUsedRatio` is a Double only because the normalizer
+        // divides by 100 — it does NOT imply sub-point resolution, so this reports
+        // itself as inexact and takes the 1pp acceptance floor.
         if let weeklyRatio = s.weeklyUsedRatio,
            freshness.allowsProjectedDisplay,
            let weekResetAt = UsageResetText.resetDate(kind: "Wk",
@@ -593,12 +596,16 @@ final class ClaudeUsageModel: ObservableObject {
                 resetsAt: weekResetAt,
                 windowMinutes: 10080,
                 usedPercentPoints: weeklyRatio * 100,
+                limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(
                 provider: "claude",
                 remainingPercent: 100 - (weeklyRatio * 100),
-                hasExactPercent: true,
+                // Integer-quantized, per the payload above. Claiming exactness here
+                // lowered the acceptance floor to 0.25pp on a source whose real
+                // quantum is a full point.
+                hasExactPercent: false,
                 resetAt: weekResetAt,
                 observedAt: s.fetchedAt,
                 scope: WeeklyQuotaCalibrationScope(

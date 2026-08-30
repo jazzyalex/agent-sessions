@@ -670,6 +670,7 @@ final class CodexUsageModel: ObservableObject {
                 usedPercentPoints: Double(100 - s.weekRemainingPercent),
                 accountHash: WeeklyQuotaCalibrationScope.hashAccount(
                     CodexCalibrationAccountScope.accountId(now: now)),
+                limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                 now: now
             )
             WeeklyQuotaCalibrationStore.shared.observeQuota(

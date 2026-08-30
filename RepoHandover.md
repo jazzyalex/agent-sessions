@@ -1,5 +1,55 @@
-## 2026-08-30 15:12 · weekly-quota-calibration · Bootstrap cache fixes from external review
+## 2026-08-30 16:40 · weekly-quota-calibration · Account-scope completeness pass
 status: in-progress
+
+**State:** Uncommitted, on top of `cb296eaf`. Suite **2352 pass / 3 skipped / 0 failures**,
+build clean. Second Codex review returned NO-SHIP on `cb296eaf` for incomplete account-scope
+protection; five findings accepted and fixed, one citation corrected, one doc claim rejected.
+
+**Decided / don't redo:**
+- **The midpoint belongs to the measurement, not to a code path.** It lived only in
+  `freshenedBootstrapRatio`, so a carried-over bootstrap served the raw floor while a
+  current-window one served the midpoint. Now `calibratedPercentPointsPerDollar`.
+  `percentPointsPerDollar` is kept as the VALIDITY test (nil when dollars/used <= 0).
+- **Claude was claiming `hasExactPercent: true`** in `ClaudeUsageModel`, which dropped its
+  acceptance floor to 0.25pp on an integer-quantized source. Now `false`. The old comment
+  asserting a "FRACTIONAL weekly percent" was simply wrong.
+- **`restored` holds full defaults keys**, so `restored.remove(provider)` removed nothing —
+  A -> B -> A skipped A's restore. Now filtered by key prefix.
+- **A scan can outlive its account.** Results carry a scope generation captured at dispatch;
+  a mismatched completion is discarded. The dictionaries are keyed by provider, so nothing
+  else would have stopped it.
+- **Bootstraps are stamped** with `priceRevision` + `limitShape`; incompatible ones are not
+  restored or migrated. Unstamped legacy records are still accepted on purpose — rejecting
+  them would throw away the completed windows this cache exists to keep.
+- **A provider-level Boolean cannot test a retry.** `dispatchedScans` is now a count; the
+  retry test asserts 1 then 2. This is the same defect class as the `/nonexistent` test.
+- **The 3.6x cross-provider figure was not midpoint-consistent.** Floors give 3.61x, midpoints
+  give 4.03x, and the app serves midpoints. Documented as a 3.6-4.0x snapshot with the Codex
+  numerator's +/-12% quantization band, not as a constant.
+- **DSH archive capability: the review's cited URL 404s, but the claim is right.** Real source
+  is `.agents/notes/implemented/feature/2026-07-31-session-archive-global-set.md` in
+  deepseek-ai/deepseek-harness: `workspace.archiveSession` writes `archivedSessionIds` and the
+  session log is retained. DSH ships no unarchive surface — the AS gap-fill case. PREP's
+  "Archived history: none" was wrong and is now "investigate".
+- **DSH resume is undecided, not `dsh --resume=<id>`.** Upstream CLI README shows
+  `dsh --profile tui --resume <id>` and labels it a hypothetical example. Verified by fetch.
+
+**Key files:**
+- `AgentSessions/CodexStatus/WeeklyQuotaBootstrap.swift` — `calibratedPercentPointsPerDollar`,
+  `isCompatible`, `priceRevision`/`limitShape` stamps
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift` — `scopeGenerations`, prefix-filtered
+  `restored`, compatibility filtering in restore + migration
+- `AgentSessions/ClaudeStatus/ClaudeUsageModel.swift` — `hasExactPercent: false`, `limitShape`
+
+**Next:**
+1. Owner to review; nothing committed. `main` is 4 ahead of origin, unpushed.
+2. Codex's carry-over slot still holds the current window only (4pp) — no completed Codex
+   window is cached. Restate the cross-provider figure once there is one.
+3. Claude's bootstrap still persists under the literal scope `unscoped`; two Claude accounts
+   on one machine would share the slot. Needs an account identifier to fix properly.
+
+## 2026-08-30 15:12 · weekly-quota-calibration · Bootstrap cache fixes from external review
+status: superseded-by:2026-08-30 16:40
 
 **State:** Uncommitted on `main`. Suite **2349 pass / 3 skipped / 0 failures**, build clean
 (the two optional-interpolation warnings in `CodexStatusService` are fixed). Codex ran three
