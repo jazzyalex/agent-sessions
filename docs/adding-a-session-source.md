@@ -10,7 +10,7 @@ last_modified_at: 2026-08-29
 
 Verified against the Qwen Code source dogfood pass on 2026-08-17, after the Session
 Source Registry program completed
-([SPEC](superpowers/plans/2026-08-14-session-source-registry-SPEC.md)). Update the base
+([SPEC](https://github.com/jazzyalex/agent-sessions/blob/main/docs/superpowers/plans/2026-08-14-session-source-registry-SPEC.md)). Update the base
 commit in your PR evidence; this no-commit working pass deliberately does not invent one.
 
 This is the whole cost of the next agent. It is deliberately a *closed* list: if the
@@ -33,7 +33,7 @@ lives mostly inside your own folder. On top of it you owe eight baseline things:
    exist. Synthetic fixtures belong under `Resources/Fixtures/stage0/agents/<source>/`.
    A single-SQLite-file source may build its schema in-test instead — see the carve-out in §5.
 3. **The `SessionSource` case** and its four metadata arms in
-   [`SessionSource.swift`](../AgentSessions/Model/SessionSource.swift).
+   [`SessionSource.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSource.swift).
 4. **One line** in `SessionSourceRegistry.ordered`.
 5. **Project membership for every new Swift file**, via one `scripts/xcode_add_file.rb`
    invocation per file. The invocations all update the same pbxproj.
@@ -60,7 +60,7 @@ remain the explicit semantic edits in §6; do not assume those files are untouch
 **Pick your `versionIntroduced` carefully.** It must be **the upcoming real app
 version**, not a placeholder. What's New derives its provider-highlight rows from
 `SessionSource.versionIntroduced`
-([`WhatsNewCatalog`](../AgentSessions/Onboarding/Models/WhatsNewCatalog.swift)), so a
+([`WhatsNewCatalog`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Onboarding/Models/WhatsNewCatalog.swift)), so a
 wrong value either hides your source's announcement or attaches it to a release that
 already shipped. The shipped version is **4.8** (Grok), while Qwen is currently recorded
 for the upcoming **5.0** release. Confirm the intended release with the maintainer; another
@@ -107,7 +107,7 @@ resume tests.
 ### 3.1 The `SessionIndexerProtocol` conformance contract
 
 **Your indexer must conform to `SessionIndexerProtocol`**
-([`SessionIndexer.swift:41`](../AgentSessions/Services/SessionIndexer.swift)). This is a
+([`SessionIndexer.swift:41`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/SessionIndexer.swift)). This is a
 hard requirement, not a nicety: `SourceRuntime.indexerObject` is typed
 `any SessionIndexerProtocol & ObservableObject`, and `UnifiedTranscriptView` is generic
 over the protocol. If you write only the de-facto published surface, you get a compile
@@ -148,7 +148,7 @@ that reloads a shorter active branch whose discarded branch carried the previous
 ## 4. The descriptor and adapter
 
 One file, in your source's folder. Start from the closest current storage shape:
-[`GrokSourceDescriptor.swift`](../AgentSessions/Grok/GrokSourceDescriptor.swift) is a complete
+[`GrokSourceDescriptor.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Grok/GrokSourceDescriptor.swift) is a complete
 file-backed example, while `OpenCodeSourceDescriptor.swift` demonstrates identity-backed
 shared storage. Do not copy a descriptor without re-answering every capability field.
 
@@ -207,7 +207,7 @@ otherAgentPill: PillSpec(color: Color(nsColor: SessionSourceRegistry.resolvedBra
 ```
 
 The existing `Color.agent<X>` statics in
-[`AnalyticsColors.swift`](../AgentSessions/Analytics/Utilities/AnalyticsColors.swift) are
+[`AnalyticsColors.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Analytics/Utilities/AnalyticsColors.swift) are
 now thin aliases for `TranscriptColorSystem.agentBrandAccent(source:)`, which is itself
 `SessionSourceRegistry.resolvedBrandAccent(for:)`. Adding one for your source is optional
 convenience. The `agent<X>Gray` monochrome statics below them are superseded by
@@ -238,7 +238,7 @@ columns across five tables, archive folder names, and `SessionArchiveInfo`'s Cod
 form). Pick both carefully; you cannot change them later.
 
 You **do** add one row to
-[`SessionSourceKeyStabilityTests`](../AgentSessionsTests/SessionSourceKeyStabilityTests.swift)'s
+[`SessionSourceKeyStabilityTests`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessionsTests/SessionSourceKeyStabilityTests.swift)'s
 table — it asserts `table.map(\.0) == SessionSource.allCases`, so it fails until you do.
 See §7.
 
@@ -437,36 +437,36 @@ this table is complete.
 
 | # | File | Site |
 |---|---|---|
-| 1 | [`Model/SessionSource.swift`](../AgentSessions/Model/SessionSource.swift) | the case + `displayName` / `iconName` / `versionIntroduced` / `featureDescription` |
-| 2 | [`Model/SessionSourceRegistry.swift`](../AgentSessions/Model/SessionSourceRegistry.swift) | one line in `ordered`, in `allCases` position |
-| 3 | [`Model/Session.swift:656`](../AgentSessions/Model/Session.swift) | `computeIsHousekeeping(source:events:)` |
+| 1 | [`Model/SessionSource.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSource.swift) | the case + `displayName` / `iconName` / `versionIntroduced` / `featureDescription` |
+| 2 | [`Model/SessionSourceRegistry.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/SessionSourceRegistry.swift) | one line in `ordered`, in `allCases` position |
+| 3 | [`Model/Session.swift:656`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Model/Session.swift) | `computeIsHousekeeping(source:events:)` |
 | 4 | `Model/Session.swift:775, 798` | `storesAuthoritativeLightweightCwd`, `storesAuthoritativeLightweightTitle` |
-| 5 | [`Utilities/CodexSessionImagePayload.swift:223, 263, 323`](../AgentSessions/Utilities/CodexSessionImagePayload.swift) | three image-scan switches |
-| 6 | [`Utilities/ImageBrowserIndexCache.swift:103, 107, 143`](../AgentSessions/Utilities/ImageBrowserIndexCache.swift) | outer scanner switch + the two inner ones (made exhaustive by Task 8; they used to fall through `default:` and silently scan nothing) |
-| 7 | [`Views/TranscriptPlainView.swift:1097`](../AgentSessions/Views/TranscriptPlainView.swift) | the inline-image gate — a seventh image switch, easy to miss |
-| 8 | [`Services/UnifiedSessionIndexer.swift:2172`](../AgentSessions/Services/UnifiedSessionIndexer.swift) | `passesHasCommandsFilter` — say whether your source is judged on tool-call evidence or on an unparsed-means-command-free rule |
+| 5 | [`Utilities/CodexSessionImagePayload.swift:223, 263, 323`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Utilities/CodexSessionImagePayload.swift) | three image-scan switches |
+| 6 | [`Utilities/ImageBrowserIndexCache.swift:103, 107, 143`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Utilities/ImageBrowserIndexCache.swift) | outer scanner switch + the two inner ones (made exhaustive by Task 8; they used to fall through `default:` and silently scan nothing) |
+| 7 | [`Views/TranscriptPlainView.swift:1097`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Views/TranscriptPlainView.swift) | the inline-image gate — a seventh image switch, easy to miss |
+| 8 | [`Services/UnifiedSessionIndexer.swift:2172`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/UnifiedSessionIndexer.swift) | `passesHasCommandsFilter` — say whether your source is judged on tool-call evidence or on an unparsed-means-command-free rule |
 | 9 | `Services/UnifiedSessionIndexer.swift` (`include<Source>` block, ~`:372-402`) | one `@Published var include<Source>` with its `applyInclude` `didSet`. Forced *transitively*: `includeBinding(for:)` (item 13) and `ensureSourceIncludedForCockpitNavigation` (item 14) are exhaustive and can only be satisfied by naming this property |
 | 9b | `Services/UnifiedSessionIndexer.swift` (`<source>AgentEnabled` block, ~`:412-423`; `applyEnablement` `:902`) | **Convention-forced, not compiler-forced** — the only row in this table that is. `isAgentEnabled(_:)` is dictionary-backed, so the build succeeds without these; but every existing arm of `reloadSessionForSource` (item 15) reads `unified.<source>AgentEnabled`, so omitting the mirror leaves your source out of step with the other sources. Add the `@Published private(set) var` and the matching line in `applyEnablement` |
 | 9c | `Views/UnifiedSessionsView.swift` (`include<Source>` `.onChange` block, ~`:590-620`) | restart an in-flight search when the source include toggle changes. The session list reads the new value immediately, but an existing search keeps its old allow-list unless this observer calls `restartSearchIfRunning()` |
-| 10 | [`Services/AgentUpdateService.swift:372`](../AgentSessions/Services/AgentUpdateService.swift) | `profile(for:)` — your update-feed semantics, or `nil` (see grok's arm for why "there is a Homebrew formula" is not sufficient) |
-| 11 | [`Views/UnifiedSessionsView.swift:1453, 1490`](../AgentSessions/Views/UnifiedSessionsView.swift) | `canCopyResumeCommand`, `copyResumeCommand`. The registry's `supportsResume` is a pre-filter; these arms exist because several are *narrower* than it |
+| 10 | [`Services/AgentUpdateService.swift:372`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Services/AgentUpdateService.swift) | `profile(for:)` — your update-feed semantics, or `nil` (see grok's arm for why "there is a Homebrew formula" is not sufficient) |
+| 11 | [`Views/UnifiedSessionsView.swift:1453, 1490`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Views/UnifiedSessionsView.swift) | `canCopyResumeCommand`, `copyResumeCommand`. The registry's `supportsResume` is a pre-filter; these arms exist because several are *narrower* than it |
 | 11b | `Views/UnifiedSessionsView.swift:3141` (switch at `:3143`) | `canResumeSession` — the third member of the resume family, and the one items 11 and 12 are written against. `descriptor.supportsResume` guards it first, but the switch is exhaustive with no `default:`, so declare your per-session rule (droid/openclaw spell out an unreachable `return false` rather than inherit one) |
 | 12 | `Views/UnifiedSessionsView.swift:3164` | `resume(_:)` — made exhaustive by Task 8. Before that, a new source silently got a dead Resume button |
 | 13 | `Views/UnifiedSessionsView.swift:1924` | `includeBinding(for:)` — which include toggle your pill flips |
 | 14 | `Views/UnifiedSessionsView.swift:2427` | `ensureSourceIncludedForCockpitNavigation` |
 | 15 | `Views/UnifiedSessionsView.swift:2477` | `reloadSessionForSource` — needs your concrete indexer |
 | 16 | `Views/UnifiedSessionsView.swift:3933` | `TranscriptHostView`: a stored indexer property + your transcript layer. **The layers are selected by `opacity`, not by a switch**, so omitting the layer is not a compile error — it renders an empty transcript. Grok shipped exactly that way once |
-| 17 | [`Views/PreferencesView.swift:1103`](../AgentSessions/Views/PreferencesView.swift) | the `PreferencesTab` case |
+| 17 | [`Views/PreferencesView.swift:1103`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Views/PreferencesView.swift) | the `PreferencesTab` case |
 | 18 | `Views/PreferencesView.swift:1128, 1154` | `PreferencesTab.title`, `PreferencesTab.iconName` |
 | 19 | `Views/PreferencesView.swift:1192, 1212` | `PreferencesTab.init(source:)` and `configuredSource` — the bijection the sidebar derives from |
 | 19b | `Views/PreferencesView.swift:1242` | `PreferencesTab.sidebarAgentSources` — **a hand-maintained literal, the second one in the codebase after `SessionSourceRegistry.ordered`**. It is *not* registry order: the rows are frozen sidebar history, so membership is test-enforced but sequence is not derivable. Append your source (unless you are deliberately hiding it, like droid, via `sidebarHiddenSources`) |
 | 20 | `Views/PreferencesView.swift:394` | `tabBody` — route your tab case to your pane |
 | 21 | `Views/PreferencesView.swift:904, 921, 950, 1536` | the probe quartet: `reprobeAgentBinary(_:)`, `resolvedBinaryPath(for:)`, `customBinaryPath(for:)`, `maybeProbe(for:)` |
 | 21b | `Views/PreferencesView.swift` (`resetToDefaults`, ~`:735-812`) | clear every source-specific binary/root override, revalidate the corresponding fields, and reprobe availability. This is not descriptor-derived; omission leaves custom settings active after Reset to Defaults |
-| 22 | `Views/PreferencesView.swift:~81` + [`Views/Preferences/PreferencesView+General.swift:459`](../AgentSessions/Views/Preferences/PreferencesView+General.swift) | one `@AppStorage` property on `PreferencesView` + one arm in `agentEnablementBinding(for:)` |
-| 23 | [`Analytics/Models/AnalyticsDateRange.swift:51, 82`](../AgentSessions/Analytics/Models/AnalyticsDateRange.swift) | `AnalyticsAgentFilter` case + its `matches(_:)` arm. Two-stage: `matches(_:)` switches over `self`, not over `SessionSource`, so the *case* is test-forced (§6.B) and only once you add it does the compiler demand the arm. `AnalyticsService.sourcesFor(_:)` derives from `matches` and needs nothing |
-| 24 | [`Analytics/Views/AnalyticsView.swift`](../AgentSessions/Analytics/Views/AnalyticsView.swift) (`@AppStorage` block ~`:8-20`; `isEnabled(_:)` `:43`) | one `@AppStorage` property + one arm |
-| 25 | [`Onboarding/Views/FirstRunSetupView.swift`](../AgentSessions/Onboarding/Views/FirstRunSetupView.swift) (`@AppStorage` block ~`:20-32`; `isAgentEnabled(_:)` `:369`) | one `@AppStorage` property + one arm |
+| 22 | `Views/PreferencesView.swift:~81` + [`Views/Preferences/PreferencesView+General.swift:459`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Views/Preferences/PreferencesView+General.swift) | one `@AppStorage` property on `PreferencesView` + one arm in `agentEnablementBinding(for:)` |
+| 23 | [`Analytics/Models/AnalyticsDateRange.swift:51, 82`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Analytics/Models/AnalyticsDateRange.swift) | `AnalyticsAgentFilter` case + its `matches(_:)` arm. Two-stage: `matches(_:)` switches over `self`, not over `SessionSource`, so the *case* is test-forced (§6.B) and only once you add it does the compiler demand the arm. `AnalyticsService.sourcesFor(_:)` derives from `matches` and needs nothing |
+| 24 | [`Analytics/Views/AnalyticsView.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Analytics/Views/AnalyticsView.swift) (`@AppStorage` block ~`:8-20`; `isEnabled(_:)` `:43`) | one `@AppStorage` property + one arm |
+| 25 | [`Onboarding/Views/FirstRunSetupView.swift`](https://github.com/jazzyalex/agent-sessions/blob/main/AgentSessions/Onboarding/Views/FirstRunSetupView.swift) (`@AppStorage` block ~`:20-32`; `isAgentEnabled(_:)` `:369`) | one `@AppStorage` property + one arm |
 | 26 | your indexer | `SessionIndexerProtocol` conformance (§3.1) — surfaces at `makeRuntime` |
 
 Items 22, 24 and 25 are the same shape three times: SwiftUI's `@AppStorage` is a property
@@ -587,7 +587,7 @@ capabilities and limitations.
 
 A green suite proves the fixtures parse; it does not prove the app reads your agent. Before
 marking the PR ready, run the app against your own sessions and answer the checklist in
-[docs/CONTRIBUTING.md](CONTRIBUTING.md) → "Testing your source against your own sessions".
+[docs/CONTRIBUTING.md](https://github.com/jazzyalex/agent-sessions/blob/main/docs/CONTRIBUTING.md) → "Testing your source against your own sessions".
 Most of it nobody else can do for you — a maintainer without the agent installed cannot tell
 whether Resume actually reopens a session.
 

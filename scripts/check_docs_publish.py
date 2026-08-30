@@ -12,6 +12,13 @@ Two failure modes this catches, both silent otherwise:
 2. A must-serve path is added to `exclude:`. Excluding `appcast.xml` breaks the
    Sparkle feed and therefore auto-update for every installed copy.
 
+3. A published markdown page links to something that only exists in the repo.
+   `jekyll-relative-links` rewrites `[x](../AgentSessions/Foo.swift)` into a site
+   URL that 404s, because Swift sources are not part of the site. That link works
+   perfectly when the same file is read on GitHub, so it is invisible until
+   someone loads the published page. `adding-a-session-source.md` shipped 21 of
+   them. Repo files must be linked by absolute github.com/blob URL.
+
 No third-party imports: this runs in CI before anything is installed. The
 `exclude:` block is parsed by hand, with enough assertions that a silent
 mis-parse fails loudly instead of passing everything.
@@ -90,6 +97,45 @@ def die(message):
     raise SystemExit(1)
 
 
+MD_LINK = re.compile(r"\]\(\s*([^)\s]+)")
+DOCS = os.path.join(REPO_ROOT, "docs")
+
+
+def published_markdown():
+    """Markdown files that GitHub Pages actually serves as pages."""
+    paths = [os.path.join(DOCS, name) for name in sorted(PUBLIC_ROOT_MARKDOWN)]
+    paths += sorted(glob.glob(os.path.join(DOCS, "prompts", "*.md")))
+    paths += sorted(glob.glob(os.path.join(DOCS, "bench", "*.md")))
+    return [p for p in paths if os.path.exists(p)]
+
+
+def check_relative_links(excludes):
+    """A relative link that escapes docs/ (or hits an excluded file) 404s on the site."""
+    problems = []
+    for path in published_markdown():
+        rel_page = os.path.relpath(path, REPO_ROOT)
+        for target in set(MD_LINK.findall(open(path, encoding="utf-8").read())):
+            if re.match(r"^[a-z][a-z0-9+.-]*:", target) or target.startswith(("#", "//")):
+                continue
+            bare = target.split("#")[0].split("?")[0]
+            if not bare:
+                continue
+            resolved = os.path.normpath(os.path.join(os.path.dirname(path), bare))
+            inside = os.path.commonpath([DOCS, resolved]) == DOCS
+            if not inside:
+                problems.append(
+                    "%s links to %s, which is outside docs/ and 404s on the site. "
+                    "Link repo files by absolute github.com/.../blob/main/ URL."
+                    % (rel_page, target)
+                )
+            elif os.path.relpath(resolved, DOCS) in excludes:
+                problems.append(
+                    "%s links to %s, which is in `exclude:` and therefore not served."
+                    % (rel_page, target)
+                )
+    return problems
+
+
 def main():
     excludes = set(parse_excludes(CONFIG))
 
@@ -120,14 +166,22 @@ def main():
                 "Drop it from this script." % name
             )
 
+    problems += check_relative_links(excludes)
+
     if problems:
         for problem in problems:
             print("ERROR: " + problem, file=sys.stderr)
         raise SystemExit(1)
 
     print(
-        "OK: %d root docs/*.md checked, %d excluded, %d intentionally public"
-        % (len(root_markdown), len(excludes), len(PUBLIC_ROOT_MARKDOWN))
+        "OK: %d root docs/*.md checked, %d excluded, %d intentionally public, "
+        "%d published markdown pages link-checked"
+        % (
+            len(root_markdown),
+            len(excludes),
+            len(PUBLIC_ROOT_MARKDOWN),
+            len(published_markdown()),
+        )
     )
 
 
