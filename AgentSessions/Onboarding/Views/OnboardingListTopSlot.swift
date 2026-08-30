@@ -66,11 +66,14 @@ struct OnboardingListTopSlot: View {
                     palette: palette,
                     majorMinor: version,
                     teaser: WhatsNewCatalog.teaser(for: version),
-                    onOpen: { coordinator.openWhatsNewPanel(version: version) },
+                    onOpen: { coordinator.openWhatsNewFromCard(version: version) },
                     onDismiss: { coordinator.dismissWhatsNewCard() }
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+                // Being ignored is an answer. The coordinator counts one
+                // impression per launch however often this fires.
+                .onAppear { coordinator.noteWhatsNewCardShown() }
             } else if showsQuotaMeterCard {
                 QuotaMeterCard(
                     palette: palette,

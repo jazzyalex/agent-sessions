@@ -18,13 +18,14 @@ final class OnboardingStarCardTests: XCTestCase {
     private func makeCoordinator(
         defaults: UserDefaults,
         version: String = "4.6",
-        now: Date = OnboardingStarCardTests.referenceNow
+        now: Date = OnboardingStarCardTests.referenceNow,
+        whatsNewAvailable: Bool = false
     ) -> OnboardingCoordinator {
         OnboardingCoordinator(
             defaults: defaults,
             currentMajorMinorProvider: { version },
             isFreshInstallProvider: { false },
-            whatsNewAvailableProvider: { _ in false },
+            whatsNewAvailableProvider: { _ in whatsNewAvailable },
             now: { now }
         )
     }
@@ -92,6 +93,28 @@ final class OnboardingStarCardTests: XCTestCase {
         let coordinator = makeCoordinator(defaults: defaults)
         coordinator.whatsNewMajorMinor = "4.6"
         XCTAssertFalse(coordinator.shouldShowStarCard())
+    }
+
+    /// The sibling that matters: What's New wins the slot, but not forever.
+    /// Before the impression cap the star ask could wait behind an ignored
+    /// What's New card indefinitely, because ignoring one recorded nothing.
+    @MainActor
+    func testStarCardReachesTheSlotOnceWhatsNewStandsDown() {
+        let defaults = makeDefaults("Star.whatsNewStandsDown")
+        markRetained(defaults)
+
+        for _ in 0..<OnboardingCoordinator.whatsNewMaxImpressionsPerVersion {
+            let launch = makeCoordinator(defaults: defaults, whatsNewAvailable: true)
+            launch.checkAndPresentIfNeeded()
+            XCTAssertNotNil(launch.whatsNewMajorMinor)
+            XCTAssertFalse(launch.shouldShowStarCard())
+            launch.noteWhatsNewCardShown()
+        }
+
+        let fourth = makeCoordinator(defaults: defaults, whatsNewAvailable: true)
+        fourth.checkAndPresentIfNeeded()
+        XCTAssertNil(fourth.whatsNewMajorMinor)
+        XCTAssertTrue(fourth.shouldShowStarCard())
     }
 
     @MainActor

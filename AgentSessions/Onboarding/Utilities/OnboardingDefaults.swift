@@ -6,6 +6,8 @@ extension UserDefaults {
         static let fullTourCompleted = "OnboardingFullTourCompleted"
         static let lastSeenAppMajorMinor = "OnboardingLastSeenAppMajorMinor"
         static let whatsNewDismissedMajorMinor = "OnboardingWhatsNewDismissedMajorMinor"
+        static let whatsNewImpressions = "OnboardingWhatsNewImpressions"
+        static let whatsNewImpressionsVersion = "OnboardingWhatsNewImpressionsVersion"
         static let firstLaunchDate = "OnboardingFirstLaunchDate"
         static let sessionsOpenedCount = "OnboardingSessionsOpenedCount"
         static let feedbackAskState = "OnboardingFeedbackAskState"
@@ -126,11 +128,38 @@ extension UserDefaults {
         set { set(newValue, forKey: OnboardingKeys.lastSeenAppMajorMinor) }
     }
 
-    /// The major.minor version whose What's New card the user explicitly dismissed.
-    /// Once set to a version, that version's card never re-appears.
+    /// The major.minor version whose What's New card the user has answered. Once
+    /// set to a version, that version's card never re-appears.
+    ///
+    /// Written by both of the card's controls: the ✕, and "See what's new" —
+    /// reading the notes is as complete an answer as dismissing them, and the
+    /// card sits ahead of every other ask in the top slot, so leaving it armed
+    /// after the user engaged blocks the whole queue behind it.
+    ///
+    /// The key name still says `Dismissed` and must keep saying so: renaming it
+    /// would silently reset the flag for every installed user and resurrect a
+    /// card they already answered.
     var onboardingWhatsNewDismissedMajorMinor: String? {
         get { string(forKey: OnboardingKeys.whatsNewDismissedMajorMinor) }
         set { set(newValue, forKey: OnboardingKeys.whatsNewDismissedMajorMinor) }
+    }
+
+    /// Launches that have shown the current version's What's New card without
+    /// the user answering it. Caps how long an ignored card can hold the slot.
+    var onboardingWhatsNewImpressions: Int {
+        get { integer(forKey: OnboardingKeys.whatsNewImpressions) }
+        set { set(newValue, forKey: OnboardingKeys.whatsNewImpressions) }
+    }
+
+    /// The major.minor `onboardingWhatsNewImpressions` was counted for.
+    ///
+    /// Scoping the counter to a version rather than clearing it on a bump keeps
+    /// the reset implicit and idempotent: a counter stamped with another version
+    /// is zero by definition, so there is no launch-ordering hazard and no
+    /// migration for installs that predate the key.
+    var onboardingWhatsNewImpressionsVersion: String? {
+        get { string(forKey: OnboardingKeys.whatsNewImpressionsVersion) }
+        set { set(newValue, forKey: OnboardingKeys.whatsNewImpressionsVersion) }
     }
 
     /// The date of the first launch (set once). Drives the 14-day feedback trigger.

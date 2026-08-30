@@ -41,6 +41,12 @@ final class OnboardingCoordinator: ObservableObject {
     /// the slot for itself.
     static let starAskPriorityAfterDays: Double = 14
 
+    /// Launches a version's What's New card may go unanswered before it stands
+    /// down. Same budget and same reasoning as the star ask: ignoring a card is
+    /// an answer, and without this the card returns on every launch until the
+    /// next minor, holding the slot against every ask queued behind it.
+    static let whatsNewMaxImpressionsPerVersion = 3
+
     /// Where "Contribute an agent" sends the user: the repository's structured
     /// proposal form. Built from `githubRepositoryURL` so the card, the menu
     /// item, and this can never drift onto different repositories.
@@ -188,6 +194,8 @@ final class OnboardingCoordinator: ObservableObject {
     /// One impression per launch, not per render: `.onAppear` fires again every
     /// time the list rebuilds the card.
     private var didCountStarImpressionThisLaunch: Bool = false
+    /// Same one-impression-per-launch rule for the What's New card.
+    private var didCountWhatsNewImpressionThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the contribute card.
     private var didCountContributeImpressionThisLaunch: Bool = false
     /// Same one-impression-per-launch rule for the steward card.
@@ -274,7 +282,15 @@ final class OnboardingCoordinator: ObservableObject {
         if defaults.onboardingWhatsNewDismissedMajorMinor == current { return false }
         // Legacy signal: a version already actioned via the old update tour never re-flags.
         if defaults.onboardingLastActionMajorMinor == current { return false }
+        // Silence is an answer, same as every other card in the top slot.
+        if whatsNewImpressionBudgetSpent(for: current) { return false }
         return whatsNewAvailableProvider(current)
+    }
+
+    /// Whether this version's card has already had its three launches.
+    private func whatsNewImpressionBudgetSpent(for majorMinor: String) -> Bool {
+        guard defaults.onboardingWhatsNewImpressionsVersion == majorMinor else { return false }
+        return defaults.onboardingWhatsNewImpressions >= Self.whatsNewMaxImpressionsPerVersion
     }
 
     /// Preserves the historical 2.11 → 2.12 suppression from the old update-tour matrix.
@@ -319,6 +335,52 @@ final class OnboardingCoordinator: ObservableObject {
     func openWhatsNewPanel(version: String?) {
         whatsNewPanelVersion = version ?? currentMajorMinorProvider()
         isWhatsNewPanelPresented = true
+    }
+
+    /// The card's primary action. Reading the notes is an answer: it records the
+    /// version handled exactly as the ✕ does, so the card does not return next
+    /// launch and the queue behind it advances.
+    ///
+    /// Deliberately a separate entry point rather than a flag on
+    /// `openWhatsNewPanel(version:)`, which Help → What's New also calls: a
+    /// defaulted parameter is one forgotten argument away from the menu
+    /// retiring a card the user never saw.
+    ///
+    /// Spends the launch's ask for the same reason `dismissWhatsNewCard()` and
+    /// `recordQuotaMeterActivated()` do — someone who just acted should not have
+    /// the next card swapped in behind the opening panel.
+    func openWhatsNewFromCard(version: String) {
+        // Only an armed card can retire a version, mirroring the guard in
+        // `dismissWhatsNewCard()`. This is what makes the separate entry point
+        // structurally safe rather than safe by convention: a future caller that
+        // reaches it without the card on screen gets the panel and nothing else,
+        // instead of silently retiring a card the user never saw.
+        if whatsNewMajorMinor != nil {
+            defaults.onboardingWhatsNewDismissedMajorMinor = version
+            didConsumeTopSlotAskThisLaunch = true
+            whatsNewMajorMinor = nil
+        }
+        openWhatsNewPanel(version: version)
+    }
+
+    /// Records that this launch put the What's New card on screen.
+    ///
+    /// Mirrors `noteStarCardShown()`: the view calls it from `.onAppear` while
+    /// rendering, so it must be idempotent within a launch. Spending the budget
+    /// does not clear `whatsNewMajorMinor` — the card stays for the rest of this
+    /// launch and stands down starting with the next one, because a card that
+    /// vanishes while it is being read is worse than one that stays a launch too
+    /// long.
+    func noteWhatsNewCardShown() {
+        guard !didCountWhatsNewImpressionThisLaunch else { return }
+        guard let current = currentMajorMinorProvider() else { return }
+        didCountWhatsNewImpressionThisLaunch = true
+
+        if defaults.onboardingWhatsNewImpressionsVersion != current {
+            defaults.onboardingWhatsNewImpressionsVersion = current
+            defaults.onboardingWhatsNewImpressions = 0
+        }
+        defaults.onboardingWhatsNewImpressions += 1
     }
 
     /// Help → What's New — always opens the panel for the current version, even if
