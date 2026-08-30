@@ -454,6 +454,29 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// Latest weekly consumption seen per provider, so a stored bootstrap's
     /// numerator can be kept current without rescanning.
     private var latestUsedPercentPoints: [String: Double] = [:]
+    /// The window that `latestUsedPercentPoints` was reported against. Freshening
+    /// pairs a numerator with a denominator, and the two must describe the SAME
+    /// window — see `freshenedBootstrapRatio`.
+    private var latestResetsAt: [String: Date] = [:]
+    /// Scope (account) each provider's in-memory state belongs to. The persisted
+    /// keys are account-scoped, but the maps here are keyed by provider alone, so
+    /// without this an in-process account switch keeps serving the previous
+    /// account's calibration.
+    private var activeScopeKeys: [String: String] = [:]
+    /// Providers whose older anchor-keyed caches have been folded into the
+    /// carry-over slot. Once per process; see `migrateHistoricalBootstraps`.
+    private var migratedProviders: Set<String> = []
+    /// Earliest retry after a failed scan, so a provider whose transcripts cannot
+    /// be priced does not rescan on every 5s runway cycle.
+    private var scanCooldownUntil: [String: Date] = [:]
+    /// Providers a scan has ever been dispatched for. Test observability only:
+    /// dispatch and success must be distinguishable, since retry-after-failure is
+    /// the behavior under test.
+    private var dispatchedScans: Set<String> = []
+    /// Backoff after a scan that returned nothing usable. Long enough that a
+    /// permanently unscannable root costs one walk per interval, short enough that
+    /// a transient read failure self-heals well inside a weekly window.
+    static let failedScanCooldown: TimeInterval = 600
     /// Best-conditioned bootstrap ever seen for a provider (largest numerator),
     /// retained across weekly resets. See `bestConditionedBootstrap`.
     private var bestBootstraps: [String: WeeklyQuotaBootstrapResult] = [:]
@@ -496,6 +519,12 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// plan, not the window, so the best measurement must outlive the window it
     /// came from — otherwise every weekly reset orphans it and the fresh window
     /// has ~0% consumed to divide by, stranding the UI on "n/a" for hours.
+    /// Prefix shared by every anchor-keyed bootstrap cache for one provider+scope.
+    /// Used to sweep prior windows into the carry-over slot.
+    private static func bootstrapKeyPrefix(provider: String, accountHash: String?) -> String {
+        "quotaMeter.weeklyBootstrap.\(provider).\(accountHash ?? "unscoped")."
+    }
+
     private static func bestBootstrapKey(provider: String, accountHash: String?) -> String {
         "quotaMeter.weeklyBootstrapBest.\(provider).\(accountHash ?? "unscoped")"
     }
@@ -550,6 +579,15 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                          bootstrap: WeeklyQuotaBootstrapResult,
                                          now: Date) -> Double? {
         guard let reported = latestUsedPercentPoints[provider], reported > 0 else { return nil }
+        // Both terms must describe the same window. `bestConditionedBootstrap` may
+        // hand back a measurement carried over from a PREVIOUS week — that ratio is
+        // still the best estimate of the plan's conversion, but its dollars are the
+        // old window's. Pairing them with this window's percent yields a number that
+        // belongs to neither: a carried 77pp/$1240 alongside a fresh week reporting
+        // 1pp would serve 1.5/1240 instead of 77/1240, understating by ~50x.
+        guard let currentAnchor = latestResetsAt[provider],
+              abs(bootstrap.resetsAt.timeIntervalSince(currentAnchor))
+                < CodexWeeklyQuotaBootstrapScanner.anchorTolerance else { return nil }
         // Midpoint, not the reported floor. A provider reporting "2" means true
         // consumption is somewhere in [2, 3); taking 2 biases every estimate low,
         // and the bias is worst exactly where the numerator is smallest.
@@ -645,6 +683,52 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         return accepted
     }
 
+    /// Fold every stored window's measurement into the carry-over slot, once per
+    /// process.
+    ///
+    /// The carry-over slot is meant to hold the best-conditioned ratio ever seen,
+    /// but the restore path only ever read two keys: the slot itself and the
+    /// CURRENT anchor's cache. Anchor caches from previous windows were therefore
+    /// invisible, and the very first launch after the slot was introduced seeded it
+    /// from whatever the current window happened to hold. Observed on a live
+    /// account: a completed week measured at 77pp/$1239.83 (0.0621 pp/$) sat on
+    /// disk while the slot served the fresh window's 7pp/$142.71 (0.0491 pp/$) —
+    /// a 21% understatement of every Claude session's %/h, with the better
+    /// measurement already present and simply unread.
+    ///
+    /// Cheap enough for the poll path: one dictionary snapshot, then decoding only
+    /// the handful of keys under this provider's prefix.
+    private func migrateHistoricalBootstraps(provider: String,
+                                             accountHash: String?,
+                                             bestKey: String,
+                                             defaults: UserDefaults) {
+        lock.lock()
+        let alreadyMigrated = migratedProviders.contains(provider)
+        if !alreadyMigrated { migratedProviders.insert(provider) }
+        lock.unlock()
+        guard !alreadyMigrated else { return }
+
+        let prefix = Self.bootstrapKeyPrefix(provider: provider, accountHash: accountHash)
+        var best: WeeklyQuotaBootstrapResult?
+        for (key, value) in defaults.dictionaryRepresentation() where key.hasPrefix(prefix) {
+            guard let data = value as? Data,
+                  let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
+                  cached.percentPointsPerDollar != nil else { continue }
+            if cached.usedPercentPoints > (best?.usedPercentPoints ?? 0) { best = cached }
+        }
+        guard let best else { return }
+
+        lock.lock()
+        let isBetter = (bestBootstraps[provider]?.usedPercentPoints ?? 0) < best.usedPercentPoints
+        if isBetter { bestBootstraps[provider] = best }
+        lock.unlock()
+        guard isBetter, let encoded = try? JSONEncoder().encode(best) else { return }
+        defaults.set(encoded, forKey: bestKey)
+        CodexWeeklyQuotaBootstrapScanner.debugLog(
+            "BOOTSTRAP MIGRATED provider=\(provider) used=\(best.usedPercentPoints)pp "
+            + "ppPerDollar=\(best.percentPointsPerDollar ?? -1)")
+    }
+
     /// Compute the historical calibration for the current weekly window, once per
     /// anchor, off the main thread. Safe to call on every usage poll.
     func ensureBootstrap(provider: String,
@@ -657,9 +741,27 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                          defaults: UserDefaults = .standard) {
         let storeKey = Self.bootstrapKey(provider: provider, accountHash: accountHash, resetsAt: resetsAt)
         let bestKey = Self.bestBootstrapKey(provider: provider, accountHash: accountHash)
+        let scopeKey = accountHash ?? "unscoped"
         var promoted: WeeklyQuotaBootstrapResult?
         lock.lock()
+        // The persisted keys are account-scoped but these maps are not, so a
+        // same-process account switch would otherwise keep serving the previous
+        // account's calibration under the new account's name.
+        if let previous = activeScopeKeys[provider], previous != scopeKey {
+            bootstraps[provider] = nil
+            bestBootstraps[provider] = nil
+            trackers[provider] = nil
+            ledgers[provider] = nil
+            latestResetsAt[provider] = nil
+            restored.remove(provider)
+            migratedProviders.remove(provider)
+            scanCooldownUntil[provider] = nil
+            dispatchedScans.remove(provider)
+            scannedAnchors = scannedAnchors.filter { !$0.hasPrefix("\(provider)|") }
+        }
+        activeScopeKeys[provider] = scopeKey
         latestUsedPercentPoints[provider] = usedPercentPoints
+        latestResetsAt[provider] = resetsAt
         // Restore the carried-over measurement once per process. Without this the
         // cross-reset carry only works while the app keeps running.
         if bestBootstraps[provider] == nil,
@@ -669,6 +771,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
+        migrateHistoricalBootstraps(provider: provider,
+                                    accountHash: accountHash,
+                                    bestKey: bestKey,
+                                    defaults: defaults)
 
         // Restore first, synchronously: a cached ratio for this exact window makes
         // the very first frame after launch a real number instead of a clock, and
@@ -702,20 +808,42 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // Re-scan when the window has moved on enough that the stored ratio is
         // materially less accurate than a fresh one would be.
         let anchorKey = "\(provider)|\(Int(resetsAt.timeIntervalSince1970))|\(Int(usedPercentPoints / Self.bootstrapRefreshGrowthPercentPoints))"
+        // Two independent triggers, because either alone leaves a stale ratio.
+        //
+        // Growth: the window has consumed enough more that a fresh scan is better
+        // conditioned than the stored one.
+        //
+        // Age: the ledger can only extend a denominator within its own retention
+        // window, so once the stored scan is older than that, nothing can freshen
+        // it. Observed on a live account — a ratio scanned the previous day was
+        // still being served while real spend against the same integer percent had
+        // grown 14%, and the growth trigger could never fire because the reported
+        // percent had not moved.
         let staleEnough = stored.map {
             usedPercentPoints - $0.usedPercentPoints >= Self.bootstrapRefreshGrowthPercentPoints
+                || now.timeIntervalSince($0.scannedAt) > WeeklyQuotaActivityLedger.retention
         } ?? true
         guard staleEnough else { return }
 
+        // `scannedAnchors` records SUCCESSES, never attempts. Marking on dispatch
+        // looks equivalent and is not: every failure path below returns without
+        // clearing it, so one unreadable root or unpriced week would retire this
+        // bucket permanently and pin the very stale ratio the rescan exists to
+        // replace. It also created a startup dead zone — a window at 0pp is
+        // rejected by the scanner for having nothing to divide, and 0pp/1pp/2pp
+        // share a bucket, so the burnt attempt blocked any retry until 3pp.
+        // Failures back off on a cooldown instead.
         lock.lock()
-        let alreadyHandled = scannedAnchors.contains(anchorKey) || scansInFlight.contains(provider)
-        if !alreadyHandled { scannedAnchors.insert(anchorKey) }
+        let blocked = scannedAnchors.contains(anchorKey)
+            || scansInFlight.contains(provider)
+            || (scanCooldownUntil[provider].map { now < $0 } ?? false)
+        if !blocked {
+            scansInFlight.insert(provider)
+            scanStartedAt[provider] = now
+            dispatchedScans.insert(provider)
+        }
         lock.unlock()
-        guard !alreadyHandled else { return }
-        lock.lock()
-        scansInFlight.insert(provider)
-        scanStartedAt[provider] = now
-        lock.unlock()
+        guard !blocked else { return }
 
         DispatchQueue.global(qos: .utility).async {
             defer {
@@ -730,6 +858,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             let scan = provider == "claude"
                 ? ClaudeWeeklyQuotaBootstrapScanner.scan
                 : CodexWeeklyQuotaBootstrapScanner.scan
+            func backOff() {
+                self.lock.lock()
+                self.scanCooldownUntil[provider] = now.addingTimeInterval(Self.failedScanCooldown)
+                self.lock.unlock()
+            }
             guard let result = scan(
                 root,
                 resetsAt,
@@ -738,12 +871,14 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 RunwayPriceTable.shared,
                 now,
                 FileManager.default
-            ) else { return }
+            ) else { backOff(); return }
             // A week can contain one slug the price table has never seen without
             // meaningfully moving the ratio; a large unknown share cannot.
             guard result.unpricedVolumeShare <= CodexWeeklyQuotaBootstrapScanner.maximumUnpricedShare,
-                  result.percentPointsPerDollar != nil else { return }
+                  result.percentPointsPerDollar != nil else { backOff(); return }
             self.lock.lock()
+            self.scannedAnchors.insert(anchorKey)
+            self.scanCooldownUntil[provider] = nil
             self.bootstraps[provider] = result
             let isBest = (self.bestBootstraps[provider]?.usedPercentPoints ?? 0) <= result.usedPercentPoints
             if isBest { self.bestBootstraps[provider] = result }
@@ -767,6 +902,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         bootstraps.removeAll()
         bestBootstraps.removeAll()
         latestUsedPercentPoints.removeAll()
+        latestResetsAt.removeAll()
+        activeScopeKeys.removeAll()
+        migratedProviders.removeAll()
+        scanCooldownUntil.removeAll()
+        dispatchedScans.removeAll()
         scannedAnchors.removeAll()
         scansInFlight.removeAll()
         scanStartedAt.removeAll()
@@ -789,9 +929,39 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         bestBootstraps[provider] = result
     }
 
-    func recordUsedPercentForTesting(provider: String, usedPercentPoints: Double) {
+    /// Whether a rescan was DISPATCHED for this provider. Distinct from
+    /// `scanSucceededForTesting`: a dispatched scan may still fail, and the whole
+    /// point of the cooldown is that failure stays retryable.
+    func scanWasDispatchedForTesting(provider: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return dispatchedScans.contains(provider)
+    }
+
+    /// Whether a scan for this provider completed with a usable result.
+    func scanSucceededForTesting(provider: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return scannedAnchors.contains { $0.hasPrefix("\(provider)|") }
+    }
+
+    /// True while a failed scan is backing off. A blocked retry here is a bug when
+    /// the cooldown has elapsed.
+    func scanIsCoolingDownForTesting(provider: String, now: Date = Date()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return scanCooldownUntil[provider].map { now < $0 } ?? false
+    }
+
+    func clearScanCooldownForTesting(provider: String) {
+        lock.lock(); defer { lock.unlock() }
+        scanCooldownUntil[provider] = nil
+        dispatchedScans.remove(provider)
+    }
+
+    func recordUsedPercentForTesting(provider: String,
+                                     usedPercentPoints: Double,
+                                     resetsAt: Date? = nil) {
         lock.lock(); defer { lock.unlock() }
         latestUsedPercentPoints[provider] = usedPercentPoints
+        if let resetsAt { latestResetsAt[provider] = resetsAt }
     }
     #endif
 }

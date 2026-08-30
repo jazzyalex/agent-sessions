@@ -1,3 +1,140 @@
+## 2026-08-30 15:12 · weekly-quota-calibration · Bootstrap cache fixes from external review
+status: in-progress
+
+**State:** Uncommitted on `main`. Suite **2349 pass / 3 skipped / 0 failures**, build clean
+(the two optional-interpolation warnings in `CodexStatusService` are fixed). Codex ran three
+reviews of `792161fe` + the uncommitted age-trigger patch; findings verified one by one, five
+accepted and one rejected on evidence. Live app relaunched and the fix confirmed working.
+
+**Decided / don't redo:**
+- **Claude quantizes weekly percent to whole points, same as Codex.** Fetched the live payload:
+  `five_hour.utilization 27.0`, `seven_day.utilization 11.0`, `limits[].percent: 27` (literal
+  JSON integer). `weeklyUsedRatio` is a `Double` only because the normalizer divides by 100.
+  The `+0.5` midpoint is CORRECT for both providers — the review's claim that Claude is exact
+  and wrongly midpointed is **rejected**. Do not remove it.
+- **Root cause of the Claude understatement: restore read only two keys** (the carry-over slot
+  and the current anchor's cache), so a completed week already on disk was never seen. Live:
+  77pp/$1239.62 = 0.0621 pp/$ ignored in favour of 7pp/$142.71 = 0.0491. Fixed by sweeping every
+  `quotaMeter.weeklyBootstrap.<provider>.<scope>.*` key once per process. Confirmed live —
+  `BOOTSTRAP MIGRATED provider=claude used=77.0pp ppPerDollar=0.062115…` at 21:59:13Z, and the
+  persisted best slot now reads 0.06212.
+- My earlier claim to the owner that "Claude can only be fixed prospectively" was **wrong**; the
+  measurement was already captured and merely unread.
+- **Anchors record scan SUCCESSES, never dispatches.** Marking on dispatch meant every failure
+  path retired that refresh bucket permanently, plus a startup dead zone (0pp is rejected by the
+  scanner, and 0/1/2pp share a bucket, so nothing retried until 3pp). Failures back off 10 min.
+- **Freshening must not cross a window boundary.** It pairs the current reported percent with a
+  stored denominator, and the stored one may be a carried-over previous week.
+- A test that scans `/nonexistent` and asserts only that a scan launched proves nothing — that
+  scan MUST fail. Dispatch and success are now separate test observations.
+- Cross-provider answer for the owner: Codex burns ~**3.6x** more weekly quota per
+  API-equivalent dollar than Claude on the same $100/mo tier. Real, not an artifact — both
+  windows ran 93–98% cache reads. The app previously showed ~6x because Claude read 27% low and
+  Codex ~32% high.
+
+**Key files:**
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift` — `migrateHistoricalBootstraps`,
+  anchor guard in `freshenedBootstrapRatio`, success-only `scannedAnchors` + `scanCooldownUntil`,
+  scope-change clearing
+- `AgentSessionsTests/WeeklyQuotaCalibrationTests.swift` — new `WeeklyQuotaBootstrapCacheTests`
+  (7 tests). Fixture gotcha: the scanner requires `windowStart < now` and turns `at <= now`, so a
+  fixture turn must sit strictly inside the elapsed part of the window.
+- `docs/superpowers/plans/2026-08-29-weekly-quota-calibration-SPEC.md` — §4, §7, §8, §9 updated;
+  the "agree within quantization" claim is withdrawn (the two Claude windows differ by 26%).
+
+**Next:**
+1. Owner to review and say whether to commit — nothing is committed or pushed.
+2. Codex's carry-over slot still holds only the current window (4pp/$13.56). It will improve as
+   the week accrues now that the growth and age triggers both work; no completed Codex window is
+   cached to migrate.
+3. Open by design: the ~30s sampling window makes displayed rates spiky (9x on Codex, 3x on
+   Claude vs a 20-min average); `#if DEBUG` logging to `/tmp/agentsessions-wkcal.log` retained.
+4. Known gap, not fixed: Claude's bootstrap persists under the literal scope `unscoped`, so two
+   Claude accounts on one machine would share the slot.
+
+## 2026-08-30 13:43 · weekly-quota-calibration · Wk shows estimated per-session weekly burn
+status: superseded-by:2026-08-30 15:12
+
+**State:** Committed `792161fe` (15 files, +3125/-122), suite 2340 green, Release relaunched.
+Not pushed. Spec rewritten to match what shipped:
+`docs/superpowers/plans/2026-08-29-weekly-quota-calibration-SPEC.md`.
+
+**Decided / don't redo:**
+- Waiting for a live quota tick cannot produce a first number: Codex weekly percent is
+  integer-only, so the smallest drop is 1pp of a *weekly* quota (~12h). Verified across every
+  local transcript — there is no fractional weekly percent hiding anywhere.
+- The conversion comes from history instead: Codex `token_count` lines carry `rate_limits`
+  beside their own token usage, so a transcript is a full quota trace.
+- The 5h-window bridge is a dead end: the 5h:weekly quota ratio is only observable by watching
+  a weekly tick, i.e. the bottleneck being avoided.
+- Search BOTH `primary` and `secondary` slots by declared length. The 5h window is
+  plan-dependent (Plus has it, Pro-lite does not), so weekly moves slots per plan.
+- Trust the largest numerator, not the newest window — a 2pp sliver swung 2.6x inside one
+  integer quantum. This is also what carries the conversion across a weekly reset.
+- Do NOT test against `WeeklyQuotaCalibrationStore.shared`; use `makeForTesting()`. It carries
+  a launch timestamp from whenever the first test touched it, so budget assertions pass alone
+  and fail in the suite.
+- Hand-rolled byte matching in the scanner was tried and is ~1 MB/s — use stdlib
+  `String(decoding:)` + `split` + `contains`.
+
+**Key files:**
+- `AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift` — tracker, ledger, store, resolution order
+- `AgentSessions/CodexStatus/WeeklyQuotaBootstrap.swift` — historical scanners (Codex + Claude)
+- `AgentSessions/Views/AgentCockpitHUDView.swift` — formatter, `RunwayLoadBarFill`, clock
+
+**Next:**
+1. Push when ready — nothing is pushed.
+2. Open: per-session rates use a ~30s sampling window, so they stay spikier than a weekly
+   quantity warrants; the 150s hold masks it rather than fixing it.
+3. Codex weekly path was never live-profiled with an *active* Codex session — every live
+   verification ran against Claude. Same code path, unit-tested, but weaker evidence.
+4. `#if DEBUG` logging to `/tmp/agentsessions-wkcal.log` is still in (no-op in Release).
+
+## 2026-08-29 22:03 · rollout-blog-fixes · Rollout #3 corrected, CTAs tagged, #4 retracted and replaced
+status: done
+
+**State:** Six commits pushed to `main` (`0b9a0ee1`, `88f38896`, `6dceeae5`, `e828234a`,
+`3c8dfad4`, `43840697`), CI and Pages green, blog verified live. All blog work finished and
+nothing of mine is uncommitted. Also pushed a parallel session's `f73a57ab` onboarding commit
+at the owner's request; their weekly-quota SPECs remain untracked and untouched.
+
+**Decided / don't redo:**
+- **Rollout #3 had shipped with leaked tool markup** (`</content></invoke>`) rendering on the
+  public page since 2026-07-17, plus three false claims. All fixed. The worst: we claimed
+  Agent Sessions lists archived OpenCode rows — `OpenCodeSqliteReader` filters
+  `WHERE time_archived IS NULL` and `SessionParserTests.swift:3029` pins the opposite.
+- **Rollout #4 was written, published, and retracted the same day.** It duplicated 07-11 and
+  07-14 and had no hook. Do not rewrite it in that shape; post-mortem in `GROWTH_ANGLES.md`.
+- **The "read-only hides WAL rows" belief is FALSE**, and the FIRST correction was wrong too
+  — this cost two rounds. Final measured rule: **the `-wal`'s presence is necessary and
+  sufficient**; the `-shm` is neither and directory writability is irrelevant. A read-only
+  reader that cannot reach the log fails LOUDLY (error 14, at first query — SQLite opens
+  lazily). Only `immutable=1` and a read-WRITE open of a bare `.db` copy answer silently
+  wrong. The published post asserted the `-shm` mechanism and was corrected in `43840697`.
+  Its embedded repro had the same bug shape: one copy probed read-write then read-only, and
+  the read-write open created the empty `-wal` that let the read-only probe pass.
+- **`{% post_url %}` omits the baseurl** — six cross-post links were 404ing live. Now wrapped
+  in `{{ site.baseurl }}`. Never use bare `post_url` in a link.
+- Owner's read on the new post: "very niche… nothing special." Published on that basis;
+  expect a modest SEO floor. It is the best HN candidate under the parked-HN rule.
+
+**Key files:**
+- `Marketing/STATUS.md` + `GROWTH_ANGLES.md` — full post-mortem, the two repeatable lessons,
+  and the corrected Discord drafts (owner posts; draft B's plug was removed as a judgment call).
+- `docs/_posts/2026-08-29-sqlite-wal-missing-rows.md` — the live replacement post.
+
+**Next:**
+1. **Hermes indexes zero sessions** — still true, still unexplained. My "read-only open fails"
+   diagnosis was WRONG (the `-wal` was merely absent at measurement time; with sidecars present
+   the read-only open works and returns 36 tables). Deferred by the owner; a corrected task chip
+   is queued. Cheapest first check: whether the Hermes source is simply disabled/unavailable,
+   in which case zero rows is correct behaviour and there is no bug.
+2. Owner to re-read the two Discord drafts before posting either.
+3. Done: `docs/guides/index.html` had the same baseurl-less link (it was already committed and
+   live, not untracked as I first said); fixed and pushed in `3c8dfad4`. The built site now has
+   zero baseurl-less internal links.
+4. Unrelated and still open from the previous handover: ship 5.1.1.
+
 ## 2026-08-28 19:36 · scoped-weekly-and-patch-fixes · Claude scoped weekly limit + 5.1.1 fix batch, all pushed
 status: in-progress
 

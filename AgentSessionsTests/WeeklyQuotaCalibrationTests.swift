@@ -344,7 +344,8 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                                             output: cumulative, cacheCreation: 0, modelSlug: "gpt-5.6")
             ], priceTable: prices, now: at)
         }
-        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 2)
+        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 2,
+                                          resetsAt: t0.addingTimeInterval(604_800))
 
         let now = scannedAt.addingTimeInterval(120)
         let served = store.percentPointsPerDollar(provider: "codex", now: now) ?? 0
@@ -394,7 +395,8 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             usedPercentPoints: 2, dollars: 20, unpricedVolumeShare: 0,
             windowStart: t0.addingTimeInterval(-3600), resetsAt: t0.addingTimeInterval(604_800),
             scannedAt: t0))
-        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 2)
+        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 2,
+                                          resetsAt: t0.addingTimeInterval(604_800))
         // A bucket strictly after `scannedAt`, carrying no new spend: the
         // denominator stays $20 so this isolates the numerator.
         let ledger = store.ledger(provider: "codex")
@@ -402,6 +404,48 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
                       now: t0.addingTimeInterval(10))
         let served = store.percentPointsPerDollar(provider: "codex", now: t0.addingTimeInterval(30)) ?? 0
         XCTAssertEqual(served, 2.5 / 20.0, accuracy: 0.0001, "reported 2 means [2,3), so use 2.5")
+    }
+
+    /// A stored ratio older than the ledger's retention can no longer be freshened
+    /// by it, so it must trigger a rescan on age alone. Observed live: a ratio
+    /// scanned the previous day was still being served while real spend against
+    /// the same integer percent had grown 14%, and the growth trigger could not
+    /// fire because the reported percent had not moved.
+    func testStaleScanTriggersRescanEvenWithoutGrowth() throws {
+        let suite = try XCTUnwrap(UserDefaults(suiteName: "wkstale-\(UUID().uuidString)"))
+        defer { suite.removePersistentDomain(forName: suite.description) }
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let key = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
+        suite.set(try JSONEncoder().encode(WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 3, dollars: 10.84, unpricedVolumeShare: 0,
+            windowStart: t0, resetsAt: resetsAt,
+            scannedAt: t0.addingTimeInterval(-24 * 3600))), forKey: key)
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 3, now: t0, defaults: suite)
+        XCTAssertTrue(store.scanWasDispatchedForTesting(provider: "codex"),
+                      "a day-old scan must refresh on age, not only on growth")
+    }
+
+    /// The age trigger must not cause a rescan on every poll of a fresh scan.
+    func testFreshScanIsNotRescanned() throws {
+        let suite = try XCTUnwrap(UserDefaults(suiteName: "wkfresh-\(UUID().uuidString)"))
+        defer { suite.removePersistentDomain(forName: suite.description) }
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let key = "quotaMeter.weeklyBootstrap.codex.unscoped.\(Int(resetsAt.timeIntervalSince1970))"
+        suite.set(try JSONEncoder().encode(WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 3, dollars: 10.84, unpricedVolumeShare: 0,
+            windowStart: t0, resetsAt: resetsAt,
+            scannedAt: t0.addingTimeInterval(-600))), forKey: key)
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 3, now: t0, defaults: suite)
+        XCTAssertFalse(store.scanWasDispatchedForTesting(provider: "codex"),
+                       "a ten-minute-old scan is still good; rescanning it is pure churn")
     }
 
     /// Promotion must happen on RESTORE as well as after a scan: a launch that
@@ -786,5 +830,254 @@ extension ProvisionalRateClampTests {
             XCTAssertNotNil(priced)
             XCTAssertLessThan(priced ?? .infinity, 10_000)
         }
+    }
+}
+
+/// The bootstrap cache is the app's memory of what a percentage point costs.
+/// Every test here pins a way that memory was observed to go wrong on a live
+/// account: a good measurement left unread, a failed scan retiring its own retry,
+/// or two different weeks' terms combined into one ratio.
+final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
+
+    private let t0 = Date(timeIntervalSince1970: 3_000_000)
+    private var root: URL!
+    private var suite: UserDefaults!
+    private var suiteName: String!
+
+    override func setUpWithError() throws {
+        root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("wkcache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        suiteName = "wkcache-\(UUID().uuidString)"
+        suite = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+        suite.removePersistentDomain(forName: suiteName)
+    }
+
+    private func key(_ provider: String, _ scope: String, _ resetsAt: Date) -> String {
+        "quotaMeter.weeklyBootstrap.\(provider).\(scope).\(Int(resetsAt.timeIntervalSince1970))"
+    }
+
+    private func store(_ result: WeeklyQuotaBootstrapResult, at key: String) throws {
+        suite.set(try JSONEncoder().encode(result), forKey: key)
+    }
+
+    private func result(used: Double, dollars: Double, resetsAt: Date,
+                        scannedAt: Date) -> WeeklyQuotaBootstrapResult {
+        WeeklyQuotaBootstrapResult(
+            usedPercentPoints: used, dollars: dollars, unpricedVolumeShare: 0,
+            windowStart: resetsAt.addingTimeInterval(-604_800), resetsAt: resetsAt,
+            scannedAt: scannedAt)
+    }
+
+    /// Writes a Codex transcript whose turns all carry `resetsAt` as their weekly
+    /// anchor, so a scan of this root produces a real, priced measurement.
+    private func writeTranscript(outputTokens: Int, resetsAt: Date, at: Date) throws {
+        let iso = ISO8601DateFormatter().string(from: at)
+        let lines = [
+            "{\"timestamp\":\"\(iso)\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.6\"}}",
+            "{\"timestamp\":\"\(iso)\",\"type\":\"token_count\",\"payload\":{\"info\":{\"last_token_usage\":"
+            + "{\"input_tokens\":0,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,"
+            + "\"output_tokens\":\(outputTokens),\"total_tokens\":\(outputTokens)}},"
+            + "\"rate_limits\":{\"primary\":{\"used_percent\":6.0,\"window_minutes\":10080,"
+            + "\"resets_at\":\(resetsAt.timeIntervalSince1970)},\"secondary\":null}}}"
+        ]
+        try lines.joined(separator: "\n").write(
+            to: root.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+    }
+
+    private func waitForScan(_ store: WeeklyQuotaCalibrationStore, provider: String) {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if store.scanSucceededForTesting(provider: provider)
+                || store.scanIsCoolingDownForTesting(provider: provider) { return }
+            usleep(20_000)
+        }
+    }
+
+    // MARK: - Carry-over slot
+
+    /// The regression that made every Claude session read ~21% low.
+    ///
+    /// Restore only ever consulted two keys — the carry-over slot and the CURRENT
+    /// anchor's cache — so a completed window's measurement sat on disk unread.
+    /// On the first launch after the slot was introduced it was seeded from the
+    /// fresh window's sliver, and the `<=` promotion guard then locked it there.
+    /// Live values: a completed week at 77pp/$1239.83 was ignored in favour of
+    /// 7pp/$142.71.
+    func testMigratesACompletedWindowIntoTheCarryOverSlot() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        try store(result(used: 77, dollars: 1239.83, resetsAt: previous,
+                         scannedAt: previous.addingTimeInterval(-3600)),
+                  at: key("claude", "unscoped", previous))
+        try store(result(used: 7, dollars: 142.71, resetsAt: current, scannedAt: current),
+                  at: key("claude", "unscoped", current))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: current,
+                              windowMinutes: 10080, usedPercentPoints: 7,
+                              now: current, defaults: suite)
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 77.0 / 1239.83, accuracy: 0.0005,
+                       "the completed week is the better-conditioned measurement")
+        XCTAssertGreaterThan(served, 7.0 / 142.71,
+                             "serving the 7pp sliver understates every session's %/h")
+    }
+
+    /// Migration must not let an older, worse-conditioned window displace a good
+    /// carry-over that is already in the slot.
+    func testMigrationKeepsTheLargerNumerator() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        try store(result(used: 4, dollars: 60, resetsAt: previous, scannedAt: previous),
+                  at: key("claude", "unscoped", previous))
+        let bestKey = "quotaMeter.weeklyBootstrapBest.claude.unscoped"
+        try store(result(used: 70, dollars: 1000, resetsAt: previous, scannedAt: previous),
+                  at: bestKey)
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: current,
+                              windowMinutes: 10080, usedPercentPoints: 0,
+                              now: current, defaults: suite)
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 70.0 / 1000.0, accuracy: 0.0005)
+    }
+
+    // MARK: - Freshening across a reset
+
+    /// Freshening extends a stored denominator with ledger spend and pairs it with
+    /// the CURRENT reported percent. When the stored measurement was carried over
+    /// from a previous week, those two terms describe different windows: a carried
+    /// 77pp/$1239.83 beside a fresh week reporting 1pp would serve 1.5/1239.83 —
+    /// roughly fifty times too low. The carried ratio must be served intact.
+    func testFresheningIsRejectedAcrossAWindowBoundary() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.setBestBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 77, dollars: 1239.83, resetsAt: previous,
+                           scannedAt: current.addingTimeInterval(-1800)))
+        // Fresh window, 1pp consumed, and a ledger that could otherwise freshen.
+        store.recordUsedPercentForTesting(provider: "claude", usedPercentPoints: 1,
+                                          resetsAt: current)
+        store.ledger(provider: "claude").record(
+            observations: [], priceTable: RunwayPriceTable.makeForTesting(),
+            now: current.addingTimeInterval(-60))
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 77.0 / 1239.83, accuracy: 0.0005,
+                       "a carried measurement must not borrow the new window's numerator")
+    }
+
+    // MARK: - Failed scans stay retryable
+
+    /// A scan that fails must not retire its own retry. Marking the anchor on
+    /// dispatch rather than on success meant one unreadable root permanently
+    /// pinned the stale ratio the rescan existed to replace.
+    func testAFailedScanRemainsRetryable() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        try store(result(used: 3, dollars: 10.84, resetsAt: resetsAt,
+                         scannedAt: t0.addingTimeInterval(-24 * 3600)),
+                  at: key("codex", "unscoped", resetsAt))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 3, now: t0, defaults: suite)
+        waitForScan(store, provider: "codex")
+
+        XCTAssertTrue(store.scanWasDispatchedForTesting(provider: "codex"))
+        XCTAssertFalse(store.scanSucceededForTesting(provider: "codex"),
+                       "an unreadable root cannot have produced a measurement")
+        XCTAssertTrue(store.scanIsCoolingDownForTesting(provider: "codex", now: t0),
+                      "failure must back off rather than retire the anchor")
+
+        // Once the backoff elapses the same bucket must be scannable again.
+        store.clearScanCooldownForTesting(provider: "codex")
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 3, now: t0, defaults: suite)
+        XCTAssertTrue(store.scanWasDispatchedForTesting(provider: "codex"),
+                      "a burnt retry leaves the stale ratio in place for the whole window")
+    }
+
+    /// The startup dead zone. A window at 0pp has nothing to divide by, so the
+    /// scanner rejects it — but 0pp, 1pp and 2pp share one refresh bucket, so a
+    /// burnt attempt at 0pp blocked every retry until 3pp.
+    func testAZeroPercentWindowDoesNotBlockTheRetryAtOnePercent() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 0,
+                              now: t0, defaults: suite)
+        waitForScan(store, provider: "codex")
+        XCTAssertFalse(store.scanSucceededForTesting(provider: "codex"),
+                       "0pp gives the scanner nothing to divide")
+
+        store.clearScanCooldownForTesting(provider: "codex")
+        try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
+                            at: t0.addingTimeInterval(3600))
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 1,
+                              now: t0.addingTimeInterval(7200), defaults: suite)
+        waitForScan(store, provider: "codex")
+        XCTAssertTrue(store.scanSucceededForTesting(provider: "codex"),
+                      "the same bucket must still be scannable once there is data")
+    }
+
+    /// A rescan on age must actually replace the stored ratio, not merely dispatch.
+    func testAStaleScanIsReplacedByTheFreshMeasurement() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        try store(result(used: 6, dollars: 10.0, resetsAt: resetsAt,
+                         scannedAt: t0.addingTimeInterval(-24 * 3600)),
+                  at: key("codex", "unscoped", resetsAt))
+        // 1M output tokens of gpt-5.6 at $20/MTok, so a real scan prices this
+        // window at $20 rather than the stored $10.
+        try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
+                            at: t0.addingTimeInterval(3600))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 6,
+                              now: t0.addingTimeInterval(7200), defaults: suite)
+        waitForScan(store, provider: "codex")
+
+        XCTAssertTrue(store.scanSucceededForTesting(provider: "codex"))
+        let stored = try XCTUnwrap(store.bootstrap(provider: "codex"))
+        XCTAssertEqual(stored.dollars, 20.0, accuracy: 0.001,
+                       "the day-old $10 denominator must be replaced, not merely re-dispatched")
+    }
+
+    // MARK: - Account scope
+
+    /// The persisted keys are account-scoped but the in-memory maps are keyed by
+    /// provider, so an in-process account switch would keep serving the previous
+    /// account's calibration under the new account's name.
+    func testAnAccountSwitchDropsThePreviousAccountsCalibration() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        try store(result(used: 40, dollars: 100, resetsAt: resetsAt, scannedAt: t0),
+                  at: key("codex", "acct-a", resetsAt))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 40,
+                              accountHash: "acct-a", now: t0, defaults: suite)
+        XCTAssertEqual(store.percentPointsPerDollar(provider: "codex", now: t0) ?? 0,
+                       40.0 / 100.0, accuracy: 0.001)
+
+        // Same process, different account, and nothing cached for it.
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 2, accountHash: "acct-b",
+                              now: t0, defaults: suite)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
+                     "account B must not inherit account A's conversion")
     }
 }

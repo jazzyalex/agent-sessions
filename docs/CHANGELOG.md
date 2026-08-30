@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- **Session Runway can show weekly quota burn.** A new `Wk` unit answers "how fast is this session eating my week", in percentage points per hour, per session. It reads each session's own current activity rather than splitting one account-wide rate, so a session working twice as hard reads twice as fast. The conversion between spend and quota is learned from the weekly usage already recorded on disk, so a figure appears within seconds of launch instead of waiting hours for the provider's percentage to tick. A session with no recent activity reads `quiet`, one still being measured shows a clock for at most a minute, and a provider with no weekly window reads `n/a`. "quiet" replaces "flat" across the `5h`, `tk` and `$` units too.
 - **Claude's model-scoped weekly limit is visible.** Claude now reports a third window alongside the 5-hour and weekly ones — a weekly budget for a single model, shown on Claude's side as "Current week (Fable)". Agent Sessions could not see it at all: it arrives in a new list in the usage response, while the older named fields it used to read are now empty. The menu-bar dropdown names it under the Claude meters ("Wk Fable: 70% · resets …"). The compact meter's `Wk` figure is unchanged and still the all-models number.
 
 ### Bug Fixes

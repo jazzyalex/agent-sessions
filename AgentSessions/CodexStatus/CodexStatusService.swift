@@ -661,7 +661,7 @@ final class CodexUsageModel: ObservableObject {
             // on disk for this weekly window, so `Wk` shows a number seconds after
             // launch instead of waiting hours for a 1pp tick. Once per anchor, off
             // the main thread.
-            CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource)")
+            CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource?.rawValue ?? "none")")
             WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
                 provider: "codex",
                 root: CodexWeeklyQuotaBootstrapScanner.defaultSessionsRoot,
@@ -683,7 +683,7 @@ final class CodexUsageModel: ObservableObject {
                 scope: WeeklyQuotaCalibrationScope(
                     provider: "codex",
                     accountHash: WeeklyQuotaCalibrationScope.hashAccount(CodexCalibrationAccountScope.accountId(now: now)),
-                    sourceFamily: "\(s.weekLimitsSource)",
+                    sourceFamily: s.weekLimitsSource?.rawValue ?? "unknown",
                     limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
                     priceRevision: RunwayPriceTable.shared.revision
                 ),

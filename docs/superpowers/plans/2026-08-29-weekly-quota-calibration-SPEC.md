@@ -90,7 +90,7 @@ workers. Concurrency is **bounded** — an unbounded `concurrentPerform` decodin
 
 ## 4. Keeping it accurate
 
-Three corrections, each from an observed error on live data:
+Corrections, each from an observed error on live data:
 
 - **Denominator tracks ongoing spend.** A frozen bootstrap drifts high: the
   numerator is integer-quantized and sits still for hours while spending accrues.
@@ -108,6 +108,38 @@ fresh window has ~0% consumed to divide by. The conversion describes the plan,
 not the window. Promotion happens on restore as well as after a scan — a launch
 that restores from cache never scans, so promotion-on-scan alone left the
 carry-over slot empty.
+
+Three further corrections came out of an external review of the shipped code,
+each verified against live state before being accepted:
+
+- **Every stored window feeds the carry-over slot.** Restore consulted only two
+  keys — the slot itself and the *current* anchor's cache — so a completed
+  window's measurement sat on disk unread. The first launch after the slot was
+  introduced seeded it from the fresh window's sliver and the promotion guard
+  locked it there. Live: a completed week at **77pp / $1239.62** (0.0621 pp/$)
+  was ignored in favour of **7pp / $142.71** (0.0491 pp/$), understating every
+  Claude session's `%/h` by **21%**. Now every `weeklyBootstrap.<provider>.<scope>.*`
+  key is swept once per process and the largest numerator wins.
+- **Rescan on age, not only on growth.** The ledger can only extend a denominator
+  inside its own 6h retention, so once a stored scan is older than that nothing
+  can freshen it. Live: a ratio scanned the previous day was still being served
+  while real spend against the same integer percent had grown **14%**, and the
+  growth trigger could not fire because the reported percent had not moved.
+- **Failed scans stay retryable.** The anchor was marked on *dispatch*, and every
+  failure path returned without clearing it, so one unreadable root or unpriced
+  week retired that bucket permanently — pinning the stale ratio the rescan
+  exists to replace. It also created a startup dead zone: a window at 0pp is
+  rejected for having nothing to divide, and 0pp/1pp/2pp share one bucket, so the
+  burnt attempt blocked every retry until 3pp. Anchors now record **successes
+  only**; failures back off for 10 minutes.
+
+**Freshening never crosses a window boundary.** Freshening pairs the current
+reported percent with a stored denominator, but `bestConditionedBootstrap` may
+return a measurement carried over from a *previous* week. Those terms describe
+different windows: a carried 77pp/$1239.62 beside a fresh week reporting 1pp
+would serve `1.5/1239.62` — roughly fifty times too low. Freshening now requires
+the stored anchor to match the reported one; otherwise the carried ratio is
+served intact.
 
 Resolution order: ≥2 accepted live ticks (median) → bootstrap → a single tick.
 
@@ -138,7 +170,19 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
 ## 7. Scope and honest limits
 
 - Claude calibration is **memory-only** for the live tracker (`ClaudeLimitSnapshot`
-  carries no account scope); its bootstrap persists keyed by reset anchor.
+  carries no account scope); its bootstrap persists keyed by reset anchor under
+  the literal scope `unscoped`. Two Claude accounts on one machine would share
+  that slot. The reset anchor discriminates in practice — it is an account's own
+  reset instant at second precision — but this is a real gap, not a guarantee.
+- In-memory calibration state is keyed by provider, while the persisted keys are
+  account-scoped. A same-process account switch would otherwise keep serving the
+  previous account's conversion, so a scope change now clears that provider's
+  bootstraps, tracker, ledger and scan bookkeeping.
+- **Both providers quantize weekly percent to whole points**, so the midpoint
+  correction applies to both. Verified against the live payload: Claude's OAuth
+  `utilization` reports `27.0` / `11.0` and `limits[].percent` is a literal JSON
+  integer. `weeklyUsedRatio` is a `Double` only because the normalizer divides by
+  100 — it does not imply sub-point resolution.
 - Outside usage (another device, an untracked client) drops the account quota
   with no local activity to match, biasing the calibration **high**. Intervals
   with zero local activity are rejected; partial contamination is not detectable.
@@ -152,19 +196,32 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
 Independent recomputation from raw transcripts, outside the app:
 
 ```
-Claude  previous full week : 72pp / $1073.58 → 0.0671 pp/$   (implied quota $1491)
-        current window     :  6pp / $ 114.28 → 0.0569 pp/$
-Codex   current window     :  3pp / $  11.89 → 0.2523 pp/$   (implied quota $396)
+Claude  previous full week : 77pp / $1239.62 → 0.0621 pp/$   (implied quota $1610)
+        current window     :  7pp / $ 142.71 → 0.0491 pp/$   (implied quota $2039)
+Codex   current window     :  4pp / $  17.84 → 0.2242 pp/$   (implied quota $446)
 ```
 
-Two independent windows agreeing within quantization is the strongest available
-evidence, since no ground-truth quota size is published.
+No ground-truth quota size is published, so these are the strongest available
+evidence — but they do **not** corroborate each other. The two Claude windows
+differ by **26%**, and treating 7pp as `[7,8)` yields `0.0491–0.0561`, which
+still does not reach `0.0621`. The completed week is the better-conditioned
+measurement (larger numerator, whole window) and is what the app now serves; the
+disagreement is unexplained and is a reason to distrust short windows, not a
+validation of the model. An earlier revision of this spec cited these as agreeing
+"within quantization" — that claim was wrong and is withdrawn.
+
+Cross-provider, on one $100/month plan with comparable sessions, Codex consumes
+roughly **3.6×** more weekly quota per API-equivalent dollar than Claude. That
+gap survives every correction above and is not a cache-mix artifact — both
+providers ran 93–98% cache reads over the compared windows. It rests on the
+assumption that quota consumption is proportional to API list price, which is
+unverified and may not hold identically across providers.
 
 ## 9. Key regression tests
 
 `WeeklyQuotaCalibrationTests`, `WeeklyQuotaBootstrapTests`,
-`WeeklyQuotaDisplayTests`, `WeeklyRateHoldTests`, `ProvisionalRateClampTests`,
-`RunwayQuietLabelTests`, `RunwayLoadBarAgreementTests`.
+`WeeklyQuotaBootstrapCacheTests`, `WeeklyQuotaDisplayTests`, `WeeklyRateHoldTests`,
+`ProvisionalRateClampTests`, `RunwayQuietLabelTests`, `RunwayLoadBarAgreementTests`.
 
 Notable invariants pinned: `Wk` can never resolve to `tk/h` or `$/h`; no
 calibration renders a clock, never `0%/h`; doubling activity doubles `%/h`; a
@@ -172,6 +229,16 @@ session ending mid-interval stays in the denominator; a drop with no local
 activity is rejected; unpriced material activity voids an interval; scope changes
 invalidate; a scoped calibration survives restart and an unscoped one does not;
 the carry-over survives a reset; the bar never fills at a zero rate.
+
+`WeeklyQuotaBootstrapCacheTests` pins the cache defects specifically: a completed
+window migrates into the carry-over slot; migration cannot demote a better slot;
+freshening is rejected across a window boundary; a failed scan backs off and stays
+retryable; a 0pp window does not block the retry at 1pp; an age-triggered rescan
+actually **replaces** the stored denominator rather than merely dispatching; and
+an account switch drops the previous account's conversion. The last two exist
+because the original age-trigger test scanned `/nonexistent` and asserted only
+that a scan was launched — a scan that had to fail. Dispatch and success are now
+separate observations.
 
 Tests use `WeeklyQuotaCalibrationStore.makeForTesting()` and an injected
 `UserDefaults` suite. Do **not** test against `.shared`: it carries a launch
