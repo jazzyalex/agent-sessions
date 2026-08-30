@@ -212,6 +212,17 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
   three weekly windows). Both thresholds are judgment calls, not measurements.
   Vendor promotion terms and dates are deliberately kept out of the code and out
   of this spec: they change, and neither can verify them.
+- **A reset text is only an anchor when it names an instant.** The weekly reset
+  identifies the window — it is the bootstrap cache key and the tracker's interval
+  match — so a relative countdown ("in 4h 28m") cannot serve as one: it resolves
+  against `now` and names a different window every poll. Claude's tmux `/usage`
+  fallback supplies exactly that, and the calibration wrote a NEW cache key each
+  poll: seven in 75 minutes, each holding 50pp/$1282 = 0.0394 pp/$ against the
+  account's real 0.0625 — 37% low, from the FIVE-HOUR window's percent divided by
+  a week of priced activity. Identity callers use
+  `UsageResetText.resetAnchorDate`; `resetDate` still resolves countdowns, which
+  is correct for display. This also made the well-conditioned rule above unsafe on
+  its own: a bogus record at 50pp clears the 10pp bar comfortably.
 - **The ledger must vouch for the span it freshens.** `activity(from:to:)` answers
   from a single bucket, so freshening silently accepted intervals it never watched
   and undercounted the denominator — which overstates burn rather than failing

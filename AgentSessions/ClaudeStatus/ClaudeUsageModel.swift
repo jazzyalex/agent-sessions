@@ -582,10 +582,15 @@ final class ClaudeUsageModel: ObservableObject {
         // itself as inexact and takes the 1pp acceptance floor.
         if let weeklyRatio = s.weeklyUsedRatio,
            freshness.allowsProjectedDisplay,
-           let weekResetAt = UsageResetText.resetDate(kind: "Wk",
-                                                      source: .claude,
-                                                      raw: s.weeklyResetText,
-                                                      now: s.fetchedAt),
+           // Anchor, not display: the weekly reset identifies the window for both
+           // the bootstrap cache key and the tracker's interval matching. The tmux
+           // fallback supplies a relative countdown, which resolves against `now`
+           // and so names a new window every poll — it wrote seven bogus cache keys
+           // in 75 minutes before this guard existed.
+           let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
+                                                            source: .claude,
+                                                            raw: s.weeklyResetText,
+                                                            now: s.fetchedAt),
            weekResetAt > s.fetchedAt {
             // Historical bootstrap, same as Codex: without this the Claude rows
             // wait out the 60s budget and fall to "n/a" permanently, because a

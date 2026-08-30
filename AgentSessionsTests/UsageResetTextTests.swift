@@ -338,4 +338,58 @@ final class UsageResetTextTests: XCTestCase {
 
         XCTAssertEqual(text, UsageStaleThresholds.unavailableCopy)
     }
+
+    // MARK: - Anchor stability
+
+    /// A relative countdown resolves against `now`, so it names a different instant
+    /// every call. `resetDate` must keep doing that — a countdown is exactly what a
+    /// user wants displayed — while `resetAnchorDate` must refuse, because callers
+    /// that key a cache or match an interval need an identity, not a moving target.
+    func testRelativeResetIsDisplayableButNotAnAnchor() {
+        let now = Date(timeIntervalSince1970: 1_788_130_000)
+        let raw = "resets in 4h 28m"
+
+        let displayed = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: raw, now: now)
+        XCTAssertNotNil(displayed, "the UI countdown must keep working")
+        XCTAssertEqual(displayed?.timeIntervalSince(now) ?? 0, 4 * 3600 + 28 * 60, accuracy: 60)
+
+        XCTAssertNil(UsageResetText.resetAnchorDate(kind: "Wk", source: .claude,
+                                                    raw: raw, now: now),
+                     "a countdown cannot identify a window")
+    }
+
+    /// The live failure this guard exists for: polled a few minutes apart, a
+    /// countdown produced anchors 130s apart — past the 120s tolerance that decides
+    /// whether two readings describe the same window — so every poll wrote a fresh
+    /// bootstrap cache key. Seven accumulated in 75 minutes.
+    func testACountdownYieldsAMovingAnchorAcrossPolls() {
+        let raw = "resets in 4h 28m"
+        let first = Date(timeIntervalSince1970: 1_788_130_000)
+        let second = first.addingTimeInterval(130)
+
+        let a = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: raw, now: first)
+        let b = UsageResetText.resetDate(kind: "Wk", source: .claude, raw: raw, now: second)
+        let drift = abs((b ?? .distantPast).timeIntervalSince(a ?? .distantFuture))
+        XCTAssertEqual(drift, 130, accuracy: 5)
+        XCTAssertGreaterThan(drift, 120, "drifts past the anchor-equality tolerance")
+
+        XCTAssertNil(UsageResetText.resetAnchorDate(kind: "Wk", source: .claude,
+                                                    raw: raw, now: first))
+        XCTAssertNil(UsageResetText.resetAnchorDate(kind: "Wk", source: .claude,
+                                                    raw: raw, now: second))
+    }
+
+    /// An absolute instant is unaffected — the OAuth path must keep calibrating.
+    func testAnAbsoluteResetIsStillAnAnchor() {
+        let now = Date(timeIntervalSince1970: 1_788_130_000)
+        let raw = "resets 2026-09-06T11:59:59.814154+00:00"
+        let anchor = UsageResetText.resetAnchorDate(kind: "Wk", source: .claude,
+                                                    raw: raw, now: now)
+        XCTAssertEqual(anchor?.timeIntervalSince1970 ?? 0, 1_788_695_999.814, accuracy: 1)
+        XCTAssertEqual(anchor, UsageResetText.resetDate(kind: "Wk", source: .claude,
+                                                        raw: raw, now: now))
+        // Stable across polls, which is the whole point.
+        XCTAssertEqual(anchor, UsageResetText.resetAnchorDate(
+            kind: "Wk", source: .claude, raw: raw, now: now.addingTimeInterval(3600)))
+    }
 }

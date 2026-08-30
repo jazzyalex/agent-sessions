@@ -652,10 +652,13 @@ final class CodexUsageModel: ObservableObject {
         // 30-minute cap would make it unacquirable on ordinary days).
         if s.hasWeekRateLimit,
            weeklyFreshness.allowsProjectedDisplay,
-           let weekResetAt = UsageResetText.resetDate(kind: "Wk",
-                                                      source: .codex,
-                                                      raw: s.weekResetText,
-                                                      now: observedAt),
+           // Anchor, not display — same rule as the Claude path. Codex's OAuth text
+           // is ISO-8601 today, but a legacy or fallback source supplying a relative
+           // countdown would silently key the cache by `now`.
+           let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
+                                                            source: .codex,
+                                                            raw: s.weekResetText,
+                                                            now: observedAt),
            weekResetAt > observedAt {
             // Historical bootstrap: derive the conversion from the activity already
             // on disk for this weekly window, so `Wk` shows a number seconds after

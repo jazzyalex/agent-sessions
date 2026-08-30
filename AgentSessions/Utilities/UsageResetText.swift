@@ -32,7 +32,35 @@ enum UsageResetText {
         return parse(kind: kind, source: source, text: parseInput, now: now)
     }
 
-    private static func parse(kind: String, source: UsageTrackingSource, text: String, now: Date) -> Date? {
+    /// The reset instant, but only when the text actually names one.
+    ///
+    /// Use this wherever the reset is a window IDENTITY rather than something to
+    /// display: a cache key, a calibration anchor, an interval match. A relative
+    /// countdown ("in 4h 28m") resolves against `now`, so it yields a different
+    /// instant on every poll and cannot identify anything. Observed live: Claude's
+    /// tmux `/usage` fallback supplied a countdown for the weekly window, and the
+    /// weekly calibration wrote a NEW cache key every poll — seven in 75 minutes,
+    /// each holding a measurement (50pp/$1282 = 0.0394 pp/$) that disagreed with
+    /// the account's real conversion (0.0625) by 37%, and each eligible to win the
+    /// carry-over slot.
+    ///
+    /// `resetDate` keeps resolving countdowns, which is correct for the UI: a
+    /// countdown is exactly what a user wants displayed.
+    static func resetAnchorDate(kind: String,
+                                source: UsageTrackingSource,
+                                raw: String,
+                                now: Date = Date()) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimResetCopy(trimmed).isEmpty else { return nil }
+        return parse(kind: kind, source: source, text: stripResetPrefix(trimmed),
+                     now: now, allowRelative: false)
+    }
+
+    private static func parse(kind: String,
+                              source: UsageTrackingSource,
+                              text: String,
+                              now: Date,
+                              allowRelative: Bool = true) -> Date? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
 
@@ -40,7 +68,9 @@ enum UsageResetText {
         if let d = parseISO8601(trimmed) { return d }
 
         // 0.5) Claude tmux /usage relative reset text: "in 3h", "in 2d", "in 1h 30m".
-        if let d = parseRelativeReset(trimmed, now: now) { return d }
+        // Resolved against `now`, so it names a different instant every call — see
+        // `resetAnchorDate` for why identity callers must opt out.
+        if allowRelative, let d = parseRelativeReset(trimmed, now: now) { return d }
 
         // Extract a timezone suffix like "(America/Los_Angeles)" when present, so Codex legacy
         // strings can be interpreted in the correct timezone.
