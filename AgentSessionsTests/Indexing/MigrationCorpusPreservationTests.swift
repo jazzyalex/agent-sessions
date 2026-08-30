@@ -136,5 +136,45 @@ final class MigrationCorpusPreservationTests: XCTestCase {
             XCTAssertEqual(toolIO, 1, "session_tool_io[\(source)] must survive bootstrap's codex guardian reindex marker")
         }
     }
+
+    /// Locks the OpenCode mtime normalization marker: on a populated install it
+    /// rebuilds ONLY opencode session_meta (so the next provider refresh rewrites
+    /// mtime on the seconds scale) and never touches the FTS corpus or other sources.
+    func testBootstrapOpenCodeMtimeReindexMarkerPreservesCorpusOnPopulatedDatabase() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        var db: IndexDB? = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        try await seedSession(db!, source: "opencode", id: "opencode-1")
+        try await seedSession(db!, source: "claude", id: "claude-1")
+
+        // Simulate the upgrade where this marker has never run.
+        try await db!.exec("DELETE FROM schema_migrations WHERE key = 'opencode_mtime_reindex_v1';")
+        db = nil
+
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        let reopened = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        let opencodeMeta = try await reopened.rowCountForTesting(table: "session_meta", source: "opencode")
+        let claudeMeta = try await reopened.rowCountForTesting(table: "session_meta", source: "claude")
+        XCTAssertEqual(opencodeMeta, 0, "bootstrap's opencode_mtime_reindex_v1 marker should clear opencode session_meta")
+        XCTAssertEqual(claudeMeta, 1, "the marker must not touch claude session_meta")
+
+        for source in ["opencode", "claude"] {
+            let search = try await reopened.rowCountForTesting(table: "session_search", source: source)
+            let toolIO = try await reopened.rowCountForTesting(table: "session_tool_io", source: source)
+            XCTAssertEqual(search, 1, "session_search[\(source)] must survive bootstrap's opencode mtime reindex marker")
+            XCTAssertEqual(toolIO, 1, "session_tool_io[\(source)] must survive bootstrap's opencode mtime reindex marker")
+        }
+    }
 }
 #endif

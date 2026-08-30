@@ -131,6 +131,14 @@ actor SearchIngestService {
         let dbGeneration: Int64
     }
 
+    /// session_meta timestamps (mtime, start_ts, end_ts) are seconds-scaled.
+    /// Providers that report milliseconds (OpenCode session.time_updated) must be
+    /// normalized before reaching the index, or COALESCE(end_ts, mtime) ordering
+    /// and date filters mix units and rows misdate.
+    nonisolated static func normalizedMtime(_ value: Int64) -> Int64 {
+        value >= 1_000_000_000_000 ? value / 1_000 : value
+    }
+
     nonisolated static func contentRevision(for session: Session) -> ContentRevision {
         let updated = session.endTime ?? session.startTime ?? Date(timeIntervalSince1970: 0)
         return ContentRevision(updatedMillis: Int64((updated.timeIntervalSince1970 * 1_000.0).rounded()),
@@ -303,9 +311,17 @@ actor SearchIngestService {
 
             let pathIsCurrent = indexedByPath[file.path].map { $0.mtime == file.mtime && $0.size == file.size } ?? false
             let identityIsCurrent = file.sessionID.flatMap { id in
-                file.contentRevision.map {
-                    searchIdentityStatesBySessionID[id]?.storagePath == file.path
-                        && searchIdentityStatesBySessionID[id]?.revision == $0
+                file.contentRevision.map { revision -> Bool in
+                    guard let state = searchIdentityStatesBySessionID[id],
+                          state.storagePath == file.path,
+                          state.revision.updatedMillis == revision.updatedMillis else { return false }
+                    // A stored revision on the seconds scale while the provider
+                    // reports milliseconds marks a pre-normalization legacy row
+                    // (OpenCode session.time_updated used to reach session_meta
+                    // unconverted). Force one re-ingest so session_meta mtime is
+                    // rewritten on the seconds scale.
+                    return Self.normalizedMtime(revision.updatedMillis) == revision.updatedMillis
+                        || revision.updatedMillis >= 1_000_000_000_000
                 }
             }
             let isCurrent = identityIsCurrent ?? pathIsCurrent
@@ -320,9 +336,10 @@ actor SearchIngestService {
                 // when the path has no `session_meta` row yet (refTSByPath lookup miss);
                 // `isCurrent`/`searchReadyPaths` already guarantee a row exists in that
                 // case in practice, but the fallback keeps this branch safe regardless.
-                let refTS = file.sessionID.flatMap { refTSBySessionID[$0] }
-                    ?? refTSByPath[file.path]
-                    ?? file.mtime
+                let refTS = Self.normalizedMtime(
+                    file.sessionID.flatMap { refTSBySessionID[$0] }
+                        ?? refTSByPath[file.path]
+                        ?? file.mtime)
                 let outsideToolIOWindow = refTS < toolIOCutoffTS
                 let toolIOIsReady = file.sessionID.flatMap { id in
                     file.contentRevision.map {
@@ -526,8 +543,11 @@ actor SearchIngestService {
             // For shared SQLite storage, analytics freshness must follow the logical
             // session revision rather than the database file stat (which can remain
             // unchanged while writes live in the WAL). Ordinary files still resolve
-            // these accessors to their physical mtime/size.
-            mtime: file.searchMtime,
+            // these accessors to their physical mtime/size. `normalizedMtime` also
+            // collapses any provider that reports milliseconds (OpenCode
+            // session.time_updated) into the seconds scale session_meta uses, so
+            // COALESCE(end_ts, mtime) ordering and date filters cannot mix units.
+            mtime: Self.normalizedMtime(file.searchMtime),
             size: file.searchSize,
             startTS: Int64(start.timeIntervalSince1970),
             endTS: Int64(end.timeIntervalSince1970),

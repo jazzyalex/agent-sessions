@@ -521,6 +521,18 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
         }
 
+        // OpenCode session_meta.mtime was written on the millisecond scale while
+        // start_ts/end_ts stayed seconds, so COALESCE(end_ts, mtime) ordering and
+        // date filters mixed units and every OpenCode row misdated (mtime treated
+        // as ~year 58k under unixepoch seconds). The ingest writer is fixed; this
+        // one-time marker rebuilds the already-indexed OpenCode rows so existing
+        // databases are repaired on launch instead of only new ingests.
+        let opencodeMtimeReindex = "opencode_mtime_reindex_v1"
+        if !migrationApplied(db, key: opencodeMtimeReindex) {
+            try reindexSessionMeta(db, sources: ["opencode"])
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", opencodeMtimeReindex)
+        }
+
         // Re-derive Codex session_meta so guardian approval-reviewer subagents
         // ({"subagent":{"other":"guardian"}}) get subagent_type/parent_session_id
         // populated by the fixed SessionIndexer extraction, and internal session
