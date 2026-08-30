@@ -596,6 +596,16 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// reading is a real accuracy bug, not just staleness.
     static let bootstrapRefreshGrowthPercentPoints: Double = 3
 
+    /// A numerator this large carries ~±5% from integer quantization, which is
+    /// close enough that being from the CURRENT quota regime matters more than
+    /// being the largest number ever recorded.
+    static let wellConditionedPercentPoints: Double = 10
+
+    /// How long a carried-over measurement may outlive its own window. Three weekly
+    /// windows: long enough that an idle fortnight still starts on a real number,
+    /// short enough that a quota-regime change cannot be served indefinitely.
+    static let carryOverMaximumAge: TimeInterval = 21 * 24 * 60 * 60
+
     func ledger(provider: String) -> WeeklyQuotaActivityLedger {
         lock.lock(); defer { lock.unlock() }
         if let existing = ledgers[provider] { return existing }
@@ -617,11 +627,34 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         if (tracker?.acceptedCount ?? 0) >= 2, let live = tracker?.percentPointsPerDollar(now: now) {
             return live
         }
-        if let bootstrap = bestConditionedBootstrap(provider: provider) {
+        if let bootstrap = bestConditionedBootstrap(provider: provider, now: now) {
             return freshenedBootstrapRatio(provider: provider, bootstrap: bootstrap, now: now)
                 ?? bootstrap.calibratedPercentPointsPerDollar
         }
         return tracker?.percentPointsPerDollar(now: now)
+    }
+
+    /// Ledger activity since a bootstrap was measured, or nil when the ledger
+    /// cannot vouch for that span.
+    ///
+    /// The poll-gap check is the part that matters and was missing. `activity` is
+    /// happy to answer from a single bucket, so after a restart — the ledger is
+    /// memory-only and starts empty — freshening got the spend banked since launch
+    /// and silently dropped everything between the cached scan and it. That is an
+    /// undercounted denominator, which overstates the burn rate rather than
+    /// failing safe. Observed live: a cache of 4pp/$13.56 restored while actual
+    /// spend had reached $28.07 served 0.332 pp/$ against a true 0.232 — 43% high,
+    /// and neither the growth (+3pp) nor the age (6h) trigger could clear it.
+    ///
+    /// Callers must hold `lock`.
+    private func ledgerCoverage(provider: String,
+                                since bootstrap: WeeklyQuotaBootstrapResult,
+                                now: Date) -> WeeklyQuotaActivityLedger.IntervalActivity? {
+        guard now.timeIntervalSince(bootstrap.scannedAt) <= WeeklyQuotaActivityLedger.retention,
+              let ledger = ledgers[provider],
+              let since = ledger.activity(from: bootstrap.scannedAt, to: now),
+              since.maxPollGap <= WeeklyQuotaCalibrationTracker.maximumPollGap else { return nil }
+        return since
     }
 
     /// The stored ratio with BOTH terms brought up to date.
@@ -653,9 +686,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // consumption is somewhere in [2, 3); taking 2 biases every estimate low,
         // and the bias is worst exactly where the numerator is smallest.
         let used = reported + WeeklyQuotaBootstrapResult.quantizationMidpoint
-        guard now.timeIntervalSince(bootstrap.scannedAt) <= WeeklyQuotaActivityLedger.retention else { return nil }
-        guard let ledger = ledgers[provider],
-              let since = ledger.activity(from: bootstrap.scannedAt, to: now) else { return nil }
+        guard let since = ledgerCoverage(provider: provider, since: bootstrap, now: now) else { return nil }
         let dollars = bootstrap.dollars + since.dollars
         guard dollars > 0 else { return nil }
         let ratio = used / dollars
@@ -670,10 +701,28 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// best-conditioned observation also carries a good ratio across a weekly
     /// reset, where the fresh window has nothing to divide by yet — the conversion
     /// is a property of the plan, not of the window.
-    private func bestConditionedBootstrap(provider: String) -> WeeklyQuotaBootstrapResult? {
+    private func bestConditionedBootstrap(provider: String,
+                                          now: Date = Date()) -> WeeklyQuotaBootstrapResult? {
         let current = bootstraps[provider]
         guard let best = bestBootstraps[provider] else { return current }
+        // A carry-over describes the quota REGIME it was measured under, and a
+        // regime can change without touching anything the compatibility stamp can
+        // see. Promotional weekly limits are the live example: both vendors have run
+        // them, they move capacity by tens of percent, and they start and end with no
+        // price change and no limit-shape change — so a measurement taken under one
+        // stays formally compatible while describing a plan that no longer exists.
+        // (Do not encode a specific promotion's terms or dates here: they are vendor
+        // announcements, they change, and the code cannot verify them.)
+        //
+        // Nothing in the payload announces a regime change, so recency has to win
+        // eventually: once the CURRENT window is well enough conditioned to stand on
+        // its own it is preferred outright, and a carry-over that no fresh
+        // measurement has displaced expires rather than being trusted indefinitely.
+        if now.timeIntervalSince(best.scannedAt) > Self.carryOverMaximumAge {
+            return current
+        }
         guard let current else { return best }
+        if current.usedPercentPoints >= Self.wellConditionedPercentPoints { return current }
         return current.usedPercentPoints >= best.usedPercentPoints ? current : best
     }
 
@@ -691,7 +740,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // Must consult the SAME selection the reader uses, or a carried-over
         // measurement satisfies `percentPointsPerDollar` while this still reports
         // "give up" — the row would show n/a next to a perfectly good number.
-        if bestConditionedBootstrap(provider: provider)?.percentPointsPerDollar != nil { return false }
+        if bestConditionedBootstrap(provider: provider, now: now)?.percentPointsPerDollar != nil { return false }
         // A scan still running WILL produce a number, so don't show "n/a" only to
         // contradict it seconds later. Bounded by `scanDeadline`: without that, a
         // stalled scan would pin the clock on screen forever, which is the exact
@@ -888,6 +937,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             promoted = current
         }
         let stored = bootstraps[provider]
+        let storedIsFreshenable = stored.map {
+            ledgerCoverage(provider: provider, since: $0, now: now) != nil
+        } ?? false
         lock.unlock()
         if let promoted, let encoded = try? JSONEncoder().encode(promoted) {
             defaults.set(encoded, forKey: bestKey)
@@ -907,9 +959,16 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         // still being served while real spend against the same integer percent had
         // grown 14%, and the growth trigger could never fire because the reported
         // percent had not moved.
+        //
+        // Unfreshenable: the ledger cannot vouch for the span since the stored scan,
+        // so its denominator is frozen while spending continues. The ledger is
+        // memory-only, so EVERY restart lands here with a same-anchor cache that
+        // neither other trigger can clear — the 43% live overstatement in
+        // `ledgerCoverage`. Rescanning is the only way to re-measure the denominator.
         let staleEnough = stored.map {
             usedPercentPoints - $0.usedPercentPoints >= Self.bootstrapRefreshGrowthPercentPoints
                 || now.timeIntervalSince($0.scannedAt) > WeeklyQuotaActivityLedger.retention
+                || !storedIsFreshenable
         } ?? true
         guard staleEnough else { return }
 

@@ -201,6 +201,26 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
   forever purely by having reached a larger percentage. Records written before the
   stamp existed decode as `nil` and are still accepted: discarding them would
   throw away the completed windows the cache exists to keep.
+- **A quota regime can change with nothing in the payload announcing it.**
+  Promotional weekly limits move capacity by tens of percent and begin and end
+  with no price change and no limit-shape change, so the compatibility stamp
+  cannot see them and a carry-over measured under one stays formally valid while
+  describing a plan that no longer exists. Two guards, since detection is
+  impossible: the current window is preferred outright once it reaches
+  `wellConditionedPercentPoints` (10pp, ~±5% quantization), and a carry-over no
+  fresh measurement has displaced expires after `carryOverMaximumAge` (21 days,
+  three weekly windows). Both thresholds are judgment calls, not measurements.
+  Vendor promotion terms and dates are deliberately kept out of the code and out
+  of this spec: they change, and neither can verify them.
+- **The ledger must vouch for the span it freshens.** `activity(from:to:)` answers
+  from a single bucket, so freshening silently accepted intervals it never watched
+  and undercounted the denominator — which overstates burn rather than failing
+  safe. The ledger is memory-only, so every restart hit this: a cache of
+  4pp/$13.56 restored while real spend had reached $28.07 served 0.332 pp/$
+  against a true 0.232, **43% high**, and neither the growth (+3pp) nor the age
+  (6h) trigger could clear it. Freshening now applies the same
+  `maximumPollGap` check the live tracker uses, and a stored measurement the
+  ledger cannot cover is a third rescan trigger.
 - A bootstrap scan captures a **scope generation** at dispatch and its result is
   discarded if the generation has moved. A scan walking hundreds of megabytes can
   outlive the account it was started for, and the state dictionaries are keyed by

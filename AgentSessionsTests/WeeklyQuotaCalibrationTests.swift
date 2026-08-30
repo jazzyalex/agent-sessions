@@ -444,11 +444,15 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
             scannedAt: t0.addingTimeInterval(-600))), forKey: key)
 
         let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        // The ledger must be able to vouch for the span since that scan, or the
+        // cache is unverifiable and rescanning it is correct rather than churn.
+        store.ledger(provider: "codex").record(
+            observations: [], priceTable: RunwayPriceTable.makeForTesting(), now: t0)
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
                               resetsAt: resetsAt, windowMinutes: 10080,
                               usedPercentPoints: 3, now: t0, defaults: suite)
         XCTAssertFalse(store.scanWasDispatchedForTesting(provider: "codex"),
-                       "a ten-minute-old scan is still good; rescanning it is pure churn")
+                       "a ten-minute-old scan the ledger covers is still good; rescanning is churn")
     }
 
     /// Promotion must happen on RESTORE as well as after a scan: a launch that
@@ -1114,6 +1118,103 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
         XCTAssertTrue(waitForScanEntry(entries, count: 2))
         release.signal()
         waitForScanToFinish(store, provider: "codex")
+    }
+
+    // MARK: - Restart and regime changes
+
+    /// The ledger is memory-only, so after a restart it cannot vouch for the span
+    /// between the cached scan and launch. `activity` answers happily from a single
+    /// post-launch bucket, so freshening used to silently drop the pre-restart
+    /// spend and serve an undercounted denominator — 43% high on live data.
+    func testFresheningRejectsASpanTheLedgerDidNotWatch() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let scannedAt = t0.addingTimeInterval(-3600)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.setBootstrapForTesting(
+            provider: "codex",
+            result: result(used: 4, dollars: 13.56, resetsAt: resetsAt, scannedAt: scannedAt))
+        store.recordUsedPercentForTesting(provider: "codex", usedPercentPoints: 6,
+                                          resetsAt: resetsAt)
+        // One bucket, banked "after launch" — an hour after the cached scan, so the
+        // ledger never observed the interval in between.
+        store.ledger(provider: "codex").record(
+            observations: [], priceTable: RunwayPriceTable.makeForTesting(), now: t0)
+
+        // Falls back to the stored ratio rather than inventing a small denominator.
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "codex",
+                                                                now: t0.addingTimeInterval(30)))
+        XCTAssertEqual(served, 4.5 / 13.56, accuracy: 0.0001)
+    }
+
+    /// ...and because that stored ratio is itself unverifiable, a rescan must be
+    /// triggered. Neither the growth (+3pp) nor the age (6h) trigger fires here.
+    func testAnUnfreshenableCacheTriggersARescan() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        try store(result(used: 4, dollars: 13.56, resetsAt: resetsAt,
+                         scannedAt: t0.addingTimeInterval(-3600)),
+                  at: key("codex", "unscoped", resetsAt))
+        try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
+                            at: t0.addingTimeInterval(3600))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 6,
+                              now: t0.addingTimeInterval(7200), defaults: suite)
+        waitForScan(store, provider: "codex")
+
+        XCTAssertTrue(store.scanSucceededForTesting(provider: "codex"),
+                      "a restart leaves a same-anchor cache no trigger can clear")
+        let stored = try XCTUnwrap(store.bootstrap(provider: "codex"))
+        XCTAssertEqual(stored.dollars, 20.0, accuracy: 0.001,
+                       "the frozen $13.56 denominator must be re-measured")
+    }
+
+    /// A quota-regime change moves capacity without touching the price table or the
+    /// limit shape, so the compatibility stamp cannot see it. Anthropic's +50%
+    /// weekly promotion ending is exactly this. Once the current window stands on
+    /// its own, recency beats numerator size.
+    func testAWellConditionedCurrentWindowBeatsAnOlderCarryOver() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.setBestBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 77, dollars: 1239.62, resetsAt: previous, scannedAt: previous))
+        store.setBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 12, dollars: 120, resetsAt: current, scannedAt: current))
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 12.5 / 120, accuracy: 0.0001,
+                       "12pp of the CURRENT regime beats 77pp of a possibly-expired one")
+    }
+
+    /// Below that bar the carry-over still wins — a 2pp sliver swings badly inside
+    /// one integer quantum.
+    func testAPoorlyConditionedCurrentWindowDoesNotDisplaceTheCarryOver() throws {
+        let previous = t0
+        let current = t0.addingTimeInterval(604_800)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: current)
+        store.setBestBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 77, dollars: 1239.62, resetsAt: previous, scannedAt: previous))
+        store.setBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 2, dollars: 28, resetsAt: current, scannedAt: current))
+
+        let served = try XCTUnwrap(store.percentPointsPerDollar(provider: "claude", now: current))
+        XCTAssertEqual(served, 77.5 / 1239.62, accuracy: 0.0001)
+    }
+
+    /// A carry-over no fresh measurement has displaced must not be trusted forever.
+    func testAnExpiredCarryOverIsNotServed() throws {
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.setBestBootstrapForTesting(
+            provider: "claude",
+            result: result(used: 77, dollars: 1239.62, resetsAt: t0, scannedAt: t0))
+        let muchLater = t0.addingTimeInterval(WeeklyQuotaCalibrationStore.carryOverMaximumAge + 60)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "claude", now: muchLater),
+                     "a measurement three weeks stale may describe a different quota regime")
     }
 
     /// A measurement priced under a different table describes a different
