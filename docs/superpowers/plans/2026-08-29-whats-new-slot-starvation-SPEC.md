@@ -269,6 +269,29 @@ Into `AgentSessionsTests/OnboardingStarCardTests.swift`:
 - **The star card's copy, design, gate, or terminal states.** Nothing suggests
   the card fails when it is seen.
 - **Telemetry of any kind.** The card promises "nothing sent".
-- **Extending `TopSlotDebugOverride` to `star` and `whatsnew`.** A genuinely
-  useful ~15-line QA affordance, but it is a separate, optional patch — keep
-  this one to the defect.
+
+## 11. Follow-up: `TopSlotDebugOverride` covers `star` and `whatsnew`
+
+Landed separately from the defect fix, as §10 originally proposed.
+
+The override forces one card into the slot ahead of the whole chain, read from
+the volatile launch-argument domain so it leaves nothing behind:
+
+```
+open <built>.app --args -AgentSessionsDebugTopSlotCard star
+open <built>.app --args -AgentSessionsDebugTopSlotCard whatsnew
+open <built>.app --args -AgentSessionsDebugTopSlotCard whatsnew:5.0
+```
+
+A bare `whatsnew` renders this build's own major.minor. Before this, positions 1
+and 3 of the queue had no override at all, and reaching them by hand meant
+writing `OnboardingSessionsOpenedCount` and deleting three lifecycle keys — all
+of which persist in the real preference domain after the run, which is exactly
+what the launch-argument design exists to avoid.
+
+**What it is not.** It renders appearance — copy, layout, wrapping, light and
+dark. Every action is wired to `debugCardDismissed`, so viewing a card here
+cannot spend the real ask, and the `whatsnew` branch deliberately calls
+`openWhatsNewPanel` rather than `openWhatsNewFromCard` so looking at it cannot
+retire the version. The lifecycles in §1–§4 are verified by the tests in §9, not
+by this.
