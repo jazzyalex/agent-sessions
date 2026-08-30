@@ -1,4 +1,5 @@
 import XCTest
+import Dispatch
 @testable import AgentSessions
 
 /// Covers the calibration acceptance rules and the activity ledger. These are the
@@ -843,6 +844,21 @@ extension ProvisionalRateClampTests {
 /// or two different weeks' terms combined into one ratio.
 final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
 
+    private final class ScanEntryCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+
+        func increment() {
+            lock.lock(); defer { lock.unlock() }
+            value += 1
+        }
+
+        func hasReached(_ expected: Int) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return value >= expected
+        }
+    }
+
     private let t0 = Date(timeIntervalSince1970: 3_000_000)
     private var root: URL!
     private var suite: UserDefaults!
@@ -900,6 +916,22 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                 || store.scanIsCoolingDownForTesting(provider: provider) { return }
             usleep(20_000)
         }
+    }
+
+    private func waitForScanToFinish(_ store: WeeklyQuotaCalibrationStore, provider: String) {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline && store.scanIsInFlightForTesting(provider: provider) {
+            usleep(20_000)
+        }
+    }
+
+    private func waitForScanEntry(_ counter: ScanEntryCounter, count: Int = 1) -> Bool {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if counter.hasReached(count) { return true }
+            usleep(20_000)
+        }
+        return counter.hasReached(count)
     }
 
     // MARK: - Carry-over slot
@@ -1021,24 +1053,67 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
     /// old account's result from landing in the new account's calibration.
     func testAScanCompletingAfterAnAccountSwitchIsDiscarded() throws {
         let resetsAt = t0.addingTimeInterval(604_800)
-        try writeTranscript(outputTokens: 1_000_000, resetsAt: resetsAt,
-                            at: t0.addingTimeInterval(3600))
         let now = t0.addingTimeInterval(7200)
-        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let entries = ScanEntryCounter()
+        let release = DispatchSemaphore(value: 0)
+        let completed = result(used: 6, dollars: 20, resetsAt: resetsAt, scannedAt: now)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, _, _, _, _, _, _ in
+                entries.increment()
+                release.wait()
+                return completed
+            })
         store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
                               windowMinutes: 10080, usedPercentPoints: 6,
                               accountHash: "acct-a", now: now, defaults: suite)
-        // Switch accounts while account A's walk is still in flight.
+        XCTAssertTrue(waitForScanEntry(entries))
+        // The injected scanner cannot complete until after account B is active.
         store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
                               resetsAt: resetsAt, windowMinutes: 10080,
                               usedPercentPoints: 1, accountHash: "acct-b",
                               now: now, defaults: suite)
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline && store.bootstrap(provider: "codex") == nil { usleep(20_000) }
+        release.signal()
+        waitForScanToFinish(store, provider: "codex")
 
         XCTAssertNil(store.bootstrap(provider: "codex"),
                      "account A's scan result must not land in account B's state")
         XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: now))
+    }
+
+    /// Failure bookkeeping is scoped too. Account A must not fail after a switch
+    /// and leave account B waiting through A's ten-minute cooldown.
+    func testAFailedScanAfterAnAccountSwitchDoesNotCoolDownTheNewAccount() {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let entries = ScanEntryCounter()
+        let release = DispatchSemaphore(value: 0)
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            scanRunner: { _, _, _, _, _, _, _ in
+                entries.increment()
+                release.wait()
+                return nil
+            })
+
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 3,
+                              accountHash: "acct-a", now: t0, defaults: suite)
+        XCTAssertTrue(waitForScanEntry(entries))
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 3,
+                              accountHash: "acct-b", now: t0, defaults: suite)
+        release.signal()
+        waitForScanToFinish(store, provider: "codex")
+
+        XCTAssertFalse(store.scanIsCoolingDownForTesting(provider: "codex", now: t0))
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 3,
+                              accountHash: "acct-b", now: t0, defaults: suite)
+        XCTAssertEqual(store.scanDispatchCountForTesting(provider: "codex"), 1,
+                       "account B must be able to dispatch immediately")
+        XCTAssertTrue(waitForScanEntry(entries, count: 2))
+        release.signal()
+        waitForScanToFinish(store, provider: "codex")
     }
 
     /// A measurement priced under a different table describes a different
@@ -1057,6 +1132,60 @@ final class WeeklyQuotaBootstrapCacheTests: XCTestCase {
                               now: t0, defaults: suite)
         XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
                      "a differently-priced week is not a usable calibration")
+    }
+
+    /// Compatibility is an in-memory rule too. A remotely refreshed price table
+    /// must invalidate a bootstrap already selected by this process.
+    func testAPriceRevisionChangeDropsAnInMemoryBootstrap() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        let prices = RunwayPriceTable.makeForTesting()
+        var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0)
+        cached.priceRevision = prices.revision
+        cached.limitShape = "5h+weekly"
+        try store(cached, at: key("codex", "acct-a", resetsAt))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(
+            launchedAt: t0,
+            priceRevisionProvider: { prices.revision })
+        store.ensureBootstrap(provider: "codex", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 40,
+                              accountHash: "acct-a", limitShape: "5h+weekly",
+                              now: t0, defaults: suite)
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "codex", now: t0))
+
+        let replacement = Data("""
+        {"version":1,"updated":"9999-12-31","models":{"gpt-5.6":{"inputPerMTok":1,"cachedInputPerMTok":1,"outputPerMTok":1}}}
+        """.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: replacement))
+        store.ensureBootstrap(provider: "codex", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 40, accountHash: "acct-a",
+                              limitShape: "5h+weekly", now: t0, defaults: suite)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "codex", now: t0),
+                     "the old table's conversion must not survive in memory")
+    }
+
+    /// A plan-shape change on the same account is a complete scope transition,
+    /// even though the persisted account key itself does not change.
+    func testALimitShapeChangeDropsAnInMemoryBootstrap() throws {
+        let resetsAt = t0.addingTimeInterval(604_800)
+        var cached = result(used: 40, dollars: 500, resetsAt: resetsAt, scannedAt: t0)
+        cached.priceRevision = RunwayPriceTable.shared.revision
+        cached.limitShape = "weekly"
+        try store(cached, at: key("claude", "unscoped", resetsAt))
+
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        store.ensureBootstrap(provider: "claude", root: root, resetsAt: resetsAt,
+                              windowMinutes: 10080, usedPercentPoints: 40,
+                              limitShape: "weekly", now: t0, defaults: suite)
+        XCTAssertNotNil(store.percentPointsPerDollar(provider: "claude", now: t0))
+
+        store.ensureBootstrap(provider: "claude", root: URL(fileURLWithPath: "/nonexistent"),
+                              resetsAt: resetsAt, windowMinutes: 10080,
+                              usedPercentPoints: 40, limitShape: "weekly+scoped",
+                              now: t0, defaults: suite)
+        XCTAssertNil(store.percentPointsPerDollar(provider: "claude", now: t0),
+                     "a different plan shape must not reuse the old conversion")
     }
 
     /// The served ratio must use the quantization midpoint whichever path produces

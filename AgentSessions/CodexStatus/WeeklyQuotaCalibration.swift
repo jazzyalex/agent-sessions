@@ -425,26 +425,49 @@ struct WeeklyQuotaCalibrationTracker {
 final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     static let shared = WeeklyQuotaCalibrationStore()
 
+    typealias BootstrapScanRunner = @Sendable (
+        _ provider: String,
+        _ root: URL,
+        _ resetsAt: Date,
+        _ windowMinutes: Int,
+        _ usedPercentPoints: Double,
+        _ priceTable: RunwayPriceTable,
+        _ now: Date
+    ) -> WeeklyQuotaBootstrapResult?
+
     /// `launchedAt` is injectable because it is wall-clock state on a singleton,
     /// which is a trap for tests: `.shared` is constructed the first time ANY test
     /// touches it, so a later test inherits an already-expired waiting budget and
     /// sees "abandoned" before it has waited at all — passing in isolation and
     /// failing in the suite. Tests should use `makeForTesting()` and get a clean
     /// store by construction rather than remembering to reset a shared one.
-    init(launchedAt: Date = Date()) {
+    init(launchedAt: Date = Date(),
+         scanRunner: BootstrapScanRunner? = nil,
+         priceRevisionProvider: (@Sendable () -> Int)? = nil) {
         self.launchedAt = launchedAt
+        self.scanRunner = scanRunner ?? Self.runBootstrapScan
+        self.priceRevisionProvider = priceRevisionProvider ?? { RunwayPriceTable.shared.revision }
     }
 
 #if DEBUG
     /// A private store with its own clock and no shared state. Mirrors
     /// `RunwayPriceTable.makeForTesting()`. Pair it with a scratch `UserDefaults`
     /// suite so persistence assertions never touch the real domain.
-    static func makeForTesting(launchedAt: Date = Date()) -> WeeklyQuotaCalibrationStore {
-        WeeklyQuotaCalibrationStore(launchedAt: launchedAt)
+    static func makeForTesting(
+        launchedAt: Date = Date(),
+        scanRunner: BootstrapScanRunner? = nil,
+        priceRevisionProvider: (@Sendable () -> Int)? = nil
+    ) -> WeeklyQuotaCalibrationStore {
+        WeeklyQuotaCalibrationStore(
+            launchedAt: launchedAt,
+            scanRunner: scanRunner,
+            priceRevisionProvider: priceRevisionProvider)
     }
 #endif
 
     private let lock = NSLock()
+    private let scanRunner: BootstrapScanRunner
+    private let priceRevisionProvider: @Sendable () -> Int
     private var ledgers: [String: WeeklyQuotaActivityLedger] = [:]
     private var trackers: [String: WeeklyQuotaCalibrationTracker] = [:]
     private var restored: Set<String> = []
@@ -462,7 +485,12 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// keys are account-scoped, but the maps here are keyed by provider alone, so
     /// without this an in-process account switch keeps serving the previous
     /// account's calibration.
-    private var activeScopeKeys: [String: String] = [:]
+    private struct BootstrapScopeKey: Equatable {
+        let accountHash: String
+        let priceRevision: Int
+        let limitShape: String?
+    }
+    private var activeScopeKeys: [String: BootstrapScopeKey] = [:]
     /// Providers whose older anchor-keyed caches have been folded into the
     /// carry-over slot. Once per process; see `migrateHistoricalBootstraps`.
     private var migratedProviders: Set<String> = []
@@ -505,6 +533,35 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// One minute: the bootstrap scan is a few seconds, so anything past this means
     /// it failed or the window has too little history to divide by.
     static let waitingBudget: TimeInterval = 60
+
+    private static func runBootstrapScan(
+        provider: String,
+        root: URL,
+        resetsAt: Date,
+        windowMinutes: Int,
+        usedPercentPoints: Double,
+        priceTable: RunwayPriceTable,
+        now: Date
+    ) -> WeeklyQuotaBootstrapResult? {
+        if provider == "claude" {
+            return ClaudeWeeklyQuotaBootstrapScanner.scan(
+                root: root,
+                resetsAt: resetsAt,
+                windowMinutes: windowMinutes,
+                usedPercentPoints: usedPercentPoints,
+                priceTable: priceTable,
+                now: now,
+                fileManager: FileManager.default)
+        }
+        return CodexWeeklyQuotaBootstrapScanner.scan(
+            root: root,
+            resetsAt: resetsAt,
+            windowMinutes: windowMinutes,
+            usedPercentPoints: usedPercentPoints,
+            priceTable: priceTable,
+            now: now,
+            fileManager: FileManager.default)
+    }
 
     private static func defaultsKey(provider: String, scope: WeeklyQuotaCalibrationScope) -> String {
         "quotaMeter.weeklyCalibration.\(provider).\(scope.accountHash ?? "unscoped")"
@@ -704,6 +761,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// the handful of keys under this provider's prefix.
     private func migrateHistoricalBootstraps(provider: String,
                                              accountHash: String?,
+                                             priceRevision: Int,
                                              limitShape: String?,
                                              bestKey: String,
                                              defaults: UserDefaults) {
@@ -723,7 +781,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                   // different plan shape, describes a different conversion. Without
                   // this an old plan could win forever purely by having reached a
                   // larger percentage.
-                  cached.isCompatible(priceRevision: RunwayPriceTable.shared.revision,
+                  cached.isCompatible(priceRevision: priceRevision,
                                       limitShape: limitShape) else { continue }
             if cached.usedPercentPoints > (best?.usedPercentPoints ?? 0) { best = cached }
         }
@@ -753,7 +811,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                          defaults: UserDefaults = .standard) {
         let storeKey = Self.bootstrapKey(provider: provider, accountHash: accountHash, resetsAt: resetsAt)
         let bestKey = Self.bestBootstrapKey(provider: provider, accountHash: accountHash)
-        let scopeKey = accountHash ?? "unscoped"
+        let priceRevision = priceRevisionProvider()
+        let scopeKey = BootstrapScopeKey(
+            accountHash: accountHash ?? "unscoped",
+            priceRevision: priceRevision,
+            limitShape: limitShape)
         var promoted: WeeklyQuotaBootstrapResult?
         lock.lock()
         // The persisted keys are account-scoped but these maps are not, so a
@@ -788,13 +850,14 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            let data = defaults.data(forKey: bestKey),
            let cached = try? JSONDecoder().decode(WeeklyQuotaBootstrapResult.self, from: data),
            cached.percentPointsPerDollar != nil,
-           cached.isCompatible(priceRevision: RunwayPriceTable.shared.revision,
+           cached.isCompatible(priceRevision: priceRevision,
                                limitShape: limitShape) {
             bestBootstraps[provider] = cached
         }
         lock.unlock()
         migrateHistoricalBootstraps(provider: provider,
                                     accountHash: accountHash,
+                                    priceRevision: priceRevision,
                                     limitShape: limitShape,
                                     bestKey: bestKey,
                                     defaults: defaults)
@@ -811,7 +874,7 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
            // so an exact Double compare never matches and every launch rescans.
            abs(cached.resetsAt.timeIntervalSince(resetsAt)) < CodexWeeklyQuotaBootstrapScanner.anchorTolerance,
            cached.percentPointsPerDollar != nil,
-           cached.isCompatible(priceRevision: RunwayPriceTable.shared.revision,
+           cached.isCompatible(priceRevision: priceRevision,
                                limitShape: limitShape) {
             bootstraps[provider] = cached
         }
@@ -878,25 +941,21 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 self.scanStartedAt[provider] = nil
                 self.lock.unlock()
             }
-            // Same ratio, different transcript shape per provider: Codex counters
-            // are cumulative and carry a quota anchor; Claude's are per-call and
-            // carry none.
-            let scan = provider == "claude"
-                ? ClaudeWeeklyQuotaBootstrapScanner.scan
-                : CodexWeeklyQuotaBootstrapScanner.scan
             func backOff() {
                 self.lock.lock()
+                // A failed scan belongs to the scope that dispatched it just as
+                // much as a successful result does. Without this guard, account A
+                // can fail after a switch and impose its ten-minute cooldown on B.
+                guard (self.scopeGenerations[provider] ?? 0) == generation else {
+                    self.lock.unlock()
+                    return
+                }
                 self.scanCooldownUntil[provider] = now.addingTimeInterval(Self.failedScanCooldown)
                 self.lock.unlock()
             }
-            guard let result = scan(
-                root,
-                resetsAt,
-                windowMinutes,
-                usedPercentPoints,
-                RunwayPriceTable.shared,
-                now,
-                FileManager.default
+            guard let result = self.scanRunner(
+                provider, root, resetsAt, windowMinutes, usedPercentPoints,
+                RunwayPriceTable.shared, now
             ) else { backOff(); return }
             // A week can contain one slug the price table has never seen without
             // meaningfully moving the ratio; a large unknown share cannot.
@@ -993,6 +1052,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     func scanIsCoolingDownForTesting(provider: String, now: Date = Date()) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return scanCooldownUntil[provider].map { now < $0 } ?? false
+    }
+
+    func scanIsInFlightForTesting(provider: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return scansInFlight.contains(provider)
     }
 
     func clearScanCooldownForTesting(provider: String) {
