@@ -7,8 +7,10 @@ needs decoding, that's a bug — fix the wording.
 ## Marketing / promo
 All marketing, promo, and growth work goes through `Marketing/STATUS.md` — read it first,
 update it last. It indexes the detail files (goals, star log, angles, launch kits).
-Agents draft; the owner posts from their own accounts. `Marketing/` is gitignored and
-local to this machine.
+Agents draft by default. An agent may publish or send from the owner's accounts only when
+the owner explicitly authorizes that exact external action and its targets in the current
+request. Do not infer permission for additional posts, recipients, follow-ups, or account
+actions. `Marketing/` is gitignored and local to this machine.
 
 ## Build & review discipline
 - Don't ask the user to "confirm if it looks good" until the code builds with zero errors.
