@@ -755,6 +755,43 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 
 ## Usage Tracking
 
+### Weekly quota calibration cannot tell two accounts of the same provider apart
+> **open** · sev: med · urg: low · verified 2026-08-30
+
+- **What:** the `Wk` weekly calibration (percentage points per API-equivalent dollar) is
+  cached per provider and account, but Claude's normalized snapshot carries no account or
+  org id, so every Claude account persists to the literal scope `unscoped`. Two Claude
+  accounts on one machine share one carry-over slot: whichever reaches the larger weekly
+  percentage wins it, and the other account is then served a conversion learned from a
+  plan it is not on. Codex has the same shape latently — it *does* expose an account id
+  and is scoped by its hash, so it is correct today, but that only holds while one account
+  is in use at a time.
+- **Where:** `WeeklyQuotaCalibrationStore.bootstrapKey`
+  ([:519](../AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift:519)) and
+  `bestBootstrapKey` ([:533](../AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift:533))
+  fall back to `"unscoped"` when `accountHash` is nil; the Claude caller passes
+  `accountHash: nil` with the reason inline
+  ([ClaudeUsageModel.swift:616](../AgentSessions/ClaudeStatus/ClaudeUsageModel.swift:616)).
+  `WeeklyQuotaCalibrationScope.isPersistable` already refuses to persist an unscoped LIVE
+  tracker for exactly this reason — the bootstrap cache is the surface that does not.
+- **Why deferred (owner decision 2026-08-30):** the honest fix is not a better cache key.
+  It is **multi-account support for Claude and Codex** — knowing which account a session,
+  a usage poll and a stored calibration each belong to, and letting the user see and switch
+  between them. That is a separate job and is not planned soon. Scoping the calibration
+  alone would produce a key nothing else in the app understands.
+- **Mitigations already in place:** an account switch clears the provider's in-memory
+  bootstraps, tracker, ledger and scan bookkeeping; a scan that completes after a switch is
+  discarded via its scope generation; and a bootstrap is stamped with the price revision and
+  limit shape it was measured under, so a plan change invalidates it. None of these help
+  when both accounts report the same shape under the same `unscoped` key.
+- **Risk if wrong:** a wrong `%/h` for the account that did not win the slot, silently — the
+  row looks identical to a correct one. The reset anchor discriminates in practice (it is an
+  account's own reset instant at second precision), so a collision needs two Claude accounts
+  whose weekly windows align within 120s.
+- **To close:** an account identity for Claude that survives a restart; calibration keyed by
+  it; and a test proving two accounts on one machine keep separate carry-over slots.
+  Blocked on the multi-account work above.
+
 ### Storage rollup in Analytics: bytes per source and S4-eligible waste
 > **open** · sev: low · urg: low · verified 2026-08-23
 

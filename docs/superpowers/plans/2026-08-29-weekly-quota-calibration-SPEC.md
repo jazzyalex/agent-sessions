@@ -174,6 +174,9 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
   the literal scope `unscoped`. Two Claude accounts on one machine would share
   that slot. The reset anchor discriminates in practice — it is an account's own
   reset instant at second precision — but this is a real gap, not a guarantee.
+  Tracked in `docs/backlog.md` ("Weekly quota calibration cannot tell two accounts
+  of the same provider apart"); the fix is multi-account support for Claude and
+  Codex, not a better cache key, and is not planned soon.
 - In-memory calibration state is keyed by provider, while the persisted keys are
   account-scoped. A same-process account switch would otherwise keep serving the
   previous account's conversion, so a scope change now clears that provider's
