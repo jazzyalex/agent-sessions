@@ -63,6 +63,9 @@ lines are metadata (`summary`, `file-history-snapshot`, or anything flagged
 `isMeta`) rather than conversation. Parse for `type == "user"` and skip the meta
 lines, or your transcript fills with noise.
 
+The [Claude Code history guide]({{ '/guides/claude-code-jsonl-history.html' | relative_url }})
+works through those roots and the record shape in more detail.
+
 ## Codex — date-sharded rollout files
 
 Codex session files live in a location that is easy to state and easy to get
@@ -88,6 +91,9 @@ zero-data-retention or stateless mode, reasoning items come back as opaque
 a viewer should treat them as sensitive and leave them alone. CLI, Desktop, and
 VS Code Codex all write into this same rollout corpus, which is convenient: one
 location covers three surfaces.
+
+The [Codex history guide]({{ '/guides/codex-local-history.html' | relative_url }}) covers
+`CODEX_HOME` and the rest of the rollout layout.
 
 ## Cursor — one session, two stores
 
@@ -116,6 +122,9 @@ IDE-chat history that lives only inside the database is stored as protobuf
 message blobs, and those are not decoded into transcript events. If a chat never
 produced an agent transcript, there is nothing readable to show.
 
+The [Cursor Agent history guide]({{ '/guides/cursor-agent-local-history.html' | relative_url }})
+sets out that boundary and what each of the two stores holds.
+
 ## OpenCode — a session database, not files
 
 OpenCode is the cleanest example of the industry drift toward databases. Recent
@@ -135,6 +144,9 @@ across multiple part rows, so reconstructing a turn means joining messages to
 their parts and ordering by time. It is a real database schema, not a log you can
 `tail`.
 
+The [OpenCode SQLite guide]({{ '/guides/opencode-sqlite-history.html' | relative_url }}) has
+the schema notes and the read-only query path.
+
 ## The others — Copilot and Hermes
 
 Two more worth a mention, because they show the same two patterns.
@@ -149,6 +161,10 @@ Hermes went the OpenCode route. Current versions store everything in
 `~/.hermes/state.db`, a SQLite database, with a legacy
 `~/.hermes/sessions/session_*.json` fallback for older installs. Check the
 database first; fall back to JSON only when it is absent or empty.
+
+Both have a guide of their own: [Copilot CLI]({{ '/guides/copilot-cli-local-history.html' | relative_url }})
+for the event envelope, [Hermes]({{ '/guides/hermes-agent-state-db-history.html' | relative_url }})
+for the database and its JSON fallback.
 
 ## The whole map, in one table
 

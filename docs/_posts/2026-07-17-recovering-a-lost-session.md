@@ -56,6 +56,11 @@ The pattern across all three: archive is a filter, not a shredder. The bytes you
 wrote are still on disk. You're changing which of them the picker chooses to
 show you.
 
+If you need the full layout of the store you're digging through, there is a guide
+per agent: [OpenCode]({{ '/guides/opencode-sqlite-history.html' | relative_url }}),
+[Codex]({{ '/guides/codex-local-history.html' | relative_url }}), and
+[Claude Code]({{ '/guides/claude-code-jsonl-history.html' | relative_url }}).
+
 ## 2. The project folder moved or renamed
 
 This one is sneakier, because nothing was archived and nothing was deleted, yet

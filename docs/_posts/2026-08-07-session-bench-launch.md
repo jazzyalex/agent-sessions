@@ -154,7 +154,9 @@ and official documentation of its session store schema and transcript
 event structure.
 Its size probe is marked not-run rather than scored — the headless path
 refused to authenticate, which is a fact about automation readiness, not
-about the format — and the bench says so instead of guessing.
+about the format — and the bench says so instead of guessing. Where it
+writes those files:
+[OpenClaw local agent history]({{ '/guides/openclaw-local-agent-history.html' | relative_url }}).
 
 **Claude Code, 12/18.** Genuinely good bones — per-line writer-version stamps (an app version, not a schema version — that now costs a gate),
 model and usage on every assistant event, subagent trees, fifteen-plus
@@ -220,7 +222,9 @@ late June.
 then the completeness floor gives out: no model field anywhere (our parser
 regexes model changes out of user-input text), no token counts, user
 content wrapped in XML tags inside JSON strings, and the largest storage
-migration we observed — markdown artifacts to JSONL, mid-window.
+migration we observed — markdown artifacts to JSONL, mid-window. Both sides
+of that migration are mapped in the
+[Antigravity CLI history guide]({{ '/guides/antigravity-cli-local-history.html' | relative_url }}).
 
 **Cursor Agent, 7/18.** Last place, and the leanest file in the bench, which
 is the point: 1.9 KB per session because the transcript records no

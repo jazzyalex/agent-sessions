@@ -71,6 +71,10 @@ token accounting. Developers who would never dream of running a service
 without metrics are sitting on months of their own engineering telemetry and
 have never run a single query against it.
 
+The first obstacle is usually just knowing where the files are. Each agent
+stores its sessions somewhere different, and the paths and formats are written
+up per agent in the [local history guides]({{ '/#guides' | relative_url }}).
+
 ## Five questions your history can already answer
 
 **What did that feature actually cost?** Sessions in the newer formats carry
