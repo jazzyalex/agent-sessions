@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Session-Bench: 20 pass/fail gates for coding-agent session formats"
-description: "We scored what ten coding agents write to disk — signal density, completeness, stability, openness, tooling cost. Pass, fail, or not run; no partial credit. Pi tops it. Cursor comes last. Pi documents its format properly; most still don't."
+description: "We scored what ten coding agents write to disk: signal density, completeness, stability, openness, tooling cost. Pass, fail, or not run, no partial credit."
 date: 2026-08-07
 last_modified_at: 2026-08-23
 image: /assets/bench-social-card.png
@@ -13,6 +13,7 @@ summary: >-
   months of weekly drift monitoring (windows vary per harness). The smallest harness has the cleanest
   format. Cursor ranks last. And the two harnesses at the top of the
   board are the ones that document their formats.
+seo_title: "Session-Bench: 20 gates for agent session formats"
 ---
 
 A coding agent's session file is the only durable record of the

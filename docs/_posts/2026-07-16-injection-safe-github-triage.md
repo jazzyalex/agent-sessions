@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "A prompt-injection-safe GitHub triage agent: give the model no tools"
-description: "Why an LLM that triages untrusted GitHub issues should have zero tools — the tool-less design, the adversarial confinement test that proves it, and the repo-takeover flaw that motivates it."
+description: "Why an LLM that triages untrusted GitHub issues should have zero tools: the design, the adversarial test that proves it, and the flaw behind it."
 date: 2026-07-16
 image: /assets/blog/2026-07-16-injection-safe-triage-card.png
 summary: >-
@@ -11,6 +11,7 @@ summary: >-
   tool-less by construction — text in, text out, a human posting at the end —
   and the adversarial test that checks the confinement against the live model
   before it runs.
+seo_title: "A prompt-injection-safe GitHub triage agent"
 ---
 
 In January 2026, a security researcher took over a GitHub repository by opening

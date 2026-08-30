@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Your agent history is a dataset. Almost nobody queries it."
-description: "Eleven months of coding-agent transcripts, measured: what one typed instruction actually triggers, and five questions your own session history can answer about how you work."
+description: "Eleven months of coding-agent transcripts, measured: what one typed instruction triggers, and five questions your session history can answer."
 date: 2026-07-21
 summary: >-
   Every session with a coding agent leaves a complete machine-readable record
@@ -10,6 +10,7 @@ summary: >-
   That corpus can answer real questions — what a feature cost, which commands
   keep failing, how your prompting changed — and it goes unqueried on almost
   every developer's machine.
+seo_title: "Your agent history is a dataset. Nobody queries it."
 ---
 
 For every instruction I typed into Codex over the last eleven months, it

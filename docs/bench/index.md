@@ -1,9 +1,11 @@
 ---
 layout: blog
 title: "Session-Bench — the coding-agent session-format benchmark"
-description: "Session-Bench measures whether coding-agent harnesses preserve a useful, inspectable, and portable record of their work. SWE-bench measures whether the agent completed the work; Session-Bench measures what the harness preserved after it was done."
+description: "Twenty pass/fail gates measuring whether coding-agent harnesses preserve a useful, inspectable, portable record of the work they did on disk."
 permalink: /bench/
 image: /assets/bench-social-card.png
+seo_title: "Session-Bench: the agent session-format benchmark"
+last_modified_at: 2026-08-29
 ---
 <p class="eyebrow">Agent Sessions</p>
 <h1>Session-Bench</h1>

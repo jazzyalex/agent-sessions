@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "The handover problem: agent sessions end, projects don't"
-description: "Coding agent sessions are stateless and projects outlive dozens of them. A practical pattern for carrying state across sessions: the dated handover file, and why it beats memory features and transcript mining."
+description: "Agent sessions are stateless and projects outlive dozens of them. The dated handover file, and why it beats memory features and transcript mining."
 date: 2026-07-17
 summary: >-
   A long-running project outlives every agent session that works on it. Each
@@ -10,6 +10,7 @@ summary: >-
   dated, append-only log of state, decisions, and next steps — and compares it
   honestly against built-in memory features, transcript mining, and re-reading
   git history.
+seo_title: "The handover problem: agent sessions end, projects don't"
 ---
 
 A coding agent session is bounded by its context window; a project is not.

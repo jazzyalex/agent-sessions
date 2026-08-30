@@ -1,3 +1,7 @@
+---
+title: "AI-agent brief: add a source"
+last_modified_at: 2026-08-29
+---
 # AI-agent brief: add a source to Agent Sessions
 
 Before copying the brief, the human should create an empty temporary folder and send the

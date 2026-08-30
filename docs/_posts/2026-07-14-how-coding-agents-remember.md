@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "How coding agents remember: a field study of six session-history formats"
-description: "We measured 3,096 real sessions and 3.8 GB of transcripts across Claude Code, Codex, Cursor, Copilot, OpenCode, and Hermes — verbosity, telemetry, sealed reasoning, and search — with a scorecard and recommendations."
+description: "We measured 3,096 real sessions and 3.8 GB of transcripts across six coding agents: verbosity, telemetry, sealed reasoning, search — with a scorecard."
 date: 2026-07-14
 summary: >-
   Six coding agents on one Mac wrote 3,096 session transcripts over eleven
@@ -10,6 +10,7 @@ summary: >-
   what they cost, why most reasoning is now sealed even on your own disk, and
   which format can actually find anything again. With a feature scorecard and
   concrete recommendations for each vendor.
+seo_title: "Six agent session-history formats, measured"
 ---
 
 Over the last eleven months, the coding agents on one of our Macs wrote 3,096

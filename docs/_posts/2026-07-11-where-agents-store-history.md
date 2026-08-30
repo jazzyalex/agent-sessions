@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Where AI coding agents store your session history: the real paths and formats"
-description: "The exact on-disk locations and formats for Claude Code, Codex, Cursor, OpenCode, Copilot, and Hermes session history — real paths, JSONL vs SQLite, and the gotchas."
+description: "The exact on-disk paths and formats for Claude Code, Codex, Cursor, OpenCode, Copilot, and Hermes session history — JSONL vs SQLite, and the gotchas."
 date: 2026-07-11
 summary: >-
   Every coding agent writes a full transcript of each session to a local file,
@@ -10,6 +10,7 @@ summary: >-
   Codex's date-sharded rollout files under ~/.codex/sessions, OpenCode's SQLite
   database, Cursor's two-store split, and a few others — with the parsing
   gotchas that bite when you try to read them yourself.
+seo_title: "Where AI coding agents store session history"
 ---
 
 Every coding agent you run writes a full transcript of the session to a file on

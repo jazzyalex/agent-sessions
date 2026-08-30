@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Agent-legible repositories: your repo now has two kinds of readers"
-description: "Coding agents read your repository cold, dozens of times a week. How to structure instruction files, scripts, and handover state so every session starts competent instead of archaeological."
+description: "Coding agents read your repository cold, dozens of times a week. How to structure instruction files, scripts, and handover state for every session."
 date: 2026-07-24
 summary: >-
   Every agent session reads your repository from scratch, with no memory of
@@ -10,6 +10,7 @@ summary: >-
   memory surfaces of an agent-legible repo — instruction files, playbooks,
   executable scripts, handover state, and the transcript archive — with the
   failure modes each one prevents.
+seo_title: "Agent-legible repositories: writing for two readers"
 ---
 
 The highest-leverage file in this repository contains no code. It is an

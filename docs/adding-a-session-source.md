@@ -1,3 +1,6 @@
+---
+last_modified_at: 2026-08-29
+---
 # Adding a session source
 
 Verified against the Qwen Code source dogfood pass on 2026-08-17, after the Session

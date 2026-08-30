@@ -3,7 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  {% seo %}
+  {% comment %}
+    title=false suppresses only jekyll-seo-tag's <title>; og:title, twitter:title and the
+    JSON-LD headline still come from page.title. That lets a page carry a long editorial
+    headline (the H1) and a short `seo_title` that fits the ~60-char SERP budget.
+  {% endcomment %}
+  {% seo title=false %}
+  <title>{% if page.seo_title %}{{ page.seo_title }}{% else %}{{ page.title }} | {{ site.title }}{% endif %}</title>
   <link rel="alternate" type="application/rss+xml" title="The Rollout — Agent Sessions" href="{{ '/feed.xml' | relative_url }}">
   <link rel="icon" href="{{ '/assets/app-icon-32.png' | relative_url }}">
   <link rel="stylesheet" href="{{ '/guides/guide.css' | relative_url }}">

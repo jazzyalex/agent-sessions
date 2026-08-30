@@ -1,13 +1,14 @@
 ---
 layout: post
 title: "Recovering an AI coding-agent session you thought you lost"
-description: "A practical, honest guide to getting back a Claude Code, Codex, OpenCode, or Cursor session that vanished — archived, moved by path, or genuinely deleted."
+description: "A practical, honest guide to getting back a Claude Code, Codex, OpenCode, or Cursor session that vanished — archived, moved by path, or deleted."
 date: 2026-07-17
 summary: >-
   A session that disappears from your agent's resume picker is almost never
   actually gone. It was archived, or it's filed under a project path that no
   longer matches where you're standing. Here is how to tell the two apart, get
   each one back, and what to do in the one case that is genuinely unrecoverable.
+seo_title: "Recovering an AI coding-agent session you lost"
 ---
 
 A session that vanishes from your agent's resume picker is almost never gone.

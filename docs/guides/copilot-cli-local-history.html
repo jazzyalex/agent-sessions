@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GitHub Copilot CLI Local History - Where Copilot Stores Sessions on macOS</title>
-  <meta name="description" content="Where GitHub Copilot CLI stores session history on macOS: ~/.copilot/session-state/&lt;session-id&gt;/events.jsonl, the event envelope, jq recipes, and what Agent Sessions reads.">
+  <title>Where GitHub Copilot CLI Stores Sessions on macOS</title>
+  <meta name="description" content="GitHub Copilot CLI writes one events.jsonl per session under ~/.copilot/session-state. The event envelope, jq recipes, and where reading by hand ends.">
   <meta name="keywords" content="Copilot CLI history, GitHub Copilot CLI sessions, copilot session-state, events.jsonl, ~/.copilot/session-state, Copilot CLI transcript, Copilot session-store.db, macOS AI coding agent history, Agent Sessions">
   <link rel="canonical" href="https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html">
   <link rel="icon" href="../assets/app-icon-32.png">
@@ -17,6 +17,66 @@
   <meta name="twitter:title" content="GitHub Copilot CLI Local History">
   <meta name="twitter:description" content="Search local GitHub Copilot CLI session history on macOS with Agent Sessions.">
   <meta name="twitter:image" content="https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "TechArticle",
+        "@id": "https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html#article",
+        "headline": "GitHub Copilot CLI Local History",
+        "name": "GitHub Copilot CLI Local History",
+        "description": "GitHub Copilot CLI writes one events.jsonl per session under ~/.copilot/session-state. The event envelope, jq recipes, and where reading by hand ends.",
+        "url": "https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html",
+        "mainEntityOfPage": {
+          "@type": "WebPage",
+          "@id": "https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html"
+        },
+        "inLanguage": "en",
+        "datePublished": "2026-08-28",
+        "dateModified": "2026-08-28",
+        "image": "https://jazzyalex.github.io/agent-sessions/assets/agent-sessions-social-card.png",
+        "author": {
+          "@type": "Person",
+          "name": "Alexander Malakhov",
+          "url": "https://github.com/jazzyalex"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "Agent Sessions",
+          "url": "https://jazzyalex.github.io/agent-sessions/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://jazzyalex.github.io/agent-sessions/assets/app-icon-512.png"
+          }
+        },
+        "about": {
+          "@type": "SoftwareApplication",
+          "name": "Agent Sessions",
+          "applicationCategory": "DeveloperApplication",
+          "operatingSystem": "macOS 14.0 or later"
+        }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Agent Sessions",
+            "item": "https://jazzyalex.github.io/agent-sessions/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "GitHub Copilot CLI Local History",
+            "item": "https://jazzyalex.github.io/agent-sessions/guides/copilot-cli-local-history.html"
+          }
+        ]
+      }
+    ]
+  }
+  </script>
   <script defer src="guide.js"></script>
   <!-- GoatCounter: cookieless, privacy-first analytics -->
   <script data-goatcounter="https://agent-sessions.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
