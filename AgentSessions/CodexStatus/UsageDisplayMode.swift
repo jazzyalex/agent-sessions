@@ -284,7 +284,7 @@ enum RunwayPresentation: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .fiveHour: return "Quota-minutes per hour against the 5-hour window."
-        case .weekly: return "Share of average weekly burn."
+        case .weekly: return "Estimated share of the weekly quota consumed per hour."
         case .token: return "Tokens generated per hour, per session."
         case .dollar: return "Estimated API-equivalent cost per hour."
         }

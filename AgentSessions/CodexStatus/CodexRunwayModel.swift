@@ -376,17 +376,32 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
     let now: Date
     let maxRows: Int
     let recentSessionsRoot: URL?
+    /// Learned pp-per-API-dollar conversion for `Wk`. nil = not calibrated yet, so
+    /// weekly rows wait on the clock rather than inventing a number.
+    let weeklyPercentPointsPerDollar: Double?
+    /// False when the provider exposes no weekly limit at all — weekly rows then
+    /// read "n/a" instead of waiting for a calibration that can never arrive.
+    let weeklyWindowAvailable: Bool
+    /// True once we have watched long enough that a calibration is evidently not
+    /// coming. Stops the waiting clock from spinning indefinitely.
+    let weeklyCalibrationAbandoned: Bool
 
     init(baseline: RunwayProviderBaseline,
          identities: [RunwaySessionIdentity],
          now: Date,
          maxRows: Int,
-         recentSessionsRoot: URL? = nil) {
+         recentSessionsRoot: URL? = nil,
+         weeklyPercentPointsPerDollar: Double? = nil,
+         weeklyWindowAvailable: Bool = true,
+         weeklyCalibrationAbandoned: Bool = false) {
         self.baseline = baseline
         self.identities = identities
         self.now = now
         self.maxRows = maxRows
         self.recentSessionsRoot = recentSessionsRoot
+        self.weeklyPercentPointsPerDollar = weeklyPercentPointsPerDollar
+        self.weeklyWindowAvailable = weeklyWindowAvailable
+        self.weeklyCalibrationAbandoned = weeklyCalibrationAbandoned
     }
 
     var id: String {
@@ -405,6 +420,9 @@ struct CodexRunwaySnapshotRequest: Equatable, Identifiable, Sendable {
             "\(maxRows)",
             recentSessionsRoot?.path ?? "",
             "\(refreshBucket)",
+            weeklyPercentPointsPerDollar.map { String(format: "%.6f", $0) } ?? "uncalibrated",
+            weeklyWindowAvailable ? "wk" : "nowk",
+            weeklyCalibrationAbandoned ? "abandoned" : "learning",
             identityKey
         ].joined(separator: "||")
     }
@@ -485,6 +503,19 @@ enum CodexRunwaySnapshotLoader {
                     identities: identities,
                     now: request.now
                 )
+                // Bank this cycle's priced activity for weekly calibration. Done on
+                // EVERY cycle regardless of the selected unit: the ledger's bucket
+                // timeline is also the poll-continuity record, so skipping cycles
+                // while the user is on 5h would make the next weekly interval look
+                // like a sleep gap and be rejected.
+                WeeklyQuotaCalibrationStore.shared.ledger(provider: "codex").record(
+                    observations: CodexRunwayTokenActivityParser.ledgerObservations(
+                        identities: identities,
+                        now: request.now
+                    ),
+                    priceTable: RunwayPriceTable.shared,
+                    now: request.now
+                )
                 let core: CodexRunwaySnapshot?
                 // The rendered unit comes from the snapshot's baseline; on a
                 // snapshot-wide fallback we swap it so rows never mislabel.
@@ -492,6 +523,14 @@ enum CodexRunwaySnapshotLoader {
                 // Identities eligible for a pending row. $ mode narrows this to the
                 // ones it can actually price (see .dollarsPerHour below).
                 var pendingIdentities = identities
+                // Weekly-only: sessions that can never be estimated in this unit and
+                // must read "n/a" rather than sit on a waiting clock forever.
+                var weeklyUnavailableIDs: Set<String> = []
+                // With a calibration in hand, "no current burn" is a measured zero
+                // ("flat"), not an unanswered question (the clock).
+                let weeklyPendingConfidence: RunwayAttributionConfidence =
+                    (request.baseline.rateUnit == .weeklyPercentPerHour
+                     && request.weeklyPercentPointsPerDollar != nil) ? .direct : .waiting
                 switch request.baseline.rateUnit {
                 case .tokensPerHour:
                     // 5h window dropped → no run-out to normalize against, so rows
@@ -530,22 +569,36 @@ enum CodexRunwaySnapshotLoader {
                         )
                     }
                 case .weeklyPercentPerHour:
-                    // Per-session share of a recent weekly quota tick. Until two
-                    // valid same-reset samples exist, fall back to token throughput
-                    // snapshot-wide with a token baseline.
-                    if let weekly = CodexRunwayCalculator.weeklySnapshot(
-                        baseline: request.baseline,
-                        activities: activities,
-                        maxRows: request.maxRows
-                    ) {
-                        core = weekly
+                    // Estimated per-session weekly %/h from the learned calibration.
+                    // There is deliberately NO fallback to tokens here: `Wk` must
+                    // never render tk/h. Without a calibration the rows stay on the
+                    // waiting clock; sessions that can never be estimated get "n/a".
+                    RunwayPriceTable.shared.refreshInBackground(now: request.now)
+                    if !request.weeklyWindowAvailable || request.weeklyCalibrationAbandoned {
+                        // No weekly limit on this provider at all, or we have waited
+                        // long enough that a calibration is evidently not coming.
+                        // Either way the clock would be promising a number that will
+                        // not arrive, so say "n/a" instead.
+                        core = nil
+                        weeklyUnavailableIDs = Set(identities.map(\.id))
+                    } else if let calibration = request.weeklyPercentPointsPerDollar,
+                              let weekly = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+                                  baseline: request.baseline,
+                                  activities: activities,
+                                  priceTable: RunwayPriceTable.shared,
+                                  percentPointsPerDollar: calibration,
+                                  maxRows: request.maxRows
+                              ) {
+                        core = weekly.snapshot
+                        weeklyUnavailableIDs = weekly.unpriceableIDs
+                        pendingIdentities = identities.filter { !weekly.unpriceableIDs.contains($0.id) }
+                    } else if request.weeklyPercentPointsPerDollar != nil {
+                        // Calibrated, but nothing currently priceable.
+                        core = nil
+                        weeklyUnavailableIDs = Set(activities.map(\.identity.id))
                     } else {
-                        effectiveBaseline = request.baseline.with(rateUnit: .tokensPerHour)
-                        core = CodexRunwayCalculator.tokenSnapshot(
-                            baseline: effectiveBaseline,
-                            activities: activities,
-                            maxRows: request.maxRows
-                        )
+                        // Not calibrated yet — every row waits on the clock.
+                        core = nil
                     }
                 case .quotaMinutesPerHour:
                     let directBurns = identities.compactMap {
@@ -564,11 +617,19 @@ enum CodexRunwaySnapshotLoader {
                         maxRows: request.maxRows
                     )
                 }
-                var snapshot = RunwaySnapshotAssembly.withPendingRows(
+                let withUnavailable = RunwaySnapshotAssembly.withUnavailableRows(
                     baseline: effectiveBaseline,
                     snapshot: core,
-                    activeIdentities: pendingIdentities,
+                    identities: identities,
+                    unavailableIDs: weeklyUnavailableIDs,
                     maxRows: request.maxRows
+                )
+                var snapshot = RunwaySnapshotAssembly.withPendingRows(
+                    baseline: effectiveBaseline,
+                    snapshot: withUnavailable,
+                    activeIdentities: pendingIdentities,
+                    maxRows: request.maxRows,
+                    pendingConfidence: weeklyPendingConfidence
                 )
                 // Aggregate token throughput (fine-grained, window-independent) — an
                 // honest "burning" signal for a limit line with no run-out to show.
@@ -589,7 +650,8 @@ enum CodexRunwaySnapshotLoader {
                 if stableTokensPerSecond > 0, !request.identities.isEmpty {
                     snapshot?.aggregateTokensPerHour = stableTokensPerSecond * 3600
                 }
-                continuation.resume(returning: snapshot)
+                continuation.resume(returning: RunwaySnapshotAssembly.withWeeklyRateHold(
+                    snapshot, hold: .shared, now: request.now))
             }
         }
     }
@@ -700,10 +762,86 @@ enum RunwaySnapshotAssembly {
             }
     }
 
+    /// Appends explicit "n/a" rows for identities that can never be estimated in
+    /// the current unit (weekly: an unpriceable model, or no weekly window at all).
+    /// Kept distinct from a pending row on purpose — a waiting clock promises a
+    /// number is coming, and for these sessions it is not.
+    static func withUnavailableRows(baseline: RunwayProviderBaseline,
+                                    snapshot: CodexRunwaySnapshot?,
+                                    identities: [RunwaySessionIdentity],
+                                    unavailableIDs: Set<String>,
+                                    maxRows: Int) -> CodexRunwaySnapshot? {
+        guard maxRows > 0, !unavailableIDs.isEmpty else { return snapshot }
+        let existing = snapshot ?? CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
+        let representedIDs = Set(existing.rows.map(\.id))
+        let pending = identities.filter { unavailableIDs.contains($0.id) && !representedIDs.contains($0.id) }
+        guard !pending.isEmpty else { return existing }
+
+        let candidates = existing.rows + pending.map { identity in
+            RunwayPauseImpactRow(
+                id: identity.id,
+                displayName: identity.displayName,
+                isGoal: identity.isGoal,
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: 0,
+                // An idle session still reads as a calm dash; only a working one
+                // that genuinely cannot be estimated says "n/a".
+                confidence: identity.isIdle ? .idle : .unsupported
+            )
+        }
+        let (visible, overflow) = RunwayOverflowRule.split(candidates, maxRows: maxRows)
+        let burstSummary: RunwayShortBurstSummary? = overflow.isEmpty
+            ? (existing.burstSummary)
+            : RunwayShortBurstSummary(
+                count: overflow.count + (existing.burstSummary?.count ?? 0),
+                deadline: .unavailable,
+                gainedSeconds: 0,
+                displayRate: overflow.reduce(existing.burstSummary?.displayRate ?? 0) { $0 + $1.displayRate }
+            )
+        return CodexRunwaySnapshot(baseline: existing.baseline, rows: Array(visible), burstSummary: burstSummary)
+    }
+
+    /// `pendingConfidence` is what a working session with no measured burn reports.
+    /// It defaults to `.waiting` (the historical "a number is coming" state), but
+    /// weekly passes `.direct` once a calibration exists: at that point a session
+    /// with no current activity genuinely estimates to zero, which is an honest
+    /// "flat" rather than an open question. Leaving it `.waiting` there put a
+    /// spinning clock next to a session that was simply idle between turns.
+    /// Applies `RunwayWeeklyRateHold` to a finished weekly snapshot: banks every
+    /// freshly measured rate, and fills a row that momentarily has none with its
+    /// own recent value instead of showing "flat".
+    static func withWeeklyRateHold(_ snapshot: CodexRunwaySnapshot?,
+                                   hold: RunwayWeeklyRateHold,
+                                   now: Date) -> CodexRunwaySnapshot? {
+        guard let snapshot, snapshot.baseline.rateUnit == .weeklyPercentPerHour else { return snapshot }
+        let rows = snapshot.rows.map { row -> RunwayPauseImpactRow in
+            if row.displayRate > 0 {
+                hold.record(id: row.id, rate: row.displayRate, now: now)
+                return row
+            }
+            // Only bridge a row that is otherwise reporting a measured zero. A
+            // finished session (.idle) and an unestimable one (.unsupported) are
+            // saying something definite and must not be overwritten.
+            guard row.confidence == .direct, let heldRate = hold.resolve(id: row.id, now: now) else { return row }
+            return RunwayPauseImpactRow(
+                id: row.id,
+                displayName: row.displayName,
+                isGoal: row.isGoal,
+                deadline: row.deadline,
+                gainedSeconds: row.gainedSeconds,
+                displayRate: heldRate,
+                confidence: .mixed
+            )
+        }
+        return CodexRunwaySnapshot(baseline: snapshot.baseline, rows: rows, burstSummary: snapshot.burstSummary)
+    }
+
     static func withPendingRows(baseline: RunwayProviderBaseline,
                                 snapshot: CodexRunwaySnapshot?,
                                 activeIdentities: [RunwaySessionIdentity],
-                                maxRows: Int) -> CodexRunwaySnapshot? {
+                                maxRows: Int,
+                                pendingConfidence: RunwayAttributionConfidence = .waiting) -> CodexRunwaySnapshot? {
         guard maxRows > 0 else { return snapshot }
         let existing = snapshot ?? CodexRunwaySnapshot(baseline: baseline, rows: [], burstSummary: nil)
         let representedIDs = Set(existing.rows.map(\.id))
@@ -735,8 +873,9 @@ enum RunwaySnapshotAssembly {
                 deadline: .unavailable,
                 gainedSeconds: 0,
                 displayRate: 0,
-                // Idle sessions show a calm "—"; still-working ones show a spinner.
-                confidence: identity.isIdle ? .idle : .waiting
+                // Idle sessions show a calm "—"; still-working ones use the
+                // caller's pending state (see `pendingConfidence`).
+                confidence: identity.isIdle ? .idle : pendingConfidence
             )
         }
         let (visible, overflow) = RunwayOverflowRule.split(candidates, maxRows: maxRows)
@@ -780,6 +919,47 @@ enum RunwaySnapshotAssembly {
                 order: min(lhs.order, rhs.order)
             )
         }
+    }
+}
+
+/// Per-session hold for the weekly `%/h` rate.
+///
+/// Providers only emit a usage record per assistant message, and the activity
+/// parsers require a sample within ~30s. A turn spent thinking or running a long
+/// tool therefore reads as "no activity", which collapsed a live session's weekly
+/// row to "flat" and then back to a number seconds later — a flicker with no basis
+/// in what the session was actually doing.
+///
+/// Weekly is a slow quantity (a few percent per hour), so a short gap in records
+/// is noise, not a change in burn. This bridges it, mirroring the existing
+/// `RunwayAggregateBurnHold` used for the "burning" chip. Pure TTL: a held rate
+/// survives at most `window` seconds past its last real measurement, so a session
+/// that genuinely stops does go flat — just not on a 30-second hair trigger.
+final class RunwayWeeklyRateHold: @unchecked Sendable {
+    static let shared = RunwayWeeklyRateHold()
+    static let window: TimeInterval = 150
+
+    private var held: [String: (rate: Double, at: Date)] = [:]
+    private let lock = NSLock()
+
+    func record(id: String, rate: Double, now: Date) {
+        lock.lock(); defer { lock.unlock() }
+        held[id] = (rate, now)
+    }
+
+    func resolve(id: String, now: Date) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        guard let entry = held[id] else { return nil }
+        guard now.timeIntervalSince(entry.at) <= Self.window else {
+            held[id] = nil
+            return nil
+        }
+        return entry.rate
+    }
+
+    func resetForTesting() {
+        lock.lock(); defer { lock.unlock() }
+        held.removeAll()
     }
 }
 
@@ -937,44 +1117,69 @@ enum CodexRunwayCalculator {
         return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
     }
 
-    /// Weekly-mode snapshot: each session's share of the provider's most recent
-    /// same-reset weekly quota tick, as % of the weekly window per hour. The
-    /// builder encodes that measured tick rate in the baseline; this function only
-    /// attributes it by current token share. Returns `nil` until the rate or token
-    /// activity is measurable so the loader can fall back to token mode.
-    static func weeklySnapshot(baseline: RunwayProviderBaseline,
-                               activities: [RunwaySessionActivity],
-                               maxRows: Int) -> CodexRunwaySnapshot? {
+    /// Weekly-mode snapshot: each session's ESTIMATED share of the account's weekly
+    /// quota per hour, from its own current activity.
+    ///
+    /// The rate is `calibration × session $/h`, where `calibration` is the learned
+    /// pp-per-API-dollar conversion (see `WeeklyQuotaCalibrationTracker`). This is
+    /// deliberately NOT the old proportional split of a previously measured account
+    /// rate: that redistributed a fixed total, so doubling every session's activity
+    /// left the displayed total unchanged. Here each row is computed from its own
+    /// current activity, so a session that doubles its burn doubles its `%/h`, and
+    /// the account total moves with real activity.
+    ///
+    /// Absolute price level cancels between calibration and application — only the
+    /// RELATIVE weights matter, which is why `$` pricing is reused as the weight
+    /// function rather than a bespoke token blend.
+    ///
+    /// Returns `nil` only when nothing at all can be estimated. The loader must NOT
+    /// fall back to tokens on nil: `Wk` never renders `tk/h`.
+    static func weeklyEstimatedSnapshot(baseline: RunwayProviderBaseline,
+                                        activities: [RunwaySessionActivity],
+                                        priceTable: RunwayPriceTable,
+                                        percentPointsPerDollar: Double,
+                                        maxRows: Int) -> (snapshot: CodexRunwaySnapshot, unpriceableIDs: Set<String>)? {
         guard maxRows > 0 else { return nil }
-        let seconds = baseline.currentRunoutAt.timeIntervalSince(baseline.observedAt)
-        guard seconds > 0, baseline.remainingPercent > 0 else { return nil }
-        let providerPercentPerHour = (baseline.remainingPercent / seconds) * 3600
-        guard providerPercentPerHour > 0, providerPercentPerHour.isFinite else { return nil }
+        guard percentPointsPerDollar > 0, percentPointsPerDollar.isFinite else { return nil }
 
-        let positive = activities.filter { $0.tokensPerSecond > 0 && $0.tokensPerSecond.isFinite }
-        guard !positive.isEmpty else { return nil }
-        let totalTPS = positive.reduce(0) { $0 + $1.tokensPerSecond }
-        guard totalTPS > 0, totalTPS.isFinite else { return nil }
-
-        let ranked = positive.sorted { lhs, rhs in
-            if lhs.tokensPerSecond != rhs.tokensPerSecond {
-                return lhs.tokensPerSecond > rhs.tokensPerSecond
+        var estimated: [(activity: RunwaySessionActivity, percentPerHour: Double)] = []
+        var unpriceableIDs: Set<String> = []
+        for activity in activities {
+            guard let dollarsPerHour = dollarsPerHour(for: activity, priceTable: priceTable) else {
+                // Cannot be weighted, so it cannot be estimated. Surfaced as "n/a"
+                // rather than silently omitted or shown as a waiting clock.
+                unpriceableIDs.insert(activity.identity.id)
+                continue
             }
-            if lhs.identity.isGoal != rhs.identity.isGoal {
-                return lhs.identity.isGoal && !rhs.identity.isGoal
+            let percentPerHour = percentPointsPerDollar * dollarsPerHour
+            guard percentPerHour.isFinite,
+                  percentPerHour <= WeeklyQuotaCalibrationTracker.maximumDisplayablePercentPerHour else {
+                // Past this magnitude the calibration is contaminated (untracked
+                // usage on another device inflating pp-per-dollar), not the session
+                // extraordinary. Say "n/a" instead of a confident wrong number.
+                unpriceableIDs.insert(activity.identity.id)
+                continue
             }
-            return lhs.identity.displayName.localizedCaseInsensitiveCompare(rhs.identity.displayName) == .orderedAscending
+            estimated.append((activity, percentPerHour))
         }
-        func rate(_ a: RunwaySessionActivity) -> Double { providerPercentPerHour * (a.tokensPerSecond / totalTPS) }
+        guard !estimated.isEmpty else { return nil }
+
+        let ranked = estimated.sorted { lhs, rhs in
+            if lhs.percentPerHour != rhs.percentPerHour { return lhs.percentPerHour > rhs.percentPerHour }
+            if lhs.activity.identity.isGoal != rhs.activity.identity.isGoal {
+                return lhs.activity.identity.isGoal && !rhs.activity.identity.isGoal
+            }
+            return lhs.activity.identity.displayName.localizedCaseInsensitiveCompare(rhs.activity.identity.displayName) == .orderedAscending
+        }
         let (visible, overflow) = RunwayOverflowRule.split(ranked, maxRows: maxRows)
-        let rows = visible.map { a in
+        let rows = visible.map { entry in
             RunwayPauseImpactRow(
-                id: a.identity.id,
-                displayName: a.identity.displayName,
-                isGoal: a.identity.isGoal,
+                id: entry.activity.identity.id,
+                displayName: entry.activity.identity.displayName,
+                isGoal: entry.activity.identity.isGoal,
                 deadline: .unavailable,
                 gainedSeconds: 0,
-                displayRate: rate(a),
+                displayRate: entry.percentPerHour,
                 confidence: .direct
             )
         }
@@ -984,9 +1189,9 @@ enum CodexRunwayCalculator {
                 count: overflow.count,
                 deadline: .unavailable,
                 gainedSeconds: 0,
-                displayRate: overflow.reduce(0) { $0 + rate($1) }
+                displayRate: overflow.reduce(0) { $0 + $1.percentPerHour }
             )
-        return CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary)
+        return (CodexRunwaySnapshot(baseline: baseline, rows: rows, burstSummary: burstSummary), unpriceableIDs)
     }
 
     /// $/h for a single session, or nil when it can't be priced: no per-type
@@ -2086,6 +2291,36 @@ enum CodexRunwayTokenActivityParser {
     static func activities(identities: [RunwaySessionIdentity],
                            now: Date = Date()) -> [RunwaySessionActivity] {
         identities.compactMap { activity(identity: $0, now: now) }
+    }
+
+    /// Latest CUMULATIVE counters per log path, for the weekly calibration ledger.
+    ///
+    /// Cumulative rather than a rate on purpose: the ledger banks deltas between
+    /// cycles, so a session that burns hard and then ends keeps its contribution in
+    /// the calibration denominator instead of vanishing with its live identity.
+    /// Integrating a point-in-time `tokensPerSecond` instead would reintroduce
+    /// exactly the stale-rate attribution this design removes.
+    static func ledgerObservations(identities: [RunwaySessionIdentity],
+                                   now: Date = Date()) -> [WeeklyQuotaTokenObservation] {
+        var seen: Set<String> = []
+        var result: [WeeklyQuotaTokenObservation] = []
+        for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
+            seen.insert(path)
+            guard let latest = recentSamples(fromLogPath: path, now: now).last else { continue }
+            result.append(WeeklyQuotaTokenObservation(
+                logPath: path,
+                capturedAt: latest.capturedAt,
+                // Codex `input_tokens` INCLUDES cached reads, so fresh input is the
+                // difference — same normalization `activity(_:)` applies, so the
+                // ledger and `$` price identical token volumes.
+                input: max(0, latest.input - latest.cachedInput),
+                cachedInput: latest.cachedInput,
+                output: latest.output,
+                cacheCreation: 0,
+                modelSlug: latest.modelSlug
+            ))
+        }
+        return result
     }
 
     static func burns(activities: [RunwaySessionActivity],

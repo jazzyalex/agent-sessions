@@ -645,6 +645,51 @@ final class CodexUsageModel: ObservableObject {
             freshness: weeklyFreshness,
             observedAt: observedAt
         ), now: now)
+        // Weekly %/h calibration. Separate from the burn-rate tracker above: that
+        // one measures a short-lived account rate and must stay fresh, while this
+        // learns a near-static pp-per-API-dollar conversion and therefore tolerates
+        // a much longer interval (Codex weekly percent moves in whole points, so a
+        // 30-minute cap would make it unacquirable on ordinary days).
+        if s.hasWeekRateLimit,
+           weeklyFreshness.allowsProjectedDisplay,
+           let weekResetAt = UsageResetText.resetDate(kind: "Wk",
+                                                      source: .codex,
+                                                      raw: s.weekResetText,
+                                                      now: observedAt),
+           weekResetAt > observedAt {
+            // Historical bootstrap: derive the conversion from the activity already
+            // on disk for this weekly window, so `Wk` shows a number seconds after
+            // launch instead of waiting hours for a 1pp tick. Once per anchor, off
+            // the main thread.
+            CodexWeeklyQuotaBootstrapScanner.debugLog("gate PASSED weekRemaining=\(s.weekRemainingPercent) resetText=\(s.weekResetText) parsedReset=\(weekResetAt.timeIntervalSince1970) source=\(s.weekLimitsSource)")
+            WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
+                provider: "codex",
+                root: CodexWeeklyQuotaBootstrapScanner.defaultSessionsRoot,
+                resetsAt: weekResetAt,
+                windowMinutes: 10080,
+                usedPercentPoints: Double(100 - s.weekRemainingPercent),
+                accountHash: WeeklyQuotaCalibrationScope.hashAccount(
+                    CodexCalibrationAccountScope.accountId(now: now)),
+                now: now
+            )
+            WeeklyQuotaCalibrationStore.shared.observeQuota(
+                provider: "codex",
+                remainingPercent: Double(s.weekRemainingPercent),
+                // Codex supplies only an integer percent, so a 1pp quantum is the
+                // smallest trustworthy drop.
+                hasExactPercent: false,
+                resetAt: weekResetAt,
+                observedAt: observedAt,
+                scope: WeeklyQuotaCalibrationScope(
+                    provider: "codex",
+                    accountHash: WeeklyQuotaCalibrationScope.hashAccount(CodexCalibrationAccountScope.accountId(now: now)),
+                    sourceFamily: "\(s.weekLimitsSource)",
+                    limitShape: s.hasFiveHourRateLimit ? "5h+weekly" : "weekly",
+                    priceRevision: RunwayPriceTable.shared.revision
+                ),
+                now: now
+            )
+        }
         Self.recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: projectionEstimate, provider: .codex)
         limitNotifier.handle(snapshot: UsageLimitSnapshot(
             provider: .codex,

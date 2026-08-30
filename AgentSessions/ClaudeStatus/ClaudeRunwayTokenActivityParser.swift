@@ -65,6 +65,31 @@ enum ClaudeRunwayTokenActivityParser {
     static func resetSampleCacheForTesting() { sampleCache.removeAllForTesting() }
     #endif
 
+    /// Incremental usage events for the weekly calibration ledger. Claude's
+    /// `message.usage` is per-call, so these are events rather than cumulative
+    /// counters; the ledger dedupes them by path+timestamp across overlapping
+    /// tail reads.
+    static func ledgerEvents(identities: [RunwaySessionIdentity],
+                             now: Date = Date()) -> [WeeklyQuotaTokenEvent] {
+        var seen: Set<String> = []
+        var result: [WeeklyQuotaTokenEvent] = []
+        for path in identities.flatMap(\.logPaths) where !seen.contains(path) {
+            seen.insert(path)
+            for sample in recentSamples(fromLogPath: path, now: now) {
+                result.append(WeeklyQuotaTokenEvent(
+                    logPath: path,
+                    capturedAt: sample.capturedAt,
+                    input: sample.input,
+                    cachedInput: sample.cacheRead,
+                    output: sample.output,
+                    cacheCreation: sample.cacheCreation,
+                    modelSlug: sample.modelSlug
+                ))
+            }
+        }
+        return result
+    }
+
     static func recentSamples(fromLogPath path: String,
                               maxBytes: Int = 1024 * 1024,
                               now: Date = Date()) -> [ClaudeRunwayTokenActivitySample] {
@@ -117,6 +142,50 @@ enum ClaudeRunwayTokenActivityParser {
     static func activity(identity: RunwaySessionIdentity,
                          now: Date = Date()) -> RunwaySessionActivity? {
         scoredActivity(identity: identity, now: now)?.activity
+    }
+
+    /// Cross-SESSION companion to the per-path clamp inside `scoredActivity`.
+    ///
+    /// That clamp compares a provisional path against the best *measured* path in
+    /// the same session, so it cannot fire on turn one: a brand-new session has no
+    /// measured path at all. The first turn is cache-heavy (~100k cache-read
+    /// tokens) and `provisionalMinTurnDuration` allows a 2-second denominator, so
+    /// the raw estimate can reach tens of thousands of tok/s — surfacing as an
+    /// absurd headline rate that "corrects itself" seconds later once a real
+    /// two-sample burst lands. A number that wrong is worse than no number.
+    ///
+    /// So: a provisional session is capped at the fastest MEASURED session this
+    /// cycle, and dropped entirely when nothing at all is measured yet. Callers
+    /// that drop it render the row as not-currently-burning, and the weekly rate
+    /// hold fills it in as soon as a real rate exists.
+    static func activitiesClampingProvisional(identities: [RunwaySessionIdentity],
+                                              now: Date = Date()) -> [RunwaySessionActivity] {
+        let scored = identities.compactMap { scoredActivity(identity: $0, now: now) }
+        let maxMeasured = scored.filter { !$0.provisional }
+            .map(\.activity.tokensPerSecond)
+            .max()
+        return scored.compactMap { entry -> RunwaySessionActivity? in
+            guard entry.provisional else { return entry.activity }
+            guard let maxMeasured, maxMeasured > 0 else { return nil }
+            let rate = entry.activity.tokensPerSecond
+            guard rate > maxMeasured, rate > 0 else { return entry.activity }
+            // Components scale with the clamp so pricing describes the same token
+            // volume as the clamped rate (matching `scoredActivity`).
+            let scale = maxMeasured / rate
+            return RunwaySessionActivity(
+                identity: entry.activity.identity,
+                tokensPerSecond: maxMeasured,
+                sampleStart: entry.activity.sampleStart,
+                sampleEnd: entry.activity.sampleEnd,
+                components: entry.activity.components.map { c in
+                    RunwayModelComponent(modelSlug: c.modelSlug,
+                                         inputPerSecond: c.inputPerSecond * scale,
+                                         cachedInputPerSecond: c.cachedInputPerSecond * scale,
+                                         outputPerSecond: c.outputPerSecond * scale,
+                                         cacheCreationPerSecond: c.cacheCreationPerSecond * scale)
+                }
+            )
+        }
     }
 
     /// Session token-rate plus whether it rests *only* on a provisional

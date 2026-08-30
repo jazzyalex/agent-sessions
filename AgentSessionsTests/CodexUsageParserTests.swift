@@ -4330,35 +4330,114 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertTrue(QuotaMeterChrome.onDemand.armsDwellTimer())
     }
 
-    func testWeeklySnapshotAttributesPaceByTokenShare() {
-        let now = Date(timeIntervalSince1970: 2_000_000)
-        let reset = now.addingTimeInterval(5 * 24 * 3600)
-        // A recent quota tick measured 4 percentage points/hour.
-        let runout = now.addingTimeInterval(80 / (4.0 / 3600))
-        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
-                        currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
-                        windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
-        let a = RunwaySessionActivity(identity: .init(id: "a", displayName: "A", isGoal: false, logPaths: ["/a"]),
-                        tokensPerSecond: 300, sampleStart: now, sampleEnd: now)
-        let b = RunwaySessionActivity(identity: .init(id: "b", displayName: "B", isGoal: false, logPaths: ["/b"]),
-                        tokensPerSecond: 100, sampleStart: now, sampleEnd: now)
-        let snap = CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [a, b], maxRows: 5)
-        XCTAssertEqual(snap?.rows.map(\.id), ["a", "b"])
-        let total = (snap?.rows.first?.displayRate ?? 0) + (snap?.rows.last?.displayRate ?? 0)
-        XCTAssertEqual(total, 4.0, accuracy: 0.001)
-        // a burns 3× b → 75% of the provider weekly pace.
-        XCTAssertEqual((snap?.rows.first?.displayRate ?? 0) / total, 0.75, accuracy: 0.01)
+    // MARK: - Weekly %/h estimation (calibration model)
+
+    private func weeklyBaseline(now: Date) -> RunwayProviderBaseline {
+        RunwayProviderBaseline(source: .codex, remainingPercent: 80,
+                               resetAt: now.addingTimeInterval(5 * 24 * 3600),
+                               currentRunoutAt: now.addingTimeInterval(48 * 3600),
+                               observedAt: now, hasProjectedRunout: true,
+                               windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
     }
 
-    func testWeeklySnapshotNilWhenNoActivity() {
+    private func weeklyActivity(_ id: String, outputPerSecond: Double, now: Date) -> RunwaySessionActivity {
+        RunwaySessionActivity(
+            identity: .init(id: id, displayName: id.uppercased(), isGoal: false, logPaths: ["/\(id)"]),
+            tokensPerSecond: outputPerSecond, sampleStart: now, sampleEnd: now,
+            outputPerSecond: outputPerSecond, modelSlug: "gpt-5.6")
+    }
+
+    /// Acceptance test 4: doubling a session's CURRENT activity doubles its %/h.
+    /// The old proportional-share model could not do this — it redistributed a
+    /// fixed account rate, so the displayed total was invariant to real activity.
+    func testWeeklyEstimateScalesWithCurrentActivity() {
         let now = Date(timeIntervalSince1970: 2_000_000)
-        let reset = now.addingTimeInterval(5 * 24 * 3600)
-        let runout = now.addingTimeInterval(80 / (4.0 / 3600))
-        let baseline = RunwayProviderBaseline(source: .codex, remainingPercent: 80, resetAt: reset,
-                        currentRunoutAt: runout, observedAt: now, hasProjectedRunout: true,
-                        windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
-        // No positive token activity → nil, so the loader falls back to token mode.
-        XCTAssertNil(CodexRunwayCalculator.weeklySnapshot(baseline: baseline, activities: [], maxRows: 5))
+        let prices = RunwayPriceTable.makeForTesting()
+        let baseline = weeklyBaseline(now: now)
+
+        let single = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: baseline, activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
+            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+        let doubled = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: baseline, activities: [weeklyActivity("a", outputPerSecond: 200, now: now)],
+            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+
+        let one = single?.snapshot.rows.first?.displayRate ?? 0
+        let two = doubled?.snapshot.rows.first?.displayRate ?? 0
+        XCTAssertGreaterThan(one, 0)
+        XCTAssertEqual(two, one * 2, accuracy: one * 0.0001)
+
+        // And the value is calibration × $/h, not a share of anything.
+        let dollars = CodexRunwayCalculator.dollarsPerHour(
+            for: weeklyActivity("a", outputPerSecond: 100, now: now), priceTable: prices) ?? 0
+        XCTAssertEqual(one, 2.0 * dollars, accuracy: 0.0001)
+    }
+
+    /// Acceptance test 5 (reworded): rows + overflow sum to calibration × total
+    /// current priced activity, and that sum is INDEPENDENT of the baseline's
+    /// previously measured account rate.
+    func testWeeklyEstimateSumsToCalibrationTimesActivityRegardlessOfBaselineRate() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let prices = RunwayPriceTable.makeForTesting()
+        let activities = [weeklyActivity("a", outputPerSecond: 300, now: now),
+                          weeklyActivity("b", outputPerSecond: 100, now: now)]
+        let expected = activities
+            .compactMap { CodexRunwayCalculator.dollarsPerHour(for: $0, priceTable: prices) }
+            .reduce(0, +) * 3.0
+
+        // Two baselines whose implied account rates differ by 24x.
+        for runoutHours in [2.0, 48.0] {
+            let baseline = RunwayProviderBaseline(
+                source: .codex, remainingPercent: 80, resetAt: now.addingTimeInterval(5 * 24 * 3600),
+                currentRunoutAt: now.addingTimeInterval(runoutHours * 3600), observedAt: now,
+                hasProjectedRunout: true, windowMinutes: 10080, rateUnit: .weeklyPercentPerHour)
+            let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+                baseline: baseline, activities: activities, priceTable: prices,
+                percentPointsPerDollar: 3.0, maxRows: 5)
+            let total = (snap?.snapshot.rows.reduce(0) { $0 + $1.displayRate } ?? 0)
+                + (snap?.snapshot.burstSummary?.displayRate ?? 0)
+            XCTAssertEqual(total, expected, accuracy: 0.0001,
+                           "weekly total must not depend on the baseline's account rate")
+        }
+    }
+
+    /// Acceptance test 8: an unpriceable session is surfaced, never silently dropped.
+    func testWeeklyEstimateReportsUnpriceableSessions() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let prices = RunwayPriceTable.makeForTesting()
+        let known = weeklyActivity("a", outputPerSecond: 100, now: now)
+        let unknown = RunwaySessionActivity(
+            identity: .init(id: "b", displayName: "B", isGoal: false, logPaths: ["/b"]),
+            tokensPerSecond: 50, sampleStart: now, sampleEnd: now,
+            outputPerSecond: 50, modelSlug: "totally-unknown-model")
+        let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: weeklyBaseline(now: now), activities: [known, unknown],
+            priceTable: prices, percentPointsPerDollar: 2.0, maxRows: 5)
+        XCTAssertEqual(snap?.snapshot.rows.map(\.id), ["a"])
+        XCTAssertEqual(snap?.unpriceableIDs, ["b"])
+    }
+
+    /// Acceptance test 17: a contaminated calibration is refused, not rendered.
+    func testWeeklyEstimateRejectsImplausiblyLargeRates() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let prices = RunwayPriceTable.makeForTesting()
+        let snap = CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: weeklyBaseline(now: now),
+            activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
+            priceTable: prices, percentPointsPerDollar: 1_000_000, maxRows: 5)
+        XCTAssertNil(snap, "a contaminated calibration must not render a confident number")
+    }
+
+    func testWeeklyEstimateNilWithoutCalibrationOrActivity() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let prices = RunwayPriceTable.makeForTesting()
+        XCTAssertNil(CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: weeklyBaseline(now: now), activities: [], priceTable: prices,
+            percentPointsPerDollar: 2.0, maxRows: 5))
+        XCTAssertNil(CodexRunwayCalculator.weeklyEstimatedSnapshot(
+            baseline: weeklyBaseline(now: now),
+            activities: [weeklyActivity("a", outputPerSecond: 100, now: now)],
+            priceTable: prices, percentPointsPerDollar: 0, maxRows: 5))
     }
 
     func testPriceTableBundledAndPrefixMatch() {

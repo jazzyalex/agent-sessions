@@ -574,6 +574,46 @@ final class ClaudeUsageModel: ObservableObject {
             freshness: freshness,
             observedAt: s.fetchedAt
         ), now: now)
+        // Weekly %/h calibration — see the Codex counterpart. Claude's OAuth path
+        // supplies a FRACTIONAL weekly percent, so it clears the acceptance floor
+        // (0.25pp) far sooner than Codex's integer-only 1pp quantum.
+        if let weeklyRatio = s.weeklyUsedRatio,
+           freshness.allowsProjectedDisplay,
+           let weekResetAt = UsageResetText.resetDate(kind: "Wk",
+                                                      source: .claude,
+                                                      raw: s.weeklyResetText,
+                                                      now: s.fetchedAt),
+           weekResetAt > s.fetchedAt {
+            // Historical bootstrap, same as Codex: without this the Claude rows
+            // wait out the 60s budget and fall to "n/a" permanently, because a
+            // weekly tick is far too rare to be a first reading.
+            WeeklyQuotaCalibrationStore.shared.ensureBootstrap(
+                provider: "claude",
+                root: ClaudeWeeklyQuotaBootstrapScanner.defaultProjectsRoot,
+                resetsAt: weekResetAt,
+                windowMinutes: 10080,
+                usedPercentPoints: weeklyRatio * 100,
+                now: now
+            )
+            WeeklyQuotaCalibrationStore.shared.observeQuota(
+                provider: "claude",
+                remainingPercent: 100 - (weeklyRatio * 100),
+                hasExactPercent: true,
+                resetAt: weekResetAt,
+                observedAt: s.fetchedAt,
+                scope: WeeklyQuotaCalibrationScope(
+                    provider: "claude",
+                    // Claude's normalized snapshot carries no account or org id, so
+                    // this stays nil: the calibration is memory-only and cannot
+                    // survive a possible account switch across restarts.
+                    accountHash: nil,
+                    sourceFamily: "\(s.source)",
+                    limitShape: s.weekOpusUsedRatio != nil ? "weekly+scoped" : "weekly",
+                    priceRevision: RunwayPriceTable.shared.revision
+                ),
+                now: now
+            )
+        }
         limitNotifier.handle(snapshot: usageLimitSnapshot(
             fiveHourRemainingPercent: s.fiveHourRemainingPercent,
             fiveHourRemainingPercentExact: s.fiveHourUsedRatio.map { 100 - ($0 * 100) },

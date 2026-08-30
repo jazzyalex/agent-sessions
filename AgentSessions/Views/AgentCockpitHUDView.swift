@@ -3150,9 +3150,14 @@ enum HUDRunwayRequestBuilder {
                 ? RunwayResolvedPresentation(rateUnit: .quotaMinutesPerHour, windowMinutes: windowMinutes)
                 : RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
         case .weekly:
-            return (hasWeekly && weeklyMeasurable)
-                ? RunwayResolvedPresentation(rateUnit: .weeklyPercentPerHour, windowMinutes: 10080)
-                : RunwayResolvedPresentation(rateUnit: .tokensPerHour, windowMinutes: windowMinutes)
+            // Unconditional: `Wk` always renders in %/h and never degrades to
+            // tk/h. `hasWeekly`/`weeklyMeasurable` no longer pick the UNIT — they
+            // only decide what a row says inside it ("n/a" vs a waiting clock vs a
+            // number), which the loader resolves. Flipping the unit here was what
+            // made a Weekly selection silently show tokens.
+            _ = hasWeekly
+            _ = weeklyMeasurable
+            return RunwayResolvedPresentation(rateUnit: .weeklyPercentPerHour, windowMinutes: 10080)
         }
     }
 
@@ -3234,14 +3239,18 @@ enum HUDRunwayRequestBuilder {
             windowMinutes: windowMinutes)
 
         let baseline: RunwayProviderBaseline
-        if resolved.rateUnit == .weeklyPercentPerHour, let weekResetAt, let weeklyRunout {
+        if resolved.rateUnit == .weeklyPercentPerHour {
+            // No longer gated on `weeklyRunout`: the weekly rate is now estimated
+            // from calibration × current activity, so the baseline's projected
+            // run-out is not a rate carrier here. Gating on it used to force the
+            // whole snapshot into the 5h/token branch.
             baseline = RunwayProviderBaseline(
                 source: .codex,
                 remainingPercent: Double(weekRemainingPercent),
-                resetAt: weekResetAt,
-                currentRunoutAt: weeklyRunout.runoutAt,
-                observedAt: weeklyRunout.observedAt,
-                hasProjectedRunout: true,
+                resetAt: weekResetAt ?? resetAt,
+                currentRunoutAt: weeklyRunout?.runoutAt ?? weekResetAt ?? resetAt,
+                observedAt: weeklyRunout?.observedAt ?? observedAt,
+                hasProjectedRunout: weeklyRunout != nil,
                 windowMinutes: 10080,
                 rateUnit: .weeklyPercentPerHour)
         } else {
@@ -3259,7 +3268,12 @@ enum HUDRunwayRequestBuilder {
             baseline: baseline,
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .codex),
             now: now,
-            maxRows: maxRows
+            maxRows: maxRows,
+            weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
+                .percentPointsPerDollar(provider: "codex", now: now),
+            weeklyWindowAvailable: weekResetAt != nil,
+            weeklyCalibrationAbandoned: WeeklyQuotaCalibrationStore.shared
+                .calibrationAbandoned(provider: "codex", now: now)
         )
     }
 
@@ -3330,14 +3344,16 @@ enum HUDRunwayRequestBuilder {
             windowMinutes: 300)
 
         let baseline: RunwayProviderBaseline
-        if resolved.rateUnit == .weeklyPercentPerHour, let weekResetAt, let weeklyRunout {
+        if resolved.rateUnit == .weeklyPercentPerHour {
+            // See the Codex builder: the weekly rate is estimated from calibration,
+            // so a missing projected run-out no longer forces a different unit.
             baseline = RunwayProviderBaseline(
                 source: .claude,
                 remainingPercent: Double(weekRemainingPercent),
-                resetAt: weekResetAt,
-                currentRunoutAt: weeklyRunout.runoutAt,
-                observedAt: weeklyRunout.observedAt,
-                hasProjectedRunout: true,
+                resetAt: weekResetAt ?? resetAt,
+                currentRunoutAt: weeklyRunout?.runoutAt ?? weekResetAt ?? resetAt,
+                observedAt: weeklyRunout?.observedAt ?? observedAt,
+                hasProjectedRunout: weeklyRunout != nil,
                 windowMinutes: 10080,
                 rateUnit: .weeklyPercentPerHour)
         } else {
@@ -3356,7 +3372,12 @@ enum HUDRunwayRequestBuilder {
             identities: HUDRunwayIdentityReducer.identities(from: activeRows, source: .claude),
             now: now,
             maxRows: maxRows,
-            recentSessionsRoot: ClaudeRunwayRecentSessionScanner.defaultRoot()
+            recentSessionsRoot: ClaudeRunwayRecentSessionScanner.defaultRoot(),
+            weeklyPercentPointsPerDollar: WeeklyQuotaCalibrationStore.shared
+                .percentPointsPerDollar(provider: "claude", now: now),
+            weeklyWindowAvailable: weekResetAt != nil,
+            weeklyCalibrationAbandoned: WeeklyQuotaCalibrationStore.shared
+                .calibrationAbandoned(provider: "claude", now: now)
         )
     }
 }
@@ -4115,6 +4136,13 @@ private struct HUDRunwayPanel: View {
             // Finished its turn, winding down — calm dash.
             Text("—")
                 .foregroundStyle(.secondary)
+        } else if rateUnit == .weeklyPercentPerHour, confidence == .waiting {
+            // Weekly is an ESTIMATE, so before calibration there is no honest
+            // number at all — not even zero. A bounded clock says "a number is
+            // coming"; once it can't come, the loader sends `.unsupported` and the
+            // cell reads "n/a" instead, so this never spins indefinitely.
+            RunwayMeasuringClock(size: runwayFontSize, reduceMotion: reduceMotion)
+                .accessibilityLabel("Measuring weekly burn")
         } else {
             Text(RunwayTimeFormatting.rate(quota, unit: rateUnit, confidence: confidence))
                 .foregroundStyle(quota > 0 ? hudProjectionColor(colorScheme) : .secondary)
@@ -4208,6 +4236,26 @@ private struct HUDRunwayEmptyPanel: View {
     }
 }
 
+/// Whether the load bar draws any fill at all.
+///
+/// Lives outside the (file-private) view so tests exercise the real rule rather
+/// than a copy of it — a duplicated predicate passes happily while the shipped
+/// one regresses.
+enum RunwayLoadBarFill {
+    static func shouldFill(displayRate: Double,
+                           maxDisplayRate: Double,
+                           confidence: RunwayAttributionConfidence) -> Bool {
+        // Waiting (clock), idle ("—") and not-currently-burning ("quiet") rows
+        // keep an empty track; the rate cell carries the cue. `displayRate > 0` is
+        // load-bearing: `fillFraction` floors at 12% so a genuinely tiny rate stays
+        // visible, which meant a zero rate still drew a pulsing sliver saying the
+        // opposite of the word beside it.
+        guard confidence != .waiting, confidence != .idle else { return false }
+        guard displayRate.isFinite, displayRate > 0 else { return false }
+        return maxDisplayRate.isFinite && maxDisplayRate > 0
+    }
+}
+
 private struct HUDRunwayLoadBar: View {
     let displayRate: Double
     let maxDisplayRate: Double
@@ -4259,9 +4307,9 @@ private struct HUDRunwayLoadBar: View {
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.primary.opacity(0.08))
-                // Waiting (spinner) and idle ("—") rows keep an empty track —
-                // the rate cell carries the cue. Only a real rate fills the bar.
-                if confidence != .waiting, confidence != .idle {
+                if RunwayLoadBarFill.shouldFill(displayRate: displayRate,
+                                                maxDisplayRate: maxDisplayRate,
+                                                confidence: confidence) {
                     Capsule()
                         .fill(hudProjectionColor(colorScheme).opacity(fillOpacity))
                         .frame(width: max(0, proxy.size.width * fillFraction))
@@ -4306,15 +4354,41 @@ private enum HUDRunwayLayout {
     }
 }
 
+/// The "still measuring" indicator for Weekly rows. Sized to the runway font so it
+/// sits inside the 14/15pt row (a `ProgressView` at `.small` is ~16pt and would
+/// clip at the Enlarged size); honours Reduce Motion by holding still.
+private struct RunwayMeasuringClock: View {
+    let size: CGFloat
+    let reduceMotion: Bool
+    @State private var spinning = false
+
+    var body: some View {
+        Image(systemName: "clock")
+            .font(.system(size: size, weight: .medium))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .animation(
+                reduceMotion ? nil : .linear(duration: 2).repeatForever(autoreverses: false),
+                value: spinning
+            )
+            .onAppear { if !reduceMotion { spinning = true } }
+    }
+}
+
 private enum RunwayTimeFormatting {
     /// Unit-aware runway rate text. The 5h yardstick reads "137m/h"; when the 5h
     /// window is dropped the runway reports raw token throughput ("412K tk/h")
     /// instead, so "m/h" never means two things across providers.
+    /// "quiet" rather than "flat" for a live session spending nothing right now.
+    /// "flat" describes a curve, so it read as ambiguous next to real rates; the
+    /// state being named is a session that is alive and working but not consuming
+    /// tokens — waiting on a tool, a script, or a long read. Distinct from "—"
+    /// (finished its turn) and from the measuring clock (no calibration yet).
     static func rate(_ value: Double,
                      unit: RunwayRateUnit,
                      confidence: RunwayAttributionConfidence = .mixed) -> String {
         // Before the unit switch on purpose: a cloud session has no local transcript,
-        // so every unit below would otherwise invent a number ("flat", "0m/h",
+        // so every unit below would otherwise invent a number ("quiet", "0m/h",
         // "0 tk/h", "$0/h") for a rate that cannot be measured at all. One guard here
         // covers the visible cell and the load bar's accessibility label.
         if confidence == .cloud { return "Cloud" }
@@ -4324,17 +4398,38 @@ private enum RunwayTimeFormatting {
         case .tokensPerHour:
             guard confidence != .waiting else { return "0 tk/h" }
             guard confidence != .idle else { return "idle" }
-            guard value.isFinite, value >= 1 else { return "flat" }
+            guard value.isFinite, value >= 1 else { return "quiet" }
             return formatTokenRatePerHour(value)
         case .weeklyPercentPerHour:
-            guard confidence != .waiting else { return "0%/h" }
+            // `.waiting` renders as a clock GLYPH in the cell, not text — an
+            // estimate genuinely has no number yet, and "0%/h" claimed a measured
+            // zero that was never measured. The text here is the accessibility
+            // fallback only.
+            guard confidence != .waiting else { return "measuring" }
+            guard confidence != .unsupported else { return "n/a" }
             guard confidence != .idle else { return "idle" }
-            guard value.isFinite, value >= 0.05 else { return "flat" }
+            // One decimal below 10, integer at and above it. Weekly rates are
+            // inherently small — 3%/h already exhausts the week in ~33 hours — so
+            // integer-only formatting collapsed nearly every session to "quiet" or
+            // "1%/h" and the column stopped distinguishing sessions at all
+            // (measured: a real account calibrates to ~0.28pp per API-equivalent
+            // dollar, putting ordinary sessions at 0–3%/h). Larger values keep the
+            // decimal-free form.
+            guard value.isFinite, value >= 0.05 else { return "quiet" }
+            guard value <= WeeklyQuotaCalibrationTracker.maximumDisplayablePercentPerHour else { return "n/a" }
+            if value >= 10 {
+                // NOT String(format: "%.0f"): printf rounds half to EVEN, so a .5
+                // boundary could print a value one lower than the true one.
+                return "\(Int(value.rounded()))%/h"
+            }
+            // %.1f rounds half-to-even too, but only ever between two visible
+            // one-decimal values, so it cannot manufacture a false zero: the 0.05
+            // floor above already routes everything smaller to "quiet".
             return String(format: "%.1f%%/h", value)
         case .dollarsPerHour:
             guard confidence != .waiting else { return "$0/h" }
             guard confidence != .idle else { return "idle" }
-            guard value.isFinite, value >= 0.005 else { return "flat" }
+            guard value.isFinite, value >= 0.005 else { return "quiet" }
             if value >= 1000 { return String(format: "$%.1fK/h", value / 1000) }
             if value >= 100 { return String(format: "$%.0f/h", value) }
             return String(format: "$%.2f/h", value)
@@ -4346,11 +4441,24 @@ private enum RunwayTimeFormatting {
         // a calm, honest "0m/h" rather than a spinner.
         guard confidence != .waiting else { return "0m/h" }
         guard confidence != .idle else { return "idle" }
-        guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "flat" }
+        guard minutesPerHour.isFinite, minutesPerHour >= 0.5 else { return "quiet" }
         let rounded = Int(ceil(minutesPerHour))
         return "\(rounded)m/h"
     }
 }
+
+#if DEBUG
+/// Test seam for the runway rate strings. `RunwayTimeFormatting` is file-private,
+/// so without this the display contract (integer %/h, "quiet" vs a false "0%/h",
+/// "n/a") could not be asserted anywhere.
+enum RunwayRateTextTestHook {
+    static func text(_ value: Double,
+                     unit: RunwayRateUnit,
+                     confidence: RunwayAttributionConfidence = .mixed) -> String {
+        RunwayTimeFormatting.rate(value, unit: unit, confidence: confidence)
+    }
+}
+#endif
 
 
 /// Shared percent color used by HUDLimitsDetailPanel and HUDLimitsProviderText.

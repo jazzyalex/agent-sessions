@@ -2397,13 +2397,18 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         // dollar: priceable → $; not priceable → token.
         XCTAssertEqual(resolve(.dollar, dollarPriceable: true), .dollarsPerHour)
         XCTAssertEqual(resolve(.dollar, dollarPriceable: false), .tokensPerHour)
-        // weekly: measurable → weekly (window 10080); unmeasurable / no window → token.
+        // weekly: ALWAYS weekly %/h (window 10080), whatever the weekly window's
+        // state. Acceptance test 1 — selecting Wk can never produce tk/h or $/h;
+        // an unmeasurable or absent window changes what a ROW says ("n/a" / a
+        // waiting clock), never the unit.
         let wk = B.effectivePresentation(preferred: .weekly, hasFiveHour: true, hasWeekly: true,
                                          weeklyMeasurable: true, dollarPriceable: true, windowMinutes: 300)
         XCTAssertEqual(wk.rateUnit, .weeklyPercentPerHour)
         XCTAssertEqual(wk.windowMinutes, 10080)
-        XCTAssertEqual(resolve(.weekly, weeklyMeasurable: false), .tokensPerHour)
-        XCTAssertEqual(resolve(.weekly, hasWeekly: false, weeklyMeasurable: false), .tokensPerHour)
+        XCTAssertEqual(resolve(.weekly, weeklyMeasurable: false), .weeklyPercentPerHour)
+        XCTAssertEqual(resolve(.weekly, hasWeekly: false, weeklyMeasurable: false), .weeklyPercentPerHour)
+        XCTAssertEqual(resolve(.weekly, hasWeekly: false, weeklyMeasurable: false, windowMinutes: 10080),
+                       .weeklyPercentPerHour)
     }
 
     func testRequestIDChangesWithRateUnit() {
@@ -2484,7 +2489,10 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertEqual(rate, 4.0, accuracy: 0.001)
     }
 
-    func testWeeklyPresentationFallsBackToTokenWithoutRecentTick() {
+    /// Acceptance test 1: with no recent quota tick, Weekly STAYS in %/h. It used
+    /// to degrade to tk/h here, which silently showed tokens under a `Wk`
+    /// selection. The missing tick now only means the rows have no number yet.
+    func testWeeklyPresentationStaysWeeklyWithoutRecentTick() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let request = HUDRunwayRequestBuilder.request(
             activeRows: [], projectedRunoutEnabled: true,
@@ -2497,7 +2505,26 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
             weekResetText: iso8601(now.addingTimeInterval(5 * 24 * 60 * 60)),
             now: now, maxRows: 5, forceVisible: true)
 
-        XCTAssertEqual(request?.baseline.rateUnit, .tokensPerHour)
+        XCTAssertEqual(request?.baseline.rateUnit, .weeklyPercentPerHour)
+        XCTAssertEqual(request?.baseline.windowMinutes, 10080)
+        XCTAssertTrue(request?.weeklyWindowAvailable ?? false)
+    }
+
+    /// With no weekly window at all, the unit still holds — the rows read "n/a".
+    func testWeeklyPresentationStaysWeeklyWithoutWeeklyWindow() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let request = HUDRunwayRequestBuilder.request(
+            activeRows: [], projectedRunoutEnabled: true,
+            codexAgentEnabled: true, codexUsageEnabled: true,
+            fiveHourRemainingPercent: 67,
+            fiveHourResetText: iso8601(now.addingTimeInterval(3 * 60 * 60)),
+            fiveHourProjectedRunoutAt: nil, fiveHourProjectionObservedAt: nil,
+            windowMinutes: 300, presentation: .weekly,
+            weekRemainingPercent: 0, weekResetText: "",
+            now: now, maxRows: 5, forceVisible: true)
+
+        XCTAssertEqual(request?.baseline.rateUnit, .weeklyPercentPerHour)
+        XCTAssertFalse(request?.weeklyWindowAvailable ?? true)
     }
 
     func testRunwayRequestIDChangesWhenDisplayNameChanges() {
