@@ -11,6 +11,15 @@ struct ClaudeUsageSnapshot: Equatable {
     var sessionResetText: String = ""
     var weekAllModelsRemainingPercent: Int = 0
     var weekAllModelsResetText: String = ""
+    /// The weekly reset EXACTLY as the source stated it, before display formatting.
+    ///
+    /// `weekAllModelsResetText` has already been through `displayTextWithPrefix`,
+    /// which resolves a countdown ("in 2d") against `now` and renders it as a
+    /// localized date — so by the time anyone downstream sees it, a moving target
+    /// looks like a fixed instant and no amount of parsing can tell. Anchoring a
+    /// cache on that is what wrote a new bootstrap key every poll. Calibration
+    /// reads this instead; the UI keeps reading the formatted one.
+    var weekAllModelsResetRaw: String? = nil
     var weekOpusRemainingPercent: Int? = nil
     var weekOpusResetText: String? = nil
     /// Model the scoped weekly window covers ("Fable"). nil when it came from the legacy
@@ -587,9 +596,14 @@ final class ClaudeUsageModel: ObservableObject {
            // fallback supplies a relative countdown, which resolves against `now`
            // and so names a new window every poll — it wrote seven bogus cache keys
            // in 75 minutes before this guard existed.
+           // The SOURCE's own text, not the displayed one. `weeklyResetText` has
+           // already been through display formatting on the tmux path, which turns
+           // "in 2d" into a localized date resolved against `now` — an absolute
+           // string that moves every poll, which `resetAnchorDate` cannot detect
+           // because the countdown is gone by then.
            let weekResetAt = UsageResetText.resetAnchorDate(kind: "Wk",
                                                             source: .claude,
-                                                            raw: s.weeklyResetText,
+                                                            raw: s.weeklyResetRaw ?? s.weeklyResetText,
                                                             now: s.fetchedAt),
            weekResetAt > s.fetchedAt {
             // Historical bootstrap, same as Codex: without this the Claude rows

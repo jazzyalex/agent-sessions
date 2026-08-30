@@ -271,6 +271,50 @@ final class ClaudeStatusServiceTests: XCTestCase {
         guard let parsed else { return XCTFail("Expected parsed snapshot") }
         XCTAssertNotNil(UsageResetText.resetDate(kind: "5h", source: .claude, raw: parsed.sessionResetText))
         XCTAssertNotNil(UsageResetText.resetDate(kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText))
+        // The source said "in 2d" — a countdown. It must survive unformatted, or
+        // nothing downstream can tell that this window has no stated reset instant.
+        XCTAssertEqual(parsed.weekAllModelsResetRaw, "in 2d")
+    }
+
+    /// The laundering path this guards against.
+    ///
+    /// `parseUsageJSON` runs the countdown through `displayTextWithPrefix`, which
+    /// resolves it against `now` and renders a localized DATE. Downstream that is
+    /// indistinguishable from a provider-stated instant — so the anchor guard could
+    /// not see the countdown, and every poll produced a different "absolute" reset,
+    /// writing a new bootstrap cache key each time. Anchoring must read the raw
+    /// text, which stays a countdown.
+    func testATmuxCountdownIsNotAcceptedAsACalibrationAnchor() async {
+        let service = ClaudeStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
+        let json = """
+        {
+          "ok": true,
+          "session_5h": { "pct_left": 82, "resets": "in 3h" },
+          "week_all_models": { "pct_left": 51, "resets": "in 2d" },
+          "week_opus": null
+        }
+        """
+        guard let parsed = await service.parseUsageJSONForTesting(json) else {
+            return XCTFail("Expected parsed snapshot")
+        }
+
+        // Precondition: the DISPLAY text has been laundered into something that
+        // parses as absolute. This is why the earlier guard could not work.
+        XCTAssertNotNil(UsageResetText.resetAnchorDate(
+            kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText),
+            "precondition: the formatted text no longer looks relative")
+
+        // The RAW text is what calibration anchors on, and it must be refused.
+        XCTAssertNil(UsageResetText.resetAnchorDate(
+            kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetRaw ?? ""),
+            "a countdown cannot identify a window, however it was later formatted")
+
+        // And the laundered text really does move between polls, which is the harm.
+        let t0 = Date(timeIntervalSince1970: 1_788_130_000)
+        let a = UsageResetText.displayText(kind: "Wk", source: .claude, raw: "in 2d", now: t0)
+        let b = UsageResetText.displayText(kind: "Wk", source: .claude, raw: "in 2d",
+                                           now: t0.addingTimeInterval(7200))
+        XCTAssertNotEqual(a, b, "each poll renders a different absolute-looking reset")
     }
 
     func testClaudeUsageCaptureFixtureParsesV1QuotaOutput() throws {

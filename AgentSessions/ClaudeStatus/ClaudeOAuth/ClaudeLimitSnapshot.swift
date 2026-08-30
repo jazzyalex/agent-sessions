@@ -17,6 +17,13 @@ struct ClaudeLimitSnapshot: Equatable, Codable {
     var fiveHourResetText: String       // Raw reset string for UsageResetText formatting
     var weeklyUsedRatio: Double?        // 0...1, nil = not available
     var weeklyResetText: String
+    /// The weekly reset as the SOURCE stated it, when that differs from the text
+    /// above. The tmux path formats a countdown into a localized date before this
+    /// snapshot is built, which makes a per-poll moving target indistinguishable
+    /// from a fixed instant downstream. Calibration anchors on this; nil means the
+    /// source's own text is already in `weeklyResetText` (the OAuth and web paths
+    /// pass their ISO-8601 string through untouched).
+    var weeklyResetRaw: String? = nil
     /// The model-scoped weekly window. Named `weekOpus` for history and for the persisted
     /// `Codable` shape: it is no longer Opus-specific. On a current account it is fed from
     /// the `weekly_scoped` entry of the response's `limits` array, whichever model that
