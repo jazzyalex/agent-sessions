@@ -36,6 +36,11 @@ defaults:
 # blog/, bench/, prompts/. `scripts/check_docs_publish.py` fails CI if any of
 # them lands in the exclude list below.
 #
+# Also keep the bare-hex `*.txt` at this level: it is the IndexNow key file.
+# Deleting or renaming it revokes URL submission to Bing, DuckDuckGo, Brave and
+# Yandex — its path is what authorizes URLs under /agent-sessions/, and it must
+# contain the key and nothing else. See scripts/indexnow_submit.py.
+#
 # NOTE: on the Pages Jekyll (3.x) this list REPLACES the built-in defaults,
 # so the tooling entries are repeated here explicitly.
 exclude:
