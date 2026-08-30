@@ -117,7 +117,7 @@ files as crash-recovery state, not as a product surface, so nothing ships
 with a search box over your own history.
 
 The parsing problem, at least, is solved for the reading half.
-[Agent Sessions](https://github.com/jazzyalex/agent-sessions) indexes all
+[Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=your-agent-history-is-a-dataset) indexes all
 six formats into one searchable, local-only browser — that's the "what did
 we decide" and "which command failed" questions handled without writing a
 line of code. The aggregate questions still need a script, and the one this

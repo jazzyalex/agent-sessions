@@ -278,13 +278,15 @@ that when it misbehaves, the blast radius is a suggestion I can delete.
 There is a quieter benefit. Each run is a headless `claude -p` session and
 writes the same transcript any Claude Code session does. When a digest looks
 off, I don't guess; I open the run in [Agent
-Sessions](https://github.com/jazzyalex/agent-sessions), the macOS app I build
-for reading agent transcripts, and see exactly what went in and what came back.
+Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=injection-safe-github-triage),
+the macOS app I build for reading agent transcripts, and see exactly what went
+in and what came back.
 Scheduled agents are becoming ordinary, and almost none have a "what did this
 actually do last night" view. The transcripts are already on disk. They just
 need reading.
 
 Agent Sessions is free, local-only, has no telemetry, and opens those files
-read-only; the source is [on
-GitHub](https://github.com/jazzyalex/agent-sessions), and more posts like this
-one live at [/blog/]({{ '/blog/' | relative_url }}).
+read-only. [Download
+it](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=injection-safe-github-triage)
+or read the source [on GitHub](https://github.com/jazzyalex/agent-sessions).
+More posts like this one live at [/blog/]({{ '/blog/' | relative_url }}).

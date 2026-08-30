@@ -308,6 +308,6 @@ Grades will move — that is the point of a standing bench. The
 [monitoring ledger and methodology](https://github.com/jazzyalex/agent-sessions/tree/main/docs/agent-support)
 and the [drift log](https://github.com/jazzyalex/agent-sessions/blob/main/docs/agent-json-tracking.md)
 are public, re-runs happen with our weekly monitoring, and disputes are
-welcome as issues. [Agent Sessions](https://github.com/jazzyalex/agent-sessions)
+welcome as issues. [Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=session-bench-launch)
 itself is a free, local-only macOS browser for all ten of these stores;
 reading them every day is how the bench got built.

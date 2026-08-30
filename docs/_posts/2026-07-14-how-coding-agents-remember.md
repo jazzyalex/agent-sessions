@@ -331,7 +331,7 @@ journal locally, completely, and by default, and none of it leaves your
 machine on its own. The formats are six dialects of the same instinct, and
 the instinct is right: the work is worth remembering.
 
-[Agent Sessions](https://github.com/jazzyalex/agent-sessions) is a free,
+[Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=how-coding-agents-remember) is a free,
 local-only macOS browser for all six of these stores; it reads them read-only
 and never writes back. The measurement script and raw aggregates behind
 every number here are in the repo, and the companion post on the exact disk

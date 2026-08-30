@@ -114,7 +114,7 @@ maintain it or not: every agent writes complete session logs to your disk
 Unqueried, it is dead weight. Searchable, it is the answer to "have we hit
 this error before" and "what did we decide in May" — questions the other
 four layers are too terse to answer. A local browser like
-[Agent Sessions](https://github.com/jazzyalex/agent-sessions) makes this
+[Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=agent-legible-repositories) makes this
 layer usable without any setup.
 
 ## The test

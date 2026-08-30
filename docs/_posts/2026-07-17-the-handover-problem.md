@@ -41,8 +41,8 @@ intent. It is the official record, written after the fact, by the winner.
 a working session on our machines averages hundreds of events per user
 message; the signal about "where we left off" is diffused across megabytes.
 Transcripts are for audit and search (that is [what Agent Sessions is
-for](https://github.com/jazzyalex/agent-sessions)), not for briefing the next
-shift.
+for](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=the-handover-problem)),
+not for briefing the next shift.
 
 **Built-in memory features** (CLAUDE.md auto-memory, agent memory stores)
 carry durable preferences and hard-won facts well. They are the wrong shape

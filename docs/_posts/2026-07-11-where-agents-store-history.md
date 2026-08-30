@@ -31,7 +31,7 @@ reason a function looks the way it does. It is genuinely valuable and genuinely
 scattered. Most people assume old agent history is gone, or trapped somewhere
 unreachable, when in fact it is sitting in a predictable file a couple of
 directories deep. Here is where each major agent actually keeps it, grounded in
-how [Agent Sessions](https://github.com/jazzyalex/agent-sessions) parses each
+how [Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=where-agents-store-history) parses each
 one.
 
 ## Claude Code — per-project JSONL
@@ -251,6 +251,7 @@ These formats now also have a standing scorecard:
 [Session-Bench]({{ '/bench/' | relative_url }}) ranks ten of them on
 twenty pass/fail gates and re-scores when they drift.
 If you would rather not memorize six
-paths and two schema quirks, [the source is on
-GitHub](https://github.com/jazzyalex/agent-sessions), and more posts like this
-one live at [/blog/]({{ '/blog/' | relative_url }}).
+paths and two schema quirks, [Agent Sessions reads all of
+them](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=where-agents-store-history)
+and [the source is on GitHub](https://github.com/jazzyalex/agent-sessions).
+More posts like this one live at [/blog/]({{ '/blog/' | relative_url }}).

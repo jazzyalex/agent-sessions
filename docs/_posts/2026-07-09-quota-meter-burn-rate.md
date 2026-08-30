@@ -21,7 +21,7 @@ reset before the window fills depends on how fast you're burning, and a
 percentage carries no information about speed. Two accounts can show the
 identical number while one of them is twenty minutes from a hard stop.
 
-[Agent Sessions](https://github.com/jazzyalex/agent-sessions) ships a Quota
+[Agent Sessions](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=quota-meter-burn-rate) ships a Quota
 Meter with a Session Runway drawer built to answer what the percentage can't:
 how much of the Claude limit is left as a trajectory rather than a level, which
 session is spending it, and when the current pace runs the window dry. The math
@@ -168,4 +168,5 @@ Agent Sessions is a free, local-only macOS app for browsing and searching
 Claude Code and Codex sessions; the Quota Meter and Session Runway ship with
 it. There is no account and no telemetry, and it reads the same local logs your
 agents already write. The code behind everything described above is public:
-[download it or read the source on GitHub](https://github.com/jazzyalex/agent-sessions).
+[download it](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=quota-meter-burn-rate)
+or [read the source on GitHub](https://github.com/jazzyalex/agent-sessions).
