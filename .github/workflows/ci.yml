@@ -14,6 +14,9 @@ jobs:
       - name: Deploy docs drift guard
         shell: bash
         run: scripts/check_deploy_drift.sh
+      - name: Docs publish guard
+        shell: bash
+        run: python3 scripts/check_docs_publish.py
       - name: Xcode version
         run: xcodebuild -version
       - name: Build (macOS, no signing)

@@ -1,4 +1,9 @@
 ---
+layout: blog
+title: "Adding a session source"
+seo_title: "Adding a session source to Agent Sessions"
+description: "What it costs to add a coding agent as a searchable session source: the closed list of sites to touch, the fixtures, and the evidence a PR needs."
+image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
 last_modified_at: 2026-08-29
 ---
 # Adding a session source

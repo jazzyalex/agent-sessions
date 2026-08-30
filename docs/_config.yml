@@ -31,8 +31,10 @@ defaults:
       layout: post
       image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
 
-# MUST KEEP SERVED (never add to exclude): index.html, appcast.xml (Sparkle
-# SUFeedURL — breaking this breaks auto-update), assets/, guides/, blog/.
+# MUST KEEP SERVED (never add to exclude): index.html, 404.html, appcast.xml
+# (Sparkle SUFeedURL — breaking this breaks auto-update), assets/, guides/,
+# blog/, bench/, prompts/. `scripts/check_docs_publish.py` fails CI if any of
+# them lands in the exclude list below.
 #
 # NOTE: on the Pages Jekyll (3.x) this list REPLACES the built-in defaults,
 # so the tooling entries are repeated here explicitly.
@@ -62,8 +64,9 @@ exclude:
   # root-level internal markdown. Enumerated deliberately: a bare "*.md" glob
   # on Pages Jekyll 3.x ALSO matches _posts/*.md and silently drops every blog
   # post. Excluding a named .md also suppresses its optional-front-matter .html.
-  # A new root .md leaks until added here — the deploy manifest gate (.md count
-  # must be 0) catches that before publish.
+  # A new root .md leaks until added here. `scripts/check_docs_publish.py` fails
+  # CI on any root docs/*.md that is neither listed here nor named in that
+  # script's PUBLIC_ROOT_MARKDOWN allowlist.
   - "CHANGELOG.md"
   - "CONTRIBUTING.md"
   - "Energy-and-Performance.md"

@@ -1,5 +1,9 @@
 ---
+layout: blog
 title: "AI-agent brief: add a source"
+seo_title: "AI-agent brief: add an agent source"
+description: "A copy-paste brief for Codex or Claude Code to add a new agent as a session source, including the bounded preflight the human runs before starting."
+image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
 last_modified_at: 2026-08-29
 ---
 # AI-agent brief: add a source to Agent Sessions
