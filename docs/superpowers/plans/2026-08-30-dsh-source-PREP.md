@@ -92,8 +92,8 @@ showing. Accept unknown event types and unknown row tags rather than failing the
 |---|---|---|
 | Browse / search / filter | yes | format fully readable, proven in §6 |
 | Analytics | yes | `assistant/message` carries provider + model |
-| Resume | yes, `dsh --resume=<id>` | `apps/cli/README.md`; TUI chdirs to header `cwd` first |
-| Archived history | none | DSH has no archive surface; all sessions live in one root |
+| Resume | **undecided** — upstream shows `dsh --profile tui --resume <id>` | `apps/cli/README.md`, where it is an example "assuming the tui profile is installed", not a flag reference. Verify against the target tag and the installed profile before promising a command |
+| Archived history | **yes — investigate as a supported surface** | DSH archives rather than deletes: `workspace.archiveSession({sessionId})` writes `workspaceDomainState.archivedSessionIds`, and "the session log and its workspace accounting stay untouched; the session merely disappears from every grouping surface". Source: `.agents/notes/implemented/feature/2026-07-31-session-archive-global-set.md` |
 | Image extraction | **out of scope for v1** | images are content-addressed *outside* the log in a separate attachment backend — matches the Qwen / Devin / fx precedent |
 
 Resume caveat: a session whose header has **no `cwd`** cannot be resumed by DSH itself
@@ -164,5 +164,13 @@ parsers compile into `AgentSessionsLogicTests` and must not gain app-target depe
 - Does a real `~/.dsh/sessions` match §2, including the `--<cwd>--` spelling?
 - Do sub-agent sessions (`delegationDepth > 0`) appear as siblings, and should Agent Sessions
   nest them under the parent the way it nests Codex sub-agents?
-- Does `dsh --resume=<id>` actually reopen from outside the TUI, and does it need `--profile tui`?
+- Does resume work from outside the TUI, and is `--profile tui` required? Upstream's CLI
+  README shows `dsh --profile tui --resume <id>`, but labels it an example assuming that
+  profile is installed. The capability table must stay `undecided` until this is run against
+  the target tag.
+- Where does `archivedSessionIds` land on disk, and is it readable without the host running?
+  The archive set lives on the workspace domain's global singleton (schema version 2, additive
+  field), and DSH ships **no unarchive or viewing surface** — its own note records that as a
+  known limitation. That is precisely the gap Agent Sessions fills for Codex Desktop today, so
+  this is a feature to scope, not a capability to write off.
 - Do real logs carry `sourceEventSeqs` yet, and in what shape?

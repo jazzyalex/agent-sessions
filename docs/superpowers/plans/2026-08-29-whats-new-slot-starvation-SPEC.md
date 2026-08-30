@@ -290,8 +290,9 @@ of which persist in the real preference domain after the run, which is exactly
 what the launch-argument design exists to avoid.
 
 **What it is not.** It renders appearance — copy, layout, wrapping, light and
-dark. Every action is wired to `debugCardDismissed`, so viewing a card here
-cannot spend the real ask, and the `whatsnew` branch deliberately calls
+dark. The dismiss and snooze actions are wired to `debugCardDismissed` rather
+than to real lifecycle state (open and link actions mutate nothing), so viewing a
+card here cannot spend the real ask, and the `whatsnew` branch deliberately calls
 `openWhatsNewPanel` rather than `openWhatsNewFromCard` so looking at it cannot
 retire the version. The lifecycles in §1–§4 are verified by the tests in §9, not
 by this.
