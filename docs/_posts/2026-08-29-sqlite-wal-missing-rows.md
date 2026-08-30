@@ -7,9 +7,11 @@ summary: >-
   A SQLite database in WAL mode can hold a megabyte of committed rows while the
   main .db file is a 4,096-byte header page, and the readers that miss that
   data are not the ones folklore blames. We measured every reader configuration
-  we could think of against a live writer: read-only connections see
-  everything, while immutable=1 and a lone copy of the .db silently do not.
-  Our own notes carried the wrong culprit for over a month.
+  we could think of against a live writer: what decides the answer is whether
+  the -wal file is there, not whether the connection is read-only, and the two
+  readers that answer confidently with the wrong data are immutable=1 and a
+  read-write connection to a .db copied without its log. Our own notes carried
+  the wrong culprit for over a month, and the first correction was wrong too.
 seo_title: "SQLite WAL missing rows: which readers go blind"
 ---
 
@@ -52,7 +54,7 @@ header page; every row and the schema itself sat in the `-wal`.
 .viz-root svg { max-width: 720px; width: 100%; height: auto; display: block; margin: 0 auto; }
 .viz-root text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 </style>
-<svg viewBox="0 0 720 330" role="img" aria-label="Diagram: a WAL-mode SQLite database split across three files. The main live.db is 4,096 bytes and holds only the header page; live.db-wal is 1.1 MB and holds every committed row plus the schema; live.db-shm holds the wal-index. An upper reader opened on the plain path or read-only consults the wal-index, merges the main file with the log, and sees all 5,000 rows. A lower reader opened with immutable=1, or on a copy of the .db alone, reads only the main file and reports no such table.">
+<svg viewBox="0 0 720 330" role="img" aria-label="Diagram: a WAL-mode SQLite database split across three files. The main live.db is 4,096 bytes and holds only the header page; live.db-wal is 1.1 MB and holds every committed row plus the schema; live.db-shm holds the wal-index. An upper reader opened on the plain path or read-only consults the wal-index, merges the main file with the log, and sees all 5,000 rows. A lower reader opened with immutable=1, or on a .db copied without its -wal, never reaches the log: it answers from the header page, or fails outright with error 14.">
   <text x="12" y="22" font-size="14" font-weight="600" fill="var(--viz-ink)">Where the rows actually are, and who can see them</text>
   <!-- file boxes -->
   <g>
@@ -76,9 +78,9 @@ header page; every row and the schema itself sat in the `-wal`.
     <text x="580" y="122" font-size="12" font-weight="600" fill="var(--viz-accent)" text-anchor="middle">sees all 5,000 rows</text>
 
     <rect x="460" y="196" width="240" height="80" rx="8" fill="none" stroke="var(--viz-muted)" stroke-width="2" stroke-dasharray="5 4"/>
-    <text x="580" y="220" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">immutable=1 · a copy of .db alone</text>
-    <text x="580" y="240" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">never consults the log</text>
-    <text x="580" y="262" font-size="12" font-weight="600" fill="var(--viz-muted)" text-anchor="middle">"no such table"</text>
+    <text x="580" y="220" font-size="12.5" font-weight="600" fill="var(--viz-ink)" text-anchor="middle">immutable=1 · a .db copied without its -wal</text>
+    <text x="580" y="240" font-size="11.5" fill="var(--viz-ink2)" text-anchor="middle">never reaches the log</text>
+    <text x="580" y="262" font-size="12" font-weight="600" fill="var(--viz-muted)" text-anchor="middle">"no such table", or error 14</text>
   </g>
   <!-- arrows: upper reader to all three files -->
   <g stroke="var(--viz-accent)" stroke-width="1.6" fill="none">
@@ -93,7 +95,7 @@ header page; every row and the schema itself sat in the `-wal`.
   <text x="352" y="316" font-size="11" fill="var(--viz-muted)" text-anchor="middle">Measured 2026-08-29: SQLite 3.43.2 (macOS CLI) and 3.53.4 (Python), identical results.</text>
 </svg>
 </div>
-<figcaption>The database during the measurement. The main file is a 4 KB header; the megabyte is in the log. The upper reader goes through the wal-index and merges the two; the lower one reads the main file alone and reports <code>no such table</code>.</figcaption>
+<figcaption>The database during the measurement. The main file is a 4 KB header; the megabyte is in the log. The upper reader goes through the wal-index and merges the two; the lower one never reaches the log and answers from the header page alone.</figcaption>
 </figure>
 
 ## The folk claim, measured
@@ -114,20 +116,33 @@ the SQLite 3.53.4 inside Python's `sqlite3` module agree on every row of it.
 
 | Reader | Result |
 |---|---|
-| plain path | 5,000 — correct |
-| `file:…?mode=ro` | 5,000 — correct |
-| `sqlite3 -readonly` | 5,000 — correct |
-| `file:…?immutable=1` | wrong — the WAL is ignored |
-| copy of the `.db` without its sidecars | wrong — the WAL is ignored |
-| `-shm` absent, directory writable | 5,000 — the reader rebuilds the `-shm` |
-| `-shm` absent, directory read-only | hard error: `unable to open database file` |
+| plain path, `-wal` present | 5,000 — correct |
+| `file:…?mode=ro`, `-wal` present | 5,000 — correct |
+| `sqlite3 -readonly`, `-wal` present | 5,000 — correct |
+| read-only, `-shm` missing but `-wal` present | 5,000 — correct; the reader builds the index itself |
+| read-only, `-shm` present but `-wal` missing | hard error: `unable to open database file` (14) |
+| read-only on a copy of the `.db` alone | hard error 14 |
+| read-write on a copy of the `.db` alone | wrong — answers from the header page |
+| `file:…?immutable=1`, even with the `-wal` there | wrong — the WAL is ignored |
 
-Read-only is not the problem. To read a WAL database, a connection needs the
-wal-index, and a read-only connection is perfectly willing to *create* the
-`-shm` file that holds it, provided the directory permits. When the index
-genuinely cannot be had, SQLite refuses loudly with an error rather than
-quietly under-reporting. The silent failures are the two readers that never
-consult the log at all.
+Read-only is not the problem. The determining factor is much simpler and it is
+easy to get backwards: **the `-wal` file's presence is necessary and
+sufficient.** The `-shm` is neither. Given the log, a read-only connection
+builds the wal-index it needs — writing a `-shm` if the directory allows, and
+otherwise keeping the index in its own memory. Take the log away and no
+permission or flag saves you.
+
+That reframes which failures are dangerous. A read-only reader that cannot
+reach the log fails *loudly*, with error 14 at the first query rather than at
+`open`, because SQLite opens lazily. Only two configurations answer confidently
+with the wrong data: `immutable=1`, which promises the file cannot change and
+so skips the log entirely, and a read-*write* connection to a copied `.db`,
+which is allowed to start a fresh empty log and then reports what the header
+page alone contains.
+
+One practical trap follows from this. A `-wal` is often zero bytes, which makes
+it look like an empty file not worth copying. Copying it is precisely what
+makes the read work.
 
 ## The two readers that actually lie
 
@@ -138,19 +153,29 @@ assertion is false: in the run above it ignored 1.1 MB of committed data and
 answered `no such table` from the header page. The parameter did exactly what
 it promises, on a file that broke the promise, and nothing anywhere warned us.
 
-The copied `.db` is the same failure without the URI. Copy the main file
-somewhere for a look — a quick `cp` before poking at a live app's data, a
-backup script that grabs `*.db`, a database attached to a bug report — and the
-log stays behind. The copy opens cleanly, parses correctly, and holds whatever
-the last checkpoint wrote, which can be as little as one page.
+The copied `.db` is the same failure without the URI, and it is the one people
+actually hit: a quick `cp` before poking at a live app's data, a backup script
+globbing `*.db`, a database attached to a bug report. The log stays behind.
+Opened read-write, that copy is allowed to begin a fresh empty log, so it opens
+cleanly, parses correctly, and answers from whatever the last checkpoint wrote
+— which can be a single header page.
+
+Opened read-only, the same copy fails instead, with `unable to open database
+file` at the first query. That asymmetry is worth internalising, because it is
+the source of a recurring false bug report: *"this app's database won't open
+read-only, error 14."* Nearly always the repro copied the `.db` without its
+`-wal`. Re-test against the live path before concluding anything is broken. We
+managed to file that exact false report against our own app while writing this
+post.
 
 What to do instead is short. To inspect a live database, query the real path
 with plain `SELECT`s; readers do not block a WAL writer, so the caution behind
-reaching for a read-only flag is already built into the mode. To take a copy,
-take the set — `.db`, `-wal`, `-shm` — because a missing `-shm` gets rebuilt
-but a missing `-wal` is missing data. And when you own the database,
-`PRAGMA wal_checkpoint(TRUNCATE);` folds the log into the main file first, after
-which the single file means what it appears to mean.
+reaching for a read-only flag is already satisfied by the mode itself. To take
+a copy, take the set — `.db`, `-wal`, `-shm` — and copy the `-wal` **even when
+it is zero bytes**, because its absence is what turns a read-only open into
+error 14. And when you own the database, `PRAGMA wal_checkpoint(TRUNCATE);`
+folds the log into the main file first, after which the single file means what
+it appears to mean.
 
 ## The whole test, runnable
 
@@ -175,18 +200,23 @@ WRITER=$!; sleep 2
 ls -l "$W"                                 # live.db is 4096 bytes
 
 q() { printf '%-22s %s\n' "$1" "$(sqlite3 "$2" 'select count(*) from t;' 2>&1)"; }
-q "plain path"        "$DB"
-q "mode=ro"           "file:$DB?mode=ro"
-q "immutable=1"       "file:$DB?immutable=1"
-cp "$DB" "$W/alone.db"
-q ".db copied alone"  "$W/alone.db"
+q "plain path"          "$DB"
+q "mode=ro"             "file:$DB?mode=ro"
+q "immutable=1"         "file:$DB?immutable=1"
+# Each copy gets its own file: opening one read-write CREATES an empty -wal
+# beside it, which would then let a later read-only probe succeed.
+cp "$DB" "$W/ro.db"; cp "$DB" "$W/rw.db"   # the .db WITHOUT its -wal
+q ".db copy, read-only"  "file:$W/ro.db?mode=ro"
+q ".db copy, read-write" "$W/rw.db"
 
 kill $WRITER 2>/dev/null; wait $WRITER 2>/dev/null; rm -rf "$W"
 ```
 
-On this machine the last two probes both answer
-`Error: in prepare, no such table: t`, with the writer alive and a megabyte of
-its committed rows sitting in `live.db-wal`.
+On this machine the first two probes answer `5000`. `immutable=1` and the
+read-write copy both answer `Error: in prepare, no such table: t` — confidently
+wrong. The read-only copy answers `Error: in prepare, unable to open database
+file` — wrong, but honestly so. All of it with the writer alive and a megabyte
+of its committed rows sitting in `live.db-wal`.
 
 ## The clock freezes too
 
