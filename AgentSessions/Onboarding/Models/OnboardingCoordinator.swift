@@ -355,8 +355,11 @@ final class OnboardingCoordinator: ObservableObject {
         // structurally safe rather than safe by convention: a future caller that
         // reaches it without the card on screen gets the panel and nothing else,
         // instead of silently retiring a card the user never saw.
-        if whatsNewMajorMinor != nil {
-            defaults.onboardingWhatsNewDismissedMajorMinor = version
+        // Retire the version that is actually armed, not the one passed in: the
+        // two are the same from the card, and binding the armed one keeps them
+        // from ever diverging for a caller where they are not.
+        if let armed = whatsNewMajorMinor {
+            defaults.onboardingWhatsNewDismissedMajorMinor = armed
             didConsumeTopSlotAskThisLaunch = true
             whatsNewMajorMinor = nil
         }

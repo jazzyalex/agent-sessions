@@ -328,6 +328,79 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(defaults.onboardingWhatsNewDismissedMajorMinor, "2.9")
     }
 
+    /// A launch with no resolvable version must not consume the launch's single
+    /// impression slot. This pins the guard order in noteWhatsNewCardShown():
+    /// hoisting the flag above the version lookup would make the first call free
+    /// and silently under-count the budget.
+    func testNilVersionDoesNotBurnTheLaunchImpression() async {
+        let defaults = makeDefaults("WhatsNew.nilVersion")
+
+        await MainActor.run {
+            var version: String?
+            let coordinator = OnboardingCoordinator(
+                defaults: defaults,
+                currentMajorMinorProvider: { version },
+                isFreshInstallProvider: { false },
+                whatsNewAvailableProvider: { _ in true }
+            )
+
+            coordinator.noteWhatsNewCardShown()
+            XCTAssertEqual(defaults.onboardingWhatsNewImpressions, 0)
+            XCTAssertNil(defaults.onboardingWhatsNewImpressionsVersion)
+
+            // Same launch, same coordinator: the earlier no-op must not have
+            // spent the one impression this launch is allowed.
+            version = "2.9"
+            coordinator.noteWhatsNewCardShown()
+            XCTAssertEqual(defaults.onboardingWhatsNewImpressions, 1)
+            XCTAssertEqual(defaults.onboardingWhatsNewImpressionsVersion, "2.9")
+        }
+    }
+
+    // MARK: - Debug override grammar
+
+    /// DEBUG-only QA affordance, but the parsing is real string surgery and a
+    /// silent break costs the only way to look at these cards by hand.
+    func testDebugOverrideParsesEveryAcceptedValue() {
+        func parse(_ raw: String) -> TopSlotDebugOverride? {
+            TopSlotDebugOverride.parse(raw, buildMajorMinor: "5.1")
+        }
+
+        guard case .star? = parse("star") else { return XCTFail("star") }
+        guard case .contribute? = parse("contribute") else { return XCTFail("contribute") }
+
+        // A bare `whatsnew` takes the build's version; an explicit one wins.
+        guard case .whatsNew("5.1")? = parse("whatsnew") else { return XCTFail("whatsnew") }
+        guard case .whatsNew("5.0")? = parse("whatsnew:5.0") else { return XCTFail("whatsnew:5.0") }
+        // Empty suffix is the bare form, not an empty version.
+        guard case .whatsNew("5.1")? = parse("whatsnew:") else { return XCTFail("whatsnew:") }
+
+        // An agent still reaches the steward card, so the literals above did not
+        // swallow the SessionSource lookup.
+        let agent = StewardAskEligibility.stewardlessAgents.first
+        if let agent {
+            guard case .steward? = parse(agent.source.rawValue) else {
+                return XCTFail("steward \(agent.source.rawValue)")
+            }
+        }
+
+        XCTAssertNil(parse("nonsense"))
+        XCTAssertNil(parse(""))
+        XCTAssertNil(parse("Star"), "matching is exact, not case-insensitive")
+    }
+
+    /// Without a build version there is nothing honest to render, so the bare
+    /// form declines instead of inventing one.
+    func testBareWhatsNewDeclinesWithoutABuildVersion() {
+        XCTAssertNil(TopSlotDebugOverride.parse("whatsnew", buildMajorMinor: nil))
+        XCTAssertNil(TopSlotDebugOverride.parse("whatsnew:", buildMajorMinor: nil))
+
+        // An explicit version still works — it needs no fallback.
+        guard case .whatsNew("4.8")? = TopSlotDebugOverride.parse("whatsnew:4.8", buildMajorMinor: nil) else {
+            return XCTFail("explicit version should not need a build version")
+        }
+    }
+
     // MARK: - Suppression matrix (carried over)
 
     func testSuppressesWhatsNewWhenUpgradingFromTwoEleven() async {

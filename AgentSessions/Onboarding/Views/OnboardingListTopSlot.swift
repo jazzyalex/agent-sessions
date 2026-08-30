@@ -184,6 +184,24 @@ struct OnboardingListTopSlot: View {
     @ViewBuilder
     private func debugCard(_ override: TopSlotDebugOverride) -> some View {
         switch override {
+        case let .whatsNew(version):
+            WhatsNewCard(
+                palette: palette,
+                majorMinor: version,
+                teaser: WhatsNewCatalog.teaser(for: version),
+                // Opens the real panel — that side is worth looking at — but
+                // routes around `openWhatsNewFromCard` so viewing the card
+                // cannot retire the version for real.
+                onOpen: { coordinator.openWhatsNewPanel(version: version) },
+                onDismiss: { debugCardDismissed = true }
+            )
+        case .star:
+            StarCard(
+                palette: palette,
+                onOpen: { _ = NSWorkspace.shared.open(OnboardingCoordinator.githubRepositoryURL) },
+                onSnooze: { debugCardDismissed = true },
+                onDismiss: { debugCardDismissed = true }
+            )
         case let .steward(agent):
             StewardCard(
                 palette: palette,
@@ -219,11 +237,20 @@ struct OnboardingListTopSlot: View {
 /// open <built>.app --args -AgentSessionsDebugTopSlotCard qwen
 /// ```
 ///
-/// Accepts any `SessionSource` raw value listed in
-/// `StewardAskEligibility.stewardlessAgents` (`qwen`, `grok`, `cursor`, …) or
-/// `contribute`. Debug builds only: `current` is a compile-time nil elsewhere,
-/// so no release build can be argued into showing a card it has not earned.
+/// Accepts `star`, `whatsnew` (optionally `whatsnew:5.1` to pick the version),
+/// `contribute`, or any `SessionSource` raw value listed in
+/// `StewardAskEligibility.stewardlessAgents` (`qwen`, `grok`, `cursor`, …).
+/// Debug builds only: `current` is a compile-time nil elsewhere, so no release
+/// build can be argued into showing a card it has not earned.
+///
+/// This shows a card's *appearance* — copy, layout, wrapping, light and dark. It
+/// deliberately does not exercise the lifecycles: every action below hides the
+/// override instead of calling the coordinator, so looking at a card here cannot
+/// spend the real ask. State transitions are covered by the unit tests, not by
+/// this.
 enum TopSlotDebugOverride {
+    case whatsNew(String)
+    case star
     case steward(StewardAgent)
     case contribute
 
@@ -232,15 +259,44 @@ enum TopSlotDebugOverride {
     static var current: TopSlotDebugOverride? {
         #if DEBUG
         guard let raw = UserDefaults.standard.string(forKey: defaultsKey) else { return nil }
-        if raw == "contribute" { return .contribute }
-        guard let source = SessionSource(rawValue: raw),
-              let agent = StewardAskEligibility.stewardlessAgents.first(where: { $0.source == source })
-        else { return nil }
-        return .steward(agent)
+        return parse(raw, buildMajorMinor: buildMajorMinor)
         #else
         nil
         #endif
     }
+
+    #if DEBUG
+    /// This build's own major.minor, which a bare `whatsnew` renders so the card
+    /// shows the copy about to ship rather than an archived entry.
+    ///
+    /// A `let` rather than a computed property: the Info dictionary cannot change
+    /// while the process runs, and `current` is read on every render of the slot.
+    private static let buildMajorMinor = OnboardingContent.currentMajorMinor()
+
+    /// The raw-value grammar, split out from `current` so it can be tested
+    /// without writing to `UserDefaults.standard`. `buildMajorMinor` is passed in
+    /// for the same reason: the bare `whatsnew` case stays deterministic.
+    static func parse(_ raw: String, buildMajorMinor: String?) -> TopSlotDebugOverride? {
+        // Literals first: none of them is a `SessionSource` raw value, and
+        // matching them here keeps the agent lookup from having to know about
+        // the cards that are not agents.
+        if raw == "contribute" { return .contribute }
+        if raw == "star" { return .star }
+        if raw == "whatsnew" || raw.hasPrefix("whatsnew:") {
+            let requested = String(raw.dropFirst("whatsnew".count).drop(while: { $0 == ":" }))
+            if !requested.isEmpty { return .whatsNew(requested) }
+            // No version asked for and none to fall back on: decline rather than
+            // invent one, which would render a card for a version that is not
+            // this build's and may have no catalog entry.
+            guard let buildMajorMinor else { return nil }
+            return .whatsNew(buildMajorMinor)
+        }
+        guard let source = SessionSource(rawValue: raw),
+              let agent = StewardAskEligibility.stewardlessAgents.first(where: { $0.source == source })
+        else { return nil }
+        return .steward(agent)
+    }
+    #endif
 }
 
 /// Carries the slot's measured width up from a background reader.
