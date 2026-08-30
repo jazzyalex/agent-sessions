@@ -1,0 +1,63 @@
+---
+layout: blog
+title: "Local history guides"
+seo_title: "Where AI coding agents store history on macOS"
+description: "Where each coding agent keeps its sessions on macOS — the exact paths, the on-disk formats, and where reading them by hand runs out."
+permalink: /guides/
+image: /assets/marketing/screenshots/agent-sessions-codex-claude-history.png
+last_modified_at: 2026-08-29
+---
+<p class="eyebrow">Agent Sessions</p>
+<h1>Local history guides</h1>
+<p class="lede">Where each agent keeps its sessions, what Agent Sessions reads,
+and where the boundaries are. One guide per source, with the real paths, the
+record shape, and the point at which reading the files by hand stops paying.</p>
+
+<ul class="post-list">
+  <li>
+    <h2><a href="{{ '/guides/codex-local-history.html' | relative_url }}">Codex local history</a></h2>
+    <p class="post-excerpt">How CLI, Desktop, and VS Code rollout history is read
+    from <code>~/.codex/sessions</code>, and where <code>CODEX_HOME</code> moves it.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/opencode-sqlite-history.html' | relative_url }}">OpenCode SQLite</a></h2>
+    <p class="post-excerpt">Where OpenCode stores session data in
+    <code>opencode.db</code>, how to browse old runs locally, and the legacy JSON
+    layout it falls back to.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/claude-code-jsonl-history.html' | relative_url }}">Claude Code JSONL</a></h2>
+    <p class="post-excerpt">What Claude Code writes to local transcripts under
+    <code>~/.claude/projects</code>, the Desktop roots, and where the boundary is.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/cursor-agent-local-history.html' | relative_url }}">Cursor Agent</a></h2>
+    <p class="post-excerpt">How Cursor Agent transcripts are read from Cursor's
+    local storage, and why that is not the same as full Cursor IDE chat history.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/hermes-agent-state-db-history.html' | relative_url }}">Hermes state.db</a></h2>
+    <p class="post-excerpt">How Hermes sessions in <code>~/.hermes/state.db</code>
+    become searchable history, with the legacy JSON fallback.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/openclaw-local-agent-history.html' | relative_url }}">OpenClaw history</a></h2>
+    <p class="post-excerpt">How OpenClaw JSONL sessions are discovered, searched,
+    and kept separate from trajectory traces.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/copilot-cli-local-history.html' | relative_url }}">GitHub Copilot CLI</a></h2>
+    <p class="post-excerpt">Where Copilot writes <code>events.jsonl</code>, the
+    event envelope, and why its own SQLite store is not the transcript.</p>
+  </li>
+  <li>
+    <h2><a href="{{ '/guides/antigravity-cli-local-history.html' | relative_url }}">Antigravity CLI</a></h2>
+    <p class="post-excerpt">Two stores under <code>~/.gemini</code>, and the
+    sibling file that holds the untruncated text.</p>
+  </li>
+</ul>
+
+<p>The formats behind these paths are compared side by side in
+<a href="{{ '/bench/' | relative_url }}">Session-Bench</a>, and walked through in
+<a href="{% post_url 2026-07-11-where-agents-store-history %}">Where AI coding
+agents store your session history</a>.</p>

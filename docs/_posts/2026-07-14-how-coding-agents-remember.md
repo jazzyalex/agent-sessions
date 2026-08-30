@@ -51,7 +51,7 @@ controlled experiment. Where a number depends on usage rather than format, we
 say so.
 
 The on-disk layout behind each of these six corpora is written up per agent in
-the [local history guides]({{ '/#guides' | relative_url }}), if you want to run
+the [local history guides]({{ '/guides/' | relative_url }}), if you want to run
 the same measurement over your own machine.
 
 ## Finding 1: the journal is almost all margin notes
