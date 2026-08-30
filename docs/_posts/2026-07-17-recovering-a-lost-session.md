@@ -22,20 +22,22 @@ whole job. This is how to check, and how to get each one back.
 
 ## 1. It's archived, not deleted
 
-Archive is the most common way a session "disappears," because every major agent
-has an archive action and none of them make it obvious that the data survives.
-Archiving sets a flag or moves a file. It never deletes the transcript.
+Archive is the most common way a session "disappears," because the agents that
+ship an archive action rarely make it obvious that the data survives. Archiving
+sets a flag or moves a file. It never deletes the transcript.
 
 **OpenCode.** In the `/sessions` picker, `Ctrl+d` reads like a delete key and
 behaves like one — the session drops off the list. It's a soft archive. It sets
 a `time_archived` timestamp on that session's row in
 `~/.local/share/opencode/opencode.db`, and the picker simply filters archived
 rows out. The full transcript is still in the database. Set `time_archived` back
-to `NULL` for that row in the `session` table and the session comes back. (Credit
-where it's due: this is community knowledge, surfaced by an OpenCode user
-digging through the schema, not something any viewer invented.) If your OpenCode
-session is archived and you'd rather not hand-edit SQLite, any tool that reads
-the same database and lists archived rows will find it for you.
+to `NULL` for that row in the `session` table and the session comes back. Credit
+where it's due: that recipe is community knowledge, posted by Loocos in
+[opencode#23468](https://github.com/anomalyco/opencode/issues/23468), not
+something any viewer invented. Don't expect a GUI to spare you the SQL here,
+either: a tool reading that same table with the same `time_archived IS NULL`
+filter the picker uses will hide exactly what the picker hides. For OpenCode,
+the database edit is the reliable fix.
 
 **Codex.** Codex Desktop's Archive action doesn't delete either. It moves the
 session's rollout file out of `~/.codex/sessions/` and into a sibling folder,
@@ -45,12 +47,17 @@ under `~/.codex/sessions/YYYY/MM/DD/` (matching the date in its filename), or
 just open it where it sits — an archived rollout is a completely normal Codex
 log.
 
-**Claude Code / Claude Desktop.** Claude marks an archived session with an
-`isArchived` flag in a small sidecar JSON file that lives next to the session,
-not inside the transcript. The transcript stays put; the flag hides the row.
-Claude Desktop now ships a native unarchive action (it's easy to miss in the
-UI), so reach for that first. If you're editing by hand, flip `isArchived` to
-`false` in the sidecar and the session reappears.
+**Claude Desktop.** Archiving is a Desktop feature here, not a Claude Code CLI
+one, and the flag is stored nowhere near the transcript. Desktop keeps a small
+metadata sidecar per conversation under `~/Library/Application
+Support/Claude/claude-code-sessions/`, as `local_*.json` files that point back at
+the CLI transcript through a `cliSessionId` field. (Cowork sessions use a
+parallel tree, `local-agent-mode-sessions/`, with the same sidecar shape.)
+Archiving sets `isArchived` to `true` in that sidecar. Your JSONL under
+`~/.claude/projects/` is not touched at all. Claude Desktop ships a native
+unarchive action — easy to miss in the UI, but reach for it first. Editing by
+hand means setting `isArchived` back to `false` in the sidecar; searching the
+transcript for the flag will turn up nothing, because it was never in there.
 
 The pattern across all three: archive is a filter, not a shredder. The bytes you
 wrote are still on disk. You're changing which of them the picker chooses to
@@ -86,12 +93,22 @@ the picker matches again. A handful of community tools — the "teleport" and
 which is the whole reason they exist. There's nothing magic inside them; they
 reconcile the encoded folder name with where your project now lives.
 
+Cursor falls into the same trap, with one cosmetic difference in the encoding.
+Its agent transcripts live under `~/.cursor/projects/`, one folder per project
+path with the separators turned into dashes and no leading dash — the project
+above becomes `Users-you-app`, where Claude Code would write `-Users-you-app`.
+Inside it, `agent-transcripts/<session-id>/<session-id>.jsonl`. Rename the repo
+and the old transcripts stay filed under the old name, exactly as with Claude
+Code. Cursor's chat databases are a separate surface: per-session SQLite files
+under `~/.cursor/chats/`, in directories named by a workspace hash rather than
+by path, so renaming the project doesn't disturb those.
+
 Codex behaves a little differently and it's worth being precise about why. Codex
 shards sessions by date under `~/.codex/sessions/YYYY/MM/DD/`, not by project
 path, so moving your repo never relocates the log file. The original working
-directory is recorded inside the rollout's metadata instead. Moving the folder
-doesn't hide a Codex session by path the way it does for Claude Code — you locate
-it by date or ID, not by browsing from the new directory.
+directory is recorded inside the rollout's `session_meta` line instead. Moving
+the folder doesn't hide a Codex session by path the way it does for Claude Code
+or Cursor — you locate it by date or ID, not by browsing from the new directory.
 
 ## 3. The file was genuinely deleted
 
@@ -124,16 +141,23 @@ running without backups. This is the case to prevent, not the one to fix.
 
 Two of the three failure modes above are findability problems, not data-loss
 problems, and that's exactly where a read-only session browser earns its place.
-Something that reads every agent's store — the OpenCode database including
-archived rows, the Codex `archived_sessions` folder, Claude's sidecar-flagged
-sessions — and searches all of it in one window turns "lost by archive" and
-"lost by path" into "found in a search box." It surfaces the sessions the
-individual pickers hide, and it opens them read-only, so nothing gets written
-back into your agent's files.
+The path case is the one it flattens completely: read every project folder under
+`~/.claude/projects/` and `~/.cursor/projects/` at once and it stops mattering
+which directory you happen to be standing in, which is the entire mechanism
+behind the renamed-repo panic. Archive is a partial win. A browser that walks
+`~/.codex/archived_sessions/` and reads Claude Desktop's sidecars will show you
+the Codex and Claude sessions their own pickers hide.
 
-What it can't do is invent bytes that aren't on disk. A truly deleted session is
-a backup problem, full stop. Honest tools tell you that instead of pretending
-otherwise.
+Be skeptical of anything broader. Upstream archive flags are easy for a viewer
+to inherit and awkward to override, and a tool that reads OpenCode's `session`
+table the obvious way inherits `time_archived IS NULL` along with it — so it
+hides the same rows the picker does, mine included. "Reads the store" and
+"shows you everything in the store" are different claims, and the second one is
+worth checking rather than assuming.
+
+What none of them can do is invent bytes that aren't on disk. A truly deleted
+session is a backup problem, full stop. Honest tools tell you that instead of
+pretending otherwise.
 
 <figure class="post-figure">
 <style>
@@ -156,7 +180,7 @@ otherwise.
 <tr>
 <td>OpenCode session gone after <code>Ctrl+d</code> in <code>/sessions</code></td>
 <td>Soft archive: a <code>time_archived</code> timestamp is set on the row in <code>~/.local/share/opencode/opencode.db</code>; the transcript is still in the DB.</td>
-<td>Set <code>time_archived</code> back to <code>NULL</code> in the <code>session</code> table, or open a viewer that lists archived rows.</td>
+<td>Set <code>time_archived</code> back to <code>NULL</code> in the <code>session</code> table. Viewers generally inherit the same filter, so this one really is the SQL edit.</td>
 </tr>
 <tr>
 <td>Codex session missing from the list after Archive</td>
@@ -165,13 +189,18 @@ otherwise.
 </tr>
 <tr>
 <td>Claude session hidden from Claude Desktop</td>
-<td><code>isArchived=true</code> in the session's sidecar JSON; the transcript is untouched.</td>
-<td>Use Claude Desktop's native unarchive, or set <code>isArchived=false</code> in the sidecar.</td>
+<td><code>isArchived=true</code> in a <code>local_*.json</code> sidecar under <code>~/Library/Application&nbsp;Support/Claude/claude-code-sessions/</code>, not in the transcript.</td>
+<td>Use Claude Desktop's native unarchive, or set <code>isArchived=false</code> in that sidecar.</td>
 </tr>
 <tr>
 <td><code>claude --resume</code> shows nothing after you renamed the repo</td>
 <td>Sessions are filed under the <em>old</em> path, encoded as a folder name (<code>/</code>&nbsp;&rarr;&nbsp;<code>-</code>); the picker keys on your current directory.</td>
 <td>Resume from the old path, or copy <code>~/.claude/projects/&lt;old-encoded-cwd&gt;/</code> into a folder named for the new path.</td>
+</tr>
+<tr>
+<td>Cursor transcripts missing after the same rename</td>
+<td>Same mechanic, same encoding minus the leading dash: transcripts stay under <code>~/.cursor/projects/&lt;old-encoded-path&gt;/agent-transcripts/</code>.</td>
+<td>Copy the old folder to one named for the new path. Chat DBs under <code>~/.cursor/chats/</code> are hash-named and unaffected.</td>
 </tr>
 <tr>
 <td>The file is simply not there anymore</td>
@@ -181,7 +210,7 @@ otherwise.
 </tbody>
 </table>
 </div>
-<figcaption>Five ways a session "disappears," and the honest fix for each. Four of them never left your disk. The last one is a backup problem, and no viewer can pretend otherwise.</figcaption>
+<figcaption>Six ways a session "disappears," and the honest fix for each. Five of them never left your disk. The last one is a backup problem, and no viewer can pretend otherwise.</figcaption>
 </figure>
 
 ## The one habit that makes all of this moot
@@ -191,11 +220,16 @@ but the file's timestamp is recent? Archived. Empty picker right after you moved
 the project? Path mismatch. File genuinely missing from disk? Backups or
 nothing. Guessing wastes the time you'd spend just looking at the path.
 
-Agent Sessions is a free, local-only macOS app with no telemetry that reads all
-of these stores at once, archived rows included, and opens them read-only — handy
-for the "archived" and "moved by path" cases, and honest about the fact that it
-can't recover a deleted file either. [The source is on
-GitHub](https://github.com/jazzyalex/agent-sessions), and more posts like this
-one live at [/blog/]({{ '/blog/' | relative_url }}).
-</content>
-</invoke>
+Agent Sessions is a free, local-only macOS app with no telemetry that opens all
+of these stores read-only in one window. It searches every project folder at
+once, so a renamed repo stops hiding your history, and it surfaces the archived
+Codex rollouts and archived Claude Desktop sessions that the agents' own pickers
+filter out. It does not list archived OpenCode rows — that one is still the SQL
+edit above — and it cannot recover a deleted file, because nothing can. The only
+write it will ever make is the Claude unarchive, and that ships switched off
+until you turn it on.
+
+[Download it](https://jazzyalex.github.io/agent-sessions/?campaign=blog&ref=recovering-a-lost-session),
+and if it hands back a session you'd already written off,
+[star the repo](https://github.com/jazzyalex/agent-sessions) — that's the whole
+ask. More posts like this one live at [/blog/]({{ '/blog/' | relative_url }}).
