@@ -40,6 +40,14 @@ Keep that derived-data path **relative**. It once read `"$PWD/.deriveddata-tests
 copied it into a context that didn't expand `$PWD`, and a literal `$PWD/` directory sat in
 the repo root unnoticed for four months. Relative can't fail that way.
 
+**The test COUNT is an invariant, not a statistic.** Read the `Executed N tests` line and
+compare it to the previous run. If N fell and you did not deliberately delete tests, treat
+it as a failing suite and find out why before doing anything else. Green with fewer tests
+is byte-identical to green — the signal you are trusting cannot detect the damage. On
+2026-08-30 a block deletion took eleven unrelated tests plus a fixture helper (probe
+cleanup, usage-capture parsing); the run went 2364 → 2355, reported "0 failures", and was
+committed and pushed. Both numbers had been printed one message apart.
+
 ## Swift/macOS QA
 - If a QA script forces macOS Appearance to Dark, set it back to System when done.
 - Relaunching the app to test a change is two commands — don't hunt for a "run" skill:
