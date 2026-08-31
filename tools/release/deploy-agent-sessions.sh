@@ -53,6 +53,7 @@ if [[ -z "${RELEASE_QA_HEAD:-}" ]]; then
 fi
 
 source "$REPO_ROOT/tools/release/notary-auth.sh"
+source "$REPO_ROOT/tools/release/dmg-verify.sh"
 
 # State management (for resume/diagnostics)
 STATE_FILE="/tmp/deploy-state.json"
@@ -470,9 +471,14 @@ if [[ ! -f "$DMG" ]]; then
   exit 2
 fi
 
-# Verify DMG is valid and mountable
-if ! hdiutil verify "$DMG" >/dev/null 2>&1; then
-  red "ERROR: DMG verification failed - file may be corrupt"
+# Verify DMG is valid and mountable. Stapling and the Gatekeeper checks that run
+# between DMG creation and this point can leave the image transiently attached, and
+# `hdiutil verify` needs an exclusive handle — so detach first rather than reporting
+# a mounted image as a corrupt one.
+if ! dmg_verify_with_detach "$DMG" 1; then
+  red "ERROR: DMG verification failed after 3 attempts."
+  red "If the reason was 'Resource temporarily unavailable', a volume backed by this"
+  red "image is still mounted — check 'hdiutil info'. Otherwise the image is damaged."
   exit 2
 fi
 green "✓ DMG structure valid"

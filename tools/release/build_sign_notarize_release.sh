@@ -32,6 +32,7 @@ DEV_ID_APP=${DEV_ID_APP:-}
 TEAM_ID=${TEAM_ID:-}
 
 source "$REPO_ROOT/tools/release/notary-auth.sh"
+source "$REPO_ROOT/tools/release/dmg-verify.sh"
 
 build_notary_auth_args || exit $?
 
@@ -329,37 +330,8 @@ echo "==> Creating DMG: $DMG"
 rm -f "$DMG"
 hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$DMG"
 
-# `hdiutil create` can leave the new image attached, and `hdiutil verify` needs an
-# exclusive handle — it fails with "Resource temporarily unavailable" while a volume
-# backed by this file is still mounted. That is not corruption, but the old error text
-# said the app bundle was damaged and sent the operator after a build problem that did
-# not exist. Detach any volume backed by this image, then verify, retrying briefly for
-# an unmount that DiskArbitration has not finished.
-detach_dmg_volumes() {
-  local dmg_abs
-  dmg_abs=$(cd "$(dirname "$DMG")" && pwd)/$(basename "$DMG")
-  hdiutil info | awk -v img="$dmg_abs" '
-    $1 == "image-path" { current = ($3 == img) }
-    current && $1 ~ "^/dev/disk" { print $1 }
-  ' | while read -r dev; do
-    echo "==> Detaching stale mount of the new DMG: $dev"
-    hdiutil detach "$dev" -force >/dev/null 2>&1 || true
-  done
-}
-
 echo "==> Verifying DMG integrity"
-detach_dmg_volumes
-dmg_verified=0
-for attempt in 1 2 3; do
-  if hdiutil verify "$DMG"; then
-    dmg_verified=1
-    break
-  fi
-  echo "==> DMG verify attempt $attempt failed; detaching and retrying in 3s" >&2
-  detach_dmg_volumes
-  sleep 3
-done
-if [[ "$dmg_verified" != "1" ]]; then
+if ! dmg_verify_with_detach "$DMG"; then
   echo "ERROR: DMG verification failed after 3 attempts." >&2
   echo "If the reason was 'Resource temporarily unavailable', a volume backed by this" >&2
   echo "image is still mounted — check 'hdiutil info'. Otherwise the image is damaged." >&2

@@ -642,24 +642,59 @@ run_release_qa_core() {
   # release stdout said 2396 where the real total was 2448. agents.md makes the count an
   # invariant; print the authoritative one here so a release operator compares against
   # the same number the handover records.
+  # Read the derived-data directory out of the test script rather than repeating the
+  # literal here: two independent copies drift, and this one drifting is invisible --
+  # it falls to the "no .xcresult found" branch, which looks exactly like a machine
+  # that has not run tests yet.
+  local dd_dir=""
+  dd_dir=$(sed -n 's|^DERIVED_DATA_PATH="\${PWD}/\(.*\)"$|\1|p' scripts/xcode_test_stable.sh | head -1) || dd_dir=""
+  if [[ -z "$dd_dir" ]]; then
+    yellow "  (could not read DERIVED_DATA_PATH from scripts/xcode_test_stable.sh — falling back)"
+    dd_dir=".deriveddata-tests"
+  fi
+
   # `|| xcresult=""` is required, not defensive: on a clean checkout the glob matches
   # nothing, ls exits non-zero, pipefail propagates it out of the command substitution,
-  # and set -e would abort QA over a missing convenience readout.
+  # and set -e would abort QA over a missing readout.
   local xcresult=""
-  xcresult=$(ls -td .deriveddata-tests/Logs/Test/Run-*.xcresult 2>/dev/null | head -1) || xcresult=""
-  if [[ -n "$xcresult" ]]; then
-    echo "==> Test totals (from the result bundle, not stdout)"
-    xcrun xcresulttool get test-results summary --path "$xcresult" 2>/dev/null \
-      | python3 -c 'import json,sys
+  xcresult=$(ls -td "$dd_dir"/Logs/Test/Run-*.xcresult 2>/dev/null | head -1) || xcresult=""
+  if [[ -z "$xcresult" ]]; then
+    red "ERROR: no .xcresult under $dd_dir — cannot verify the test count."
+    red "The suite must run before release QA can vouch for it."
+    return 1
+  fi
+
+  echo "==> Test totals (from the result bundle, not stdout)"
+  local passed=""
+  passed=$(xcrun xcresulttool get test-results summary --path "$xcresult" 2>/dev/null \
+    | python3 -c 'import json,sys
 try:
     s = json.load(sys.stdin)
 except Exception:
-    sys.exit(0)
-print("  passed:  %s" % s.get("passedTests"))
-print("  failed:  %s" % s.get("failedTests"))
-print("  skipped: %s" % s.get("skippedTests"))' || true
-  else
-    yellow "  (no .xcresult found — test count not verified against the result bundle)"
+    sys.exit(1)
+print("%d %d %d" % (s.get("passedTests") or 0, s.get("failedTests") or 0, s.get("skippedTests") or 0))') || passed=""
+  if [[ -z "$passed" ]]; then
+    red "ERROR: could not read test totals from $xcresult"
+    return 1
+  fi
+  local n_pass n_fail n_skip
+  read -r n_pass n_fail n_skip <<<"$passed"
+  echo "  passed: $n_pass · failed: $n_fail · skipped: $n_skip"
+
+  # agents.md treats the test count as an invariant, so compare it rather than just
+  # printing it: a silently deleted suite still exits 0 from xcodebuild, and a number
+  # with nothing to compare against relies on a human noticing four digits changed.
+  local baseline_file="tools/release/test-count-baseline.txt" baseline=""
+  baseline=$(cat "$baseline_file" 2>/dev/null | tr -dc '0-9') || baseline=""
+  if [[ -z "$baseline" ]]; then
+    yellow "  (no baseline in $baseline_file — skipping the count check)"
+  elif (( n_pass < baseline )); then
+    red "ERROR: test count regressed: $n_pass passed, baseline is $baseline."
+    red "Tests were removed or stopped running. Investigate, or update $baseline_file"
+    red "in the same commit that legitimately removes them."
+    return 1
+  elif (( n_pass > baseline )); then
+    yellow "  test count rose ($baseline → $n_pass) — bump $baseline_file in this release."
   fi
 
   if [[ -d scripts/tests ]]; then
