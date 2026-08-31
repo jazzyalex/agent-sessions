@@ -521,16 +521,15 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
         }
 
-        // OpenCode session_meta.mtime was written on the millisecond scale while
-        // start_ts/end_ts stayed seconds, so COALESCE(end_ts, mtime) ordering and
-        // date filters mixed units and every OpenCode row misdated (mtime treated
-        // as ~year 58k under unixepoch seconds). The ingest writer is fixed; this
-        // one-time marker rebuilds the already-indexed OpenCode rows so existing
-        // databases are repaired on launch instead of only new ingests.
-        let opencodeMtimeReindex = "opencode_mtime_reindex_v1"
-        if !migrationApplied(db, key: opencodeMtimeReindex) {
-            try reindexSessionMeta(db, sources: ["opencode"])
-            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", opencodeMtimeReindex)
+        // Identity-backed sources historically wrote their millisecond logical revision
+        // into session_meta.mtime, while the rest of session_meta uses Unix seconds.
+        // Repair those rows in place for every source. This preserves the search corpus,
+        // works for currently disabled providers, and leaves session_days.meta_mtime stale
+        // so the analytics refresh naturally re-derives affected day rows.
+        let sessionMetaMtimeSeconds = "session_meta_mtime_seconds_v1"
+        if !migrationApplied(db, key: sessionMetaMtimeSeconds) {
+            try exec(db, "UPDATE session_meta SET mtime = mtime / 1000 WHERE mtime >= 1000000000000;")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", sessionMetaMtimeSeconds)
         }
 
         // Re-derive Codex session_meta so guardian approval-reviewer subagents
