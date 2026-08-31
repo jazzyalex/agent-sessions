@@ -2,11 +2,12 @@ import Foundation
 
 /// Discovers Qwen Code chat transcripts under `~/.qwen/projects`.
 ///
-/// The writer read from the installed Qwen Code 0.21.13 package stores one
+/// The writer read from the installed Qwen Code 0.22.3 package stores one
 /// `<session-id>.jsonl` file in each project's
 /// `chats` directory. CLI-archived transcripts live one level deeper in
 /// `chats/archive`; unrelated JSONL files elsewhere below `projects` are not
-/// sessions and are deliberately excluded.
+/// sessions and are deliberately excluded. Re-read at 0.22.3 on 2026-08-31
+/// (`getChatsDir()` + `"archive"`) and unchanged from the earlier 0.21.13 reading.
 final class QwenSessionDiscovery: SessionDiscovery {
     enum TranscriptLocation: Equatable {
         case active
@@ -98,9 +99,11 @@ final class QwenSessionDiscovery: SessionDiscovery {
     static func sessionID(forTranscript url: URL) -> String? {
         guard url.pathExtension.lowercased() == "jsonl" else { return nil }
         let id = url.deletingPathExtension().lastPathComponent
-        // Matches the SESSION_FILE_PATTERN read from the installed 0.21.13 package
-        // source (no 0.21.13 transcript was captured; the matrix pins 0.14.3): compact legacy IDs
-        // and canonical UUIDs are both accepted, while arbitrary JSONL names are not.
+        // Matches the SESSION_FILE_PATTERN read from the installed 0.22.3 package
+        // source, `/^[0-9a-fA-F-]{32,36}\.jsonl$/`, byte-for-byte what 0.21.13 carried:
+        // compact legacy IDs and canonical UUIDs are both accepted, while arbitrary
+        // JSONL names are not. Still no captured transcript at either version — the
+        // matrix pins 0.14.3 and a source read does not move it.
         let bytes = id.utf8
         guard (32...36).contains(bytes.count),
               bytes.allSatisfy({ byte in

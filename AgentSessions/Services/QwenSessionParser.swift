@@ -652,11 +652,13 @@ enum QwenSessionParser {
         return joined.isEmpty ? nil : joined
     }
 
-    /// Mirrors the display projection read from the installed Qwen Code 0.21.13
-    /// package source: the reserved hook context is removable only when it is a
-    /// separate final part, uses the writer's newline-delimited wrapper, and contains
-    /// no nested wrapper tag. Behaviour is claimed from reading that source, not from
-    /// an observed 0.21.13 transcript — the matrix pins `max_verified_version: 0.14.3`.
+    /// Mirrors the display projection read from the installed Qwen Code 0.22.3
+    /// package source (`projectUserTranscriptForDisplay` /
+    /// `isUserPromptSubmitContextPartText`, unchanged from the earlier 0.21.13
+    /// reading): the reserved hook context is removable only when it is a separate
+    /// final part, uses the writer's newline-delimited wrapper, and contains no nested
+    /// wrapper tag. Behaviour is claimed from reading that source, not from an observed
+    /// transcript at any version — the matrix pins `max_verified_version: 0.14.3`.
     private static func isUserPromptSubmitContextPart(_ value: Any) -> Bool {
         guard let part = value as? [String: Any],
               let text = part["text"] as? String else { return false }
