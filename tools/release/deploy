@@ -689,10 +689,12 @@ print("%d %d %d" % (s.get("passedTests") or 0, s.get("failedTests") or 0, s.get(
   if [[ -z "$baseline" ]]; then
     yellow "  (no baseline in $baseline_file — skipping the count check)"
   elif (( n_pass < baseline )); then
-    red "ERROR: test count regressed: $n_pass passed, baseline is $baseline."
-    red "Tests were removed or stopped running. Investigate, or update $baseline_file"
-    red "in the same commit that legitimately removes them."
-    return 1
+    # Warns rather than blocks, deliberately. Blocking would stop a release until
+    # someone edited the baseline, which is a surprising failure for anyone who has
+    # not seen it before. The trade is real: this line has to actually be read.
+    red "WARNING: test count dropped: $n_pass passed, baseline is $baseline ($(( baseline - n_pass )) fewer)."
+    red "Tests were removed or stopped running. If that was intended, update"
+    red "$baseline_file. If not, stop and investigate before releasing."
   elif (( n_pass > baseline )); then
     yellow "  test count rose ($baseline → $n_pass) — bump $baseline_file in this release."
   fi

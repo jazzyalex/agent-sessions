@@ -35,6 +35,13 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - If automated gates fail → stop, report failure, do not proceed to bump/release.
 - If user says "skip QA" or "no QA" → proceed without running, note it was skipped.
 
+**Test count.** QA reads the authoritative pass count from the `.xcresult` bundle (stdout
+reports per-bundle totals and this scheme has two — it under-reports) and compares it to
+`tools/release/test-count-baseline.txt`. A drop **warns and continues**, deliberately: it
+does not block a release. So the warning has to actually be read — a deleted suite still
+exits 0 from xcodebuild, and this line is the only thing that says so. When the count
+changes for a real reason, update the baseline file in the same release.
+
 ## Before Starting (Ask the User)
 
 1. Target version (`X.Y` for major/minor releases, `X.Y.Z` only for patch releases; never ship `X.Y.0`)
