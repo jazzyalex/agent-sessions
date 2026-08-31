@@ -401,6 +401,16 @@ What a sweep **does** owe a steward-verified agent, in order:
    version the record predates, a contract that changed shape — put it in the ask so the
    steward is not re-deriving it.
 
+**Read the recommendation through the tier.** The verdict vocabulary assumes the maintainer
+can run the agent, so for a steward-owned one it gives advice you cannot take. Translate:
+`blocked_no_fresh_evidence` / `rec=run_prebump_validator` on a steward agent does **not**
+mean "run prebump" — no driver here can produce a session for a CLI that is not installed.
+It means *upstream moved past what the steward last verified*, and the action is the ping in
+step 3. Configure the agent's `upstream` source even when nothing else about it is
+checkable locally: it is the **only** channel that can raise this, and without it the rule
+above is unenforceable. fx sat at `upstream=unknown` for exactly this reason while v0.0.6
+and v0.0.7 shipped past a record reading 0.0.5, and the sweep reported nothing.
+
 A steward-verified agent only becomes maintainer work when its steward goes quiet. At
 that point the honest move is to drop it to **Best-effort** in `STEWARDS.md` and say so,
 not to quietly keep claiming a verification nobody performed.

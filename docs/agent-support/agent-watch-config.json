@@ -687,7 +687,13 @@
       "cadence": { "daily": false, "weekly": true },
       "installed_version_cmd": ["fx", "--version"],
       "verified_version_source": "docs/agent-support/agent-support-matrix.yml#agents.fx.max_verified_version",
-      "upstream": [],
+      "upstream": [
+        {
+          "kind": "github_latest_release",
+          "repo": "vercel-labs/fx",
+          "note": "fx is STEWARD-VERIFIED and is normally not installed on the maintainer's machine, so installed_version resolves to unknown and the schema channel is silent here by design (SKILL 1g). This upstream source is the only signal a maintainer sweep can act on: it answers 'has upstream moved past what the steward last verified?', which is the ping trigger. Without it the steward rule is unenforceable -- on 2026-08-31 the record read 0.0.5 while v0.0.6 (08-25) and v0.0.7 (08-29) had already shipped, and the weekly reported upstream=unknown and saw nothing."
+        }
+      ],
       "risk_keywords": {
         "schema": [
           "session", "checkpoint", "schema", "migration", "format", "storage",
