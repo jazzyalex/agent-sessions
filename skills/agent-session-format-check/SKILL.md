@@ -461,9 +461,15 @@ broken probe, **stale prices fail silently**: the number still renders, just wro
    `claude-opus-4-1` must NOT match `claude-opus-4-8`). Adding a bare `claude-opus-4`
    would break exactly this. `testPriceTableLegacyKeysPriceWithoutShadowingCurrent`
    and `testPriceTableBundledAndPrefixMatch` pin it — run them after any table edit.
-4. **Temporary pricing expired?** Introductory/promo rates have end dates. Known:
-   Claude Sonnet 5 intro $2/$10 ends **2026-08-31** (we deliberately bundle the stable
-   $3/$15, so nothing breaks at expiry).
+4. **Temporary pricing expired?** Introductory/promo rates have end dates — but check
+   whether the end date still stands before "correcting" anything. Claude Sonnet 5's
+   $2/$10 was announced as introductory through **2026-08-31**; Anthropic has since made
+   it the standard price and cancelled the scheduled rise to $3/$15, so the explicit
+   `claude-sonnet-5` key at $2/$10 is correct and must not be reverted to the
+   `claude-sonnet` $3/$15 fallback (verified 2026-08-30 against the pricing page's
+   `claude-sonnet-5-introductory-pricing` note). A promo whose date has simply passed is
+   the easy case; this is the one that costs you, because the stale plan reads as
+   authoritative.
 
 ### Updating
 Edit `docs/prices.json`, mirror the identical change into `bundledJSON`, and **always

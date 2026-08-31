@@ -174,9 +174,90 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
-### Watch list from the 2026-08-21 format sweep
-> **open** · sev: low · urg: low · verified 2026-08-21
+### Codex 0.151 moved subagent identity off `agent_role` and 28% of badges went blank
+> **open** · sev: med · urg: low · verified 2026-08-30
 
+- **What:** in `session_meta.payload.source.subagent.thread_spawn`, Codex 0.151 leaves
+  `agent_role` null and carries the identity in new siblings `agent_path`
+  (`/root/git_migration_audit`) and `agent_nickname` (`Bernoulli`), alongside `depth`.
+  **Measured 2026-08-30** over the 400 most-recently-modified rollouts: 287 `thread_spawn`
+  subagents, **`agent_role` null on 80 of them (27.9%)**; `agent_nickname` present on
+  **287/287**, `agent_path` on 79 of the 80. Surviving `agent_role` values are `explorer`
+  (161), `worker` (26), `default` (20). Those 80 sessions nest correctly and render
+  **unlabeled**.
+- **Where:** `subagentType` is set only from `agent_role` at
+  [SessionIndexer.swift:2040](../AgentSessions/Services/SessionIndexer.swift:2040),
+  duplicated at [:2320](../AgentSessions/Services/SessionIndexer.swift:2320); the badge is
+  gated on it at
+  [UnifiedSessionsView.swift:4295-4303](../AgentSessions/Views/UnifiedSessionsView.swift:4295).
+  `agent_path`, `subagent_history_start_ordinal`, `thread_source`, `multi_agent_version`
+  and `forked_from_id` appear nowhere in `AgentSessions/`. **`agent_nickname` has exactly
+  one reader —
+  [CodexRunwayModel.swift:1899](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1899) —
+  so the Runway HUD names these subagents while the session list beside it shows them
+  blank.**
+- **Not the problem — do not build this:** the hierarchy already works. Children carry
+  `source.subagent.thread_spawn.parent_thread_id`, already read at
+  [SessionIndexer.swift:2039](../AgentSessions/Services/SessionIndexer.swift:2039) into
+  `Session.parentSessionID` and nested by
+  [SubagentHierarchyBuilder](../AgentSessions/Services/SubagentHierarchyBuilder.swift:57).
+  The new `agent_thread_id` on `SubAgentActivity` items does resolve — 27 of 27 (100%)
+  against real rollouts across 1782 files — but it is a redundant second path to a link
+  the app already has.
+- **Fix shape:** fall `subagentType` back to the last component of `agent_path`, then
+  `agent_nickname`, when `agent_role` is null. Codex's `source.subagent` is decoded in
+  **three** hand-maintained copies —
+  [SessionIndexer.swift:2034](../AgentSessions/Services/SessionIndexer.swift:2034),
+  [:2313](../AgentSessions/Services/SessionIndexer.swift:2313), and
+  [CodexRunwayModel.swift:1980](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1980),
+  whose comment says it is *"Kept identical to SessionIndexer's two parse blocks"* — so
+  extract one decoder and fix it once rather than patching three.
+- **Risk if wrong:** `agent_thread_id` is **not** a child pointer. A child's transcript
+  contains `SubAgentActivity` items naming its **parent** (`agent_path: "/root"`) — 11 of
+  53 observed. Deriving edges from it without checking `agent_path` depth against the
+  file's own thread id inverts those. Separately, `payload.session_id` on a child is the
+  **parent's** uuid while `payload.id` is its own; that trap is already guarded at
+  [Session.swift:758-763](../AgentSessions/Model/Session.swift:758) and must not be
+  reintroduced. `agent_path` is absent pre-0.151, so it must be a fallback, never a
+  requirement.
+- **Why deferred:** the labeling fix is small but sits behind the three-way duplication,
+  which is the actual work. The `SubAgentActivity` transcript-rendering half belongs with
+  *Codex `item_completed` describes shell calls the transcript still renders raw* below —
+  same event family, same `.meta` fall-through — and is low volume besides: 78 lines in 20
+  of 1782 sessions. (The 2026-08-30 sweep first reported ~1561 lines in 70 of 119; that
+  was a substring count of `agent_thread_id`, not a count of items. Corrected here.)
+- **To close:** a 0.151 subagent row shows a name derived from `agent_path` /
+  `agent_nickname` when `agent_role` is null; a pre-0.151 subagent still shows its
+  `agent_role`; one decoder serves all three callsites. Fixture covers both the
+  `agent_role: null` + `agent_path` form and the legacy form.
+
+### Watch list from the 2026-08-21 format sweep
+> **open** · sev: low · urg: low · verified 2026-08-30
+
+- **Added by the 2026-08-30 sweep** (codex 0.151.0, claude 2.1.251) — all ruled *watch*,
+  none earning a surface yet:
+  - **Codex `world_state.payload.state.context_window_guidance`** — empty string in every
+    observation, 11 of 119 sessions. The name suggests context-budget advice; promote if
+    it ever carries text.
+  - **Codex `persistent_mode` / `managed_developer_instructions`** — both empty `{}`, 11
+    and 24 of 119 sessions. They surfaced as `unknown_types` only because an empty dict
+    creates a fingerprint bucket with no keys; they are not new event types.
+  - **Codex `subagent_history_start_ordinal`** — the parent-history position a child
+    forked from, 10 of 119 sessions. Same family as the `ordinal` already parked here;
+    only becomes interesting if a subagent transcript is ever rendered with its inherited
+    prefix trimmed.
+  - **Claude `attachment:deferred_tools_delta.failedMcpServers`** — would name which MCP
+    servers failed to load, which a user would want. Empty `[]` in all 29 observations, so
+    there is nothing to show yet. Promote on the first non-empty sighting.
+  - **Claude `queue-operation.reason`** — single observed value `absorbed_mid_turn`, 56
+    lines across 11 of 212 sessions. `queue-operation` already renders as `.meta`.
+- **Settled 2026-08-30, do not re-open:** Codex
+  `inter_agent_communication_metadata.ordinal` is the same `ordinal` already logged below,
+  now appearing on one more record type — noise, not a second sighting worth promoting.
+  Codex `agent_thread_id` was investigated as a hierarchy source and rejected: the app
+  already reads `parent_thread_id`, so it is a redundant path (see the 0.151 badge entry
+  above). Claude `user.queueSkipAttachments` is a plumbing bool, always `true`, 19
+  observations — noise.
 - **What:** fields upstream started emitting that are real but do not yet earn a surface.
   Recorded so they are not re-litigated at every sweep, and so a second sighting can
   promote one:
@@ -255,6 +336,57 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Transcript UI
+
+### Codex `content_item_kinds` states what the app currently guesses by string-matching
+> **open** · sev: low · urg: low · verified 2026-08-30
+
+- **What:** Codex now stamps `internal_chat_message_metadata_passthrough.content_item_kinds`
+  — an array naming what a synthetic message actually contains — on
+  `response_item.payload:message` and on each `compacted.payload.replacement_history`
+  entry. **Measured 2026-08-30** across 1188 rollouts: 923 `message` records carry it, in
+  29 files. Observed kinds include `agents_md.instructions` (34), `host_skills.instructions`
+  (45), `environments.environment_context` (39), `collaboration_mode.instructions` (30),
+  `permissions.instructions` (29), `multi_agent.mode_instructions` (29), plus `user.text`
+  (149) and `unknown` (619) for ordinary turns. The app classifies these same blobs today
+  by matching English strings.
+- **Where:** `content_item_kinds` and `internal_chat_message_metadata_passthrough` appear
+  nowhere in `AgentSessions/`. `role: "developer"` is absent from the role switch at
+  [SessionEvent.swift:52-59](../AgentSessions/Model/SessionEvent.swift:52) so it reaches
+  `return .meta` at [:61](../AgentSessions/Model/SessionEvent.swift:61) — the right answer
+  by accident. `role: "user"` maps to `.user` at
+  [:54](../AgentSessions/Model/SessionEvent.swift:54), and the only thing reclassifying a
+  synthetic user blob is a literal sniff for `<environment_context>` at
+  [SessionIndexer.swift:2504](../AgentSessions/Services/SessionIndexer.swift:2504). Title
+  derivation runs a second, larger sniff —
+  [`Session.looksLikeAgentsPreamble`](../AgentSessions/Model/Session.swift:610), ~15
+  hardcoded anchors, called from six sites — while
+  [`Session.listTitle`](../AgentSessions/Model/Session.swift:460) documents that it
+  deliberately skips those heuristics.
+- **Honest impact today: small.** Of the 34 `role: "user"` records carrying an
+  `*.instructions` kind, **6** escape the `<environment_context>` sniff (2.7K–32K chars).
+  Those 6 begin `# AGENTS.md instructions` / `<INSTRUCTIONS>`, which
+  `looksLikeAgentsPreamble` *does* anchor on — so the second heuristic almost certainly
+  catches them and little is visibly broken right now.
+- **Fix shape:** the value is not fixing 6 titles, it is replacing ~15 hardcoded English
+  anchors with a field upstream now states outright — before those anchors silently stop
+  matching. Read `content_item_kinds`, use it to reclassify an instruction-bearing message
+  to `.meta` regardless of `role`, and demote `looksLikeAgentsPreamble` to a pre-0.151
+  fallback. Optionally give the collapsed meta block a real heading from its kinds instead
+  of a dim JSON wall.
+- **Risk if wrong:** the field is new, so every older session lacks it — it must
+  *strengthen* the heuristics, never replace them, or older sessions lose preamble
+  suppression entirely. Reclassifying too aggressively is the worse failure: `user.text`
+  and `unknown` are the majority (768 of 923) and a message mixing `user.text` with an
+  instruction kind contains real user words, so demoting it to `.meta` hides a prompt
+  behind a toggle. Leave mixed messages on the `.user` path.
+- **Not the noise call:** the watch list parks
+  `internal_chat_message_metadata_passthrough.create_time` as deliberately-not-filed noise.
+  This is different in kind — `create_time` duplicates a timestamp the app already has,
+  whereas `content_item_kinds` is the only machine-readable signal for a classification the
+  app currently performs with string matches that upstream can invalidate without notice.
+- **To close:** a Codex session whose head carries `generic.developer_instructions` shows a
+  labeled collapsed block; a `["user.text"]` message stays a user turn; a session predating
+  the field still suppresses its preamble via the existing heuristics.
 
 ### Codex `memory_citation` names the prior sessions a turn cited
 > **open** · sev: low · urg: low · verified 2026-08-21
@@ -567,25 +699,14 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
   placeholder rendering plus `.meta`/`.assistant` classification.
 
 ### No `agent_watch` prebump driver for kimi
-> **open** · sev: low · urg: low · verified —
+> **done** 2026-08-14 (`15a7f21b`) — found stale 2026-08-30
 
-- **Where:** `scripts/agent_watch_prebump_drivers.py` (`DRIVERS` registry);
-  `docs/agent-support/agent-watch-config.json` → `agents.kimi` has `weekly` but no
-  `prebump` block.
-- **What:** Kimi is monitored only by the weekly `kimi_wire_newest` local-schema scan.
-  Every scan therefore reports blocker `no_real_session_driver_configured`, and the
-  verdict cannot rise above `supports_installed_only`.
-- **Feasible:** yes — `kimi -p "<prompt>" --output-format text` is a real headless mode
-  (verified at 0.29.1 and 0.31.1), so a `kimi_prompt` driver is buildable with a
-  `home_override` sandbox on `KIMI_CODE_HOME` plus a `discover_session` contract of
-  `sessions/**/agents/main/wire.jsonl`.
-- **Why deferred:** a driver is a Python class in the shared registry with its own
-  auth/sandbox handling, not a config line; it is its own task. Kimi currently sits in
-  the same posture as Hermes and Cursor, which also run weekly-evidence-only.
-- **Caveat worth keeping:** a green prebump would be necessary but not sufficient here.
-  A `-p` one-shot never emits `turn.steer`, `plan_mode.*`, `permission.*`,
-  `full_compaction.*` or a subagent journal, so the weekly real-session scan stays the
-  primary drift signal either way (same finding as the 2026-07-17 Claude `mode` event).
+Shipped in `15a7f21b`, which added `KimiPromptDriver` (`DRIVERS["kimi_prompt"]`,
+[agent_watch_prebump_drivers.py:1085](../scripts/agent_watch_prebump_drivers.py:1085)) and
+the `agents.kimi.prebump` config block. No test pins driver *existence* — the config gate
+(exit 4 for an agent with no `prebump` block) is the enforcement;
+`test_every_monitored_agent_is_registered_in_the_rebuild_tool` pins matrix-key wiring, not
+this. The entry sat `verified —` and read as open work for two weeks.
 
 ---
 
@@ -910,6 +1031,36 @@ Tests: `testRegistryOrderEqualsSessionSourceAllCases`,
 
 ## QM / Runway
 
+### OpenAI long-context pricing is unreachable from the Codex CLI — do not implement
+> **won't-do** · sev: low · urg: low · verified 2026-08-30
+
+Recorded so the next price sweep does not re-investigate it. OpenAI publishes a second
+price column for long context — for `gpt-5.6-sol` $8.00/$0.80/$10.00/$30.00 against the
+short-context $4.00/$0.40/$5.00/$20.00 the table ships; input, cached input and cache
+write double, output goes 1.5x. Only `gpt-5.6-sol`, `-terra` and `-luna` have the tier;
+`gpt-5.5` and `gpt-5.4` are labelled `(<272K context length)` and cannot reach it.
+
+**The threshold is 272,000 *input* tokens**, and it is stated only inside a column-header
+tooltip on <https://developers.openai.com/api/docs/pricing> — the rendered prose does not
+mention it, so a plain read of that page reports "no threshold stated". Fetched and
+extracted from the raw page 2026-08-30; re-derive rather than trusting this line if the
+page is redesigned.
+
+**Why it cannot fire:** every Codex session reports
+`payload.info.model_context_window` = **258,400** — uniformly across `gpt-5.6-sol`,
+`-terra`, `-luna`, `gpt-5.5` and `codex-auto-review`, in all 29,402 local observations.
+258,400 < 272,000. Max observed per-turn `input_tokens` is 245,726; turns over 272K:
+**zero**. Claude has no long-context tier at all (4.6+ ships the full 1M window at
+standard rates), so this is OpenAI-only and currently unreachable.
+
+**Reopen if** `model_context_window` rises above 272,000. At that point the work is real:
+the runway prices *cumulative deltas* from `total_token_usage`
+([CodexRunwayModel.swift:2401](../AgentSessions/CodexStatus/CodexRunwayModel.swift:2401)),
+which has no per-turn structure, so it would have to read
+`payload.info.last_token_usage.input_tokens` per turn and classify each turn
+individually. Testing the *cumulative* input against 272,000 would flip nearly every long
+session to double rates after a few turns — a large, confident overstatement.
+
 ### Runway overflow "+X sessions" undercount (`withPendingRows`)
 > **done** 2026-07-09
 
@@ -942,6 +1093,81 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 ---
 
 ## QM / Runway (Claude)
+
+### Every Claude cache write is billed at the 5-minute rate, but they are all 1-hour
+> **open** · sev: high · urg: med · verified 2026-08-30
+
+- **What:** `message.usage.cache_creation` splits into `ephemeral_5m_input_tokens` and
+  `ephemeral_1h_input_tokens`, and the two bill differently — a 5-minute write is 1.25x
+  base input, a 1-hour write is **2x**. The runway charges every cache-creation token at
+  the 5m rate. **Measured 2026-08-30** over the 60 newest local Claude sessions: 20,091
+  records carrying a `cache_creation` object, **182,878,668 cache-creation tokens, 100.00%
+  of them 1-hour, zero 5-minute**. Replaying that corpus at correct rates: **$5,556.18
+  charged vs $6,479.31 correct — the `$` view understates by 16.6%** ($923.13). Per model:
+  Fable 5 -20.6%, Opus 4.8 -17.1%, Opus 5 -12.6%, Sonnet 5 -14.1%. This is not latent and
+  not an edge case: it is every Claude session, today.
+- **Where:** the parser reads only the flat total,
+  [ClaudeRunwayTokenActivityParser.swift:426](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:426)
+  (`cacheCreation: v("cache_creation_input_tokens")`), so the 5m/1h split never reaches
+  the rate calculation. `RunwayModelPrice` has a single write column documented as the
+  5-minute rate,
+  [RunwayPriceTable.swift:8](../AgentSessions/CodexStatus/RunwayPriceTable.swift:8) and
+  the comment at [:177](../AgentSessions/CodexStatus/RunwayPriceTable.swift:177). It is
+  applied unconditionally at
+  [CodexRunwayModel.swift:1225](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1225).
+- **Fix shape:** read the `cache_creation` sub-object and carry 5m and 1h as separate
+  token streams through `ClaudeRunwayTokenActivitySample` and `RunwayModelComponent`; add
+  a fifth rate column (`cacheWrite1hPerMTok` = 2x input) to `RunwayModelPrice`, to
+  **both** `docs/prices.json` and `RunwayPriceTable.bundledJSON`, advancing `updated`.
+  Keep the flat `cache_creation_input_tokens` as the fallback for records with no
+  sub-object, charged at the existing 5m rate.
+- **Why deferred:** it is a rate change across two shipped surfaces plus a served
+  manifest, not a one-line fix, and `dollarsPerHour` doubles as the weighting function for
+  weekly `%/h` ([CodexRunwayModel.swift:1148](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1148)),
+  so correcting one provider's level shifts cross-provider weights too.
+- **Risk if wrong:** do not simply reprice the single write column to 2x — that would
+  overcharge any genuine 5m write, and 5m is what the field is documented as. Do not infer
+  the tier from anything but the observed sub-object. And if a new price key is added to
+  `bundledJSON` only, a fetched manifest overwrites the table and the session drops out of
+  `$` entirely via the unpriced-slice branch at
+  [CodexRunwayModel.swift:1221](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1221).
+- **To close:** a session whose cache creation is 100% 1h prices 2x input on that
+  component; a synthetic 5m session still prices 1.25x; a record with only the flat field
+  still prices; `docs/prices.json` and `bundledJSON` stay identical with `updated`
+  advanced. Pinned by a test that would fail against the current 5m-only behavior.
+
+### Fast mode doubles Opus rates and nothing reads `usage.speed`
+> **open** · sev: med · urg: low · verified 2026-08-30
+
+- **What:** Anthropic's fast mode bills Claude Opus 5 and Opus 4.8 at **$10/$50 per MTok
+  versus $5/$25 standard** — exactly 2x — and the response reports which tier was used in
+  `message.usage.speed`. The field is already in local session data (present at
+  `message.usage.speed` and `.toolUseResult.usage.speed`), and nothing reads it. **Latent
+  today, not active:** across the 60 newest local sessions the value is `"standard"` in
+  20,035 records and `null` in 16; `"fast"` never appears. Filed so the 2x is not
+  discovered by someone wondering why their bill disagrees with the app.
+- **Where:** `speed` is simply not read at
+  [ClaudeRunwayTokenActivityParser.swift:417-428](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:417).
+  The burst accumulator keys on `modelSlug` alone,
+  [:328](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:328). No
+  `speed` / `fast` handling exists anywhere in `AgentSessions/`.
+- **Fix shape:** thread `speed` into the sample, then widen the burst key from
+  `modelSlug` to `(modelSlug, speed)` so a session that toggles mid-burst prices each half
+  correctly, and mirror the new field through the two clamp-rescaling maps at
+  [:180-186](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:180) and
+  [:226-232](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:226) or a
+  clamped fast session silently loses its fast slice. Prefer a second rate column over a
+  blanket 2x multiplier: output is 2x here by coincidence, and cache multipliers are
+  defined off the *fast* input base.
+- **Risk if wrong:** gate on the observed `usage.speed` value, never on the model name or
+  a user setting. Opus 4.7 **errors** on `speed:"fast"` and Opus 4.6 **accepts it and then
+  bills standard** while reporting `speed: "standard"` — so a model-name heuristic doubles
+  the bill in exactly the case that most looks like a fast session.
+- **Unverified:** that Claude Code's `/fast` writes `speed:"fast"` into the JSONL. The
+  Anthropic docs describe the API parameter and the beta header, and never mention the CLI
+  command. Confirm on a real fast-mode session before building on it.
+- **To close:** an Opus 5 session reporting `speed: "fast"` prices at $10/$50; a
+  `"standard"` session is unchanged; a session that switches mid-window prices each half.
 
 ### Model-scoped weekly limit is read and shown, but never picked as the bottleneck
 > **partial** · sev: low · urg: low · verified 2026-08-28
