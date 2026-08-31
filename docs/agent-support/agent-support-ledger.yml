@@ -11,6 +11,61 @@
 entries:
   - agent_sessions_version: "5.1.0"
     as_of_date_utc: "2026-08-31"
+    as_of_commit: "50df8129"
+    note: "Second pass the same day, after the maintainer re-authenticated pi, antigravity and grok and confirmed opencode works interactively. Four of the five agents held in the first pass cleared; two new findings appeared."
+    verified:
+      opencode:
+        sessions:
+          max_verified_version: "1.18.25"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-170957Z-prebump/report.json"]
+          notes: "Bumped 1.18.21->1.18.25. THE FIRST PASS'S 'PROVIDER-SIDE OUTAGE' VERDICT WAS WRONG and is corrected here. opencode_run kept returning {\"name\":\"UnknownError\",\"message\":\"Unexpected server error\"} with a fresh ref each run, which read as a vendor 500. Running the driver's exact command (`opencode run --pure --format json --dir <tmp>`) against the REAL environment produced a complete session with a real tool call - so the failure was ours, in the sandbox. Cause: `agents.opencode.prebump.credential_files` was EMPTY, and the only auth path left was env-var-first over ANTHROPIC/OPENAI/GEMINI/GROQ/OPENROUTER API keys, none of which are set on a machine using OAuth. The sandbox therefore had no credentials at all and OpenCode's backend reported that as an opaque UnknownError rather than a 401. Fixed by adding ~/.local/share/opencode/auth.json to credential_files (0600, 3.5KB, passes all three hygiene gates). Prebump then returned ok=True / fresh_matches_baseline=True immediately. LESSON: an opaque server error is not evidence of a server problem - run the driver's own command against real HOME before concluding the vendor is down."
+      pi:
+        sessions:
+          max_verified_version: "0.84.4"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-171109Z/report.json"]
+          notes: "Bumped 0.84.3->0.84.4 the same day as the 0.84.2->0.84.3 bump, because pi SELF-UPDATED between the two prebump runs - the SKILL 1b 're-read the installed version after the run' case, live. Checked rather than assumed before claiming it: the pi binary's mtime is 2026-08-31T16:02:51Z and the prebump session's is 17:08:35Z, so the session was written by 0.84.4, not the 0.84.3 that was installed when the run started. Weekly agrees: fresh_evidence_source=latest_prebump_report, latest_real_session_evidence=true, supports_latest. The >90-day credential warning on ~/.pi/agent/auth.json cleared after the maintainer re-authenticated."
+      grok:
+        sessions:
+          max_verified_version: "1.0.13"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-171039Z-prebump/report.json"]
+          notes: "Bumped 1.0.5->1.0.13. No install was needed - grok had already self-updated to 1.0.13 (5e9a58528b76) by the time the loop began, which is why the first pass's passing prebump could not be reused: it ran against 1.0.5. Re-ran on 1.0.13 and confirmed the report was the new one rather than a stale read (different session id fb91702d vs 12dfe162, report 171039Z). Substance confirmed: baseline_type_count 15 (non-zero, so a baseline was genuinely consulted), 9 events at 0.667 coverage, unknowns empty. The identical event/coverage numbers across runs are the same one-shot prompt, not a cached result."
+    not_verified:
+      copilot:
+        sessions:
+          held_at_version: "1.0.80"
+          installed_version: "1.0.82"
+          reason: "format_drift_detected - unchanged from the first pass"
+          notes: "See the first-pass entry below. Still held; promptCacheBreakState.models must be opaque-listed before any copilot baseline rebuild."
+      antigravity:
+        sessions:
+          held_at_version: "1.1.14"
+          installed_version: "1.1.22"
+          reason: "blocked_thin_sample - and this sweep is what caused it"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-171109Z/report.json"]
+          notes: "After the maintainer logged in, antigravity_print went from rc=1 to ok=True / fresh_matches_baseline=True - so the earlier 'permission check failed for command ls -la' was a symptom of being logged out, not a driver defect. But the agent still cannot be bumped, and the reason is self-inflicted: antigravity is real_home_session, so each prebump session lands in the real store and enters the newest-_LOCAL_SCHEMA_SAMPLE_COUNT window. Running it repeatedly today pushed the weekly union down to 19 events at 0.308 coverage and flipped the verdict to blocked_thin_sample - all five sampled files are prebump transcripts. This is EXACTLY the degradation SKILL 1a warns about, reproduced by following the rest of the procedure correctly. The prompt is already tool-using ('Say hi, then list the files in the current directory using your tools'), so the prompt is not the lever; the lever is not running real-home prebumps repeatedly against an agent with a thin real store. To close: let real antigravity usage refill the newest-5 window, then re-run the weekly - do NOT re-run prebump to try to fix it."
+      openclaw:
+        sessions:
+          held_at_version: "2026.7.1"
+          installed_version: "2026.8.1"
+          reason: "the agent's own config is invalid after its self-update - fixable, theirs"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-171501Z-prebump/report.json"]
+          notes: "openclaw self-updated 2026.7.1 -> 2026.8.1 during the day and went blocked_stale_sample. openclaw_local_agent then failed rc=1, and NOT on format or auth: 2026.8.1 rejects the user's existing config. Reported keys include gateway.reload.mode (now only off|hybrid), gateway.reload.debounceMs, cron.maxConcurrentRuns, commands.ownerDisplay and gateway.tailscale.resetOnExit, plus retired layout aliases and tuning knobs. openclaw names its own remedy - `openclaw doctor --fix` - which rewrites the maintainer's config, so it was left for them to run rather than executed from a sweep. SKILL 1c category two: fixable, theirs. Re-run prebump after the config migration."
+      devin:
+        sessions:
+          held_at_version: "3000.5.20 (2d902011)"
+          reason: "steward-verified; not installed on this machine - NOT a maintainer finding"
+          notes: "Reports latest_unknown / cli_binary_unresolved, which is the correct and expected output for an agent that is not installed here. STEWARDS.md records @thedavidweng as steward, last verified 2026-08-27 on 3000.5.20. The scan cannot tell 'broken' from 'not installed', so it had been surfacing devin and fx as maintainer gaps for a full sweep. SKILL 1g now states the rule: read the tier first, state it beside the verdict, judge the steward's DATE rather than the schema, and ping rather than investigate. Do not install the CLI to close it - a maintainer install with no sessions produces no better evidence."
+      fx:
+        sessions:
+          held_at_version: "0.0.5"
+          reason: "steward-verified; not installed on this machine - NOT a maintainer finding"
+          notes: "Same as devin: @thedavidweng, last verified 2026-08-27 on 0.0.5. Its discovery contract 'fails' with error no_local_file, which for a steward-owned absent agent means only that ~/.fx/sessions does not exist here - it is not a contract breach and must not be reported as one."
+
+  - agent_sessions_version: "5.1.0"
+    as_of_date_utc: "2026-08-31"
     as_of_commit: "e27ea63b"
     verified:
       codex:

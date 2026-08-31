@@ -78,7 +78,9 @@ Interpretation:
   evidence, but latest is newer, cached from a prior report, unknown, or lacks
   fresh real-session proof.
 - `latest_unknown`: no configured/reachable latest source or no real-session
-  driver exists; do not claim latest support.
+  driver exists; do not claim latest support. **Check `STEWARDS.md` before calling this
+  a finding** — for a steward-verified agent not installed here, this verdict is the
+  expected output and the agent belongs to its steward, not to you (§1g).
 - `blocked_stale_sample`: evidence predates the installed CLI; run prebump before claiming support.
 - `blocked_no_fresh_evidence`: a version changed but no fresh matching sample proves support.
 - `format_drift_detected`: unknown schema/storage/usage fields appeared; update fixtures/parsers.
@@ -362,6 +364,53 @@ Maintainer side of the same command: when a steward's issue arrives, its sample
 is already in fixture shape, so it drops straight into
 `Resources/Fixtures/stage0/agents/<agent>/` for a baseline rebuild. Verify the
 redaction yourself anyway before committing (§7).
+
+---
+
+## 1g  Agents With a Steward (what the maintainer does *not* chase)
+
+`STEWARDS.md` assigns each agent a tier: **Maintained** (the maintainer runs it daily),
+**Steward-verified** (a named contributor re-checks it on their own machine), or
+**Best-effort** (nobody yet). A sweep must read that tier before deciding an agent is a
+problem, because **the scan cannot distinguish "this agent is broken" from "this agent is
+not installed here."** Both surface as `installed=unknown`, `latest_unknown`,
+`cli_binary_unresolved`, or a discovery contract failing `no_local_file`.
+
+For a **steward-verified** agent that is absent from this machine, all of those are the
+expected, correct output. They are not findings. Do not:
+
+- report them as drift, gaps, or open work in the sweep summary;
+- install the CLI to "close" them — a maintainer install with no sessions in it produces
+  no better evidence and starts a support obligation nobody asked for;
+- bump or lower `max_verified_version` from a machine with no sessions from that build.
+  The steward's dated verification *is* the evidence, and overwriting it with a local
+  guess destroys the only real record.
+
+What a sweep **does** owe a steward-verified agent, in order:
+
+1. **State the tier next to the verdict.** "fx: `latest_unknown` — steward-verified,
+   no local CLI" is a complete, honest line. "fx: `latest_unknown`" alone reads as a hole.
+2. **Check the steward's date, not the schema.** The question is not "did the format
+   move?" — nobody here can answer that — it is "how long since anyone who runs this
+   agent looked?" Two or three checks a year is the agreed cadence; past that, the entry
+   is aging, and *that* is the finding.
+3. **Ping, don't investigate.** When it is due, or when upstream shipped a release the
+   record predates, ask the steward to run `./scripts/steward_check.py <agent>`. That is
+   a ten-minute job for them and an impossible one here.
+4. **Route what you already know.** If the sweep saw something relevant — an upstream
+   version the record predates, a contract that changed shape — put it in the ask so the
+   steward is not re-deriving it.
+
+A steward-verified agent only becomes maintainer work when its steward goes quiet. At
+that point the honest move is to drop it to **Best-effort** in `STEWARDS.md` and say so,
+not to quietly keep claiming a verification nobody performed.
+
+**Ordering trap.** `STEWARDS.md` is the human table and the matrix is the machine record;
+the file itself says the matrix wins on disagreement. But the *tier* lives only in
+`STEWARDS.md` — the matrix has no `steward:` field — so a purely matrix-driven sweep is
+structurally blind to stewardship and will keep re-reporting the same non-findings every
+week. Read both, and if you find yourself about to file a steward-verified agent as a
+gap, that is the bug.
 
 ---
 

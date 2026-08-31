@@ -900,7 +900,12 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # would write real artifact ids into a committed fixture as if they were schema, and
     # every artifact anyone creates later would then read as Claude drift. Same class as
     # `collab_waiting_end.statuses`; caught 2026-08-30 before the first emit.
-    "claude": {"input", "toolUseResult", "headers", "mcpMeta", "artifacts"},
+    # `cost-state.modelUsage` is keyed by MODEL SLUG (observed: claude-fable-5), so every
+    # model the user ever runs would otherwise land in the fixture as a bucket and read as
+    # drift. Third instance of this same trap in one sweep, after `artifacts` here and
+    # copilot's `promptCacheBreakState.models` — and note the fixture guard test only
+    # matches UUID-shaped keys, so a slug-keyed map like this one slips past it.
+    "claude": {"input", "toolUseResult", "headers", "mcpMeta", "artifacts", "modelUsage"},
     # Grok's transcript nests the parts that matter (content blocks, tool_calls,
     # reasoning summaries, backend_tool_call kinds), so it is worth walking. The one
     # exclusion is `arguments` — a tool's own parameter object, where every new tool
