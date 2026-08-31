@@ -1,3 +1,40 @@
+## 2026-08-31 11:54 · seo-discovery-and-qwen-outreach · Site SEO, IndexNow, Qwen listing + steward ask
+status: in-progress
+
+**State:** Site SEO work is shipped and live (4 commits pushed). All 24 URLs submitted to
+Google (three days of the 11/day cap) and to IndexNow. Qwen listing PR and Q&A discussion are
+both open upstream; the discussion got a substantive answer. A brief for the Qwen parser work
+is written but unimplemented.
+
+**Decided / don't redo:**
+- **GSC sitemap is a dead end.** Tried resubmit, remove-and-re-add, and full XSD validation.
+  File is provably valid (200, `application/xml`, no BOM, validates, all locs in scope). Google
+  read it once on 8/29, failed, and hasn't re-fetched since. Stop working it — manual requests
+  and IndexNow both bypass it.
+- **Request-indexing quota is ~11 per property on a rolling ~24h window, NOT a midnight reset.**
+  I claimed midnight twice and was wrong both times. Verify by attempting one request.
+- **In `QwenLM/qwen-code`, listing issues rot and docs PRs merge fast** (#8629 open 24d, #9294
+  13d; #8710 merged in 32 min). File the issue for the CONTRIBUTING rule, then send the PR.
+- **Never overclaim their triage bot.** Its "accept for exploration ✅" is automation, not a
+  maintainer decision. Disclosing self-authorship is what the bot thanked us for.
+- **Third-party READMEs override our LINK_TAGGING rule** — match the host repo's convention
+  (plain repo URL), accept the attribution loss.
+
+**Key files:**
+- `docs/superpowers/plans/2026-08-31-qwen-0.22-format-brief.md` — self-contained brief for the
+  Qwen work; 4 tasks, evidence-tiered. Unimplemented.
+- `scripts/indexnow_submit.py` — re-run after publishing anything. Key file is
+  `docs/563a54b780ff51acf6824e405649d31c.txt`; deleting it revokes submission.
+- `scripts/check_docs_publish.py` — new CI gate; blocks root `docs/*.md` leaks and off-site links.
+
+**Next:**
+1. Hand the Qwen brief to a fresh session (Task 1, the `QWEN_HOME` fallback, is a real bug).
+2. Watch [PR #10578](https://github.com/QwenLM/qwen-code/pull/10578) — 0 findings, awaiting a
+   human. Give it a few days before nudging.
+3. Ask Johannes on [discussion #10579](https://github.com/QwenLM/qwen-code/discussions/10579)
+   for a real 0.22.x transcript — it unblocks the whole Tier B list.
+4. Re-check GSC indexing in a few days; nothing from the 24 requests has been crawled yet.
+
 ## 2026-08-31 09:59 · runway-claude-pricing · Cache-write TTL + fast-mode pricing
 status: done
 
