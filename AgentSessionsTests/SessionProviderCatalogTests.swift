@@ -221,6 +221,11 @@ final class SessionProviderCatalogTests: XCTestCase {
         // the machine is doing. That is the price of the teardown barrier the IndexDB sandbox
         // depends on, not stray waste — budget it deliberately before trimming it.
         let cleared = expectation(description: "claude refresh clears isIndexing")
+        // The claim is "isIndexing cleared", not "cleared exactly once". `@Published` emits on
+        // assignment rather than on change, so any future early-exit that assigns false a
+        // second time would otherwise fail this test as an XCTest over-fulfil API violation —
+        // pointing the next reader at the test instead of at the path they just added.
+        cleared.assertForOverFulfill = false
         let watch = indexer?.$isIndexing.dropFirst().sink { if !$0 { cleared.fulfill() } }
         defer { watch?.cancel() }
         wait(for: [cleared], timeout: 30)
