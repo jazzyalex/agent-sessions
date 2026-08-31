@@ -158,40 +158,10 @@ final class SessionProviderCatalogTests: XCTestCase {
     /// monitor path's before/after fingerprint comparison, which then suppressed the kick
     /// outright. Claude's search corpus stopped advancing entirely.
     func testRefreshPublishesIsIndexingBeforeItReturns() {
-        let defaults = UserDefaults.standard
-        let overrideKey = PreferencesKey.Paths.claudeSessionsRootOverride
-        // Derived, not spelled: `AgentEnablement.isEnabled` reads `descriptor.enablementKey`,
-        // and a hand-written literal that drifts from it would write a dead key while
-        // `defaultEnabled: .always` kept the test green — passing without controlling its
-        // own precondition.
-        let enabledKey = AgentEnablement.enablementKey(for: .claude)
-        let previousOverride = defaults.string(forKey: overrideKey)
-        let previousEnabled = defaults.object(forKey: enabledKey)
-
-        // The refresh task hydrates through `IndexDB()`, which opens the real
-        // ~/Library/Application Support/AgentSessions/index.db and is NOT scoped by the
-        // sessions-root override — that override only bounds filesystem discovery. Without
-        // this hook the test would read (and, via `upsertSessionMetaCore`, write) the
-        // developer's live index.
-        let sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("claude-refresh-flag-\(UUID().uuidString)")
-        let emptyRoot = sandbox.appendingPathComponent("sessions")
-        try? FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
-        let previousProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
-        IndexDBTestHooks.applicationSupportDirectoryProvider = { sandbox }
-        defaults.set(emptyRoot.path, forKey: overrideKey)
-        defaults.set(true, forKey: enabledKey)
-        defer {
-            IndexDBTestHooks.applicationSupportDirectoryProvider = previousProvider
-            if let previousOverride { defaults.set(previousOverride, forKey: overrideKey) }
-            else { defaults.removeObject(forKey: overrideKey) }
-            if let previousEnabled { defaults.set(previousEnabled, forKey: enabledKey) }
-            else { defaults.removeObject(forKey: enabledKey) }
-            try? FileManager.default.removeItem(at: sandbox)
-        }
+        withSandboxedClaudeEnvironment { sandbox in
 
         // Optional, and explicitly dropped in the defer below — which runs before the defaults
-        // restore above (LIFO). Restoring the sessions-root override is a real value change,
+        // restore in the harness. Restoring the sessions-root override is a real value change,
         // and ClaudeSessionIndexer's own FilteredDefaultsObserver (:158) answers a change by
         // scheduling another refresh — one that would run against the developer's real root,
         // after the IndexDB hook is already back. Releasing the indexer here leaves nothing to
@@ -242,6 +212,87 @@ final class SessionProviderCatalogTests: XCTestCase {
             FileManager.default.fileExists(
                 atPath: sandbox.appendingPathComponent("AgentSessions/index.db").path),
             "the refresh must have hydrated from the sandboxed IndexDB, not the real one")
+
+        }
+    }
+
+    /// The probe-cleanup notification sink is the one caller that reaches main-actor
+    /// `refresh()` from a Combine closure carrying no isolation of its own, and it had no
+    /// coverage at all — it was only ever exercised by a real probe cleanup. It reaches the
+    /// main actor through `Task { @MainActor in }` rather than an `assumeIsolated` assertion
+    /// precisely because its main-threadedness rests on two conventions nothing type-checks:
+    /// `.receive(on: DispatchQueue.main)` on the pipeline, and ClaudeProbeProject posting from
+    /// the main thread. Posting from a background queue here exercises the hop directly, so a
+    /// future change that drops either convention shows up as a failure rather than as a trap
+    /// in someone's cleanup run.
+    func testProbeCleanupNotificationRefreshesTheSessionList() {
+        withSandboxedClaudeEnvironment { _ in
+
+        var indexer: ClaudeSessionIndexer? = ClaudeSessionIndexer()
+        defer {
+            indexer?.cancelInFlightWork()
+            indexer = nil
+        }
+
+        let started = expectation(description: "probe cleanup triggers a refresh")
+        started.assertForOverFulfill = false
+        let watch = indexer?.$isIndexing.dropFirst().sink { if $0 { started.fulfill() } }
+        defer { watch?.cancel() }
+
+        XCTAssertEqual(indexer?.isIndexing, false, "precondition: a freshly built indexer is idle")
+        DispatchQueue.global(qos: .utility).async {
+            NotificationCenter.default.post(
+                name: ClaudeProbeProject.didRunCleanupNotification,
+                object: nil,
+                userInfo: ["status": "success"])
+        }
+
+        wait(for: [started], timeout: 30)
+        XCTAssertEqual(indexer?.isIndexing, true,
+                       "a successful probe cleanup must refresh the session list so deleted probe sessions disappear")
+
+        }
+    }
+
+    /// Claude enabled, its sessions root pointed at an empty temp directory, and `IndexDB`
+    /// redirected into that same sandbox — then all three restored.
+    ///
+    /// `IndexDB()` opens the real ~/Library/Application Support/AgentSessions/index.db and is
+    /// NOT scoped by the sessions-root override (that override only bounds filesystem
+    /// discovery), so without the hook these tests would read — and via `upsertSessionMetaCore`
+    /// write — the developer's live index. Anything `body` creates is released when it returns,
+    /// which is before the restore below: that ordering matters, because putting the real
+    /// sessions root back is a value change that ClaudeSessionIndexer's own defaults observer
+    /// answers with another refresh.
+    private func withSandboxedClaudeEnvironment(_ body: (URL) -> Void) {
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.claudeSessionsRootOverride
+        // Derived, not spelled: `AgentEnablement.isEnabled` reads `descriptor.enablementKey`,
+        // and a hand-written literal that drifts from it would write a dead key while
+        // `defaultEnabled: .always` kept the test green — passing without controlling its
+        // own precondition.
+        let enabledKey = AgentEnablement.enablementKey(for: .claude)
+        let previousOverride = defaults.string(forKey: overrideKey)
+        let previousEnabled = defaults.object(forKey: enabledKey)
+
+        let sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("claude-sandbox-\(UUID().uuidString)")
+        let emptyRoot = sandbox.appendingPathComponent("sessions")
+        try? FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
+        let previousProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { sandbox }
+        defaults.set(emptyRoot.path, forKey: overrideKey)
+        defaults.set(true, forKey: enabledKey)
+        defer {
+            IndexDBTestHooks.applicationSupportDirectoryProvider = previousProvider
+            if let previousOverride { defaults.set(previousOverride, forKey: overrideKey) }
+            else { defaults.removeObject(forKey: overrideKey) }
+            if let previousEnabled { defaults.set(previousEnabled, forKey: enabledKey) }
+            else { defaults.removeObject(forKey: enabledKey) }
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+
+        body(sandbox)
     }
 
     /// `combineLatestArray` is the fold the pyramids collapse into (SPEC §3.4): it holds the

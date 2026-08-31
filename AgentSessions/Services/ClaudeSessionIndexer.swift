@@ -189,13 +189,16 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             .sink { [weak self] note in
                 guard let self = self else { return }
                 if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                    // `.receive(on: DispatchQueue.main)` above already delivers this on the
-                    // main thread; the sink closure just carries no isolation to prove it.
-                    // Assert the isolation rather than deferring through
-                    // `publishAfterCurrentUpdate`, whose job is yielding past a render pass,
-                    // not crossing an actor boundary — deferring would delay a call that was
-                    // immediate and drop it entirely if `self` died in the gap.
-                    MainActor.assumeIsolated { self.refresh() }
+                    // Hop, don't assert. `MainActor.assumeIsolated` would be immediate and
+                    // correct today — both `.receive(on: DispatchQueue.main)` above and the
+                    // poster in ClaudeProbeProject (:197) put this on the main thread — but it
+                    // is a precondition, so the day either of those conventions changes it
+                    // stops being a thread-safety question and becomes a crash on every
+                    // successful cleanup. Nothing in the type system couples them to this
+                    // line. A hop cannot trap, and one main-actor turn of delay costs a
+                    // list refresh nothing. Not `publishAfterCurrentUpdate`: that helper
+                    // yields past a SwiftUI render pass, which is not what this needs.
+                    Task { @MainActor in self.refresh() }
                 }
             }
             .store(in: &cancellables)
@@ -212,10 +215,12 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     /// nothing would stop a future caller from mutating that state off-main. All three
     /// live callers satisfy it: the `@MainActor` handle closure in `ClaudeSourceDescriptor`,
     /// the root-override observer above (already inside a `publishAfterCurrentUpdate`
-    /// block), and the probe-cleanup notification sink above, which is main-threaded via
-    /// `.receive(on:)` and says so with `MainActor.assumeIsolated`. That third one called
-    /// `refresh()` bare until this annotation made the compiler reject it — check it first
-    /// if this isolation is ever revisited.
+    /// block), and the probe-cleanup notification sink above, which hops via
+    /// `Task { @MainActor in }`. That third one called `refresh()` bare until this
+    /// annotation made the compiler reject it — check it first if this isolation is ever
+    /// revisited, and prefer a hop over an `assumeIsolated`-style assertion there: its
+    /// main-threadedness comes from Combine and notification-poster conventions that
+    /// nothing type-checks. `testProbeCleanupNotificationRefreshesTheSessionList` covers it.
     @MainActor
     func refresh(mode: IndexRefreshMode = .incremental,
                  trigger: IndexRefreshTrigger = .manual,
