@@ -127,6 +127,23 @@ final class UnifiedSessionIndexer: ObservableObject {
         let currentIsIndexing: @MainActor () -> Bool
         let currentLaunchPhase: @MainActor () -> LaunchPhase
         let searchIdentitySnapshots: SearchIdentitySnapshots
+        /// **Contract: this must publish `isIndexing = true` before it returns.**
+        ///
+        /// `performProviderRefresh` calls it and then immediately polls `currentIsIndexing()`
+        /// to learn when the refresh finished, because only then is the session list current
+        /// enough to hand to search ingest. An indexer that defers the flag — a main-queue
+        /// hop, a `Task`, a debounce — makes that first poll read `false`, so the wait loop
+        /// exits after zero iterations and the caller proceeds as if the refresh were done.
+        /// The damage is silent and provider-local: the launch/manual kick ingests the
+        /// *pre-refresh* list (empty at launch), and on the `.monitor` path the before/after
+        /// `SessionListFingerprint` pair straddles a wait that never waited, comes out equal,
+        /// and suppresses the kick outright. That source's search corpus then stops advancing
+        /// while its session list stays perfectly correct — nothing fails, nothing logs.
+        /// Claude shipped exactly this and went nine days without indexing a session for
+        /// search. Pinned for Claude by
+        /// `SessionProviderCatalogTests.testRefreshPublishesIsIndexingBeforeItReturns`; a new
+        /// source owes the same contract, so set the flag synchronously the way
+        /// `SessionIndexer.refresh` does rather than inside a deferred publish.
         let refresh: @MainActor (IndexRefreshMode, IndexRefreshTrigger, IndexRefreshExecutionProfile) -> Void
         /// Maps the trigger onto this indexer's own nominal `ReloadReason` internally.
         /// NO enablement guard here — callers guard (SPEC §3.4).

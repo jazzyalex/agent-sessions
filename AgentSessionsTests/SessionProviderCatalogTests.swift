@@ -145,6 +145,100 @@ final class SessionProviderCatalogTests: XCTestCase {
         XCTAssertEqual(catalog[.grok].handle.currentLaunchPhase(), .ready)
     }
 
+    /// `UnifiedSessionIndexer.performProviderRefresh` triggers a provider refresh and then
+    /// polls `currentIsIndexing()` to learn when that refresh finished, because only then is
+    /// the provider's session list current enough to hand to search ingest. The poll starts
+    /// immediately after `refresh(...)` returns, so the contract every indexer owes it is:
+    /// **`isIndexing` must be observable as `true` by the time `refresh` returns.**
+    ///
+    /// Claude was the one provider that broke it — it published the flag from inside
+    /// `publishAfterCurrentUpdate` (a main-queue hop plus two `Task.yield()`s), so the first
+    /// poll read `false`, the wait loop exited after zero iterations, and the kick ran
+    /// against the *pre-refresh* session list: empty at launch, and byte-identical across the
+    /// monitor path's before/after fingerprint comparison, which then suppressed the kick
+    /// outright. Claude's search corpus stopped advancing entirely.
+    func testRefreshPublishesIsIndexingBeforeItReturns() {
+        let defaults = UserDefaults.standard
+        let overrideKey = PreferencesKey.Paths.claudeSessionsRootOverride
+        // Derived, not spelled: `AgentEnablement.isEnabled` reads `descriptor.enablementKey`,
+        // and a hand-written literal that drifts from it would write a dead key while
+        // `defaultEnabled: .always` kept the test green — passing without controlling its
+        // own precondition.
+        let enabledKey = AgentEnablement.enablementKey(for: .claude)
+        let previousOverride = defaults.string(forKey: overrideKey)
+        let previousEnabled = defaults.object(forKey: enabledKey)
+
+        // The refresh task hydrates through `IndexDB()`, which opens the real
+        // ~/Library/Application Support/AgentSessions/index.db and is NOT scoped by the
+        // sessions-root override — that override only bounds filesystem discovery. Without
+        // this hook the test would read (and, via `upsertSessionMetaCore`, write) the
+        // developer's live index.
+        let sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("claude-refresh-flag-\(UUID().uuidString)")
+        let emptyRoot = sandbox.appendingPathComponent("sessions")
+        try? FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
+        let previousProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { sandbox }
+        defaults.set(emptyRoot.path, forKey: overrideKey)
+        defaults.set(true, forKey: enabledKey)
+        defer {
+            IndexDBTestHooks.applicationSupportDirectoryProvider = previousProvider
+            if let previousOverride { defaults.set(previousOverride, forKey: overrideKey) }
+            else { defaults.removeObject(forKey: overrideKey) }
+            if let previousEnabled { defaults.set(previousEnabled, forKey: enabledKey) }
+            else { defaults.removeObject(forKey: enabledKey) }
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+
+        // Optional, and explicitly dropped in the defer below — which runs before the defaults
+        // restore above (LIFO). Restoring the sessions-root override is a real value change,
+        // and ClaudeSessionIndexer's own FilteredDefaultsObserver (:158) answers a change by
+        // scheduling another refresh — one that would run against the developer's real root,
+        // after the IndexDB hook is already back. Releasing the indexer here leaves nothing to
+        // answer it, instead of depending on this local going out of scope at the right moment.
+        var indexer: ClaudeSessionIndexer? = ClaudeSessionIndexer()
+        defer {
+            indexer?.cancelInFlightWork()
+            indexer = nil
+        }
+
+        XCTAssertEqual(indexer?.isIndexing, false, "precondition: a freshly built indexer is idle")
+        indexer?.refresh(mode: .incremental, trigger: .launch, executionProfile: .interactive)
+        XCTAssertEqual(indexer?.isIndexing, true,
+                       "refresh() must publish isIndexing synchronously; performProviderRefresh polls it the instant refresh returns")
+
+        // The other half of the contract. `shouldRefreshSource` is
+        // `isAgentEnabled(source) && !currentIsIndexing()`, so a flag that never clears drops
+        // every later refresh at that guard — the same stall from the opposite direction, and
+        // just as silent. Waiting for the real transition (rather than only asserting the
+        // leading edge) also guarantees the sandbox outlives the refresh's own DB work.
+        //
+        // Known cost: this wait is what makes the test seconds rather than milliseconds —
+        // measured 3.7s / 8.6s / 5.6s / 5.1s across four runs, against ~0.013s before it was
+        // added. Against an empty sandbox DB `hydrateFromIndexDBIfAvailable` always returns
+        // nil, so the refresh always takes the 250ms retry sleep before scanning and
+        // prewarming; the spread on top of that is scan/prewarm contention with whatever else
+        // the machine is doing. That is the price of the teardown barrier the IndexDB sandbox
+        // depends on, not stray waste — budget it deliberately before trimming it.
+        let cleared = expectation(description: "claude refresh clears isIndexing")
+        let watch = indexer?.$isIndexing.dropFirst().sink { if !$0 { cleared.fulfill() } }
+        defer { watch?.cancel() }
+        wait(for: [cleared], timeout: 30)
+        XCTAssertEqual(indexer?.isIndexing, false,
+                       "refresh() must clear isIndexing when it completes, or shouldRefreshSource drops every later refresh")
+
+        // Pin the isolation itself, not just the behaviour it protects. Nothing above would
+        // notice if the IndexDB hook stopped being honoured — the assertions never observe
+        // the database — so the test would quietly go back to driving the developer's real
+        // index and still report green, which is how its first version shipped. `IndexDB`
+        // writes `<appSupport>/AgentSessions/index.db`, so this file existing under the
+        // sandbox is proof the refresh above hydrated from there and nowhere else.
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: sandbox.appendingPathComponent("AgentSessions/index.db").path),
+            "the refresh must have hydrated from the sandboxed IndexDB, not the real one")
+    }
+
     /// `combineLatestArray` is the fold the pyramids collapse into (SPEC §3.4): it holds the
     /// latest of every upstream, emits nothing until all of them have produced, and keeps
     /// the input order.

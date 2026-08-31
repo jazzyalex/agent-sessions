@@ -189,7 +189,13 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             .sink { [weak self] note in
                 guard let self = self else { return }
                 if let info = note.userInfo as? [String: Any], let status = info["status"] as? String, status == "success" {
-                    self.refresh()
+                    // `.receive(on: DispatchQueue.main)` above already delivers this on the
+                    // main thread; the sink closure just carries no isolation to prove it.
+                    // Assert the isolation rather than deferring through
+                    // `publishAfterCurrentUpdate`, whose job is yielding past a render pass,
+                    // not crossing an actor boundary — deferring would delay a call that was
+                    // immediate and drop it entirely if `self` died in the gap.
+                    MainActor.assumeIsolated { self.refresh() }
                 }
             }
             .store(in: &cancellables)
@@ -201,6 +207,16 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir) && isDir.boolValue
     }
 
+    /// Main-actor isolated because the state block below writes `@Published` properties
+    /// synchronously. The class is `@unchecked Sendable`, so without this annotation
+    /// nothing would stop a future caller from mutating that state off-main. All three
+    /// live callers satisfy it: the `@MainActor` handle closure in `ClaudeSourceDescriptor`,
+    /// the root-override observer above (already inside a `publishAfterCurrentUpdate`
+    /// block), and the probe-cleanup notification sink above, which is main-threaded via
+    /// `.receive(on:)` and says so with `MainActor.assumeIsolated`. That third one called
+    /// `refresh()` bare until this annotation made the compiler reject it — check it first
+    /// if this isolation is ever revisited.
+    @MainActor
     func refresh(mode: IndexRefreshMode = .incremental,
                  trigger: IndexRefreshTrigger = .manual,
                  executionProfile: IndexRefreshExecutionProfile = .interactive) {
@@ -217,17 +233,27 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
         refreshTask = nil
         transcriptPrewarmTask?.cancel()
         transcriptPrewarmTask = nil
-        publishAfterCurrentUpdate { [weak self] in
-            guard let self else { return }
-            self.launchPhase = .hydrating
-            self.isIndexing = true
-            self.isProcessingTranscripts = false
-            self.progressText = "Scanning…"
-            self.filesProcessed = 0
-            self.totalFiles = 0
-            self.indexingError = nil
-            self.hasEmptyDirectory = false
-        }
+        // Published synchronously, matching `SessionIndexer.refresh`. `UnifiedSessionIndexer`
+        // triggers a provider refresh and then polls `currentIsIndexing()` to learn when it
+        // finished — only then is the session list current enough to hand to search ingest.
+        // Deferring `isIndexing` through `publishAfterCurrentUpdate` meant the first poll read
+        // `false`, the wait loop exited after zero iterations, and the search-ingest kick ran
+        // against the pre-refresh list: empty at launch, and identical across the monitor
+        // path's before/after fingerprint comparison, which suppressed the kick outright.
+        // Every other indexer already set it here; Claude was the outlier.
+        //
+        // The whole block moves with it rather than just the flag: `aggregateProgress` sums
+        // processed/total across the rows reporting `indexing`, so a run that flipped the flag
+        // a render pass ahead of the counters would briefly publish the *previous* refresh's
+        // completed counts — and a stale `indexingError` — as if they belonged to this one.
+        launchPhase = .hydrating
+        isIndexing = true
+        isProcessingTranscripts = false
+        progressText = "Scanning…"
+        filesProcessed = 0
+        totalFiles = 0
+        indexingError = nil
+        hasEmptyDirectory = false
 
         let task = Task.detached(priority: .utility) { [weak self, token, mode, executionProfile] in
             guard let self else { return }
