@@ -43,11 +43,11 @@ All notable changes to this project will be documented in this file.
 - **Devin CLI and fx join the lineup.** Two more coding agents put their local history in the same searchable list as the rest, each with a Settings pane and a resume command. Both were contributed and are stewarded by @thedavidweng — the first outside test of the adapter recipe 5.0 documented.
 
 ### Features
-- **Devin CLI sessions.** Browsing, search, filtering, Analytics and transcripts over Devin's shared SQLite store, with binary and storage-root controls in Settings. Devin keeps every retry as a branch, so a session shows the live conversation rather than every path it took to get there. Copy Resume Command produces `devin --resume <id>`, verified end-to-end on CLI 3000.5.20 ([verification report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)). Devin keeps only active sessions, and image extraction is not yet supported.
-- **fx (vercel-labs) sessions.** Per-session checkpoints under `~/.fx/sessions`, with every kind of turn rendered — including background commands, auto-compaction summaries and interrupted turns — and text fx stored as raw bytes decoded back to readable output. Copy Resume Command produces `fx --resume <id>`, verified on fx 0.0.5 down to the terminal gate ([verification report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)). Image extraction is not yet supported.
+- **Devin CLI sessions.** Browsing, search, filtering, Analytics and transcripts over Devin's shared SQLite store, with binary and storage-root controls in Settings. `devin --resume <id>`, verified on CLI 3000.5.20 ([report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)). Active sessions only; no image extraction yet.
+- **fx (vercel-labs) sessions.** Per-session checkpoints under `~/.fx/sessions`, with every kind of turn rendered — background commands, auto-compaction summaries, interrupted turns. `fx --resume <id>`, verified on fx 0.0.5 ([report](https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336)). No image extraction yet.
 
 ### Bug Fixes
-- **Weekly Session Runway reflects recent quota movement.** Its `%/h` used to average everything burned since the weekly reset, so one heavy day set the pace for days; it now measures the burn between recent same-reset quota readings, and shows `tk/h` until it has one. API-equivalent prices were refreshed for the GPT-5.6 tiers and Claude Sonnet 5.
+- **Weekly Session Runway reflects recent quota movement.** Its `%/h` averaged everything burned since the weekly reset, so one heavy day set the pace for days; it measures the burn between recent same-reset readings now, and shows `tk/h` until it has one.
 
 ## [5.0.2] - 2026-08-22
 
