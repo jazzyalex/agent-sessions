@@ -41,6 +41,9 @@ Gate application is always a separate explicit command. `run` may build manifest
 - Never read a SQLite database as JSONL. SQLite adapters yield canonical logical records inside a read transaction and compute a digest over those records.
 - Never install unless preflight proves the driver is ready and the initial snapshot says a post-install session may be generated.
 - Never auto-downgrade after a failed install/prebump. Record the failure and print the exact revert command.
+- Every active Agent Sessions source has one verification owner: the maintainer or a named steward. The sweep routes evidence through that owner; it does not recruit or sign up stewards.
+- A steward-owned agent that is absent locally is expected, not broken. Never install it, run a local prebump, or lower its support claim because this machine has no sessions.
+- A maintainer-owned agent may explicitly declare fresh-session generation unavailable. Qwen is the model: keep the existing verified ceiling, state the blocker, and do not redirect it to a steward unless ownership itself changes.
 - Preserve all content before the generated markers in `docs/agent-json-tracking.md` byte-for-byte.
 - Treat `docs/agent-support/agent-format-tracker.jsonl` as an existing append-only migration input. Never truncate, recreate, reorder, normalize, or rewrite committed records.
 - Ledger additions must contain zero deleted ledger lines. A matrix version replacement is allowed only inside the exact reviewed Gate 2 patch.
@@ -60,6 +63,46 @@ Existing schema-version-1 records predate the stricter writer in this plan:
 - two later Qwen `corrected` records are standalone corrections with `supersedes: null`.
 
 The reader and renderer must accept these rows without mutation. New writes use schema version 2 and the stricter event-specific validation below. Task 1 updates the SPEC's tracker-schema section to document the v1 reader/v2 writer boundary.
+
+## Verification ownership contract
+
+Add a machine-readable `verification` block to every active agent in `docs/agent-support/agent-watch-config.json`:
+
+```json
+{
+  "verification": {
+    "owner": "maintainer",
+    "fresh_session": "local"
+  }
+}
+```
+
+For a steward-owned source:
+
+```json
+{
+  "verification": {
+    "owner": "steward",
+    "handle": "@thedavidweng",
+    "fresh_session": "steward",
+    "cadence_days": 180
+  }
+}
+```
+
+For a maintainer-owned exception such as Qwen:
+
+```json
+{
+  "verification": {
+    "owner": "maintainer",
+    "fresh_session": "unavailable",
+    "reason": "No working account can produce a fresh transcript; retain the last captured verified version."
+  }
+}
+```
+
+Allowed values are `owner = maintainer | steward` and `fresh_session = local | steward | unavailable`. `handle` and `cadence_days` are required for a steward. `reason` is required for `unavailable`. An inventory test fails if an active source has no block or an impossible combination. `STEWARDS.md` remains the human explanation and credit table; the config block is the automation source of truth and a test requires named steward assignments to agree between them.
 
 ## Shared data contracts
 
@@ -138,6 +181,8 @@ New records are schema version 2. Required fields for every new event are `event
 - `triaged`: `bucket`, `frequency`, `rationale`;
 - `corrected`: `supersedes`, `observation`, `rationale`;
 - `action_applied`: `action`, `status`, `patch_sha256` when a patch exists.
+- `verification_requested`: `steward`, `requested_version`, `reason`, `sent_evidence`;
+- `verification_received`: `steward`, `verified_version`, `verdict`, `report_sha256`.
 
 Implement `append_once` with `fcntl.flock(LOCK_EX)` around lookup and append. Write the complete encoded line with a loop until every byte is written, `fsync` the file, and `fsync` the parent directory when the file is first created. The lock covers `supersedes` validation and event-key deduplication.
 
@@ -378,14 +423,17 @@ Call it at the exact point `schema_diff` confirms an unknown type or key. Do not
 
 **Checkpoint:** `feat(sweep): persist discoveries from the real scan path`
 
-## Task 7: Batched side-effect-free preflight
+## Task 7: Verification ownership, steward communication, and side-effect-free preflight
 
 **Files**
 
 - Modify `scripts/agent_watch_prebump_drivers.py`
 - Modify `scripts/agent_watch.py`
+- Modify `scripts/steward_check.py`
+- Create `scripts/agent_verification.py`
 - Modify `docs/agent-support/agent-watch-config.json`
 - Create `scripts/tests/test_agent_watch_preflight.py`
+- Create `scripts/tests/test_agent_verification.py`
 
 Add `--mode preflight`. Preflight performs no session generation and no install. It validates:
 
@@ -395,6 +443,12 @@ Add `--mode preflight`. Preflight performs no session generation and no install.
 - at least one auth route is present: configured environment variable or credential file;
 - credential hygiene without copying or printing values;
 - an optional side-effect-free authentication probe declared under `preflight.auth_probe`.
+
+Resolve `verification` ownership before interpreting those local checks:
+
+- `maintainer + local`: use the normal local preflight/install/prebump path;
+- `maintainer + unavailable`: report the declared blocker, skip install and prebump, retain the last verified ceiling, and generate no steward poke;
+- `steward + steward`: local CLI/session absence is expected. Skip local install and prebump, read current upstream, and compare it with the steward's last verified version/date from the support matrix.
 
 Return per agent:
 
@@ -413,6 +467,24 @@ Return per agent:
 
 The preflight result includes version-update candidates based on installed/upstream inventory and driver readiness. It does not call them final install decisions because thinness and staleness are not known until the initial snapshot. The orchestrator merges preflight with the initial snapshot, then prints one consolidated planned/skipped install report. After execution it adds outcomes to the same report without raising a second prompt.
 
+For steward-owned agents, produce one of four communication states:
+
+- `greenlight_current`: the latest imported steward greenlight still covers current upstream and is within cadence;
+- `poke_due_version`: upstream is newer than the steward-verified version;
+- `poke_due_age`: the verification is older than `cadence_days`;
+- `awaiting_steward`: a poke for this steward/version has already been recorded as sent.
+
+When a poke is due, write an idempotent communication draft under `scripts/probe_scan_output/agent_format/<run-id>/stewards/`. It names the steward, current verified and upstream versions, why the check is due, and the exact `./scripts/steward_check.py <agent>` command. Draft creation is unattended; sending an external message requires explicit authorization and is not a sweep gate. Append `verification_requested` only after a separate `record-poke --sent-evidence <url-or-message-id>` command confirms it was actually sent.
+
+Extend `steward_check.py` to write a portable `verification.json` for both clean and drift outcomes. It contains the agent, steward-reported installed version, baseline version, verdict, schema diff, redacted-sample manifest when present, source report hash, and timestamp. It contains no raw session content. Import with:
+
+```bash
+./scripts/agent_format_tracker.py import-steward-verification \
+  --agent <agent> --report <verification.json> --steward <configured-handle>
+```
+
+Import verifies the configured owner/handle, report hash, agent name, version fields, and referenced redacted files. It appends `verification_received` but never changes fixtures, the matrix, or the ledger. A clean greenlight becomes eligible evidence for Gate 2; drift becomes discovery/triage input and any redacted sample may enter Gate 1 after review.
+
 **Tests**
 
 1. Environment-variable auth is recognized without reading credential files.
@@ -421,6 +493,11 @@ The preflight result includes version-update candidates based on installed/upstr
 4. No driver, session file, or install command is invoked.
 5. No credential value appears in returned JSON or captured stdout/stderr.
 6. The production `main --mode preflight` path emits the expected report.
+7. A steward-owned agent with no local CLI is not classified as broken and invokes no install/prebump path.
+8. Current greenlight suppresses a poke; upstream movement and cadence expiry each create one idempotent draft.
+9. A recorded sent poke produces `awaiting_steward` and does not duplicate communication.
+10. A valid clean steward report appends `verification_received`; a drift report routes to Gate 1 inputs.
+11. Qwen's maintainer-owned unavailable declaration produces neither local generation nor a steward draft nor a version claim.
 
 **Checkpoint:** `feat(preflight): batch auth and driver readiness before sweep work`
 
@@ -440,6 +517,8 @@ Eligibility requires all four SPEC conditions:
 2. declared install block;
 3. `preflight_row.driver_ready is True`;
 4. conditional-generation policy allows a post-install session.
+
+Eligibility also requires `verification.owner == "maintainer"` and `verification.fresh_session == "local"`. Steward-owned and unavailable sources are refused before any adapter lookup.
 
 Implement allowlisted argument-vector adapters for `brew_cask`, `brew_formula`, `npm_global`, and `vendor_updater`. Never use `shell=True`. Every adapter returns the exact install and revert argv plus captured result.
 
@@ -614,6 +693,13 @@ When Gate 1 also changes `agent-support-matrix.yml` to register fixture evidence
 
 Build refuses upstream-only targets, failed prebump, stale/thin evidence, unknown schema, any blocker, or evidence not written by the installed build. Use parsed timestamps, not lexical string comparison.
 
+There are two accepted evidence provenances:
+
+- maintainer-owned local evidence: the post-prebump version/session checks above;
+- steward-owned evidence: an imported clean `verification_received` record whose configured steward, report hash, agent, version, and cadence are valid.
+
+A steward greenlight never bypasses Gate 2. It replaces the impossible local-prebump assertion with checkable steward-report assertions in the reviewed claim manifest. Maintainer-owned `fresh_session: unavailable` sources cannot build a version claim from source reading or upstream version alone.
+
 Apply:
 
 1. verifies expected plan hash;
@@ -634,6 +720,8 @@ Recovery is idempotent: if the patch post-image hashes already match but the act
 4. Any ledger deletion refuses, while the reviewed matrix replacement is allowed.
 5. Crash-recovery simulation completes the tracker event without duplicating the patch.
 6. Proposal and application are separate tracker events.
+7. Current steward greenlight can build a claim plan; stale, mismatched, or wrong-steward reports refuse.
+8. Maintainer-owned unavailable evidence cannot build a claim plan.
 
 **Checkpoint:** `feat(gate2): bind version claims to exact evidence and patches`
 
@@ -736,16 +824,16 @@ def run(
 Required order:
 
 1. validate tracker, generated markers, and the triage command before doing agent work;
-2. run batched side-effect-free preflight;
+2. resolve verification ownership and run batched side-effect-free preflight for locally owned sources;
 3. run the initial weekly snapshot with discovery events;
-4. merge preflight and initial-snapshot facts, then print one consolidated auth/update action report;
+4. merge preflight, ownership, initial-snapshot, and steward-greenlight facts, then print one consolidated auth/update/communication report;
 5. compute install and generation decisions from the initial snapshot;
 6. apply eligible installs, recording started actions first;
 7. run one batched prebump for selected agents;
 8. reread installed versions;
 9. run the final weekly snapshot;
 10. measure and append triage events;
-11. generate read-only urgent/support/backlog proposals;
+11. generate read-only urgent/support/backlog proposals and idempotent steward poke drafts;
 12. build Gate 1 manifests and their virtual post-images;
 13. build Gate 2 manifests against the applicable Gate 1 post-images;
 14. render the tracker view;
@@ -762,6 +850,7 @@ The orchestrator never calls either apply function. A post-install prebump failu
 5. The CLI builds manifests and prints hashes but leaves fixture, matrix, ledger, and backlog files unchanged.
 6. The only write-capable CLI subcommands are explicit `apply-fixture-plan` and `apply-claim-plan`.
 7. A complete fake run produces no duplicate findings or proposals when rerun with the same `run_id`.
+8. A mixed run proves local maintainer, unavailable maintainer, and absent steward-owned agents each stay in their own lane.
 
 **Checkpoint:** `feat(sweep): orchestrate the complete two-gate format workflow`
 
@@ -781,6 +870,9 @@ Document the exact production commands, manifest locations, gate hashes, recover
 - Gate 2 owns matrix plus ledger and requires zero ledger deletions;
 - semantic workers are read-only;
 - the Swift test detects UUID-shaped keys only, while the Python guard covers all four shapes.
+- steward signup is outside this workflow; the sweep only checks ownership, drafts/records pokes, and imports greenlights;
+- an external poke is never marked sent until `sent_evidence` is recorded;
+- maintainer-owned unavailable sources remain blocked without being reassigned.
 
 Run final verification:
 
@@ -819,6 +911,10 @@ The plan is complete only when every SPEC acceptance item maps to a named test:
 | Gate 2 refusal cases | parameterized cases in `test_agent_version_claim.py` |
 | Ledger patch has zero deletions | `test_claim_apply_refuses_ledger_deletion` |
 | Batched preflight is side-effect-free | `test_preflight_batches_without_driver_or_install` |
+| Absent steward-owned agent is expected | `test_absent_steward_agent_skips_local_failure_and_generation` |
+| Current greenlight or due poke is deterministic | `test_steward_communication_state_uses_version_and_cadence` |
+| Sent poke and imported greenlight are idempotent | `test_steward_poke_and_greenlight_event_keys` |
+| Qwen-style unavailable ownership stays local | `test_unavailable_maintainer_agent_is_not_poked_or_bumped` |
 | Thin store invokes no driver | `test_thin_real_home_store_invokes_nothing` |
 | Install requires working driver | `test_install_refuses_nonready_driver` |
 | Failed post-install prebump does not downgrade | `test_failed_postinstall_prebump_prints_revert_only` |
