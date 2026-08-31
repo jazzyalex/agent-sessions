@@ -3,8 +3,8 @@
     <channel>
         <title>AgentSessions</title>
         <item>
-            <title>5.1</title>
-            <pubDate>Thu, 27 Aug 2026 15:28:01 -0700</pubDate>
+            <title>5.1.1</title>
+            <pubDate>Mon, 31 Aug 2026 14:00:38 -0700</pubDate>
             <description><![CDATA[
 <style>
 .rn { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 13px; line-height: 1.55; color: #1d1d1f; -webkit-font-smoothing: antialiased; padding: 2px; }
@@ -27,27 +27,39 @@
 }
 </style>
 <div class="rn">
-<h2>What&#x27;s New in 5.1</h2>
+<h2>What&#x27;s New in 5.1.1</h2>
 <h3 class="hl">Highlights</h3>
 <ul class="highlights">
-<li><strong>Devin CLI and fx join the lineup.</strong> Two more coding agents put their local history in the same searchable list as the rest, each with a Settings pane and a resume command. Both were contributed and are stewarded by @thedavidweng — the first outside test of the adapter recipe 5.0 documented.</li>
+<li><strong>A small version number and a big fix list.</strong> Twelve fixes, three of them silent failures you had no way to notice: Claude sessions indexed after 2026-08-21 were listed but returned nothing from search, Claude spend read about a sixth low in the <code>$</code> unit, and a <code>QWEN_HOME</code> set for something unrelated emptied the Qwen list. All three looked healthy from the outside, which is why they lasted. If you run Claude or Qwen, take this update.</li>
 </ul>
 <h3>Features</h3>
 <ul>
-<li><strong>Devin CLI sessions.</strong> Browsing, search, filtering, Analytics and transcripts over Devin&#x27;s shared SQLite store, with binary and storage-root controls in Settings. Devin keeps every retry as a branch, so a session shows the live conversation rather than every path it took to get there. Copy Resume Command produces <code>devin --resume &lt;id&gt;</code>, verified end-to-end on CLI 3000.5.20 (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">verification report</a>). Devin keeps only active sessions, and image extraction is not yet supported.</li>
-<li><strong>fx (vercel-labs) sessions.</strong> Per-session checkpoints under <code>~/.fx/sessions</code>, with every kind of turn rendered — including background commands, auto-compaction summaries and interrupted turns — and text fx stored as raw bytes decoded back to readable output. Copy Resume Command produces <code>fx --resume &lt;id&gt;</code>, verified on fx 0.0.5 down to the terminal gate (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">verification report</a>). Image extraction is not yet supported.</li>
+<li><strong>Session Runway can read your week.</strong> A new <code>Wk</code> unit answers &quot;how fast is *this* session eating my weekly quota&quot;, in percentage points per hour — per session, not one account-wide rate split up. It learns the conversion from usage already on disk, so a figure appears seconds after launch instead of hours later. Idle sessions read <code>quiet</code>, which also replaces &quot;flat&quot; in the <code>5h</code>, <code>tk</code> and <code>$</code> units.</li>
+<li><strong>Claude&#x27;s model-scoped weekly limit is visible.</strong> Claude reports a third window beside the 5-hour and weekly ones — a weekly budget for one model — and Agent Sessions could not see it at all. The menu-bar dropdown now names it (&quot;Wk Fable: 70% · resets …&quot;); the compact meter&#x27;s <code>Wk</code> stays the all-models number.</li>
 </ul>
 <h3>Bug Fixes</h3>
 <ul>
-<li><strong>Weekly Session Runway reflects recent quota movement.</strong> Its <code>%/h</code> used to average everything burned since the weekly reset, so one heavy day set the pace for days; it now measures the burn between recent same-reset quota readings, and shows <code>tk/h</code> until it has one. API-equivalent prices were refreshed for the GPT-5.6 tiers and Claude Sonnet 5.</li>
+<li><strong>Claude sessions are searchable again.</strong> Since 2026-08-21 they were listed with the right title, project and dates, but searching their text returned nothing — and nothing said so. 256 sessions on the development machine, nine days&#x27; worth. Picked up on the first launch after updating.</li>
+<li><strong>Claude spend was understated by about a sixth in the <code>$</code> unit.</strong> Anthropic charges a cache write by how long it is kept alive — 1.25x input for five minutes, 2x for an hour — and every write was billed at the cheaper rate, while Claude Code almost only writes hour-long ones. Fast mode is priced at its own rates now too, rather than silently at half.</li>
+<li><strong>A <code>QWEN_HOME</code> you set for something else no longer empties your Qwen list.</strong> Qwen 0.14.x ignores that variable and reads <code>~/.qwen</code>; the app only ever looked where it pointed. It falls back now, and resume follows the same root — so those sessions come back listed *and* resumable.</li>
+<li><strong>A Qwen record Agent Sessions does not recognise says so.</strong> Types outside the four it knew were dropped without a trace, so a newer build&#x27;s transcript could quietly lose turns. They surface as a note now, and the kinds Qwen 0.22 writes render as themselves — including two carrying real conversation.</li>
+<li><strong>The weekly burn-rate figure is no longer thrown off by a countdown.</strong> When Claude&#x27;s usage falls back to the terminal, the reset reads &quot;in 4h 28m&quot; rather than a date, and every refresh stored that as a new week — about a third below the truth. Readings are keyed only on a stated date now.</li>
+<li><strong>Weekly Session Runway drops stale calibration immediately.</strong> A same-process price refresh or weekly-limit shape change can no longer keep serving a conversion learned under the previous scope, and a failed scan from an account you switched away from cannot delay the new account&#x27;s scan.</li>
 </ul>
-<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1</a></p>
+<h3>Reminder: What You Got in 5.1</h3>
+<ul>
+<li><strong>Devin CLI and fx join the lineup.</strong> Two more coding agents put their local history in the same searchable list as the rest, each with a Settings pane and a resume command. Both were contributed and are stewarded by @thedavidweng — the first outside test of the adapter recipe 5.0 documented.</li>
+<li><strong>Devin CLI sessions.</strong> Browsing, search, filtering, Analytics and transcripts over Devin&#x27;s shared SQLite store, with binary and storage-root controls in Settings. <code>devin --resume &lt;id&gt;</code>, verified on CLI 3000.5.20 (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">report</a>). Active sessions only; no image extraction yet.</li>
+<li><strong>fx (vercel-labs) sessions.</strong> Per-session checkpoints under <code>~/.fx/sessions</code>, with every kind of turn rendered — background commands, auto-compaction summaries, interrupted turns. <code>fx --resume &lt;id&gt;</code>, verified on fx 0.0.5 (<a href="https://github.com/jazzyalex/agent-sessions/issues/62#issuecomment-5433779336">report</a>). No image extraction yet.</li>
+<li><strong>Weekly Session Runway reflects recent quota movement.</strong> Its <code>%/h</code> averaged everything burned since the weekly reset, so one heavy day set the pace for days; it measures the burn between recent same-reset readings now, and shows <code>tk/h</code> until it has one.</li>
+</ul>
+<p class="more">Full release notes: <a href="https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1.1">https://github.com/jazzyalex/agent-sessions/releases/tag/v5.1.1</a></p>
 </div>
             ]]></description>
-            <sparkle:version>71</sparkle:version>
-            <sparkle:shortVersionString>5.1</sparkle:shortVersionString>
+            <sparkle:version>72</sparkle:version>
+            <sparkle:shortVersionString>5.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1/AgentSessions-5.1.dmg" length="23290866" type="application/octet-stream" sparkle:edSignature="qwNZHpH9Zw7hNmv5oVWZWn8csBpmQAwRPwLn2dj22bzPZc/9lrSBQVqQBJzzc1xN+vRplxQXyLMvOMo+344kCQ=="/>
+            <enclosure url="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg" length="23555312" type="application/octet-stream" sparkle:edSignature="7+p1AQ8mva55y0D5v57cdUx1r4546W2ybHR6bJpbDx7dMVadTxKsKoFp1n7QfW8zeOTLiYbEs85LyP8CJt61DQ=="/>
         </item>
     </channel>
 </rss>
