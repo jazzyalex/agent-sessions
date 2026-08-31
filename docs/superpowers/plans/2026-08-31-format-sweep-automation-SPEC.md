@@ -50,26 +50,30 @@ exists after fingerprinting ([agent_watch.py:2831](../../../scripts/agent_watch.
 ```
 1  batched auth preflight (§4)          ── one prompt, at minute zero
 2  INITIAL weekly snapshot              ── fingerprint, verdicts, thinness, staleness
-3  conditional prebump selection (§5)   ── decided FROM snapshot 1
-4  one batched prebump for eligible agents
-5  post-prebump installed-version reread   ── CLIs self-update; see §3.2
-6  FINAL weekly snapshot
-7  triage + proposal generation (§6)
+3  install eligible agents (§5a)        ── decided FROM snapshot 1, announced in step 1
+4  conditional prebump selection (§5)   ── decided FROM snapshot 1 + step 3 outcome
+5  one batched prebump for eligible agents
+6  post-prebump installed-version reread   ── CLIs self-update; see §3.2
+7  FINAL weekly snapshot
+8  triage + proposal generation (§6)
       ↳ every finding appended to the tracker as it is made (§7)
    ─────────────────────────────────────────────────────────────
    GATE 1 — apply a reviewed fixture patch (§3.1)
    GATE 2 — apply a reviewed version claim (§3.2)
 ```
 
-Steps 1–7 run unattended. The gates are **two confirmations per run**, against the dozens
+Steps 1–8 run unattended. The gates are **two confirmations per run**, against the dozens
 the current workflow asks for.
 
-**v1 does not install or update any CLI.** *Amendment (8).* The first draft implied
-unattended installs with no adapter and no rollback policy. The sweep reports the exact
-install command per agent and mutates nothing globally. CLIs that self-update as a side
-effect of prebump are still handled — that is what step 5 exists for, and it is not
-optional: on 2026-08-31 grok was already 1.0.13 before its loop began and pi moved
-0.84.3 → 0.84.4 *between* two prebumps.
+**Installs are automatic, and add no new prompt.** *Amendment (8), revised: the
+maintainer reversed the reviewer's install-free recommendation.* The reviewer's objection
+was correct that the first draft left installs unspecified — not that they should be
+dropped. §5a specifies them. The planned installs are printed in the step 1 preflight
+report, so the single existing prompt covers both logins and updates.
+
+Step 6 stays regardless: CLIs self-update as a side effect of prebump. On 2026-08-31 grok
+was already 1.0.13 before its loop began, and pi moved 0.84.3 → 0.84.4 *between* two
+prebumps. Never bump to the version observed at run start.
 
 ## 3. The two gates
 
@@ -219,6 +223,83 @@ purely by age. One real user session restored it.
 The first row is the opposite of what an eager automation does, and is the row that
 matters.
 
+## 5a. Automatic installs
+
+**The governing rule is §1b: never install unless a session can be generated afterward.**
+Installing rewrites nothing on disk, so the newest session is still the one the *old*
+build wrote — it is now older than the binary, and the agent flips from
+`supports_installed_only` (a real claim, backed by real evidence) to
+`blocked_stale_sample`, which per §1a means *unknown*, never *clean*. **An install without
+a following prebump destroys a verdict it cannot replace.** The 2026-08-13 pass
+deliberately did not install Hermes 0.19.0 for exactly this reason.
+
+**Requirement — eligibility. All four must hold:**
+
+1. `upstream.parsed_version` > `installed.parsed_version` in the initial snapshot.
+2. The agent declares an `install` block in `agent-watch-config.json` (§5a.1).
+3. The agent has a `prebump` driver that **succeeded in the initial preflight**. A driver
+   that is merely configured is not enough — Hermes has one and it stopped producing a
+   usable sample, which is why Hermes sits at 0.17.0 against upstream 0.20.6 and must
+   **not** be auto-updated.
+4. The agent is not refused by §5's thin-store rule. If we will not generate a session,
+   we must not install — that is case 3 with extra steps.
+
+Agents failing any check are reported as "update available, not applied" with the reason
+and the exact command, which is what the install-free design would have done for
+everything.
+
+### 5a.1 Installer adapters
+
+Declared per agent, never inferred. The repo already carries one hand-maintained
+per-source list too many.
+
+```json
+"install": {
+  "kind": "brew_cask",           // brew_cask | brew_formula | npm_global | vendor_updater
+  "package": "grok-build",
+  "version_probe": ["grok", "--version"],
+  "note": "x.ai native binary; the cask lags x.ai releases (see the grok upstream block)"
+}
+```
+
+`vendor_updater` covers CLIs that update themselves (antigravity's updater service,
+copilot); for those the adapter's job is to *invoke* the vendor path, not to shell out to
+a package manager.
+
+### 5a.2 Rollback
+
+**Requirement.** Record `pre_install_version` in a tracker `action_applied` event before
+the install runs. If the post-install prebump fails, the sweep does **not** auto-downgrade
+— a failed downgrade on top of a failed upgrade is worse than one bad state. It:
+
+- restores nothing, changes nothing further;
+- prints the exact revert command for that adapter kind
+  (`brew install --cask grok-build@1.0.5`, `npm i -g openclaw@2026.7.1`, …);
+- appends a `corrected` tracker event recording that the install left the agent in a
+  worse position than it started;
+- and **refuses to propose a version bump for that agent**, since the claim now has no
+  fresh-session evidence behind it.
+
+**Requirement.** An install that succeeds but whose prebump then reports
+`fresh_matches_baseline=false` is not a rollback case — that is genuine drift found early,
+which is the point. It routes to triage as `urgent`.
+
+### 5a.3 What the maintainer sees
+
+Planned installs appear in the step 1 preflight report, inside the prompt that already
+exists for logins. No new confirmation:
+
+```
+planned updates (3):
+  grok       1.0.5   -> 1.0.13    brew_cask grok-build
+  kimi       0.38.0  -> 0.39.1    npm_global @moonshot-ai/kimi-code
+  opencode   1.18.21 -> 1.18.25   npm_global opencode
+not updating (2):
+  hermes     0.17.0  -> 0.20.6    prebump driver produces no usable sample; installing
+                                  would convert a real claim into blocked_stale_sample
+  antigravity 1.1.14 -> 1.1.22    thin store; session generation refused (§5)
+```
+
 ## 6. Triage contract
 
 The gap to close is not the taxonomy — it is that **the funnel keeps answering "does it
@@ -341,6 +422,19 @@ decrease.
    agent work begins, with no session generated and no credential value printed.
 9. **Thin-store refusal.** A `real_home_session` agent below the thin gate never invokes
    a driver, even when its sample is stale and a newer version exists.
+9a. **Install refused without a working driver.** An agent whose upstream is newer but
+    whose prebump driver failed in preflight is **not** installed, and is reported with
+    the reason. Modelled on Hermes: 0.17.0 against upstream 0.20.6, driver produces no
+    usable sample. Installing it would convert a real `supports_installed_only` claim
+    into `blocked_stale_sample`.
+9b. **Install refused for a thin store.** An eligible-by-version `real_home_session`
+    agent below the thin gate is not installed, because §5 will refuse to generate the
+    session that would justify it.
+9c. **Failed post-install prebump does not auto-downgrade.** The sweep leaves the new
+    version in place, prints the exact revert command, appends a `corrected` event, and
+    generates **no** version-bump proposal for that agent.
+9d. **Planned installs appear in preflight.** The step 1 report lists both applied and
+    skipped updates with reasons, and no second prompt is raised.
 10. **Correction chain.** A `corrected` event referencing a `record_id` renders the
     correction while preserving the original.
 11. **Idempotent re-run.** Re-running the same `run_id` produces no duplicate findings
@@ -354,7 +448,6 @@ from the `.xcresult`, and then runs the Debug build.
 
 - **Modifying any Swift file.** The existing Swift UUID guard is read and referenced but
   left unchanged (§3.1). Product fixes arising from triage are separate work.
-- **Installing or updating agent CLIs** (§2). v1 reports the command and mutates nothing.
 - **Replacing `agent-support-ledger.yml`.** It stays the release-verified record; the
   tracker is the finding log. They answer different questions.
 - **Automating `steward_check.py`.** Steward-owned agents follow §1g — ping, do not chase.
