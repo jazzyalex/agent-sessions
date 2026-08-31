@@ -1095,79 +1095,32 @@ Test: `testRunwayPendingOverflowMergesWithBurnSummaryCount`.
 ## QM / Runway (Claude)
 
 ### Every Claude cache write is billed at the 5-minute rate, but they are all 1-hour
-> **open** · sev: high · urg: med · verified 2026-08-30
+> **done** 2026-08-31 (`c1dcb058`)
 
-- **What:** `message.usage.cache_creation` splits into `ephemeral_5m_input_tokens` and
-  `ephemeral_1h_input_tokens`, and the two bill differently — a 5-minute write is 1.25x
-  base input, a 1-hour write is **2x**. The runway charges every cache-creation token at
-  the 5m rate. **Measured 2026-08-30** over the 60 newest local Claude sessions: 20,091
-  records carrying a `cache_creation` object, **182,878,668 cache-creation tokens, 100.00%
-  of them 1-hour, zero 5-minute**. Replaying that corpus at correct rates: **$5,556.18
-  charged vs $6,479.31 correct — the `$` view understates by 16.6%** ($923.13). Per model:
-  Fable 5 -20.6%, Opus 4.8 -17.1%, Opus 5 -12.6%, Sonnet 5 -14.1%. This is not latent and
-  not an edge case: it is every Claude session, today.
-- **Where:** the parser reads only the flat total,
-  [ClaudeRunwayTokenActivityParser.swift:426](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:426)
-  (`cacheCreation: v("cache_creation_input_tokens")`), so the 5m/1h split never reaches
-  the rate calculation. `RunwayModelPrice` has a single write column documented as the
-  5-minute rate,
-  [RunwayPriceTable.swift:8](../AgentSessions/CodexStatus/RunwayPriceTable.swift:8) and
-  the comment at [:177](../AgentSessions/CodexStatus/RunwayPriceTable.swift:177). It is
-  applied unconditionally at
-  [CodexRunwayModel.swift:1225](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1225).
-- **Fix shape:** read the `cache_creation` sub-object and carry 5m and 1h as separate
-  token streams through `ClaudeRunwayTokenActivitySample` and `RunwayModelComponent`; add
-  a fifth rate column (`cacheWrite1hPerMTok` = 2x input) to `RunwayModelPrice`, to
-  **both** `docs/prices.json` and `RunwayPriceTable.bundledJSON`, advancing `updated`.
-  Keep the flat `cache_creation_input_tokens` as the fallback for records with no
-  sub-object, charged at the existing 5m rate.
-- **Why deferred:** it is a rate change across two shipped surfaces plus a served
-  manifest, not a one-line fix, and `dollarsPerHour` doubles as the weighting function for
-  weekly `%/h` ([CodexRunwayModel.swift:1148](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1148)),
-  so correcting one provider's level shifts cross-provider weights too.
-- **Risk if wrong:** do not simply reprice the single write column to 2x — that would
-  overcharge any genuine 5m write, and 5m is what the field is documented as. Do not infer
-  the tier from anything but the observed sub-object. And if a new price key is added to
-  `bundledJSON` only, a fetched manifest overwrites the table and the session drops out of
-  `$` entirely via the unpriced-slice branch at
-  [CodexRunwayModel.swift:1221](../AgentSessions/CodexStatus/CodexRunwayModel.swift:1221).
-- **To close:** a session whose cache creation is 100% 1h prices 2x input on that
-  component; a synthetic 5m session still prices 1.25x; a record with only the flat field
-  still prices; `docs/prices.json` and `bundledJSON` stay identical with `updated`
-  advanced. Pinned by a test that would fail against the current 5m-only behavior.
+Filed and fixed same-day. The `$` view had understated Claude cost by 16.6% (182.9M local
+cache-creation tokens, 100% 1-hour, billed at the 1.25x 5m rate instead of 2x). Now priced
+by TTL from the `cache_creation` sub-object. Tests:
+`testOneHourCacheWritesPriceAtDoubleInput`, `testFiveMinuteCacheWritesPriceAtTheFiveMinuteRate`,
+`testFlatCacheCreationStillPricesWhenSubObjectAbsent`,
+`testCacheCreationSubObjectReplacesFlatTotalRatherThanAddingToIt`, and
+`testServedManifestMatchesTheBundledTable` — which pins the two-copy trap this entry warned
+about, and failed for real before `RunwayPriceTable.bundledJSON` was advanced to match
+`docs/prices.json`.
 
 ### Fast mode doubles Opus rates and nothing reads `usage.speed`
-> **open** · sev: med · urg: low · verified 2026-08-30
+> **done** 2026-08-31 (`c1dcb058`)
 
-- **What:** Anthropic's fast mode bills Claude Opus 5 and Opus 4.8 at **$10/$50 per MTok
-  versus $5/$25 standard** — exactly 2x — and the response reports which tier was used in
-  `message.usage.speed`. The field is already in local session data (present at
-  `message.usage.speed` and `.toolUseResult.usage.speed`), and nothing reads it. **Latent
-  today, not active:** across the 60 newest local sessions the value is `"standard"` in
-  20,035 records and `null` in 16; `"fast"` never appears. Filed so the 2x is not
-  discovered by someone wondering why their bill disagrees with the app.
-- **Where:** `speed` is simply not read at
-  [ClaudeRunwayTokenActivityParser.swift:417-428](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:417).
-  The burst accumulator keys on `modelSlug` alone,
-  [:328](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:328). No
-  `speed` / `fast` handling exists anywhere in `AgentSessions/`.
-- **Fix shape:** thread `speed` into the sample, then widen the burst key from
-  `modelSlug` to `(modelSlug, speed)` so a session that toggles mid-burst prices each half
-  correctly, and mirror the new field through the two clamp-rescaling maps at
-  [:180-186](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:180) and
-  [:226-232](../AgentSessions/ClaudeStatus/ClaudeRunwayTokenActivityParser.swift:226) or a
-  clamped fast session silently loses its fast slice. Prefer a second rate column over a
-  blanket 2x multiplier: output is 2x here by coincidence, and cache multipliers are
-  defined off the *fast* input base.
-- **Risk if wrong:** gate on the observed `usage.speed` value, never on the model name or
-  a user setting. Opus 4.7 **errors** on `speed:"fast"` and Opus 4.6 **accepts it and then
-  bills standard** while reporting `speed: "standard"` — so a model-name heuristic doubles
-  the bill in exactly the case that most looks like a fast session.
-- **Unverified:** that Claude Code's `/fast` writes `speed:"fast"` into the JSONL. The
-  Anthropic docs describe the API parameter and the beta header, and never mention the CLI
-  command. Confirm on a real fast-mode session before building on it.
-- **To close:** an Opus 5 session reporting `speed: "fast"` prices at $10/$50; a
-  `"standard"` session is unchanged; a session that switches mid-window prices each half.
+Filed latent (no local record ever carried `speed: "fast"`) and implemented same-day, so
+the 2x on Opus 5 / Opus 4.8 is priced before anyone meets it on a bill. Reads the observed
+`usage.speed` rather than the model name — the trap this entry flagged, since Opus 4.6
+accepts `speed:"fast"` and then bills standard. Tests:
+`testFastModePricesAtTheFastRateSet`, `testStandardSpeedIsUnchangedByFastModeSupport`,
+`testBurstStraddlingASpeedSwitchPricesEachHalf`,
+`testFastSpeedOnAModelWithoutFastRatesIsUnpriceable`, plus
+`testCrossSessionClampPreservesTheSpeedTier` / `testPerPathClampPreservesTheSpeedTier` for
+the clamp-rescaling paths. **Still unverified:** that Claude Code's `/fast` writes
+`speed:"fast"` into the JSONL — the pricing is right either way, but nothing has yet
+observed a real fast session locally.
 
 ### Model-scoped weekly limit is read and shown, but never picked as the bottleneck
 > **partial** · sev: low · urg: low · verified 2026-08-28

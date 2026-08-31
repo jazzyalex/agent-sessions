@@ -45,14 +45,14 @@ notes:
   - "2026-08-21 full format check: bumped Codex 0.147.0->0.149.0, Claude 2.1.220->2.1.239, OpenCode 1.18.18->1.18.21, Antigravity 1.1.12->1.1.14, Copilot 1.0.79->1.0.80, Kimi 0.36.1->0.38.0, and Grok 1.0.4->1.0.5. Codex 0.149 adds an additive item_completed family (parsed_cmd, duration, memory_citation, ordinal on every record) while still emitting custom_tool_call, so no parser change was needed; Claude added five additive types incl. bridge-session; OpenCode added part.patch; Kimi 0.38.0 stamps agentId on 13 wire types and adds token_counting.*. Antigravity truncated_fields was already handled and was only a fixture gap. Hermes stays 0.17.0 and Qwen stays 0.14.3 -- neither can produce a session from its installed build. Two tooling traps recorded in the ledger: rebuild_stage0_baseline.py ignores db_roots (so it swept the wrong OpenCode store), and kimi prebump sessions land in a sandbox the tool never sees. Gemini CLI references were removed from the monitoring skill and scripts."
 agents:
   codex_cli:
-    max_verified_version: "0.149.0"
+    max_verified_version: "0.151.0"
     version_field: "payload.cli_version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/codex/small.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/large.jsonl"
       - "Resources/Fixtures/stage0/agents/codex/schema_drift.jsonl"
   claude_code:
-    max_verified_version: "2.1.239"
+    max_verified_version: "2.1.251"
     version_field: "version"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/claude/small.jsonl"
@@ -111,7 +111,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/openclaw/large.jsonl"
       - "Resources/Fixtures/stage0/agents/openclaw/schema_drift.jsonl"
   cursor:
-    max_verified_version: "2026.8.11"
+    max_verified_version: "2026.8.25"
     version_field: "not_logged"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/cursor/small.jsonl"
@@ -120,7 +120,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/cursor/subagent/parent.jsonl"
       - "Resources/Fixtures/stage0/agents/cursor/subagent/subagents/child.jsonl"
   pi:
-    max_verified_version: "0.84.2"
+    max_verified_version: "0.84.3"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, resume/copy-resume commands, analytics, and weekly session-format monitoring"
     unsupported_surfaces:
@@ -141,7 +141,7 @@ agents:
       - "AgentSessionsTests/PiResumeCommandBuilderTests.swift"
       - "AgentSessionsTests/PiCLIEnvironmentTests.swift"
   kimi_code:
-    max_verified_version: "0.38.0"
+    max_verified_version: "0.39.1"
     version_field: "not_logged"
     support_scope: "tier-2 local JSONL transcript discovery, browsing, search, Preferences controls, colors, copy-resume command, launch-in-terminal resume, analytics, and weekly session-format monitoring"
     unsupported_surfaces:

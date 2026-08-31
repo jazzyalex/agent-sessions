@@ -403,6 +403,87 @@ final class Stage0GoldenFixturesTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - 2026-08-30 format sweep
+
+    // Claude 2.1.251 writes `artifact-autoreact-ledger` / `artifact-comment-monitor`
+    // records. They carry no role and no content, so they reach `.meta` through the
+    // SessionEventKind.from fallback rather than a named case.
+    func testClaudeArtifactLedgerRecordsSurviveParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/claude/small.jsonl")
+        guard let full = ClaudeSessionParser.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        for type in ["artifact-autoreact-ledger", "artifact-comment-monitor"] {
+            XCTAssertFalse(metaEvents(withType: type, in: full.events).isEmpty,
+                           "\(type) should survive parsing as .meta")
+        }
+    }
+
+    // Codex 0.151 nests subagent lifecycle under `item_completed`. The payload exposes no
+    // role/type at its top level, so it resolves to `.meta` (non-breaking). Codex rawJSON
+    // is stored plain, not base64 like Claude's.
+    func testCodexItemCompletedSubAgentActivitySurvivesParsing() throws {
+        let url = FixturePaths.stage0FixtureURL("agents/codex/small.jsonl")
+        let idx = SessionIndexer()
+        guard let full = idx.parseFileFull(at: url) else {
+            return XCTFail("full parse returned nil")
+        }
+        let items = full.events.filter {
+            $0.kind == .meta && $0.rawJSON.contains("\"type\":\"item_completed\"")
+        }
+        XCTAssertFalse(items.isEmpty, "item_completed event should survive parsing as .meta")
+    }
+
+    /// The invariant that matters most about these fixtures: they are committed, public
+    /// artifacts, so no identifier may ever appear as a dict KEY in one.
+    ///
+    /// `rebuild_stage0_baseline._redact` blanks string *values* but never dict *keys*, so
+    /// a map keyed by an id serialises its real ids into the fixture as if they were
+    /// schema. That is what `_NESTED_OPAQUE_KEYS` prevents. On 2026-08-30 Claude's
+    /// `artifacts` map — keyed by artifact UUID — was one emit away from doing exactly
+    /// this; it is opaque-listed now and lands as an empty dict. This test is the
+    /// forcing function, so the next unlisted id-keyed map fails here rather than
+    /// shipping and making every future id read as schema drift.
+    func testCommittedFixturesCarryNoIdentifierShapedDictKeys() throws {
+        let uuidish = try NSRegularExpression(
+            pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        var offenders: [String] = []
+
+        func scan(_ value: Any, path: String, fixture: String) {
+            if let dict = value as? [String: Any] {
+                for (key, child) in dict {
+                    let range = NSRange(key.startIndex..., in: key)
+                    if uuidish.firstMatch(in: key, range: range) != nil {
+                        offenders.append("\(fixture): \(path).\(key)")
+                    }
+                    scan(child, path: "\(path).\(key)", fixture: fixture)
+                }
+            } else if let list = value as? [Any] {
+                for item in list { scan(item, path: "\(path)[]", fixture: fixture) }
+            }
+        }
+
+        let root = FixturePaths.stage0FixtureURL("agents")
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            return XCTFail("could not enumerate \(root.path)")
+        }
+        var scanned = 0
+        for case let url as URL in walker where url.pathExtension == "jsonl" {
+            scanned += 1
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let name = url.lastPathComponent
+            for line in text.split(separator: "\n") {
+                guard let data = line.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) else { continue }
+                scan(obj, path: "", fixture: name)
+            }
+        }
+        XCTAssertGreaterThan(scanned, 0, "no fixtures were scanned — the walk found nothing")
+        XCTAssertTrue(offenders.isEmpty,
+                      "identifier-shaped dict keys in committed fixtures: \(offenders.prefix(10))")
+    }
+
     private func metaEvents(withType type: String, in events: [SessionEvent]) -> [SessionEvent] {
         metaEvents(containing: "\"type\":\"\(type)\"", in: events)
     }

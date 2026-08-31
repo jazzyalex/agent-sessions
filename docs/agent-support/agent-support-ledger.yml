@@ -9,6 +9,69 @@
 # - Claude + Codex include separate "usage/limits" channels which must be monitored.
 #
 entries:
+  - agent_sessions_version: "5.1.0"
+    as_of_date_utc: "2026-08-31"
+    as_of_commit: "e27ea63b"
+    verified:
+      codex:
+        sessions:
+          max_verified_version: "0.151.0"
+          scope: "tier-1 support unchanged; multi-agent/subagent family covered"
+          evidence: ["Resources/Fixtures/stage0/agents/codex/small.jsonl", "scripts/probe_scan_output/agent_watch/20260831-060445Z/report.json"]
+          notes: "Bumped 0.149.0->0.151.0 on real local sessions written BY 0.151.0 today (5636 events, sample_older_than_cli=false), not on a prebump. 0.151 is a multi-agent release: item_completed items gain agent_path/agent_thread_id on a SubAgentActivity kind, session_meta gains subagent_history_start_ordinal/thread_source/multi_agent_version/forked_from_id, world_state.state gains context_window_guidance + empty persistent_mode/managed_developer_instructions, and message metadata gains content_item_kinds. All additive; unknown types reach .meta via SessionEvent.from's terminal fallback, verified end-to-end by the five drifted sessions being indexed with 38-48KB of extracted text each. Fixture rebuilt over 1190 sessions (31 missing pairs across 10 buckets). VALUE PASS: the sweep's headline finding is NOT the new fields - it is that 0.151 moved subagent identity off agent_role onto agent_path/agent_nickname, leaving agent_role null on 80 of 287 thread_spawn subagents (27.9%) so their session-list badge renders blank, while CodexRunwayModel.swift:1899 already reads agent_nickname and names them in the HUD. Filed. agent_thread_id was investigated as a hierarchy source and REJECTED: parent_thread_id is already read at SessionIndexer.swift:2039, and 11 of 53 SubAgentActivity items point at the PARENT, so edge-derivation from it inverts them. content_item_kinds filed; ordinal/context_window_guidance/persistent_mode/managed_developer_instructions/subagent_history_start_ordinal recorded as watch."
+      claude:
+        sessions:
+          max_verified_version: "2.1.251"
+          scope: "tier-1 support unchanged; three additive keys covered"
+          evidence: ["Resources/Fixtures/stage0/agents/claude/small.jsonl", "scripts/probe_scan_output/agent_watch/20260831-060445Z/report.json"]
+          notes: "Bumped 2.1.239->2.1.251 on real local sessions written BY 2.1.251 (2924 events, stale=false). New keys: attachment:deferred_tools_delta.failedMcpServers (empty [] in all 29 observations), queue-operation.reason (only value absorbed_mid_turn), user.queueSkipAttachments (always true). All additive, all recorded as watch/noise. Fixture rebuilt over 1910 sessions; the gap was 60 pairs across 17 buckets BEFORE an opaque-key fix and 23 across 8 after. CRITICAL, caught one emit before it shipped: artifact-autoreact-ledger.artifacts and artifact-comment-monitor.artifacts are maps keyed by ARTIFACT UUID. _redact blanks values but never dict KEYS, so emitting would have written real artifact ids into a committed public fixture as if they were schema, after which every artifact any user ever created would report as Claude drift forever - the collab_waiting_end.statuses failure repeating. `artifacts` is now in _NESTED_OPAQUE_KEYS[claude] and emits as an empty dict. Pinned generally by Stage0GoldenFixturesTests.testCommittedFixturesCarryNoIdentifierShapedDictKeys, which scans every committed fixture for UUID-shaped dict keys so the next unlisted id-keyed map fails in CI instead of shipping."
+      cursor:
+        sessions:
+          max_verified_version: "2026.8.25"
+          scope: "supports_latest - fresh session from the installed build matches baseline"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060234Z-prebump/report.json"]
+          notes: "Bumped 2026.8.11->2026.8.25. cursor_agent_print prebump ok=True, fresh_matches_baseline=True, run with --allow-real-home (real_home_session). Weekly verdict supports_latest, installed == upstream == 2026.8.25, unknown_types [] / unknown_keys {}. Sample is 21 events at 0.667 coverage - above the thin gate on coverage, and the prebump is what carries the claim."
+      pi:
+        sessions:
+          max_verified_version: "0.84.3"
+          scope: "installed build only; upstream 0.84.4 is newer and unverified"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060144Z-prebump/report.json"]
+          notes: "Bumped 0.84.2->0.84.3, deliberately to INSTALLED and not to upstream 0.84.4: a bump claims the app parses sessions written by that build, and nothing has produced a 0.84.4 session. pi_prompt prebump ok=True, fresh_matches_baseline=True. Driver warned that /Users/<user>/.pi/agent/auth.json is older than 90 days; it still authenticated, but expect a re-auth prompt on a future run."
+      kimi:
+        sessions:
+          max_verified_version: "0.39.1"
+          scope: "supports_latest - fresh session from the installed build matches baseline"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060144Z-prebump/report.json"]
+          notes: "Bumped 0.38.0->0.39.1. kimi_prompt prebump ok=True, fresh_matches_baseline=True; weekly supports_latest with 468 events at 0.8125 coverage, the strongest sample in this pass. Also closed a stale backlog entry claiming kimi has no prebump driver - KimiPromptDriver has existed since 15a7f21b (2026-08-14); the entry was stamped `verified —` and had never been re-checked."
+    not_verified:
+      copilot:
+        sessions:
+          held_at_version: "1.0.80"
+          installed_version: "1.0.82"
+          reason: "format_drift_detected, confirmed by BOTH prebump and weekly - not bumped"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060234Z-prebump/report.json"]
+          notes: "copilot_prompt prebump ok=True but fresh_matches_baseline=FALSE - a session written by the installed 1.0.82 does not match baseline. This is the case prebump exists for: the weekly had been reporting blocked_stale_sample, which per SKILL 5a means UNKNOWN and was hiding real drift. New: assistant.message.data.reasoningBlocks{provider, blocks{signature,thinking,type}} - reasoning/thinking content the transcript does not render, a value-pass candidate; session.shutdown.data.agentMetrics.main{modelMetrics,totalApiDurationMs,totalNanoAiu}; session.usage_checkpoint.data.promptCacheBreakState{conversation,lastActiveModel,models,pendingRewriteSources}; user.message.data.turnId. WARNING before any copilot baseline rebuild: promptCacheBreakState.models is keyed by MODEL ID (observed key: claude-haiku-4.5) - it must go into _NESTED_OPAQUE_KEYS[copilot] alongside the existing modelMetrics, or every new model will read as copilot drift, the same failure just caught on Claude's artifacts map."
+      antigravity:
+        sessions:
+          held_at_version: "1.1.14"
+          installed_version: "1.1.22"
+          reason: "prebump driver failed; no session proven to be written by 1.1.22"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060234Z-prebump/report.json"]
+          notes: "The weekly recommended bump_verified_version and the local sample matches baseline, but that rests on a sample matching - not on proof 1.1.22 WROTE it, which is what max_verified_version claims. antigravity_print failed rc=1: the driver's tool-using prompt was refused by antigravity's own permission gate ('permission check failed for command \"ls -la\": user denied permission'), so no fresh session exists. Compounding it, antigravity is real_home_session, so a failed run can still leave a degraded stub in the real store and refresh the sample it is judged on (the SKILL 1a trap). Its 54-event sample at 0.385 coverage is the weakest in this pass. Held deliberately across an 8-version gap. To close: make the driver's prompt survive the one-shot permission gate, then re-run prebump."
+      opencode:
+        sessions:
+          held_at_version: "1.18.21"
+          installed_version: "1.18.25"
+          reason: "upstream server error - cannot generate a session"
+          notes: "opencode_run failed rc=1. NOT the SKILL 1c npm-stub trap: /opt/homebrew/bin/opencode is a real Mach-O arm64 executable reporting 1.18.25. The driver reached OpenCode's backend and got {\"type\":\"error\",\"error\":{\"name\":\"UnknownError\",\"data\":{\"message\":\"Unexpected server error. Check server logs for details.\",\"ref\":\"err_42014830\"}}}. Provider-side outage, neither a schema change nor ours to fix. Retry later."
+      grok:
+        sessions:
+          held_at_version: "1.0.5"
+          installed_version: "1.0.5"
+          reason: "prebump passes, but installed == verified so there is nothing to bump"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-060426Z-prebump/report.json"]
+          notes: "grok_single prebump ok=True, fresh_matches_baseline=True after the maintainer re-authenticated mid-sweep (the first run failed with 'Not signed in'). Substance confirmed rather than assumed: baseline_type_count 15 (non-zero, so a baseline was genuinely consulted and this is not the vacuous-compare bug that hit grok's first driver), 9 events at 0.667 coverage, unknowns empty. Upstream is 1.0.13 via the cask; installing it would require completing the install -> prebump -> verify loop, so it was left alone."
+
   - agent_sessions_version: "5.0.1"
     as_of_date_utc: "2026-08-21"
     as_of_commit: "44d09021"

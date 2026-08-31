@@ -871,7 +871,21 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # report artifacts. `arguments`/`parameters`/`inputSchema`/`_meta` are free-form
     # tool payloads with the same problem minus the leak.
     # `changes` is keyed by absolute file path and `statuses` by thread UUID.
-    "codex": {"changes", "statuses", "arguments", "parameters", "inputSchema", "_meta"},
+    # `structuredContent` is an MCP `CallToolResult` payload, so its whole substructure
+    # belongs to whichever connector ran: 152 local records carried `emails` +
+    # `next_page_token` (a Gmail connector), `responses`, and `execution_duration_ms`.
+    # PROPHYLACTIC, not currently load-bearing: it sits at
+    # `event_msg.payload:item_completed.item.result.structuredContent`, i.e. depth 4, and
+    # nested_depth is 3 — so the walk already stops above it and listing it changes no
+    # current diff (verified 2026-08-30: no `structuredContent.*` bucket exists in any
+    # report). Kept because 0.151 also added `response_item.payload:function_call_output`
+    # at depth 2, so the same payload appearing one level shallower would silently make
+    # every newly-used connector read as Codex drift. Delete it only after confirming
+    # no reachable path exposes it.
+    "codex": {
+        "changes", "statuses", "arguments", "parameters", "inputSchema", "_meta",
+        "structuredContent",
+    },
     # Claude's envelope is rich enough that flat fingerprinting caught envelope drift,
     # but `.message` was opaque — hiding content-block types and the whole `usage`
     # struct (cache_creation, server_tool_use, iterations). Nesting exposes those. The
@@ -881,7 +895,12 @@ _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # `headers` is an HTTP response header map — open-ended, CDN-dependent, and it
     # carries set-cookie; its KEY NAMES would land in fixtures and reports. `mcpMeta`
     # is whatever an MCP server chose to return.
-    "claude": {"input", "toolUseResult", "headers", "mcpMeta"},
+    # `artifacts` (on `artifact-autoreact-ledger` / `artifact-comment-monitor`) is a map
+    # keyed by ARTIFACT UUID. `_redact` blanks values but never dict keys, so emitting it
+    # would write real artifact ids into a committed fixture as if they were schema, and
+    # every artifact anyone creates later would then read as Claude drift. Same class as
+    # `collab_waiting_end.statuses`; caught 2026-08-30 before the first emit.
+    "claude": {"input", "toolUseResult", "headers", "mcpMeta", "artifacts"},
     # Grok's transcript nests the parts that matter (content blocks, tool_calls,
     # reasoning summaries, backend_tool_call kinds), so it is worth walking. The one
     # exclusion is `arguments` — a tool's own parameter object, where every new tool
