@@ -1259,10 +1259,7 @@ actor ClaudeStatusService {
             snapshot.sessionRemainingPercent = sessionPercent
             snapshot.sessionResetText = formatResetTime(session["resets"] as? String ?? "", isWeekly: false)
             snapshot.weekAllModelsRemainingPercent = weekPercent
-            let weekResetRaw = weekAll["resets"] as? String ?? ""
-            snapshot.weekAllModelsResetText = formatResetTime(weekResetRaw, isWeekly: true)
-            // Unformatted, for anchoring — see `weekAllModelsResetRaw`.
-            snapshot.weekAllModelsResetRaw = weekResetRaw
+            snapshot.weekAllModelsResetText = formatResetTime(weekAll["resets"] as? String ?? "", isWeekly: true)
 
             if let weekOpus = obj["week_opus"] as? [String: Any] {
                 snapshot.weekOpusRemainingPercent = weekOpus["pct_left"] as? Int

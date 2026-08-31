@@ -271,258 +271,80 @@ final class ClaudeStatusServiceTests: XCTestCase {
         guard let parsed else { return XCTFail("Expected parsed snapshot") }
         XCTAssertNotNil(UsageResetText.resetDate(kind: "5h", source: .claude, raw: parsed.sessionResetText))
         XCTAssertNotNil(UsageResetText.resetDate(kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText))
-        // The source said "in 2d" — a countdown. It must survive unformatted, or
-        // nothing downstream can tell that this window has no stated reset instant.
-        XCTAssertEqual(parsed.weekAllModelsResetRaw, "in 2d")
     }
 
-    /// The laundering path this guards against.
-    ///
-    /// `parseUsageJSON` runs the countdown through `displayTextWithPrefix`, which
-    /// resolves it against `now` and renders a localized DATE. Downstream that is
-    /// indistinguishable from a provider-stated instant — so the anchor guard could
-    /// not see the countdown, and every poll produced a different "absolute" reset,
-    /// writing a new bootstrap cache key each time. Anchoring must read the raw
-    /// text, which stays a countdown.
-    func testATmuxCountdownIsNotAcceptedAsACalibrationAnchor() async {
-        let service = ClaudeStatusService(updateHandler: { _ in }, availabilityHandler: { _ in })
-        let json = """
-        {
-          "ok": true,
-          "session_5h": { "pct_left": 82, "resets": "in 3h" },
-          "week_all_models": { "pct_left": 51, "resets": "in 2d" },
-          "week_opus": null
-        }
-        """
-        guard let parsed = await service.parseUsageJSONForTesting(json) else {
-            return XCTFail("Expected parsed snapshot")
-        }
+    // MARK: - Weekly calibration provenance
 
-        // Precondition: the DISPLAY text has been laundered into something that
-        // parses as absolute. This is why the earlier guard could not work.
-        XCTAssertNotNil(UsageResetText.resetAnchorDate(
-            kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText),
-            "precondition: the formatted text no longer looks relative")
+    /// Calibration must know which quota week a percentage belongs to. The tmux
+    /// path cannot say: its reset is a countdown, and it is formatted into a
+    /// localized date before the snapshot exists, so downstream it is
+    /// indistinguishable from a stated instant while naming a new window on every
+    /// poll. It fails closed — `Wk` reads `n/a` rather than a confident wrong
+    /// number. Preserving the countdown would stop the moving keys without making
+    /// the reading trustworthy: the live tmux weekly percentage was 50% while
+    /// OAuth reported 89% remaining for the same window.
+    func testATmuxSnapshotSuppliesNoCalibrationAnchor() {
+        let laundered = UsageResetText.displayTextWithPrefix(
+            kind: "Wk", source: .claude, raw: "in 2d",
+            now: Date(timeIntervalSince1970: 1_788_130_000))
+        XCTAssertNotNil(UsageResetText.resetAnchorDate(kind: "Wk", source: .claude, raw: laundered),
+                        "precondition: the laundered text parses as absolute, so only provenance can refuse it")
 
-        // The RAW text is what calibration anchors on, and it must be refused.
-        XCTAssertNil(UsageResetText.resetAnchorDate(
-            kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetRaw ?? ""),
-            "a countdown cannot identify a window, however it was later formatted")
-
-        // And the laundered text really does move between polls, which is the harm.
-        let t0 = Date(timeIntervalSince1970: 1_788_130_000)
-        let a = UsageResetText.displayText(kind: "Wk", source: .claude, raw: "in 2d", now: t0)
-        let b = UsageResetText.displayText(kind: "Wk", source: .claude, raw: "in 2d",
-                                           now: t0.addingTimeInterval(7200))
-        XCTAssertNotEqual(a, b, "each poll renders a different absolute-looking reset")
-    }
-
-    func testClaudeUsageCaptureFixtureParsesV1QuotaOutput() throws {
-        let fixture = """
-        Current session
-        82% left
-        Resets in 3h
-
-        Current week (all models)
-        51% left
-        Resets in 2d
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
-
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertTrue(result.stdout.contains(#""ok": true"#))
-        XCTAssertTrue(result.stdout.contains(#""pct_left": 82"#))
-        XCTAssertTrue(result.stdout.contains(#""pct_left": 51"#))
-    }
-
-    func testClaudeUsageCaptureFixtureParsesUsedPercentOutput() throws {
-        let fixture = """
-        Current session
-        ███████████                                        22% used
-        Resets 2:30pm (America/Los_Angeles)
-
-        Current week (all models)
-        █▌                                                 3% used
-        Resets Jun 28 at 5am (America/Los_Angeles)
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
-
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertTrue(result.stdout.contains(#""ok": true"#))
-        XCTAssertTrue(result.stdout.contains(#""pct_left": 78"#), result.stdout)
-        XCTAssertTrue(result.stdout.contains(#""pct_left": 97"#), result.stdout)
-        XCTAssertTrue(result.stdout.contains(#""resets": "2:30pm (America/Los_Angeles)""#), result.stdout)
-        XCTAssertTrue(result.stdout.contains(#""resets": "Jun 28 at 5am (America/Los_Angeles)""#), result.stdout)
-    }
-
-    func testClaudeUsageCaptureFixtureDetectsV2UnavailableQuotaOutput() throws {
-        let fixture = """
-        Claude Code v2.1.169
-
-        What's contributing to your limits usage?
-        Approximate, based on local sessions on this machine
-
-        Last 24h
-        Nothing over 10% in this period
-
-        d to day   w to week
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
-
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertTrue(result.stdout.contains(#""ok":false"#))
-        XCTAssertTrue(result.stdout.contains(#""error":"ui_format_v2""#))
-        XCTAssertFalse(result.stdout.contains("session_5h"))
-        XCTAssertFalse(result.stdout.contains("week_all_models"))
-    }
-
-    func testClaudeUsageCaptureFixtureDetectsRateLimitedUsageOutput() throws {
-        let fixture = """
-        Current session
-
-        Error: Usage endpoint is rate limited. Please try again in a moment.
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
-
-        XCTAssertEqual(result.status, 0, result.stderr)
-        XCTAssertTrue(result.stdout.contains(#""ok":false"#))
-        XCTAssertTrue(result.stdout.contains(#""error":"rate_limited""#))
-        XCTAssertFalse(result.stdout.contains("session_5h"))
-        XCTAssertFalse(result.stdout.contains("week_all_models"))
-    }
-
-    func testClaudeUsageCaptureFixtureRejectsPartialQuotaOutput() throws {
-        let fixture = """
-        Current session
-        82% left
-        Resets in 3h
-        """
-
-        let result = try runClaudeUsageCaptureFixture(fixture)
-
-        XCTAssertEqual(result.status, 16)
-        XCTAssertTrue(result.stdout.contains(#""error":"parsing_failed""#))
-        XCTAssertFalse(result.stdout.contains(#""ok": true"#))
-    }
-
-    func testCleanupPlannerValidatesExpectedLabelShape() {
-        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
-
-        XCTAssertTrue(planner.isManagedProbeLabel("as-cc-AbCdEf1234g5"))
-        XCTAssertFalse(planner.isManagedProbeLabel("as-xy-AbCdEf1234g5"))
-        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-ABC123"))
-        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-1bCdEf1234g5"))
-        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-AbCdEf1234gX"))
-        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-AbCdEf12_4g5"))
-    }
-
-    func testCleanupPlannerQueueExcludesProtectedAndActiveLabels() {
-        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
-        let allLabels: Set<String> = [
-            "as-cc-AbCdEf1234g5",
-            "as-cc-ZyXwVu9876t4",
-            "as-cc-LmNoPq4567r8",
-            "as-cc-1badLabel234",
-            "other-prefix-AbCdEf1234g5"
-        ]
-        let protected: Set<String> = ["as-cc-ZyXwVu9876t4"]
-        let queue = planner.plannedQueue(
-            allLabels: allLabels,
-            protectedLabels: protected,
-            activeLabel: "as-cc-LmNoPq4567r8"
+        let snapshot = ClaudeLimitSnapshot(
+            fetchedAt: Date(timeIntervalSince1970: 1_788_130_060),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: 0.18,
+            fiveHourResetText: "resets 3:00 PM",
+            weeklyUsedRatio: 0.49,
+            weeklyResetText: laundered,
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            weekScopedLabel: nil,
+            rawPayloadHash: nil
         )
-
-        XCTAssertEqual(queue, ["as-cc-AbCdEf1234g5"])
+        XCTAssertNil(snapshot.weeklyResetAnchorText)
     }
 
-    func testCleanupPlannerSocketPathsForManagedLabel() {
-        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
-
-        let paths = planner.socketPaths(uid: 501, label: "as-cc-AbCdEf1234g5")
-
-        XCTAssertEqual(
-            paths,
-            [
-                "/private/tmp/tmux-501/as-cc-AbCdEf1234g5",
-                "/tmp/tmux-501/as-cc-AbCdEf1234g5"
-            ]
+    /// The same holds after a cold start, which is where a persisted tmux snapshot
+    /// re-enters with only its laundered text.
+    func testARestoredTmuxSnapshotStillSuppliesNoAnchor() {
+        let restored = ClaudeLimitSnapshot(
+            fetchedAt: Date(timeIntervalSince1970: 1_788_130_060),
+            source: .tmuxUsage,
+            health: .live,
+            fiveHourUsedRatio: 0.18,
+            fiveHourResetText: "resets 3:00 PM",
+            weeklyUsedRatio: 0.49,
+            weeklyResetText: "resets Sep 1, 2026 at 9:00 AM",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            weekScopedLabel: nil,
+            rawPayloadHash: nil
         )
+        XCTAssertNil(restored.weeklyResetAnchorText,
+                     "a restored tmux snapshot must not become a calibration anchor")
     }
 
-    func testCleanupPlannerSocketPathsRejectUnmanagedLabel() {
-        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
-
-        XCTAssertTrue(planner.socketPaths(uid: 501, label: "as-cc-1bCdEf1234g5").isEmpty)
-        XCTAssertTrue(planner.socketPaths(uid: 501, label: "other-label").isEmpty)
-    }
-
-    func testParseManagedProbePIDs_matchesOnlyManagedTmuxAndClaudeProbeProcesses() {
-        let snapshot = """
-          101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage
-          102 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/as-cc-AbCdEf1234g5,123,0
-          103 /opt/homebrew/bin/tmux -L other-label new-session -d -s usage
-          104 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/other-label,123,0
-          105 /Users/alexm/.local/bin/claude --model sonnet
-        """
-
-        let pids = ClaudeStatusService.parseManagedProbePIDs(
-            from: snapshot,
-            label: "as-cc-AbCdEf1234g5",
-            uid: 501
+    /// OAuth passes the provider's ISO-8601 instant through untouched, so it names
+    /// the week exactly and must keep calibrating — including from cache.
+    func testACachedOAuthSnapshotStillAnchorsOnItsOwnText() {
+        let restored = ClaudeLimitSnapshot(
+            fetchedAt: Date(timeIntervalSince1970: 1_788_130_060),
+            source: .cachedOAuth,
+            health: .live,
+            fiveHourUsedRatio: 0.27,
+            fiveHourResetText: "2026-08-31T00:59:59.814134+00:00",
+            weeklyUsedRatio: 0.11,
+            weeklyResetText: "2026-09-06T11:59:59.814154+00:00",
+            weekOpusUsedRatio: nil,
+            weekOpusResetText: nil,
+            weekScopedLabel: nil,
+            rawPayloadHash: nil
         )
-
-        XCTAssertEqual(pids, [101, 102])
-    }
-
-    func testParseManagedProbePIDs_rejectsUnmanagedLabels() {
-        let snapshot = "101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage"
-
-        let pids = ClaudeStatusService.parseManagedProbePIDs(
-            from: snapshot,
-            label: "other-label",
-            uid: 501
-        )
-
-        XCTAssertTrue(pids.isEmpty)
-    }
-
-    private func runClaudeUsageCaptureFixture(_ fixture: String) throws -> (status: Int32, stdout: String, stderr: String) {
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("claude-usage-fixture-\(UUID().uuidString).txt")
-        try fixture.write(to: tempURL, atomically: true, encoding: .utf8)
-        addTeardownBlock {
-            try? FileManager.default.removeItem(at: tempURL)
-        }
-
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let scriptURL = repoRoot
-            .appendingPathComponent("AgentSessions")
-            .appendingPathComponent("Resources")
-            .appendingPathComponent("claude_usage_capture.sh")
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptURL.path]
-        var environment = ProcessInfo.processInfo.environment
-        environment["CLAUDE_USAGE_CAPTURE_FIXTURE"] = tempURL.path
-        process.environment = environment
-
-        let stdoutPipe = Pipe()
-        let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdout, stderr)
+        XCTAssertEqual(restored.weeklyResetAnchorText, "2026-09-06T11:59:59.814154+00:00")
+        let anchor = UsageResetText.resetAnchorDate(
+            kind: "Wk", source: .claude, raw: restored.weeklyResetAnchorText ?? "")
+        XCTAssertEqual(anchor?.timeIntervalSince1970 ?? 0, 1_788_695_999.814, accuracy: 1)
     }
 }

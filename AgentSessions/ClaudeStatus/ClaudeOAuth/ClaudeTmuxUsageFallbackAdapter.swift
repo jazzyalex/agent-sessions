@@ -82,7 +82,6 @@ actor ClaudeTmuxUsageFallbackAdapter {
             fiveHourResetText: s.sessionResetText,
             weeklyUsedRatio: weeklyRatio,
             weeklyResetText: s.weekAllModelsResetText,
-            weeklyResetRaw: s.weekAllModelsResetRaw,
             weekOpusUsedRatio: weekOpusRatio,
             weekOpusResetText: s.weekOpusResetText,
             rawPayloadHash: nil

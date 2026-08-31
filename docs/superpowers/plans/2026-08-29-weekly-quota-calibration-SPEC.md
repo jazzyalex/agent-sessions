@@ -227,18 +227,26 @@ a 120s deadline so a stalled scan cannot pin the clock forever.
   then.** `parseUsageJSON` runs the tmux reset through `displayTextWithPrefix`
   first, which resolves "in 2d" against `now` and renders a localized DATE. Every
   downstream consumer — including the anchor guard — sees an absolute-looking
-  string that happens to differ on every poll, and no parser can recover the fact
-  that it was a countdown. The source's own text is therefore carried unformatted
-  as `ClaudeUsageSnapshot.weekAllModelsResetRaw` → `ClaudeLimitSnapshot.weeklyResetRaw`,
-  and calibration anchors on that. The OAuth and web paths pass their ISO-8601
-  string through untouched, so they leave it nil and are unaffected.
+  string that merely differs on every poll, and no parser can recover the fact
+  that it was a countdown. A persisted tmux snapshot carries that laundered text
+  into the next cold start, so this survives a restart.
 
-  Worth recording how this was missed: the anchor guard was verified against a
-  live app that was on the OAuth path both times, so the failing path was never
-  exercised. A fix verified only on the healthy path is not verified. The
-  regression test now starts from the raw tmux JSON fixture and asserts the
-  laundering explicitly — that the formatted text *does* parse as absolute, and
-  that the raw text is refused anyway.
+  **The rule is therefore provenance, not parsing: calibration is allowed only from
+  a source that states which quota week it means.** `ClaudeLimitSnapshot.weeklyResetAnchorText`
+  returns the provider's own ISO-8601 instant for the OAuth and web paths and
+  `nil` for tmux. On a tmux-only account `Wk` reads `n/a`.
+
+  Carrying the raw countdown through the model instead was tried and rejected as
+  more machinery than the problem warrants. It would stop the moving keys without
+  making the reading trustworthy — the live tmux weekly percentage was 50% while
+  OAuth reported 89% remaining for the same window — and tmux emits nothing but
+  countdowns, so the preserved text would be refused on arrival anyway. Keeping all
+  reset text raw through the model and formatting only in views is the sound
+  architectural version; it is a broader cleanup and is not needed for safety here.
+
+  Worth recording how the first attempt was missed: the anchor guard was verified
+  against a live app that was on the OAuth path both times, so the failing path was
+  never exercised. A fix verified only on the healthy path is not verified.
 - **The ledger must vouch for the span it freshens.** `activity(from:to:)` answers
   from a single bucket, so freshening silently accepted intervals it never watched
   and undercounted the denominator — which overstates burn rather than failing

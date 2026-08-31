@@ -17,13 +17,6 @@ struct ClaudeLimitSnapshot: Equatable, Codable {
     var fiveHourResetText: String       // Raw reset string for UsageResetText formatting
     var weeklyUsedRatio: Double?        // 0...1, nil = not available
     var weeklyResetText: String
-    /// The weekly reset as the SOURCE stated it, when that differs from the text
-    /// above. The tmux path formats a countdown into a localized date before this
-    /// snapshot is built, which makes a per-poll moving target indistinguishable
-    /// from a fixed instant downstream. Calibration anchors on this; nil means the
-    /// source's own text is already in `weeklyResetText` (the OAuth and web paths
-    /// pass their ISO-8601 string through untouched).
-    var weeklyResetRaw: String? = nil
     /// The model-scoped weekly window. Named `weekOpus` for history and for the persisted
     /// `Codable` shape: it is no longer Opus-specific. On a current account it is fed from
     /// the `weekly_scoped` entry of the response's `limits` array, whichever model that
@@ -37,6 +30,31 @@ struct ClaudeLimitSnapshot: Equatable, Codable {
     var rawPayloadHash: String?         // SHA256 of raw response body, for change detection
 
     // MARK: - Helpers
+
+    /// The weekly reset text safe to treat as a window IDENTITY, or nil when this
+    /// source cannot supply one.
+    ///
+    /// Calibration needs to know exactly which quota week a percentage belongs to.
+    /// The OAuth and web paths pass the provider's own ISO-8601 instant through
+    /// untouched, so for them `weeklyResetText` IS that identity.
+    ///
+    /// The tmux path fails closed, for two independent reasons. Its reset is a
+    /// countdown ("in 2d"), which names a different window on every poll — and it
+    /// is formatted into a localized date before this snapshot exists, so by the
+    /// time anyone sees it the countdown is unrecoverable and it reads as a stated
+    /// instant. Preserving the raw countdown would stop the moving keys, but it
+    /// would not make the reading trustworthy: the tmux weekly percentage observed
+    /// live was 50% while OAuth reported 89% remaining for the same window. A
+    /// source that cannot identify the week is not a source to calibrate from, so
+    /// `Wk` shows `n/a` on a tmux-only account rather than a confident wrong number.
+    var weeklyResetAnchorText: String? {
+        switch source {
+        case .oauthEndpoint, .cachedOAuth, .webEndpoint, .cachedWeb:
+            return weeklyResetText.isEmpty ? nil : weeklyResetText
+        case .tmuxUsage, .unavailable:
+            return nil
+        }
+    }
 
     var fiveHourRemainingPercent: Int {
         guard let ratio = fiveHourUsedRatio else { return 0 }
