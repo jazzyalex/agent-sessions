@@ -30,3 +30,38 @@ jobs:
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+  # Runs in parallel with `build`. Test artifacts stay in `.deriveddata-tests`,
+  # which avoids the intermittent nested-code-signature failures described in
+  # agents.md → Tests. `clean` is omitted: the runner is already fresh.
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Test (macOS, no signing)
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AgentSessions.xcodeproj \
+            -scheme AgentSessions \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath .deriveddata-tests \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+      # agents.md treats the test count as an invariant: green with fewer tests
+      # reads identically to green. Print the per-bundle totals from the result
+      # bundle (not stdout, which reports each bundle separately) so a drop is
+      # visible in the log even when the run passes.
+      - name: Test count
+        if: always()
+        shell: bash
+        run: |
+          bundle=$(ls -d .deriveddata-tests/Logs/Test/*.xcresult 2>/dev/null | tail -1)
+          if [ -z "$bundle" ]; then echo "no result bundle produced"; exit 0; fi
+          xcrun xcresulttool get test-results summary --path "$bundle"

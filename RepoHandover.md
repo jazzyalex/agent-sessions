@@ -1,3 +1,81 @@
+## 2026-08-31 09:59 · runway-claude-pricing · Cache-write TTL + fast-mode pricing
+status: done
+
+**State:** Shipped and pushed — `c1dcb058` on `main`. Suite **2436 pass / 3 skipped / 0
+failures**; 13 tests added, none removed. The Claude `$` view was 16.6% under because every
+cache write was charged the 5-minute 1.25x rate; 1-hour writes now price at 2x input.
+
+**Decided / don't redo:**
+- **The `cache_creation` sub-object REPLACES the flat total, never adds to it.** Real records
+  carry both `cache_creation_input_tokens: N` and `cache_creation: {5m, 1h}` summing to that
+  same N — reading both doubles the bill. Flat stays the fallback; 12 of 156 records in a
+  sampled transcript have no sub-object.
+- **Fast mode is a whole second rate set, not a 2x multiplier.** Output is 2x only by
+  coincidence of the current price list; cache multipliers are defined off the *fast* $10
+  input base. Only `claude-opus-5` / `claude-opus-4-8` carry `fast`, so a 4.6/4.7 record
+  reporting fast drops out of `$` rather than billing double. Gate on observed
+  `usage.speed` (confirmed at `message.usage.speed`), never the model name.
+- **Fast cache rates are derived, not published** — Anthropic documents only $10/$50. Latent:
+  `speed` is `"standard"` in every local record.
+- **Scope was widened past the backlog entry deliberately** — the weekly calibration ledger and
+  the Claude branch of the weekly bootstrap price the same tokens. Leaving them would carry two
+  different Claude dollar levels in one app, and `dollarsPerHour` weights weekly `%/h`.
+
+**Key files:**
+- `AgentSessions/ClaudeStatus/ClaudeRunwayLogIO.swift` — `cacheCreation(usage:)`, the single
+  shared TTL resolution. Runway and bootstrap must both use it or they silently drift.
+- `docs/prices.json` + `RunwayPriceTable.bundledJSON` — must stay identical with `updated`
+  advanced together; pinned by `testServedManifestMatchesTheBundledTable`.
+
+**Next:**
+1. Close the two `docs/backlog.md` entries against `c1dcb058` — still marked `open · sev: high`.
+2. Eight uncommitted files in the tree are **not mine** (`Stage0GoldenFixturesTests.swift`,
+   `agent_watch.py`, 2 stage0 fixtures, 3 `docs/agent-support`/tracking files, this file).
+   Commit with explicit paths.
+
+## 2026-08-30 22:43 · claude-search-ingest · Claude search corpus frozen since Aug 21
+status: done
+
+**State:** Shipped and pushed — `c11842db`, `f49df430`, `3e3859b6`, `e27ea63b` on `main`.
+Suite **2420 pass / 3 skipped / 0 failures**. Claude corpus backfilled 2808 → 3068 rows,
+**0 unindexed**; updated users self-heal on first launch, no re-index needed.
+
+**Decided / don't redo:**
+- **The session list was never broken.** `session_meta` stayed current the whole time because
+  the core indexer writes it directly via `upsertSessionMetaCore`. Only `session_search`/FTS
+  froze (Aug 21 12:11). Symptom = Claude sessions visible but unsearchable. Don't chase the
+  list or discovery — check `session_search` vs `session_meta` coverage first.
+- **Root cause:** `ClaudeSessionIndexer.refresh()` published `isIndexing` inside
+  `publishAfterCurrentUpdate`. `performProviderRefresh` polls `currentIsIndexing()` right
+  after `refresh()` returns, so the poll read `false`, the wait loop exited after **zero**
+  iterations, and the kick ran against the pre-refresh list — empty at launch, and identical
+  across the monitor path's before/after fingerprints, which suppressed the kick outright.
+  The corpus could only advance on a manual refresh that happened to land after the list
+  populated. Claude was the only indexer that deferred the flag.
+- **The contract is now documented on `ProviderHandle.refresh`** — it binds all 15 providers
+  and fails silently. Executable assertion is deliberately Claude-only: looping it over
+  `allCases` would run 15 real refreshes against 15 real discovery roots per suite run.
+- **Don't use `MainActor.assumeIsolated` for the probe-cleanup sink.** Tried it; it's a
+  precondition guarded only by conventions nothing type-checks (`.receive(on:)` + the poster's
+  own main-thread hop), so it trades a thread-safety question for a crash. `Task { @MainActor in }`.
+- **`IndexDB()` has no test seam of its own** — it opens the real 700MB index and is NOT
+  scoped by `claudeSessionsRootOverride` (that only bounds filesystem discovery). Use
+  `IndexDBTestHooks.applicationSupportDirectoryProvider`.
+- **Reading test counts: pin the newest `.xcresult`.** `clean test` leaves old bundles behind
+  and `Run-*.xcresult` hands `xcresulttool` the oldest alphabetically. Cost an hour of chasing
+  a phantom count drop. Use `ls -1d … | sort | tail -1`.
+
+**Key files:**
+- `AgentSessions/Services/ClaudeSessionIndexer.swift` — sync state block, `@MainActor refresh()`
+- `AgentSessions/Services/UnifiedSessionIndexer.swift:130` — the contract, on `ProviderHandle.refresh`
+- `AgentSessionsTests/SessionProviderCatalogTests.swift` — both tests + `withSandboxedClaudeEnvironment`
+
+**Next:**
+1. **Claude cache writes are billed at the 5-minute rate but are 100% 1-hour** — measured
+   16.6% understatement of Claude spend in the `$` view, live today. Backlog entry in
+   `docs/backlog.md` has the fix shape. Highest-value follow-up.
+2. Fast-mode `usage.speed` doubles Opus rates and nothing reads it — latent, can wait.
+
 ## 2026-08-30 16:40 · weekly-quota-calibration · Account-scope completeness pass
 status: in-progress
 
