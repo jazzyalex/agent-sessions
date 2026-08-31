@@ -563,6 +563,39 @@ git status --porcelain
 
 ## Troubleshooting
 
+### "The DMG is corrupted" when it is not (mounted-image false failure)
+
+**Symptom**: right after `hdiutil create`, verification fails with
+
+```
+hdiutil: verify: unable to recognize "…AgentSessions-X.Y.Z.dmg" as a disk image.
+         (Resource temporarily unavailable)
+ERROR: DMG verification failed! The DMG is corrupted.
+```
+
+**This is almost never corruption.** `hdiutil verify` needs an exclusive handle, and
+`hdiutil create` can leave the image it just made attached. Any volume backed by that file
+makes verify return `EAGAIN`. Hit during the 5.1.1 release: the image was mounted at
+`/dev/disk10` and checksummed clean the moment it was detached.
+
+**Diagnose before rebuilding anything** — the old error text blamed the app bundle and sent
+the operator after a build problem that did not exist:
+
+```bash
+hdiutil info | grep -A3 "$(pwd)/dist"
+```
+
+If your DMG is listed, detach it and re-verify:
+
+```bash
+hdiutil detach /dev/diskN -force && hdiutil verify dist/AgentSessions-X.Y.Z.dmg
+```
+
+`build_sign_notarize_release.sh` now does this automatically (detach, then verify, retrying
+twice for a slow DiskArbitration unmount), so this should not resurface. It is **intermittent**
+— 5.1 never tripped it and 5.1.1 did on one run and not the next — so a clean run is not
+evidence the guard works. Keep this entry until a run logs `==> Detaching stale mount`.
+
 ### Corrupted DMG (notarytool hangs or fails)
 
 **Symptom**: `xcrun notarytool submit` hangs at "initiating connection" or fails immediately

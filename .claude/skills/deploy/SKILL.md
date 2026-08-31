@@ -50,9 +50,19 @@ If anything here disagrees with the runbook, follow `docs/deployment.md`.
 - `README.md` download link: `v{VERSION}/AgentSessions-{VERSION}.dmg` and label `Download Agent Sessions {VERSION} (DMG)`
 - `README.md` Option A download link (second occurrence under Install section)
 - `docs/index.html` download button URL and label
-- `docs/index.html` `<meta name="description">` content (mention current version + key change)
-- `docs/index.html` `<meta property="og:description">` content
-- `docs/index.html` `<meta name="twitter:description">` content
+- `docs/index.html` version meta-line (`Version {VERSION} · Free & open source · No telemetry`)
+
+### Do NOT version-pin the site meta descriptions
+
+`docs/index.html`'s `description`, `og:description` and `twitter:description` are
+**deliberately version-agnostic** as of the 2026-08-29 SEO work. This checklist used to
+demand "mention current version + key change" there, which is how the homepage description
+reached 541 chars reading "Version 5.0 makes every agent a plug-in adapter…" — past the
+~155-char SERP budget, and stale the day after every release.
+
+Leave them alone. If the product's positioning genuinely changes, rewrite them on their own
+merits and keep the budget: **title ≤60, description ≤155.** Adding a version string is the
+one edit that is always wrong. See the `reference-docs-site-seo-conventions` memory.
 
 ### Update for minor/major or user-visible feature releases
 - `README.md` "What's New in X.Y" section: update heading to new version, rewrite TL;DR and Highlights to reflect this release's key changes (do not keep old version's copy)
@@ -93,7 +103,7 @@ body, and the README "What's New". The changelog is the source all of them deriv
 fix it there first.
 
 ### After pushing
-- Verify GitHub Pages reflects updated `docs/index.html` (check meta description and download button)
+- Verify GitHub Pages reflects updated `docs/index.html` (check the download button and version meta-line; the meta descriptions should read the same as before the release)
 
 ## Pre-Deploy Checklist (Run Before Bump)
 
@@ -102,8 +112,8 @@ fix it there first.
 - [ ] In-app What's New has an entry for this version in `AgentSessions/Onboarding/Models/WhatsNewCatalog.swift` — both a `teasers` line and a `bundled` array. `hasContent` goes true on the auto-generated new-provider row alone, so a forgotten release still shows the card, just with one generic line and no teaser. Do not author a row for a new source by hand: `providerHighlights(for:)` generates it from `versionIntroduced`, and authoring it again shows it twice.
 - [ ] README.md download links updated to new version (both occurrences)
 - [ ] README.md "What's New" section updated to new version heading + rewritten highlights
-- [ ] `docs/index.html` download button URL and label updated
-- [ ] `docs/index.html` meta description, og:description, twitter:description updated with version + key change
+- [ ] `docs/index.html` download button URL, label, and version meta-line updated
+- [ ] `docs/index.html` meta descriptions left **unchanged** — they are version-agnostic on purpose (see "Do NOT version-pin the site meta descriptions")
 - [ ] All above files committed before running `deploy bump` (or bump will overwrite)
 
 ## Sparkle Notes Are Short and Fun (Hard Rule)
@@ -160,3 +170,32 @@ tools/release/deploy verify <VERSION>
 
 - First stop: `docs/deployment.md` → Troubleshooting, logs, and rollback guidance.
 - Rollback only after reviewing logs: `tools/release/rollback-release.sh <VERSION>`.
+
+### Read the real exit code, and check what actually published
+
+Two traps, both hit during 5.1.1:
+
+- **Do not wrap the release in `; echo "EXIT: $?"`.** The wrapper's own status is what the
+  caller sees, so a pipeline that correctly exited 4 was reported as 0 and briefly looked
+  like a tooling bug. Run `tools/release/deploy release <V>` on its own and read its status.
+- **A completed run is not a published release.** Confirm against the world, not the log:
+
+  ```bash
+  gh release view v<VERSION> --json tagName,isDraft,assets
+  git ls-remote --tags origin v<VERSION>
+  grep -n "sparkle:shortVersionString" docs/appcast.xml
+  ```
+
+  Then `tools/release/deploy verify <VERSION>` for the full check. A failure before the
+  publish steps leaves nothing public — no release, no tag, appcast unchanged — which is
+  the state to expect after an aborted build.
+
+### Watching a long run
+
+The release log embeds the entire QA test output, so a bare keyword grep matches **test
+names**, not events — "Aborted", "Homebrew" and "rollback" all produced false alarms during
+5.1.1. Anchor on the script's own line markers (`^==> `, `^✅ `, `^ERROR: `) and run the
+pattern against the live log before trusting it. Note also that `ERROR: Release QA stamp is
+not valid` is expected and self-heals whenever HEAD moved after `deploy qa` — it re-runs QA
+rather than failing. When matching newest-file-by-glob (`/tmp/notarization-<V>-*.log`),
+guard on mtime or you will read the previous run's artifacts.

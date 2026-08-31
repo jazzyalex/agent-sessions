@@ -637,6 +637,28 @@ run_release_qa_core() {
   echo "==> Stable XCTest"
   ./scripts/xcode_test_stable.sh
 
+  # The "Executed N tests" lines in the log are PER TEST BUNDLE and this scheme has
+  # two, so reading the last one silently drops the smaller bundle -- during the 5.1.1
+  # release stdout said 2396 where the real total was 2448. agents.md makes the count an
+  # invariant; print the authoritative one here so a release operator compares against
+  # the same number the handover records.
+  local xcresult
+  xcresult=$(ls -td .deriveddata-tests/Logs/Test/Run-*.xcresult 2>/dev/null | head -1)
+  if [[ -n "$xcresult" ]]; then
+    echo "==> Test totals (from the result bundle, not stdout)"
+    xcrun xcresulttool get test-results summary --path "$xcresult" 2>/dev/null \
+      | python3 -c 'import json,sys
+try:
+    s = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+print("  passed:  %s" % s.get("passedTests"))
+print("  failed:  %s" % s.get("failedTests"))
+print("  skipped: %s" % s.get("skippedTests"))' || true
+  else
+    yellow "  (no .xcresult found — test count not verified against the result bundle)"
+  fi
+
   if [[ -d scripts/tests ]]; then
     echo ""
     echo "==> Python release/script tests"

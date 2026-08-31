@@ -539,6 +539,34 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Plumbing
 
+### Four Sendable warnings, one of them new in 5.1.1
+> **open** · sev: low · urg: low · verified 2026-08-31
+
+- **What:** the Release build emits four concurrency warnings. Three are non-Sendable
+  `self` captures in `@Sendable` notification closures
+  ([UnifiedSessionIndexer.swift:889](../AgentSessions/Services/UnifiedSessionIndexer.swift:889),
+  `:895`, `:903`); one is a non-Sendable function conversion at
+  [WeeklyQuotaCalibration.swift:478](../AgentSessions/CodexStatus/WeeklyQuotaCalibration.swift:478).
+- **Where they came from:** the three indexer captures are old — blame is `7f94577b`,
+  `99a61144`, `a844f690`, `0b6c9d34`, all shipped in v5.1 or earlier, so they have been
+  in released builds for several versions. The calibration one arrived with `74f57d91`
+  in the 5.1.1 cycle.
+- **Fix shape:** the calibration warning is `self.scanRunner = scanRunner ?? Self.runBootstrapScan`
+  assigning a `private static func` to a `@Sendable` typealias. A static method captures
+  nothing, so the conversion is sound and the fix is annotating the declaration at
+  `WeeklyQuotaCalibration.swift:567` `@Sendable` — one word, no design change. The three
+  indexer closures need the actual isolation decided, not an annotation.
+- **Why deferred:** filed during the 5.1.1 release. Warnings do not reach users and the
+  binary is identical with them present, so fixing them would have invalidated a written
+  QA stamp and added unrelated Swift churn to a release whose whole purpose was shipping
+  three silent failures.
+- **Risk if wrong:** low for the calibration one — verified by reading the callee, which
+  takes seven parameters and captures no state. The indexer three are the ones worth
+  actually checking rather than annotating away; a wrong `@Sendable` there would silence
+  a real race instead of fixing it.
+- **To close:** annotate `runBootstrapScan`, decide the isolation for the three closures,
+  and confirm a Release build emits none of the four.
+
 ### Newest-5 sampling gives a thin-store agent a verdict about nothing
 > **open** · sev: med · urg: low · verified 2026-08-31
 
