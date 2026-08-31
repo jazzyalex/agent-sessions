@@ -14,18 +14,16 @@ enum QwenPreferencesKey {
 
 extension SessionSourceDescriptor {
     static let qwen: SessionSourceDescriptor = {
+        // Routes through the one resolver so availability cannot disagree with the
+        // root discovery and resume eligibility actually read. See
+        // `QwenSessionDiscovery.resolvedSessionsRoot`.
         let projectsRoot: (AvailabilityContext) -> URL = { context in
-            let configuredRoot = context.customRoot(QwenPreferencesKey.sessionsRootOverride)
-                ?? context.environment["QWEN_HOME"]
-            guard let configuredRoot, !configuredRoot.isEmpty else {
-                return context.homeDirectory.appendingPathComponent(".qwen/projects", isDirectory: true)
-            }
-            let expanded = URL(
-                fileURLWithPath: UserPathExpansion.expand(configuredRoot, relativeTo: context.homeDirectory),
-                isDirectory: true
+            QwenSessionDiscovery.resolvedSessionsRoot(
+                customRoot: context.customRoot(QwenPreferencesKey.sessionsRootOverride),
+                homeDirectory: context.homeDirectory,
+                environment: context.environment,
+                directoryExists: { context.directoryExists($0) }
             )
-            let projects = expanded.appendingPathComponent("projects", isDirectory: true)
-            return context.directoryExists(projects) ? projects : expanded
         }
 
         return SessionSourceDescriptor(

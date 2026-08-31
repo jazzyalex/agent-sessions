@@ -38,9 +38,12 @@ enum QwenResumeEligibility {
         let preference = defaults.string(forKey: QwenPreferencesKey.sessionsRootOverride)
             .flatMap { $0.isEmpty ? nil : $0 }
         let qwenHome = environment["QWEN_HOME"].flatMap { $0.isEmpty ? nil : $0 }
-        let relocatedRoot = preference ?? qwenHome
+        // QWEN_HOME is deliberately NOT passed as customRoot. Doing so routed it through
+        // the customRoot branch, which never falls back, so resume would resolve
+        // $QWEN_HOME while discovery resolved ~/.qwen and every listed session came back
+        // browse-only. Let the shared resolver apply the same rule here.
         let discovery = QwenSessionDiscovery(
-            customRoot: relocatedRoot,
+            customRoot: preference,
             homeDirectory: homeDirectory,
             environment: environment
         )
@@ -62,8 +65,21 @@ enum QwenResumeEligibility {
             let expectedProjectsRoot = expandedHome
                 .appendingPathComponent("projects", isDirectory: true)
                 .standardizedFileURL
-            supportsResumeLookup = projectsRoot == expectedProjectsRoot
-            environmentOverride = supportsResumeLookup ? .qwenHome(expandedHome) : nil
+            // Either QWEN_HOME is where sessions live, or the resolver fell back to
+            // ~/.qwen because $QWEN_HOME/projects does not exist. Both are resumable,
+            // and both carry an explicit QWEN_HOME.
+            //
+            // The fallback must NOT be left to the inherited environment. 0.14.x ignores
+            // QWEN_HOME and would find the session either way, but 0.22.x honors it via
+            // getGlobalQwenDir() and would resolve the user's stale export and report the
+            // session as missing. Naming the fallback root explicitly is correct for both
+            // readers, so no CLI version gate is needed.
+            supportsResumeLookup = true
+            environmentOverride = projectsRoot == expectedProjectsRoot
+                ? .qwenHome(expandedHome)
+                : .qwenHome(
+                    homeDirectory.appendingPathComponent(".qwen", isDirectory: true).standardizedFileURL
+                )
         } else {
             supportsResumeLookup = true
             environmentOverride = nil

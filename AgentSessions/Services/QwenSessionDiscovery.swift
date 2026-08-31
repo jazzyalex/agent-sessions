@@ -26,15 +26,73 @@ final class QwenSessionDiscovery: SessionDiscovery {
     }
 
     func sessionsRoot() -> URL {
-        if let customRoot, !customRoot.isEmpty {
-            return normalizedProjectsRoot(expand(customRoot))
+        Self.resolvedSessionsRoot(
+            customRoot: customRoot,
+            homeDirectory: homeDirectory,
+            environment: environment,
+            directoryExists: { url in
+                var isDirectory: ObjCBool = false
+                return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                    && isDirectory.boolValue
+            }
+        )
+    }
+
+    /// The single root resolution shared by discovery, `SessionSourceDescriptor.qwen`'s
+    /// availability closure, and `QwenResumeEligibility`. All three must agree: if
+    /// discovery falls back and the others do not, the list fills from one root while
+    /// availability and resume eligibility are computed against another.
+    ///
+    /// `QWEN_HOME` is read by 0.22.3 through `getGlobalQwenDir()`; 0.14.3 ignores it and
+    /// goes straight to `~/.qwen`. A 0.14.x user with `QWEN_HOME` exported for an
+    /// unrelated reason therefore has sessions under `~/.qwen/projects` that we would
+    /// otherwise never look at, and sees zero rows. Provenance for the version split:
+    /// discussion QwenLM/qwen-code#10579, recorded in
+    /// `docs/superpowers/plans/2026-08-31-qwen-0.22-format-brief.md`. No 0.22.x
+    /// transcript has been captured.
+    ///
+    /// The fallback triggers on `$QWEN_HOME/projects` not being a directory, deliberately
+    /// not on "the root yields no sessions": the descriptor applies this same rule inside
+    /// `isAvailable` and must not enumerate. The cost is that a `QWEN_HOME` whose
+    /// `projects` directory exists but is empty keeps winning — pinned by
+    /// `testEmptyQwenHomeProjectsRootDoesNotFallBackToDefaultRoot`.
+    ///
+    /// `QWEN_HOME` requires a `projects` child; an explicit `customRoot` still accepts
+    /// either `<root>/projects` or `<root>` itself. That split is intentional. Requiring
+    /// `projects` matches the CLI's own layout under `getGlobalQwenDir()`, while a
+    /// hand-set path is a direct instruction and may point straight at a copied projects
+    /// root. Without it the fallback would never fire for the user it targets, whose
+    /// `$QWEN_HOME/projects` is absent and whose `$QWEN_HOME` therefore resolves to
+    /// itself and exists.
+    static func resolvedSessionsRoot(
+        customRoot: String?,
+        homeDirectory: URL,
+        environment: [String: String],
+        directoryExists: (URL) -> Bool
+    ) -> URL {
+        func expand(_ path: String) -> URL {
+            URL(
+                fileURLWithPath: UserPathExpansion.expand(path, relativeTo: homeDirectory),
+                isDirectory: true
+            )
         }
-        if let qwenHome = environment["QWEN_HOME"], !qwenHome.isEmpty {
-            return normalizedProjectsRoot(expand(qwenHome))
-        }
-        return homeDirectory
+
+        let defaultRoot = homeDirectory
             .appendingPathComponent(".qwen", isDirectory: true)
             .appendingPathComponent("projects", isDirectory: true)
+
+        if let customRoot, !customRoot.isEmpty {
+            let root = expand(customRoot)
+            let projects = root.appendingPathComponent("projects", isDirectory: true)
+            return directoryExists(projects) ? projects : root
+        }
+
+        if let qwenHome = environment["QWEN_HOME"], !qwenHome.isEmpty {
+            let projects = expand(qwenHome).appendingPathComponent("projects", isDirectory: true)
+            return directoryExists(projects) ? projects : defaultRoot
+        }
+
+        return defaultRoot
     }
 
     static func sessionID(forTranscript url: URL) -> String? {
@@ -84,21 +142,6 @@ final class QwenSessionDiscovery: SessionDiscovery {
             if lhs != rhs { return lhs > rhs }
             return $0.path > $1.path
         }
-    }
-
-    private func expand(_ path: String) -> URL {
-        let expanded = UserPathExpansion.expand(path, relativeTo: homeDirectory)
-        return URL(fileURLWithPath: expanded, isDirectory: true)
-    }
-
-    private func normalizedProjectsRoot(_ root: URL) -> URL {
-        let projects = root.appendingPathComponent("projects", isDirectory: true)
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: projects.path, isDirectory: &isDirectory),
-           isDirectory.boolValue {
-            return projects
-        }
-        return root
     }
 
     /// Matches the installed reader's exact storage layout. Recursive

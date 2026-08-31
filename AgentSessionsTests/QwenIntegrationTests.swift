@@ -37,6 +37,14 @@ final class QwenIntegrationTests: XCTestCase {
         fixtureRoot.appendingPathComponent("\(gluedSessionID).jsonl")
     }
 
+    private let syntheticUnknownSessionID = "019f0000-0000-7000-8000-000000000006"
+
+    /// SYNTHETIC, not a captured transcript. Modelled from the installed 0.22.3
+    /// package source; exercises the parser and is not evidence about the format.
+    private var syntheticUnknownRecordFixture: URL {
+        fixtureRoot.appendingPathComponent("\(syntheticUnknownSessionID).jsonl")
+    }
+
     private func makeTemporaryRoot() throws -> URL {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("qwen-integration-\(UUID().uuidString)", isDirectory: true)
@@ -426,7 +434,21 @@ final class QwenIntegrationTests: XCTestCase {
         ], to: url)
 
         let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: url))
-        XCTAssertEqual(session.events.compactMap(\.text), ["Valid prompt."])
+        // The unknown type is still excluded from the conversation and from the leaf.
+        // It is no longer silent, though: it is reported once as a meta notice, which
+        // is the only reason this assertion filters instead of comparing everything.
+        XCTAssertEqual(
+            session.events.filter { $0.kind != .meta }.compactMap(\.text),
+            ["Valid prompt."]
+        )
+        XCTAssertEqual(
+            session.events.filter { $0.role == QwenSessionParser.unrecognizedNoticeRole }.count,
+            1
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(QwenSessionParser.unrecognizedRecordCensus(at: url)),
+            ["future_type": 1]
+        )
         XCTAssertEqual(session.cwd, "/tmp/valid")
     }
 
@@ -537,6 +559,309 @@ final class QwenIntegrationTests: XCTestCase {
         )
 
         XCTAssertTrue(SessionSource.qwen.descriptor.isAvailable(context))
+    }
+
+    // MARK: - QWEN_HOME fallback to ~/.qwen
+    //
+    // 0.22.3 reads QWEN_HOME via getGlobalQwenDir(); 0.14.3 goes straight to
+    // ~/.qwen. A 0.14.x user with QWEN_HOME exported for an unrelated reason
+    // therefore has sessions we were not looking at. Provenance: discussion
+    // QwenLM/qwen-code#10579 and docs/superpowers/plans/2026-08-31-qwen-0.22-format-brief.md.
+    //
+    // The trigger is "$QWEN_HOME/projects is not a directory", deliberately not
+    // "the root yields no sessions": the descriptor's availability closure has to
+    // apply the same rule and cannot afford to enumerate.
+
+    private func defaultProjectsRoot(under home: URL) -> URL {
+        home.appendingPathComponent(".qwen", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+    }
+
+    func testQwenHomeWithoutProjectsDirectoryFallsBackToDefaultRoot() throws {
+        let home = try makeTemporaryRoot()
+        let qwenHome = try makeTemporaryRoot()
+        let active = defaultProjectsRoot(under: home)
+            .appendingPathComponent("synthetic-project/chats/\(sessionID).jsonl")
+        try stage(positiveFixture, at: active)
+
+        let discovery = QwenSessionDiscovery(
+            homeDirectory: home,
+            environment: ["QWEN_HOME": qwenHome.path]
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, defaultProjectsRoot(under: home).path)
+        XCTAssertEqual(discovery.discoverSessionFiles().count, 1)
+    }
+
+    func testQwenHomeWithProjectsDirectoryWinsOverDefaultRoot() throws {
+        let home = try makeTemporaryRoot()
+        let qwenHome = try makeTemporaryRoot()
+        let qwenHomeProjects = qwenHome.appendingPathComponent("projects", isDirectory: true)
+        try stage(
+            positiveFixture,
+            at: qwenHomeProjects.appendingPathComponent("synthetic-project/chats/\(sessionID).jsonl")
+        )
+        // Must be the compact fixture, not positiveFixture: hasValidHead rejects a
+        // filename whose session ID does not match the record, so a mismatched decoy
+        // would be skipped for the wrong reason and the test would pass vacuously.
+        try stage(
+            compactFixture,
+            at: defaultProjectsRoot(under: home)
+                .appendingPathComponent("other-project/chats/\(compactSessionID).jsonl")
+        )
+
+        let discovery = QwenSessionDiscovery(
+            homeDirectory: home,
+            environment: ["QWEN_HOME": qwenHome.path]
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, qwenHomeProjects.path)
+        let found = discovery.discoverSessionFiles()
+        XCTAssertEqual(found.count, 1)
+        XCTAssertEqual(found.first.flatMap { QwenSessionDiscovery.sessionID(forTranscript: $0) }, sessionID)
+    }
+
+    func testExplicitOverrideWinsOverQwenHomeAndDefaultRoot() throws {
+        let home = try makeTemporaryRoot()
+        let qwenHome = try makeTemporaryRoot()
+        let override = try makeTemporaryRoot()
+        try stage(
+            positiveFixture,
+            at: qwenHome.appendingPathComponent("projects/a-project/chats/\(sessionID).jsonl")
+        )
+        try stage(
+            positiveFixture,
+            at: defaultProjectsRoot(under: home).appendingPathComponent("b-project/chats/\(sessionID).jsonl")
+        )
+        let overrideProjects = override.appendingPathComponent("projects", isDirectory: true)
+        try stage(
+            compactFixture,
+            at: overrideProjects.appendingPathComponent("c-project/chats/\(compactSessionID).jsonl")
+        )
+
+        let discovery = QwenSessionDiscovery(
+            customRoot: override.path,
+            homeDirectory: home,
+            environment: ["QWEN_HOME": qwenHome.path]
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, overrideProjects.path)
+        XCTAssertEqual(
+            discovery.discoverSessionFiles().compactMap { QwenSessionDiscovery.sessionID(forTranscript: $0) },
+            [compactSessionID]
+        )
+    }
+
+    func testCustomRootPointingDirectlyAtAProjectsDirectoryStillResolves() throws {
+        // The QWEN_HOME branch now requires a `projects` child. That narrowing must
+        // not leak into customRoot, where pointing straight at a projects directory
+        // is a supported shape.
+        let home = try makeTemporaryRoot()
+        let copiedRoot = try makeTemporaryRoot()
+        try stage(
+            positiveFixture,
+            at: copiedRoot.appendingPathComponent("a-project/chats/\(sessionID).jsonl")
+        )
+
+        let discovery = QwenSessionDiscovery(
+            customRoot: copiedRoot.path,
+            homeDirectory: home,
+            environment: [:]
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, copiedRoot.path)
+        XCTAssertEqual(discovery.discoverSessionFiles().count, 1)
+    }
+
+    func testEmptyQwenHomeProjectsRootDoesNotFallBackToDefaultRoot() throws {
+        // Accepted limitation, pinned deliberately: only an enumeration trigger
+        // would catch this, and the descriptor cannot afford one. A 0.22.x user
+        // with a real-but-empty projects root should not silently be shown their
+        // old 0.14.x sessions. Deleting this test is a decision, not a cleanup.
+        let home = try makeTemporaryRoot()
+        let qwenHome = try makeTemporaryRoot()
+        let qwenHomeProjects = qwenHome.appendingPathComponent("projects", isDirectory: true)
+        try FileManager.default.createDirectory(at: qwenHomeProjects, withIntermediateDirectories: true)
+        try stage(
+            positiveFixture,
+            at: defaultProjectsRoot(under: home).appendingPathComponent("b-project/chats/\(sessionID).jsonl")
+        )
+
+        let discovery = QwenSessionDiscovery(
+            homeDirectory: home,
+            environment: ["QWEN_HOME": qwenHome.path]
+        )
+
+        XCTAssertEqual(discovery.sessionsRoot().path, qwenHomeProjects.path)
+        XCTAssertTrue(discovery.discoverSessionFiles().isEmpty)
+    }
+
+    func testNoOverrideAndNoQwenHomeUsesDefaultRoot() throws {
+        let home = try makeTemporaryRoot()
+        try stage(
+            positiveFixture,
+            at: defaultProjectsRoot(under: home).appendingPathComponent("a-project/chats/\(sessionID).jsonl")
+        )
+
+        let discovery = QwenSessionDiscovery(homeDirectory: home, environment: [:])
+
+        XCTAssertEqual(discovery.sessionsRoot().path, defaultProjectsRoot(under: home).path)
+        XCTAssertEqual(discovery.discoverSessionFiles().count, 1)
+    }
+
+    func testSharedResolverFallsBackOnlyWhenQwenHomeHasNoProjectsDirectory() {
+        let home = URL(fileURLWithPath: "/virtual/home", isDirectory: true)
+        let defaultRoot = "/virtual/home/.qwen/projects"
+
+        func resolve(_ existing: Set<String>, environment: [String: String], customRoot: String? = nil) -> String {
+            QwenSessionDiscovery.resolvedSessionsRoot(
+                customRoot: customRoot,
+                homeDirectory: home,
+                environment: environment,
+                directoryExists: { existing.contains($0.standardizedFileURL.path) }
+            ).standardizedFileURL.path
+        }
+
+        // The case isAvailable cannot see: QWEN_HOME exists, its projects child does
+        // not. Both roots exist, so the boolean is true either way — only the resolved
+        // root distinguishes right from wrong, which is why this is tested directly.
+        XCTAssertEqual(
+            resolve([defaultRoot, "/virtual/qwen-home"], environment: ["QWEN_HOME": "/virtual/qwen-home"]),
+            defaultRoot
+        )
+        XCTAssertEqual(
+            resolve(
+                [defaultRoot, "/virtual/qwen-home", "/virtual/qwen-home/projects"],
+                environment: ["QWEN_HOME": "/virtual/qwen-home"]
+            ),
+            "/virtual/qwen-home/projects"
+        )
+        XCTAssertEqual(resolve([defaultRoot], environment: [:]), defaultRoot)
+        // customRoot keeps <root>-itself acceptance; the QWEN_HOME narrowing must not leak.
+        XCTAssertEqual(
+            resolve([defaultRoot, "/virtual/copied"], environment: [:], customRoot: "/virtual/copied"),
+            "/virtual/copied"
+        )
+        XCTAssertEqual(
+            resolve(
+                [defaultRoot, "/virtual/copied", "/virtual/copied/projects"],
+                environment: [:],
+                customRoot: "/virtual/copied"
+            ),
+            "/virtual/copied/projects"
+        )
+    }
+
+    func testAvailabilityFallsBackToDefaultRootWhenQwenHomeIsNotADirectory() {
+        // Pins that the descriptor actually routes through the shared resolver.
+        // isAvailable can only observe the choice when the two candidate roots
+        // differ in existence, hence a QWEN_HOME that is not present at all.
+        let suiteName = "QwenIntegrationTests-Fallback-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let context = AvailabilityContext(
+            defaults: defaults,
+            fileProbe: FakeFileProbe(directories: ["/virtual/home/.qwen/projects"]),
+            homeDirectory: URL(fileURLWithPath: "/virtual/home", isDirectory: true),
+            environment: ["QWEN_HOME": "/virtual/qwen-home"],
+            detectBinary: { _ in false }
+        )
+
+        XCTAssertTrue(SessionSource.qwen.descriptor.isAvailable(context))
+    }
+
+    func testFallbackRootStaysResumeEligibleWithAnExplicitDefaultQwenHome() throws {
+        // configuredStorageContext passes QWEN_HOME through the customRoot
+        // parameter, so without matching treatment the fallback would surface
+        // sessions and then mark every one of them browse-only.
+        let home = try makeTemporaryRoot()
+        let qwenHome = try makeTemporaryRoot()
+        let active = defaultProjectsRoot(under: home)
+            .appendingPathComponent("a-project/chats/\(sessionID).jsonl")
+        try stage(positiveFixture, at: active)
+        let suiteName = "QwenIntegrationTests-FallbackResume-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let context = QwenResumeEligibility.configuredStorageContext(
+            defaults: defaults,
+            homeDirectory: home,
+            environment: ["QWEN_HOME": qwenHome.path]
+        )
+
+        XCTAssertEqual(context.projectsRoot.path, defaultProjectsRoot(under: home).standardizedFileURL.path)
+        XCTAssertTrue(context.supportsResumeLookup)
+        // Must name ~/.qwen explicitly rather than inherit the stale export: 0.22.x
+        // honors QWEN_HOME and would otherwise look in the wrong place and report the
+        // session as missing.
+        XCTAssertEqual(
+            context.environmentOverride,
+            .qwenHome(home.appendingPathComponent(".qwen", isDirectory: true).standardizedFileURL)
+        )
+
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: active))
+        XCTAssertTrue(QwenResumeEligibility.canResume(session, storageContext: context))
+        XCTAssertFalse(session.isArchivedQwenSession(storageContext: context))
+    }
+
+    // MARK: - 0.22.x unrecognized records and fork capture
+
+    func testSyntheticUnknownTypeAndSubtypeAreCountedAndSurfacedAsOneMetaEvent() throws {
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: syntheticUnknownRecordFixture))
+
+        let census = try XCTUnwrap(
+            QwenSessionParser.unrecognizedRecordCensus(at: syntheticUnknownRecordFixture)
+        )
+        XCTAssertEqual(census, ["session_checkpoint": 1, "system/quantum_flux": 1])
+        // Same numbers without a second read of the file.
+        XCTAssertEqual(QwenSessionParser.unrecognizedRecordCensus(in: session), census)
+
+        // The unknown-type record stays out of the chain (upstream skips it too, so
+        // matching keeps our leaf selection identical), but it is no longer silent.
+        let notices = session.events.filter { $0.role == QwenSessionParser.unrecognizedNoticeRole }
+        XCTAssertEqual(notices.count, 1)
+        let noticeText = try XCTUnwrap(notices.first?.text)
+        XCTAssertTrue(noticeText.contains("session_checkpoint"), noticeText)
+        XCTAssertTrue(noticeText.contains("system/quantum_flux"), noticeText)
+        XCTAssertEqual(notices.first?.kind, .meta)
+        // The two fates are described separately: the unknown type is skipped, the
+        // unknown subtype is displayed. One sentence covering both would be false.
+        XCTAssertTrue(noticeText.contains("Skipped and not shown"), noticeText)
+        XCTAssertTrue(noticeText.contains("Shown above as metadata"), noticeText)
+
+        // Unknown subtype still renders as a non-destructive meta event with raw JSON.
+        let unknownSubtype = try XCTUnwrap(session.events.first { $0.role == "quantum_flux" })
+        XCTAssertEqual(unknownSubtype.kind, .meta)
+        XCTAssertTrue(unknownSubtype.rawJSON.contains("quantum_flux"))
+    }
+
+    func testKnownUpstreamSubtypesAreNotReportedAsUnrecognized() throws {
+        // ui_telemetry and notification are in 0.22.3's KNOWN_RECORD_SUBTYPES, so a
+        // 0.14.3 fixture must stay silent — the notice only fires on genuine novelty.
+        // XCTUnwrap, not == [:]: the census returns nil for a file it cannot open, so a
+        // moved or mistyped fixture path must fail here rather than read as "clean".
+        let census = try XCTUnwrap(QwenSessionParser.unrecognizedRecordCensus(at: positiveFixture))
+        XCTAssertEqual(census, [:])
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: positiveFixture))
+        XCTAssertTrue(session.events.allSatisfy { $0.role != QwenSessionParser.unrecognizedNoticeRole })
+
+        // The nil-vs-empty distinction itself, so it cannot quietly regress.
+        XCTAssertNil(
+            QwenSessionParser.unrecognizedRecordCensus(
+                at: fixtureRoot.appendingPathComponent("does-not-exist.jsonl")
+            )
+        )
+    }
+
+    func testForkedFromIsRetainedOnTheRecordItWasWrittenOn() throws {
+        // Task 3 capture: forkedFrom is the only one of the subagent/fork fields that
+        // appears in chats/ transcripts. agentId/agentName/isSidechain/agentRunId are
+        // written to subagents/<sessionId>/agent-<agentId>.jsonl, which discovery
+        // never reaches, so there is nothing to capture and nothing to re-thread.
+        let session = try XCTUnwrap(QwenSessionParser.parseFileFull(at: syntheticUnknownRecordFixture))
+        let forked = try XCTUnwrap(session.events.first { $0.kind == .user })
+        XCTAssertTrue(forked.rawJSON.contains("\"forkedFrom\""), forked.rawJSON)
+        XCTAssertTrue(forked.rawJSON.contains("019f0000-0000-7000-8000-000000000001"), forked.rawJSON)
     }
 
     func testArchiveBackfillCollapsesDuplicateSessionIDsWithoutTrapping() throws {

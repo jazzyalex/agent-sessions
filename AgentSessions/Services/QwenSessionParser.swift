@@ -96,6 +96,63 @@ enum QwenSessionParser {
         "goal_runtime", "cron", "notification"
     ]
 
+    /// `KNOWN_RECORD_SUBTYPES` as shipped in 0.22.3
+    /// (`packages/core/src/utils/transcript-records.ts`, read from the installed
+    /// `@qwen-code/qwen-code@0.22.3` package). Used only to decide whether a record is
+    /// *novel*; it deliberately does not change how any of these render. Everything here
+    /// is written with `createBaseRecord("system")` except `goal_runtime` and
+    /// `mid_turn_user_message` (`"user"`) and `realtime_message` (the entry's own role),
+    /// so the system-typed ones already reach the transcript as meta.
+    ///
+    /// `user_text_elements` is included because 0.22.3 writes it, even though upstream
+    /// omitted it from its own known set — without it every such record would read as
+    /// novelty on the first real transcript.
+    private static let knownRecordSubtypes: Set<String> = [
+        "chat_compression", "slash_command", "ui_telemetry", "at_command",
+        "attribution_snapshot", "notification", "cron", "mid_turn_user_message",
+        "realtime_message", "custom_title", "parent_session", "rewind",
+        "agent_bootstrap", "agent_launch_prompt", "agent_retry",
+        "file_history_snapshot", "session_source", "session_model",
+        "branch_checkpoint", "goal_state", "goal_runtime", "turn_result",
+        "user_text_elements",
+        "session_artifact_event", "session_artifact_snapshot"
+    ]
+
+    /// Counts records this parser does not recognise, keyed by the unknown top-level
+    /// `type`, or `"<type>/<subtype>"` when the type is known and the subtype is not.
+    ///
+    /// Unknown *types* are the reason this exists: `validatedRecord` rejects them, so
+    /// such a record leaves no trace at all — it is not mis-bucketed, it is gone. 0.22.3
+    /// skips them too, so the chain walk keeps matching upstream; this only makes the
+    /// omission visible instead of silent.
+    ///
+    /// Scope is the **whole file**, including dead rewind branches, because the caller
+    /// is format monitoring: what is on disk is the question, not what one transcript
+    /// renders. The in-transcript notice is scoped differently and deliberately — see
+    /// `build(url:includeEvents:)`. Returns `nil` when the file cannot be read, which
+    /// callers must not conflate with "nothing unrecognised".
+    static func unrecognizedRecordCensus(at url: URL) -> [String: Int]? {
+        guard let loaded = loadRecords(from: url) else { return nil }
+        var census = loaded.unknownTypes
+        for (key, count) in loaded.unknownSubtypes {
+            census[key, default: 0] += count
+        }
+        return census
+    }
+
+    /// The census already computed while parsing, read back from the notice event rather
+    /// than by reading the transcript a second time. Empty when nothing was unrecognised.
+    static func unrecognizedRecordCensus(in session: Session) -> [String: Int] {
+        guard let notice = session.events.first(where: { $0.role == unrecognizedNoticeRole }),
+              let data = notice.rawJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Int] else {
+            return [:]
+        }
+        return object
+    }
+
+    static let unrecognizedNoticeRole = "unrecognized_records"
+
     private struct Record {
         var object: [String: Any]
         let uuid: String
@@ -133,7 +190,9 @@ enum QwenSessionParser {
         guard let expectedSessionID = QwenSessionDiscovery.sessionID(forTranscript: url) else { return nil }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
 
-        guard let allRecords = loadRecords(from: url), !allRecords.isEmpty else { return nil }
+        guard let loaded = loadRecords(from: url) else { return nil }
+        let allRecords = loaded.records
+        guard !allRecords.isEmpty else { return nil }
         guard allRecords.allSatisfy({
             $0.sessionID.caseInsensitiveCompare(expectedSessionID) == .orderedSame
         }) else { return nil }
@@ -175,7 +234,17 @@ enum QwenSessionParser {
         var commandCount = 0
         var firstUserTitle: String?
 
+        // Scoped to the active chain on purpose: an unknown subtype on a dead rewind
+        // branch renders nowhere, so reporting it would point at content this transcript
+        // deliberately does not show. Unknown *types* below stay whole-file, because
+        // they are dropped from every branch and there is no chain to scope them to.
+        var chainUnknownSubtypes: [String: Int] = [:]
+
         for record in selectedRecords {
+            if let subtype = record.subtype, !knownRecordSubtypes.contains(subtype) {
+                chainUnknownSubtypes["\(record.type)/\(subtype)", default: 0] += 1
+            }
+
             if firstUserTitle == nil,
                record.type == "user",
                !runtimeUserSubtypes.contains(record.subtype ?? ""),
@@ -192,6 +261,43 @@ enum QwenSessionParser {
                 if event.kind == .tool_call { count += 1 }
             }
             if includeEvents { renderedEvents.append(contentsOf: events) }
+        }
+
+        // One trailing notice, only when something genuinely unrecognised was read. A
+        // 0.14.3 transcript never produces it, so no existing event count moves. The two
+        // buckets are described separately because only one of them is hidden.
+        let noticeCensus = chainUnknownSubtypes.merging(loaded.unknownTypes) { lhs, rhs in lhs + rhs }
+        if includeEvents, !noticeCensus.isEmpty {
+            func summarize(_ counts: [String: Int]) -> String {
+                counts.sorted { $0.key < $1.key }
+                    .map { "\($0.key) ×\($0.value)" }
+                    .joined(separator: ", ")
+            }
+            var sentences: [String] = []
+            if !loaded.unknownTypes.isEmpty {
+                sentences.append(
+                    "Skipped and not shown anywhere in this transcript — records with an "
+                        + "unrecognized top-level type: \(summarize(loaded.unknownTypes)). "
+                        + "The Qwen CLI's own reader skips these too."
+                )
+            }
+            if !chainUnknownSubtypes.isEmpty {
+                sentences.append(
+                    "Shown above as metadata, with their raw JSON intact — records with an "
+                        + "unrecognized subtype: \(summarize(chainUnknownSubtypes))."
+                )
+            }
+            renderedEvents.append(
+                event(
+                    id: "\(expectedSessionID)-unrecognized",
+                    timestamp: nil,
+                    kind: .meta,
+                    role: unrecognizedNoticeRole,
+                    text: sentences.joined(separator: " "),
+                    rawJSON: jsonString(noticeCensus) ?? "{}",
+                    parentID: nil
+                )
+            )
         }
 
         let dates = selectedPhysicalRecords.compactMap { timestamp(from: $0.object) }
@@ -231,11 +337,15 @@ enum QwenSessionParser {
         )
     }
 
-    private static func loadRecords(from url: URL) -> [Record]? {
+    private static func loadRecords(
+        from url: URL
+    ) -> (records: [Record], unknownTypes: [String: Int], unknownSubtypes: [String: Int])? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
 
         var records: [Record] = []
+        var unknownTypes: [String: Int] = [:]
+        var unknownSubtypes: [String: Int] = [:]
         var buffer = Data()
         var physicalIndex = 0
         let newline = Data([0x0A])
@@ -243,6 +353,7 @@ enum QwenSessionParser {
         func consume(_ data: Data, physicalIndex: Int) {
             guard let line = String(data: data, encoding: .utf8), !line.isEmpty else { return }
             for object in QwenJSONL.objects(inPhysicalLine: line) {
+                noteIfUnrecognized(object, types: &unknownTypes, subtypes: &unknownSubtypes)
                 if let record = validatedRecord(object, physicalIndex: physicalIndex) {
                     records.append(record)
                 }
@@ -268,7 +379,33 @@ enum QwenSessionParser {
         }
 
         if !buffer.isEmpty { consume(buffer, physicalIndex: physicalIndex) }
-        return records
+        return (records, unknownTypes, unknownSubtypes)
+    }
+
+    /// Only records that carry a plausible identity are censused. A line missing `uuid`
+    /// or `sessionId` is malformed rather than novel, and counting it would turn
+    /// corruption into a format-change report.
+    ///
+    /// Unknown types and unknown subtypes are kept apart because their fates differ: a
+    /// record with an unknown type is dropped and can never be displayed, while a record
+    /// with an unknown subtype renders as meta. Conflating them produces a notice that
+    /// is false about one of the two.
+    private static func noteIfUnrecognized(
+        _ object: [String: Any],
+        types: inout [String: Int],
+        subtypes: inout [String: Int]
+    ) {
+        guard let uuid = object["uuid"] as? String, !uuid.isEmpty,
+              object["sessionId"] is String,
+              let type = object["type"] as? String else { return }
+
+        guard validRecordTypes.contains(type) else {
+            types[type, default: 0] += 1
+            return
+        }
+        if let subtype = object["subtype"] as? String, !knownRecordSubtypes.contains(subtype) {
+            subtypes["\(type)/\(subtype)", default: 0] += 1
+        }
     }
 
     private static func validatedRecord(_ object: [String: Any], physicalIndex: Int) -> Record? {
