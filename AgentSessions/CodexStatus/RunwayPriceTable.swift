@@ -1,11 +1,82 @@
 import Foundation
 
-/// Per-model API price (USD per million tokens) for the runway `$` presentation.
-struct RunwayModelPrice: Equatable, Sendable {
+/// Which billing tier a usage record was served at.
+///
+/// Read from the record's own `usage.speed` and NEVER inferred from the model name:
+/// Opus 4.7 rejects `speed: "fast"` outright, and Opus 4.6 accepts it and then bills
+/// standard while still reporting `"standard"` — so a name-based guess would double
+/// the bill in exactly the case that most looks like a fast session.
+enum RunwaySpeedTier: String, Equatable, Sendable {
+    case standard
+    case fast
+
+    /// Only the literal `"fast"` selects the fast tier. Anything else — `"standard"`,
+    /// null, absent, or a tier introduced after this build — reads as standard, so an
+    /// unrecognized value can never silently double a session's cost.
+    init(usageValue: Any?) {
+        self = (usageValue as? String) == "fast" ? .fast : .standard
+    }
+}
+
+/// One coherent set of per-MTok rates.
+///
+/// Fast mode is a whole second rate set rather than a multiplier on the standard one.
+/// Output is exactly 2× today, but that is a coincidence of the current price list,
+/// and the cache multipliers are defined off the *fast* input base — a 1-hour write on
+/// fast Opus 5 is 2 × $10, not 2 × $5.
+struct RunwayRateSet: Equatable, Sendable {
     let inputPerMTok: Double        // fresh (non-cached) input
     let cachedInputPerMTok: Double  // cached-input reads
     let outputPerMTok: Double
-    let cacheWritePerMTok: Double?  // Claude cache creation; nil → falls back to input
+    /// 5-minute-TTL cache write (1.25× input). nil → falls back to input.
+    let cacheWritePerMTok: Double?
+    /// 1-hour-TTL cache write (2× input). nil → falls back to the 5-minute rate, then
+    /// to input — the pre-split behavior, kept so a manifest published without this
+    /// column still prices rather than dropping the session out of `$`.
+    let cacheWrite1hPerMTok: Double?
+
+    /// USD for a bundle of tokens at these rates.
+    func dollars(input: Double,
+                 cachedInput: Double,
+                 output: Double,
+                 cacheWrite5m: Double,
+                 cacheWrite1h: Double) -> Double {
+        let write5m = cacheWritePerMTok ?? inputPerMTok
+        let write1h = cacheWrite1hPerMTok ?? write5m
+        return (input * inputPerMTok
+                + cachedInput * cachedInputPerMTok
+                + output * outputPerMTok
+                + cacheWrite5m * write5m
+                + cacheWrite1h * write1h) / 1_000_000
+    }
+}
+
+/// Per-model API price (USD per million tokens) for the runway `$` presentation:
+/// the standard rate set, plus the fast-mode set for models that have one.
+struct RunwayModelPrice: Equatable, Sendable {
+    let standard: RunwayRateSet
+    /// nil when this model has no fast tier. A record that nevertheless reports
+    /// `speed: "fast"` is left UNPRICEABLE rather than billed at standard — silently
+    /// halving a fast session is the exact failure this split exists to prevent, and
+    /// the calculator already prefers an honest drop to a confident wrong number.
+    let fast: RunwayRateSet?
+
+    /// Rates for one observed tier, or nil when that tier has no rate set here.
+    func rates(for speed: RunwaySpeedTier) -> RunwayRateSet? {
+        switch speed {
+        case .standard: return standard
+        case .fast: return fast
+        }
+    }
+
+    /// Standard-tier accessors. Codex has no speed tiers at all, so its callers
+    /// (weekly calibration, weekly bootstrap) read the standard rates through these
+    /// rather than unwrapping a rate set they can never fail to have.
+    var inputPerMTok: Double { standard.inputPerMTok }
+    var cachedInputPerMTok: Double { standard.cachedInputPerMTok }
+    var outputPerMTok: Double { standard.outputPerMTok }
+    var cacheWritePerMTok: Double? { standard.cacheWritePerMTok }
+    var cacheWrite1hPerMTok: Double? { standard.cacheWrite1hPerMTok }
 }
 
 /// Model→price lookup for `$` burn. Ships a compiled-in default snapshot and,
@@ -121,11 +192,42 @@ final class RunwayPriceTable: @unchecked Sendable {
         let updated: String?
         let models: [String: RawPrice]
     }
+    /// The five rate fields, shared by a model's standard rates and its nested
+    /// `fast` object. Spelled out twice rather than made recursive because a struct
+    /// cannot store an Optional of itself.
+    private struct RawRates: Decodable {
+        let inputPerMTok: Double
+        let cachedInputPerMTok: Double
+        let outputPerMTok: Double
+        let cacheWritePerMTok: Double?
+        let cacheWrite1hPerMTok: Double?
+
+        var rateSet: RunwayRateSet {
+            RunwayRateSet(inputPerMTok: inputPerMTok,
+                          cachedInputPerMTok: cachedInputPerMTok,
+                          outputPerMTok: outputPerMTok,
+                          cacheWritePerMTok: cacheWritePerMTok,
+                          cacheWrite1hPerMTok: cacheWrite1hPerMTok)
+        }
+    }
+    /// `cacheWrite1hPerMTok` and `fast` are optional, so this still decodes a
+    /// manifest published before either existed — schema `version` stays 1, and an
+    /// older client simply ignores the new keys.
     private struct RawPrice: Decodable {
         let inputPerMTok: Double
         let cachedInputPerMTok: Double
         let outputPerMTok: Double
         let cacheWritePerMTok: Double?
+        let cacheWrite1hPerMTok: Double?
+        let fast: RawRates?
+
+        var standardRateSet: RunwayRateSet {
+            RunwayRateSet(inputPerMTok: inputPerMTok,
+                          cachedInputPerMTok: cachedInputPerMTok,
+                          outputPerMTok: outputPerMTok,
+                          cacheWritePerMTok: cacheWritePerMTok,
+                          cacheWrite1hPerMTok: cacheWrite1hPerMTok)
+        }
     }
 
     /// Returns the model map + its `updated` date, only for a recognized schema
@@ -137,10 +239,7 @@ final class RunwayPriceTable: @unchecked Sendable {
               manifest.version == supportedVersion,
               !manifest.models.isEmpty else { return nil }
         let models = manifest.models.mapValues {
-            RunwayModelPrice(inputPerMTok: $0.inputPerMTok,
-                             cachedInputPerMTok: $0.cachedInputPerMTok,
-                             outputPerMTok: $0.outputPerMTok,
-                             cacheWritePerMTok: $0.cacheWritePerMTok)
+            RunwayModelPrice(standard: $0.standardRateSet, fast: $0.fast?.rateSet)
         }
         return (models, manifest.updated ?? "")
     }
@@ -168,32 +267,47 @@ final class RunwayPriceTable: @unchecked Sendable {
     #endif
 
     /// Compiled-in default snapshot. Also published at `docs/prices.json` for the
-    /// refresh. Verified 2026-08-26 against the official pricing pages
+    /// refresh — the two MUST stay identical, because whichever is newer wins outright
+    /// and a rate that reaches only one of them is silently reverted by the other.
+    /// Verified 2026-08-30 against the official pricing pages
     /// (platform.claude.com/docs/en/about-claude/pricing and
     /// developers.openai.com/api/docs/pricing). Keyed by tier so longest-prefix
     /// resolves every generation (`claude-sonnet` → claude-sonnet-5, `gpt-5.6-sol`
     /// exact, `gpt-5` → any other gpt-5.x). Correct via docs/prices.json — no rebuild.
     ///
     /// `cachedInputPerMTok` = cache-hit read (0.1× input). `cacheWritePerMTok` =
-    /// 5-minute cache write (1.25× input); currently unused for Codex because its
-    /// logs carry no cache-creation tokens. Sonnet 5's $2/$10 price is permanent;
-    /// the generic Sonnet key stays at $3/$15 for Sonnet 4.x.
+    /// 5-minute cache write (1.25× input); `cacheWrite1hPerMTok` = 1-hour cache write
+    /// (2× input). Both are omitted on the GPT keys, which have no TTL split — the
+    /// 1-hour column then falls back to the 5-minute one.
+    ///
+    /// `fast` is Anthropic's fast mode, a research preview on Opus 5 and Opus 4.8
+    /// only, published as $10/$50 per MTok. Its cache rates are derived off that
+    /// $10 fast input base (0.1× read, 1.25× 5m write, 2× 1h write), which is how the
+    /// multipliers are defined; only the $10/$50 pair is documented directly. The
+    /// generic `claude-opus` key deliberately has NO fast set, so an Opus 4.6/4.7
+    /// record that somehow reported `speed:"fast"` drops out of `$` instead of being
+    /// billed at double. Sonnet 5's $2/$10 price is permanent; the generic Sonnet key
+    /// stays at $3/$15 for Sonnet 4.x.
     static let bundledJSON = """
     {
       "version": 1,
-      "updated": "2026-08-26",
-      "_note": "USD per million tokens. Rates verified 2026-08-26 from platform.claude.com and developers.openai.com. Longest-prefix matching keeps Sonnet 5 at its permanent $2/$10 while Sonnet 4.x stays at $3/$15. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default so a contributing review slice is not silently dropped. Correct here anytime and advance updated on every edit.",
+      "updated": "2026-08-30",
+      "_note": "USD per million tokens. Rates verified 2026-08-30 from platform.claude.com and developers.openai.com. Longest-prefix matching keeps Sonnet 5 at its permanent $2/$10 while Sonnet 4.x stays at $3/$15. cachedInputPerMTok is cache read; cacheWritePerMTok is a 5-minute cache write (1.25x input) and cacheWrite1hPerMTok a 1-hour one (2x input), omitted on GPT keys which have no TTL split. The optional fast object is Anthropic fast mode (Opus 5 and Opus 4.8 only, $10/$50) with its cache rates derived off the fast input base; models without it drop out of $ rather than bill a fast record at standard. Codex logs currently carry no cache-creation tokens. codex-auto-review is an unpublished internal label priced at the GPT-5.6 Sol default so a contributing review slice is not silently dropped. Correct here anytime and advance updated on every edit, in BOTH this file and the bundled copy in RunwayPriceTable.swift.",
       "models": {
-        "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25 },
-        "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5 },
-        "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
-        "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25 },
-        "claude-fable":    { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5 },
-        "claude-mythos":   { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5 },
-        "claude-opus-4-1":  { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
-        "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75 },
-        "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75 },
-        "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0 },
+        "claude-opus-5":   { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
+                             "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
+        "claude-opus-4-8": { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0,
+                             "fast": { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0, "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 } },
+        "claude-opus":     { "inputPerMTok": 5.0,  "cachedInputPerMTok": 0.5,   "outputPerMTok": 25.0, "cacheWritePerMTok": 6.25, "cacheWrite1hPerMTok": 10.0 },
+        "claude-sonnet-5": { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 10.0, "cacheWritePerMTok": 2.5,  "cacheWrite1hPerMTok": 4.0 },
+        "claude-sonnet":   { "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,   "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
+        "claude-haiku":    { "inputPerMTok": 1.0,  "cachedInputPerMTok": 0.1,   "outputPerMTok": 5.0,  "cacheWritePerMTok": 1.25, "cacheWrite1hPerMTok": 2.0 },
+        "claude-fable":    { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
+        "claude-mythos":   { "inputPerMTok": 10.0, "cachedInputPerMTok": 1.0,   "outputPerMTok": 50.0, "cacheWritePerMTok": 12.5, "cacheWrite1hPerMTok": 20.0 },
+        "claude-opus-4-1":  { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
+        "claude-3-opus":    { "inputPerMTok": 15.0, "cachedInputPerMTok": 1.5,  "outputPerMTok": 75.0, "cacheWritePerMTok": 18.75, "cacheWrite1hPerMTok": 30.0 },
+        "claude-3-5-sonnet":{ "inputPerMTok": 3.0,  "cachedInputPerMTok": 0.3,  "outputPerMTok": 15.0, "cacheWritePerMTok": 3.75, "cacheWrite1hPerMTok": 6.0 },
+        "claude-3-5-haiku": { "inputPerMTok": 0.8,  "cachedInputPerMTok": 0.08, "outputPerMTok": 4.0,  "cacheWritePerMTok": 1.0,  "cacheWrite1hPerMTok": 1.6 },
         "gpt-5.6-sol":     { "inputPerMTok": 4.0,  "cachedInputPerMTok": 0.4,   "outputPerMTok": 20.0, "cacheWritePerMTok": 5.0 },
         "gpt-5.6-terra":   { "inputPerMTok": 2.0,  "cachedInputPerMTok": 0.2,   "outputPerMTok": 12.0, "cacheWritePerMTok": 2.5 },
         "gpt-5.6-luna":    { "inputPerMTok": 0.2,  "cachedInputPerMTok": 0.02,  "outputPerMTok": 1.2,  "cacheWritePerMTok": 0.25 },

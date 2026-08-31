@@ -413,21 +413,28 @@ enum ClaudeWeeklyQuotaBootstrapScanner {
                     // unlike Codex there is nothing to subtract.
                     let input = value("input_tokens")
                     let cacheRead = value("cache_read_input_tokens")
-                    let cacheWrite = value("cache_creation_input_tokens")
+                    // Cache writes bill by TTL — 1.25× input at 5 minutes, 2× at one
+                    // hour. Resolved by the shared helper so this scan and the live
+                    // runway price the same record identically.
+                    let writes = ClaudeRunwayLog.cacheCreation(usage: usage)
                     let output = value("output_tokens")
-                    let volume = input + cacheRead + cacheWrite + output
+                    let volume = input + cacheRead + writes.fiveMinute + writes.oneHour + output
                     guard volume > 0 else { continue }
 
                     let id = (message["id"] as? String).map { $0.hashValue }
                     let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                    guard let price = priceTable.price(forModel: model) else {
+                    // A tier with no rates counts as unpriced for the same reason an
+                    // unknown model does — better an honest gap than a halved cost.
+                    guard let price = priceTable.price(forModel: model),
+                          let rates = price.rates(for: RunwaySpeedTier(usageValue: usage["speed"])) else {
                         localEntries.append((id, 0, volume, false))
                         continue
                     }
-                    let cost = input * price.inputPerMTok / 1_000_000
-                        + cacheRead * price.cachedInputPerMTok / 1_000_000
-                        + output * price.outputPerMTok / 1_000_000
-                        + cacheWrite * (price.cacheWritePerMTok ?? price.inputPerMTok) / 1_000_000
+                    let cost = rates.dollars(input: input,
+                                             cachedInput: cacheRead,
+                                             output: output,
+                                             cacheWrite5m: writes.fiveMinute,
+                                             cacheWrite1h: writes.oneHour)
                     localEntries.append((id, cost, volume, true))
                 }
                 accumulator.lock()

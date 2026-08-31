@@ -262,15 +262,43 @@ struct CodexRunwayTokenActivitySample: Equatable, Sendable {
 /// a cheaper one. Summing all their tokens and pricing the total at any single model
 /// misprices every other slice — biased toward whichever path sorts first, which is
 /// always the parent. `$` therefore prices each slice at its own model and sums.
+///
+/// A slice is also scoped to one BILLING TIER, for the same reason it is scoped to
+/// one model: Claude's fast mode charges double, and a burst can straddle a switch.
 struct RunwayModelComponent: Equatable, Sendable {
     let modelSlug: String?
     let inputPerSecond: Double        // FRESH (non-cached) input
     let cachedInputPerSecond: Double
     let outputPerSecond: Double
+    /// Cache writes billed at the base 5-minute-TTL rate (1.25× input). Codex's
+    /// single write tier lands here too — it has no TTL split.
     let cacheCreationPerSecond: Double
+    /// Cache writes billed at the 1-hour-TTL rate (2× input). Claude only; a Claude
+    /// record splits its total across this and the field above via
+    /// `usage.cache_creation`. Always 0 for Codex.
+    let cacheCreation1hPerSecond: Double
+    /// Billing tier this slice was served at, taken from the record's `usage.speed`.
+    let speed: RunwaySpeedTier
+
+    init(modelSlug: String?,
+         inputPerSecond: Double,
+         cachedInputPerSecond: Double,
+         outputPerSecond: Double,
+         cacheCreationPerSecond: Double,
+         cacheCreation1hPerSecond: Double = 0,
+         speed: RunwaySpeedTier = .standard) {
+        self.modelSlug = modelSlug
+        self.inputPerSecond = inputPerSecond
+        self.cachedInputPerSecond = cachedInputPerSecond
+        self.outputPerSecond = outputPerSecond
+        self.cacheCreationPerSecond = cacheCreationPerSecond
+        self.cacheCreation1hPerSecond = cacheCreation1hPerSecond
+        self.speed = speed
+    }
 
     var totalPerSecond: Double {
-        inputPerSecond + cachedInputPerSecond + outputPerSecond + cacheCreationPerSecond
+        inputPerSecond + cachedInputPerSecond + outputPerSecond
+            + cacheCreationPerSecond + cacheCreation1hPerSecond
     }
 }
 
@@ -290,11 +318,17 @@ struct RunwaySessionActivity: Equatable, Sendable {
     /// Session totals across every model, normalized to ONE shape across providers
     /// so pricing needs no subtraction: `inputPerSecond` is FRESH (non-cached)
     /// input; `cachedInputPerSecond` is cached-input reads; `cacheCreationPerSecond`
-    /// is Claude cache writes (0 for Codex). Derived — never set directly.
+    /// and `cacheCreation1hPerSecond` are Claude cache writes at the 5-minute and
+    /// 1-hour rates (both 0 for Codex). Derived — never set directly.
+    ///
+    /// There is deliberately no session-level `speed`, for the same reason there is
+    /// no session-level `modelSlug`: a burst can straddle a tier switch, and one
+    /// "representative" tier would misprice the half that ran at the other.
     let inputPerSecond: Double
     let cachedInputPerSecond: Double
     let outputPerSecond: Double
     let cacheCreationPerSecond: Double
+    let cacheCreation1hPerSecond: Double
 
     init(identity: RunwaySessionIdentity,
          tokensPerSecond: Double,
@@ -310,6 +344,7 @@ struct RunwaySessionActivity: Equatable, Sendable {
         self.cachedInputPerSecond = components.reduce(0) { $0 + $1.cachedInputPerSecond }
         self.outputPerSecond = components.reduce(0) { $0 + $1.outputPerSecond }
         self.cacheCreationPerSecond = components.reduce(0) { $0 + $1.cacheCreationPerSecond }
+        self.cacheCreation1hPerSecond = components.reduce(0) { $0 + $1.cacheCreation1hPerSecond }
     }
 
     /// Single-model convenience — one transcript on one model, the common case.
@@ -321,7 +356,9 @@ struct RunwaySessionActivity: Equatable, Sendable {
          cachedInputPerSecond: Double = 0,
          outputPerSecond: Double = 0,
          cacheCreationPerSecond: Double = 0,
-         modelSlug: String? = nil) {
+         cacheCreation1hPerSecond: Double = 0,
+         modelSlug: String? = nil,
+         speed: RunwaySpeedTier = .standard) {
         self.init(identity: identity,
                   tokensPerSecond: tokensPerSecond,
                   sampleStart: sampleStart,
@@ -330,7 +367,9 @@ struct RunwaySessionActivity: Equatable, Sendable {
                                                     inputPerSecond: inputPerSecond,
                                                     cachedInputPerSecond: cachedInputPerSecond,
                                                     outputPerSecond: outputPerSecond,
-                                                    cacheCreationPerSecond: cacheCreationPerSecond)])
+                                                    cacheCreationPerSecond: cacheCreationPerSecond,
+                                                    cacheCreation1hPerSecond: cacheCreation1hPerSecond,
+                                                    speed: speed)])
     }
 }
 
@@ -1217,12 +1256,16 @@ enum CodexRunwayCalculator {
             guard component.totalPerSecond > 0 else { continue }
             // Any *contributing* slice we can't price makes the whole session
             // unpriceable: pricing only the known slices would silently understate
-            // the session rather than drop it honestly.
-            guard let p = priceTable.price(forModel: component.modelSlug) else { return nil }
-            perSecond += component.inputPerSecond * p.inputPerMTok / 1_000_000
-                + component.cachedInputPerSecond * p.cachedInputPerMTok / 1_000_000
-                + component.outputPerSecond * p.outputPerMTok / 1_000_000
-                + component.cacheCreationPerSecond * (p.cacheWritePerMTok ?? p.inputPerMTok) / 1_000_000
+            // the session rather than drop it honestly. That covers an unknown model
+            // AND a slice served at a billing tier the model has no rates for — a
+            // fast-mode record priced at standard would understate it by half.
+            guard let p = priceTable.price(forModel: component.modelSlug),
+                  let rates = p.rates(for: component.speed) else { return nil }
+            perSecond += rates.dollars(input: component.inputPerSecond,
+                                       cachedInput: component.cachedInputPerSecond,
+                                       output: component.outputPerSecond,
+                                       cacheWrite5m: component.cacheCreationPerSecond,
+                                       cacheWrite1h: component.cacheCreation1hPerSecond)
             pricedAnything = true
         }
         guard pricedAnything, perSecond.isFinite else { return nil }

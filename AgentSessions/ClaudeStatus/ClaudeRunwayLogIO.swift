@@ -33,6 +33,29 @@ enum ClaudeRunwayLog {
         return nil
     }
 
+    /// A `message.usage` record's cache-creation tokens, split by TTL, because the
+    /// two bill differently: a 5-minute write is 1.25× base input, a 1-hour write 2×.
+    ///
+    /// A record carries BOTH `cache_creation_input_tokens` (the total) and a
+    /// `cache_creation` sub-object breaking that same total down, so the two must
+    /// never be summed — the sub-object REPLACES the flat field whenever it carries
+    /// anything. The flat field stays the fallback for records that predate the split
+    /// (and for a future TTL this build does not know about, where both known buckets
+    /// read zero); it is charged at the 5-minute rate, which is what that single
+    /// column always meant.
+    ///
+    /// Shared rather than inlined per call site: the runway `$` view and the weekly
+    /// bootstrap must price the same record identically, or the weekly calibration is
+    /// built on dollars that disagree with the `$/h` used to weight it.
+    static func cacheCreation(usage: [String: Any]) -> (fiveMinute: Double, oneHour: Double) {
+        if let split = usage["cache_creation"] as? [String: Any] {
+            let fiveMinute = double(split["ephemeral_5m_input_tokens"]) ?? 0
+            let oneHour = double(split["ephemeral_1h_input_tokens"]) ?? 0
+            if fiveMinute > 0 || oneHour > 0 { return (fiveMinute, oneHour) }
+        }
+        return (double(usage["cache_creation_input_tokens"]) ?? 0, 0)
+    }
+
     /// Collapses whitespace and truncates a label for a runway row.
     static func compact(_ text: String, limit: Int = 28) -> String {
         let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")

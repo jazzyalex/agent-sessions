@@ -989,7 +989,253 @@ final class ClaudeRunwayParserTests: XCTestCase {
                        "no re-read occurs when the disk is unchanged")
     }
 
+    // MARK: - Cache-write TTL pricing
+
+    /// Anthropic bills a 1-hour cache write at 2× base input and a 5-minute write at
+    /// 1.25×. The parser used to read only the flat `cache_creation_input_tokens`
+    /// total and charge all of it at the 5-minute rate — and measurement over the 60
+    /// newest local sessions found 100% of cache creation is 1-hour, so the `$` view
+    /// understated every Claude session.
+    func testOneHourCacheWritesPriceAtDoubleInput() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "write", at: t1, flatCacheCreation: 600_000,
+                      cacheCreation5m: 0, cacheCreation1h: 600_000)
+        ], now: t1.addingTimeInterval(1))
+
+        // 600k tokens over a 30s span = 20k/s, priced at claude-opus's $10/MTok
+        // 1-hour write rate (2× its $5 input), not the $6.25 5-minute rate.
+        XCTAssertEqual(dollars ?? 0, 20_000 * 10.0 / 1_000_000 * 3600, accuracy: 1e-6)
+    }
+
+    func testFiveMinuteCacheWritesPriceAtTheFiveMinuteRate() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        // Sub-object only, no flat total: the split alone must carry the tokens
+        // through both the throughput signal and the price.
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "write", at: t1, cacheCreation5m: 600_000, cacheCreation1h: 0)
+        ], now: t1.addingTimeInterval(1))
+
+        XCTAssertEqual(dollars ?? 0, 20_000 * 6.25 / 1_000_000 * 3600, accuracy: 1e-6)
+    }
+
+    /// Regression pin for records that predate the split — they must keep pricing at
+    /// the 5-minute rate rather than dropping out of `$` entirely.
+    func testFlatCacheCreationStillPricesWhenSubObjectAbsent() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "write", at: t1, flatCacheCreation: 600_000)
+        ], now: t1.addingTimeInterval(1))
+
+        XCTAssertEqual(dollars ?? 0, 20_000 * 6.25 / 1_000_000 * 3600, accuracy: 1e-6)
+    }
+
+    /// Real records carry BOTH the flat total and the sub-object, and the sub-object
+    /// sums to the flat total. Reading both would bill the same tokens twice.
+    func testCacheCreationSubObjectReplacesFlatTotalRatherThanAddingToIt() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "write", at: t1, flatCacheCreation: 600_000,
+                      cacheCreation5m: 200_000, cacheCreation1h: 400_000)
+        ], now: t1.addingTimeInterval(1))
+
+        let fiveMinute: Double = 200_000 / 30.0 * 6.25
+        let oneHour: Double = 400_000 / 30.0 * 10.0
+        let expected: Double = (fiveMinute + oneHour) / 1_000_000 * 3600
+        XCTAssertEqual(dollars ?? 0, expected, accuracy: 1e-6)
+        // Guard the specific failure: 600k counted flat *plus* 600k counted split.
+        let doubleCountedFlat: Double = 600_000 / 30.0 * 6.25
+        let doubleCountedSplit: Double = 600_000 / 30.0 * 10.0
+        let doubleCounted: Double = (doubleCountedFlat + doubleCountedSplit) / 1_000_000 * 3600
+        XCTAssertNotEqual(dollars ?? 0, doubleCounted, accuracy: 1e-6)
+    }
+
+    // MARK: - Fast-mode pricing
+
+    /// Fast mode bills Opus 5 / 4.8 at $10/$50 per MTok versus $5/$25 standard. The
+    /// tier is read from the observed `usage.speed` — never from the model name,
+    /// because Opus 4.6 accepts `speed:"fast"` and then bills standard.
+    func testFastModePricesAtTheFastRateSet() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "burn", at: t1, output: 300_000, speed: "fast")
+        ], now: t1.addingTimeInterval(1))
+
+        XCTAssertEqual(dollars ?? 0, 10_000 * 50.0 / 1_000_000 * 3600, accuracy: 1e-6)
+    }
+
+    func testStandardSpeedIsUnchangedByFastModeSupport() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "burn", at: t1, output: 300_000, speed: "standard")
+        ], now: t1.addingTimeInterval(1))
+
+        XCTAssertEqual(dollars ?? 0, 10_000 * 25.0 / 1_000_000 * 3600, accuracy: 1e-6)
+    }
+
+    /// A burst that straddles a speed switch must price each half at its own tier,
+    /// exactly as it already does for a model switch.
+    func testBurstStraddlingASpeedSwitchPricesEachHalf() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let t2 = t0.addingTimeInterval(60)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, input: 1),
+            usageLine(id: "fast", at: t1, output: 300_000, speed: "fast"),
+            usageLine(id: "slow", at: t2, output: 300_000, speed: "standard")
+        ], now: t2.addingTimeInterval(1))
+
+        // Both later turns land in a 60s span: 5k/s each, one at $50 one at $25.
+        let expected = (5_000 * 50.0 + 5_000 * 25.0) / 1_000_000 * 3600
+        XCTAssertEqual(dollars ?? 0, expected, accuracy: 1e-6)
+    }
+
+    /// Falling back to standard rates for a model with no fast tier would understate
+    /// by exactly the 2× this work exists to correct, so the slice is dropped instead
+    /// — the same honest-drop the calculator already applies to an unknown model.
+    func testFastSpeedOnAModelWithoutFastRatesIsUnpriceable() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let dollars = try dollarsPerHour(lines: [
+            usageLine(id: "anchor", at: t0, model: "claude-sonnet-5", input: 1),
+            usageLine(id: "burn", at: t1, model: "claude-sonnet-5", output: 300_000, speed: "fast")
+        ], now: t1.addingTimeInterval(1))
+
+        XCTAssertNil(dollars)
+    }
+
+    /// Both clamp paths rebuild every component by hand, so a forgotten field is
+    /// silently defaulted rather than caught by the compiler. A clamped session must
+    /// keep its speed tier or its fast slice reverts to standard pricing.
+    func testCrossSessionClampPreservesTheSpeedTier() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let measured = try makeLog(lines: [
+            usageLine(id: "m0", at: t0, input: 1),
+            usageLine(id: "m1", at: t1, output: 30)
+        ])
+        let provisional = try makeLog(lines: [
+            userLine(sessionID: "p", cwd: "/tmp", text: "go", at: t1.addingTimeInterval(-10)),
+            usageLine(id: "p1", at: t1, output: 300_000, speed: "fast")
+        ])
+
+        let clamped = ClaudeRunwayTokenActivityParser.activitiesClampingProvisional(
+            identities: [
+                RunwaySessionIdentity(id: "measured", displayName: "M", isGoal: false, logPaths: [measured]),
+                RunwaySessionIdentity(id: "provisional", displayName: "P", isGoal: false, logPaths: [provisional])
+            ],
+            now: t1.addingTimeInterval(1))
+
+        let p = clamped.first { $0.identity.id == "provisional" }
+        XCTAssertNotNil(p)
+        XCTAssertLessThan(p?.tokensPerSecond ?? .infinity, 100, "the provisional rate must actually be clamped")
+        XCTAssertEqual(p?.components.first?.speed, .fast, "the clamp must not drop the fast tier")
+    }
+
+    /// Same trap, the per-path clamp inside `scoredActivity`: a subagent path folded
+    /// into the parent identity is rescaled by a second hand-written rebuild.
+    func testPerPathClampPreservesTheSpeedTier() throws {
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let t1 = t0.addingTimeInterval(30)
+        let measured = try makeLog(lines: [
+            usageLine(id: "m0", at: t0, input: 1),
+            usageLine(id: "m1", at: t1, output: 30)
+        ])
+        let provisional = try makeLog(lines: [
+            userLine(sessionID: "p", cwd: "/tmp", text: "go", at: t1.addingTimeInterval(-10)),
+            usageLine(id: "p1", at: t1, output: 300_000, speed: "fast")
+        ])
+
+        let identity = RunwaySessionIdentity(id: "session", displayName: "S", isGoal: false,
+                                             logPaths: [measured, provisional])
+        let activity = ClaudeRunwayTokenActivityParser.activity(identity: identity,
+                                                               now: t1.addingTimeInterval(1))
+
+        XCTAssertEqual(activity?.components.filter { $0.speed == .fast }.count, 1,
+                       "the rescaled subagent path keeps its fast tier")
+    }
+
+    // MARK: - Price manifest
+
+    /// The served manifest overwrites the compiled-in table whenever its `updated` is
+    /// not older. If a new rate reaches only one of the two, a refresh silently
+    /// reverts it — and a session whose model then has no fast rates drops out of `$`.
+    func testServedManifestMatchesTheBundledTable() throws {
+        let servedURL = FixturePaths.repoRootURL()
+            .appendingPathComponent("docs", isDirectory: true)
+            .appendingPathComponent("prices.json")
+        let served = try JSONSerialization.jsonObject(with: Data(contentsOf: servedURL)) as? [String: Any]
+        let bundled = try JSONSerialization.jsonObject(
+            with: Data(RunwayPriceTable.bundledJSON.utf8)) as? [String: Any]
+
+        XCTAssertEqual(served?["version"] as? Int, bundled?["version"] as? Int)
+        XCTAssertEqual(served?["updated"] as? String, bundled?["updated"] as? String,
+                       "both copies must advance together")
+        XCTAssertEqual(NSDictionary(dictionary: (served?["models"] as? [String: Any]) ?? [:]),
+                       NSDictionary(dictionary: (bundled?["models"] as? [String: Any]) ?? [:]),
+                       "every rate must reach both the served manifest and the bundled table")
+    }
+
     // MARK: - Helpers
+
+    /// Writes `lines` to a throwaway JSONL and returns its path. Each call gets its
+    /// own directory so the parser's (path, mtime, size) sample cache never collides.
+    private func makeLog(lines: [String]) throws -> String {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-runway-price-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let log = dir.appendingPathComponent("session.jsonl")
+        try lines.joined(separator: "\n").write(to: log, atomically: true, encoding: .utf8)
+        return log.path
+    }
+
+    /// End-to-end $/h for one session: JSONL bytes → parsed components → priced.
+    private func dollarsPerHour(lines: [String], now: Date) throws -> Double? {
+        let identity = RunwaySessionIdentity(id: "session", displayName: "session",
+                                             isGoal: false, logPaths: [try makeLog(lines: lines)])
+        guard let activity = ClaudeRunwayTokenActivityParser.activity(identity: identity, now: now) else {
+            return nil
+        }
+        return CodexRunwayCalculator.dollarsPerHour(for: activity,
+                                                    priceTable: RunwayPriceTable.makeForTesting())
+    }
+
+    /// An assistant usage line. `flatCacheCreation` and the 5m/1h pair are emitted
+    /// independently so a test can reproduce a record carrying one, the other, or —
+    /// as real transcripts do — both.
+    private func usageLine(id: String,
+                           at date: Date,
+                           model: String = "claude-opus-5",
+                           input: Int = 0,
+                           output: Int = 0,
+                           cacheRead: Int = 0,
+                           flatCacheCreation: Int? = nil,
+                           cacheCreation5m: Int? = nil,
+                           cacheCreation1h: Int? = nil,
+                           speed: String? = nil) -> String {
+        var usage = "\"input_tokens\":\(input),\"output_tokens\":\(output),\"cache_read_input_tokens\":\(cacheRead)"
+        if let flatCacheCreation { usage += ",\"cache_creation_input_tokens\":\(flatCacheCreation)" }
+        if cacheCreation5m != nil || cacheCreation1h != nil {
+            usage += ",\"cache_creation\":{\"ephemeral_5m_input_tokens\":\(cacheCreation5m ?? 0)"
+            usage += ",\"ephemeral_1h_input_tokens\":\(cacheCreation1h ?? 0)}"
+        }
+        if let speed { usage += ",\"speed\":\"\(speed)\"" }
+        return "{\"type\":\"assistant\",\"sessionId\":\"session\",\"timestamp\":\"\(iso(date))\","
+            + "\"message\":{\"id\":\"\(id)\",\"role\":\"assistant\",\"model\":\"\(model)\",\"usage\":{\(usage)}}}"
+    }
 
     private func writeDesktopSidecar(root: URL, cliSessionID: String, title: String, isArchived: Bool) throws {
         let dir = root.appendingPathComponent("convo/\(UUID().uuidString)", isDirectory: true)

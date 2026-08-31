@@ -77,8 +77,33 @@ struct WeeklyQuotaTokenEvent: Equatable, Sendable {
     let input: Double
     let cachedInput: Double
     let output: Double
+    /// Cache writes at the 5-minute rate, and — split out because it bills at 2×
+    /// input rather than 1.25× — those at the 1-hour rate.
     let cacheCreation: Double
+    let cacheCreation1h: Double
     let modelSlug: String?
+    /// Billing tier from `usage.speed`; fast mode doubles Opus rates.
+    let speed: RunwaySpeedTier
+
+    init(logPath: String,
+         capturedAt: Date,
+         input: Double,
+         cachedInput: Double,
+         output: Double,
+         cacheCreation: Double,
+         cacheCreation1h: Double = 0,
+         modelSlug: String?,
+         speed: RunwaySpeedTier = .standard) {
+        self.logPath = logPath
+        self.capturedAt = capturedAt
+        self.input = input
+        self.cachedInput = cachedInput
+        self.output = output
+        self.cacheCreation = cacheCreation
+        self.cacheCreation1h = cacheCreation1h
+        self.modelSlug = modelSlug
+        self.speed = speed
+    }
 }
 
 /// Priced activity accumulated over time, so an arbitrary quota interval can be
@@ -188,16 +213,21 @@ final class WeeklyQuotaActivityLedger {
             seenEvents.insert(key)
             seenEventOrder.append((key: key, at: now))
 
-            let volume = event.input + event.cachedInput + event.output + event.cacheCreation
+            let volume = event.input + event.cachedInput + event.output
+                + event.cacheCreation + event.cacheCreation1h
             guard volume > 0 else { continue }
-            guard let price = priceTable.price(forModel: event.modelSlug) else {
+            // Same poison flag as an unknown model when the record's billing tier has
+            // no rates: the calibration must not be built on a knowingly halved cost.
+            guard let price = priceTable.price(forModel: event.modelSlug),
+                  let rates = price.rates(for: event.speed) else {
                 hadUnpriced = true
                 continue
             }
-            dollars += event.input * price.inputPerMTok / 1_000_000
-                + event.cachedInput * price.cachedInputPerMTok / 1_000_000
-                + event.output * price.outputPerMTok / 1_000_000
-                + event.cacheCreation * (price.cacheWritePerMTok ?? price.inputPerMTok) / 1_000_000
+            dollars += rates.dollars(input: event.input,
+                                     cachedInput: event.cachedInput,
+                                     output: event.output,
+                                     cacheWrite5m: event.cacheCreation,
+                                     cacheWrite1h: event.cacheCreation1h)
         }
 
         buckets.append(Bucket(at: now, dollars: dollars, hadUnpriced: hadUnpriced))

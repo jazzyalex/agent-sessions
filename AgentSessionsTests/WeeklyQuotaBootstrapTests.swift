@@ -48,6 +48,54 @@ final class WeeklyQuotaBootstrapTests: XCTestCase {
             now: anchor.addingTimeInterval(-3600))
     }
 
+    /// The Claude scan feeds the same calibration the runway `$` view is weighted by,
+    /// so it must price a 1-hour cache write at 2× input exactly as the runway does —
+    /// otherwise the weekly denominator and the `$/h` numerator describe different
+    /// money for the same tokens.
+    func testClaudeScanPricesOneHourCacheWritesAtDoubleInput() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000)], name: "c.jsonl")
+
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+
+        // 1M cache-creation tokens, all 1-hour, at claude-opus-5's $10/MTok 1-hour
+        // rate — not the $6.25 five-minute rate the flat column used to charge.
+        XCTAssertEqual(result?.dollars ?? 0, 10.0, accuracy: 0.001)
+        XCTAssertEqual(result?.unpricedVolumeShare ?? 1, 0, accuracy: 0.0001)
+    }
+
+    /// Real records carry the flat total AND the sub-object that breaks it down, so
+    /// the scan must not bill the same tokens through both.
+    func testClaudeScanDoesNotDoubleCountFlatAndSplitCacheCreation() throws {
+        let at = anchor.addingTimeInterval(-2 * 3600)
+        try write([claudeUsageLine(id: "m1", at: at, oneHourCacheWrite: 1_000_000,
+                                   flatCacheCreation: 1_000_000)], name: "c.jsonl")
+
+        let result = ClaudeWeeklyQuotaBootstrapScanner.scan(
+            root: root, resetsAt: anchor, windowMinutes: 10080, usedPercentPoints: 5,
+            priceTable: RunwayPriceTable.makeForTesting(),
+            now: anchor.addingTimeInterval(-3600))
+
+        XCTAssertEqual(result?.dollars ?? 0, 10.0, accuracy: 0.001,
+                       "the sub-object replaces the flat total rather than adding to it")
+    }
+
+    private func claudeUsageLine(id: String,
+                                 at: Date,
+                                 oneHourCacheWrite: Int,
+                                 flatCacheCreation: Int? = nil,
+                                 model: String = "claude-opus-5") -> String {
+        let flat = flatCacheCreation.map { "\"cache_creation_input_tokens\":\($0)," } ?? ""
+        return "{\"timestamp\":\"\(ISO8601DateFormatter().string(from: at))\","
+            + "\"message\":{\"id\":\"\(id)\",\"model\":\"\(model)\",\"usage\":{"
+            + "\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\(flat)"
+            + "\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,"
+            + "\"ephemeral_1h_input_tokens\":\(oneHourCacheWrite)}}}}"
+    }
+
     func testPricesTurnsInsideTheWindow() throws {
         let at = anchor.addingTimeInterval(-2 * 3600)
         try write([modelLine("gpt-5.6", at: at), turn(output: 1_000_000, resetsAt: anchor, at: at)],

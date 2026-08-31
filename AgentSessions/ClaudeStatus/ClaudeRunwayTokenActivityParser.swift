@@ -25,9 +25,16 @@ struct ClaudeRunwayTokenActivitySample: Equatable, Sendable {
     /// `message.usage` is per-call, so these are summed across a burst (not delta'd).
     var input: Double = 0
     var output: Double = 0
-    var cacheCreation: Double = 0
+    /// Cache writes split by TTL, because they bill differently: a 5-minute write is
+    /// 1.25× base input, a 1-hour write is 2×. A record with no `cache_creation`
+    /// sub-object puts its flat total in `cacheCreation5m`, which is the rate the
+    /// single pre-split column always meant.
+    var cacheCreation5m: Double = 0
+    var cacheCreation1h: Double = 0
     var cacheRead: Double = 0
     var modelSlug: String? = nil
+    /// Billing tier from `usage.speed`. Fast mode bills Opus 5 / 4.8 at double.
+    var speed: RunwaySpeedTier = .standard
 }
 
 enum ClaudeRunwayTokenActivityParser {
@@ -82,8 +89,10 @@ enum ClaudeRunwayTokenActivityParser {
                     input: sample.input,
                     cachedInput: sample.cacheRead,
                     output: sample.output,
-                    cacheCreation: sample.cacheCreation,
-                    modelSlug: sample.modelSlug
+                    cacheCreation: sample.cacheCreation5m,
+                    cacheCreation1h: sample.cacheCreation1h,
+                    modelSlug: sample.modelSlug,
+                    speed: sample.speed
                 ))
             }
         }
@@ -177,13 +186,7 @@ enum ClaudeRunwayTokenActivityParser {
                 tokensPerSecond: maxMeasured,
                 sampleStart: entry.activity.sampleStart,
                 sampleEnd: entry.activity.sampleEnd,
-                components: entry.activity.components.map { c in
-                    RunwayModelComponent(modelSlug: c.modelSlug,
-                                         inputPerSecond: c.inputPerSecond * scale,
-                                         cachedInputPerSecond: c.cachedInputPerSecond * scale,
-                                         outputPerSecond: c.outputPerSecond * scale,
-                                         cacheCreationPerSecond: c.cacheCreationPerSecond * scale)
-                }
+                components: entry.activity.components.map { rescaled($0, by: scale) }
             )
         }
     }
@@ -223,13 +226,7 @@ enum ClaudeRunwayTokenActivityParser {
                 tokensPerSecond: maxMeasured,
                 sampleStart: activity.sampleStart,
                 sampleEnd: activity.sampleEnd,
-                components: activity.components.map { c in
-                    RunwayModelComponent(modelSlug: c.modelSlug,
-                                         inputPerSecond: c.inputPerSecond * scale,
-                                         cachedInputPerSecond: c.cachedInputPerSecond * scale,
-                                         outputPerSecond: c.outputPerSecond * scale,
-                                         cacheCreationPerSecond: c.cacheCreationPerSecond * scale)
-                }
+                components: activity.components.map { rescaled($0, by: scale) }
             ), entry.provisional)
         }
         let tokensPerSecond = pathActivities.reduce(0) { $0 + $1.activity.tokensPerSecond }
@@ -301,13 +298,39 @@ enum ClaudeRunwayTokenActivityParser {
         }
     }
 
-    /// Per-model token accumulator for one burst.
+    /// Scale one slice's token rates by the clamp factor, preserving everything that
+    /// identifies how it is priced (model and billing tier).
+    ///
+    /// Both clamp paths rebuild components by hand, and a field left out of such a
+    /// rebuild is silently defaulted rather than caught by the compiler — a dropped
+    /// `speed` would quietly reprice a clamped fast session at half. One shared
+    /// helper means there is only one place that can forget.
+    private static func rescaled(_ c: RunwayModelComponent, by scale: Double) -> RunwayModelComponent {
+        RunwayModelComponent(modelSlug: c.modelSlug,
+                             inputPerSecond: c.inputPerSecond * scale,
+                             cachedInputPerSecond: c.cachedInputPerSecond * scale,
+                             outputPerSecond: c.outputPerSecond * scale,
+                             cacheCreationPerSecond: c.cacheCreationPerSecond * scale,
+                             cacheCreation1hPerSecond: c.cacheCreation1hPerSecond * scale,
+                             speed: c.speed)
+    }
+
+    /// Accumulator for one burst's tokens within a single (model, speed) slice.
     private struct BurstTokens {
-        var input = 0.0, output = 0.0, cacheCreation = 0.0, cacheRead = 0.0
+        var input = 0.0, output = 0.0
+        var cacheCreation5m = 0.0, cacheCreation1h = 0.0, cacheRead = 0.0
         mutating func add(_ s: ClaudeRunwayTokenActivitySample) {
             input += s.input; output += s.output
-            cacheCreation += s.cacheCreation; cacheRead += s.cacheRead
+            cacheCreation5m += s.cacheCreation5m; cacheCreation1h += s.cacheCreation1h
+            cacheRead += s.cacheRead
         }
+    }
+
+    /// A burst is bucketed by model AND billing tier: a session that switches either
+    /// mid-window must price each half at what it actually cost.
+    private struct BurstKey: Hashable {
+        let modelSlug: String?
+        let speed: RunwaySpeedTier
     }
 
     private static func pathActivity(identity: RunwaySessionIdentity,
@@ -321,19 +344,21 @@ enum ClaudeRunwayTokenActivityParser {
         // tokens predate the span and are excluded.
         var windowStart = last.capturedAt
         var consumed = 0.0
-        // A burst can straddle a model switch, so keep each turn's tokens under the
-        // model that actually produced them. Pricing the whole burst at the newest
-        // turn's model would misprice every earlier turn in it. These buckets are the
-        // only per-type accumulator — the activity's totals derive from them.
-        var byModel: [String?: BurstTokens] = [:]
+        // A burst can straddle a model switch — or a fast-mode switch — so keep each
+        // turn's tokens under the (model, tier) that actually produced them. Pricing
+        // the whole burst at the newest turn's would misprice every earlier turn in
+        // it. These buckets are the only per-type accumulator — the activity's totals
+        // derive from them.
+        var bySlice: [BurstKey: BurstTokens] = [:]
         var previous = last
         for sample in samples.dropLast().reversed() {
             let gap = previous.capturedAt.timeIntervalSince(sample.capturedAt)
             if gap > maximumPairInterval { break }
             consumed += previous.tokens
-            var bucket = byModel[previous.modelSlug] ?? BurstTokens()
+            let key = BurstKey(modelSlug: previous.modelSlug, speed: previous.speed)
+            var bucket = bySlice[key] ?? BurstTokens()
             bucket.add(previous)
-            byModel[previous.modelSlug] = bucket
+            bySlice[key] = bucket
             windowStart = sample.capturedAt
             previous = sample
         }
@@ -341,15 +366,21 @@ enum ClaudeRunwayTokenActivityParser {
         let span = last.capturedAt.timeIntervalSince(windowStart)
         if span >= minimumPairInterval, consumed > 0 {
             // Sorted so the component order (and thus Equatable) is deterministic;
-            // the $ sum itself is order-independent.
-            let components = byModel
-                .sorted { ($0.key ?? "") < ($1.key ?? "") }
-                .map { model, t in
-                    RunwayModelComponent(modelSlug: model,
+            // the $ sum itself is order-independent. Tier breaks the tie when one
+            // model appears at both speeds.
+            let components = bySlice
+                .sorted {
+                    ($0.key.modelSlug ?? "", $0.key.speed.rawValue)
+                        < ($1.key.modelSlug ?? "", $1.key.speed.rawValue)
+                }
+                .map { key, t in
+                    RunwayModelComponent(modelSlug: key.modelSlug,
                                          inputPerSecond: t.input / span,
                                          cachedInputPerSecond: t.cacheRead / span,
                                          outputPerSecond: t.output / span,
-                                         cacheCreationPerSecond: t.cacheCreation / span)
+                                         cacheCreationPerSecond: t.cacheCreation5m / span,
+                                         cacheCreation1hPerSecond: t.cacheCreation1h / span,
+                                         speed: key.speed)
                 }
             return (RunwaySessionActivity(
                 identity: identity,
@@ -378,8 +409,10 @@ enum ClaudeRunwayTokenActivityParser {
                     inputPerSecond: last.input / turnDuration,
                     cachedInputPerSecond: last.cacheRead / turnDuration,
                     outputPerSecond: last.output / turnDuration,
-                    cacheCreationPerSecond: last.cacheCreation / turnDuration,
-                    modelSlug: last.modelSlug
+                    cacheCreationPerSecond: last.cacheCreation5m / turnDuration,
+                    cacheCreation1hPerSecond: last.cacheCreation1h / turnDuration,
+                    modelSlug: last.modelSlug,
+                    speed: last.speed
                 ), true)
             }
         }
@@ -416,6 +449,7 @@ enum ClaudeRunwayTokenActivityParser {
         guard tokens > 0 else { return (timestamp, nil) }
         func v(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
         let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let writes = ClaudeRunwayLog.cacheCreation(usage: usage)
         return (timestamp, ClaudeRunwayTokenActivitySample(
             logPath: logPath,
             capturedAt: capturedAt,
@@ -423,17 +457,22 @@ enum ClaudeRunwayTokenActivityParser {
             turnStartedAt: turnStartedAt,
             input: v("input_tokens"),
             output: v("output_tokens"),
-            cacheCreation: v("cache_creation_input_tokens"),
+            cacheCreation5m: writes.fiveMinute,
+            cacheCreation1h: writes.oneHour,
             cacheRead: v("cache_read_input_tokens"),
-            modelSlug: model
+            modelSlug: model,
+            speed: RunwaySpeedTier(usageValue: usage["speed"])
         ))
     }
 
     private static func weightedTokens(_ usage: [String: Any]) -> Double {
         func value(_ key: String) -> Double { ClaudeRunwayLog.double(usage[key]) ?? 0 }
+        // Resolved the same way as pricing, so a record carrying only the sub-object
+        // still registers throughput instead of reading as a zero-token turn.
+        let writes = ClaudeRunwayLog.cacheCreation(usage: usage)
         return value("input_tokens")
             + value("output_tokens")
-            + value("cache_creation_input_tokens")
+            + writes.fiveMinute + writes.oneHour
             + cacheReadWeight * value("cache_read_input_tokens")
     }
 }
