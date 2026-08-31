@@ -11,6 +11,18 @@
 entries:
   - agent_sessions_version: "5.1.0"
     as_of_date_utc: "2026-08-31"
+    as_of_commit: "2f360432"
+    note: "Fifth pass. Antigravity cleared once the maintainer created one real session; supersedes the hold in the entry below."
+    verified:
+      antigravity:
+        sessions:
+          max_verified_version: "1.1.22"
+          scope: "supports_latest"
+          evidence: ["scripts/probe_scan_output/agent_watch/20260831-172753Z-prebump/report.json"]
+          notes: "Bumped 1.1.14->1.1.22 across an 8-version gap, held twice earlier today and released only when the evidence actually supported it. The maintainer created ONE real antigravity session (18 events), which lifted the newest-5 union from 19 events to 34 and cleared the thin-sample gate - the gate needs BOTH <25 events and <50% coverage, so the event count alone released it. That is the recovery path predicted in the sampling entry: real usage, not another prebump. Coverage is still only 0.308, so this is not a broad claim; what carries the bump is the separate prebump evidence, checked field by field rather than inferred from the verdict string: fresh_evidence_source=latest_prebump_report, latest_real_session_evidence=true, latest_status=current_fetch_known, blockers=[], and a sample mtime (17:10:18Z) later than the agy binary's (06:02:37Z), so the session was written by the installed build. unknown_types [] / unknown_keys {}. The underlying sampling weakness is NOT fixed - antigravity will fall back to blocked_thin_sample the next time five thin sessions lead the window - and remains filed against the sampling rule in docs/backlog.md."
+
+  - agent_sessions_version: "5.1.0"
+    as_of_date_utc: "2026-08-31"
     as_of_commit: "9b8f0dc4"
     note: "Fourth pass. Supersedes the copilot hold recorded two entries below; antigravity and openclaw remain held but for corrected reasons."
     verified:
