@@ -273,6 +273,215 @@ final class ClaudeStatusServiceTests: XCTestCase {
         XCTAssertNotNil(UsageResetText.resetDate(kind: "Wk", source: .claude, raw: parsed.weekAllModelsResetText))
     }
 
+    func testClaudeUsageCaptureFixtureParsesV1QuotaOutput() throws {
+        let fixture = """
+        Current session
+        82% left
+        Resets in 3h
+
+        Current week (all models)
+        51% left
+        Resets in 2d
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok": true"#))
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 82"#))
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 51"#))
+    }
+
+    func testClaudeUsageCaptureFixtureParsesUsedPercentOutput() throws {
+        let fixture = """
+        Current session
+        ███████████                                        22% used
+        Resets 2:30pm (America/Los_Angeles)
+
+        Current week (all models)
+        █▌                                                 3% used
+        Resets Jun 28 at 5am (America/Los_Angeles)
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok": true"#))
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 78"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""pct_left": 97"#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""resets": "2:30pm (America/Los_Angeles)""#), result.stdout)
+        XCTAssertTrue(result.stdout.contains(#""resets": "Jun 28 at 5am (America/Los_Angeles)""#), result.stdout)
+    }
+
+    func testClaudeUsageCaptureFixtureDetectsV2UnavailableQuotaOutput() throws {
+        let fixture = """
+        Claude Code v2.1.169
+
+        What's contributing to your limits usage?
+        Approximate, based on local sessions on this machine
+
+        Last 24h
+        Nothing over 10% in this period
+
+        d to day   w to week
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok":false"#))
+        XCTAssertTrue(result.stdout.contains(#""error":"ui_format_v2""#))
+        XCTAssertFalse(result.stdout.contains("session_5h"))
+        XCTAssertFalse(result.stdout.contains("week_all_models"))
+    }
+
+    func testClaudeUsageCaptureFixtureDetectsRateLimitedUsageOutput() throws {
+        let fixture = """
+        Current session
+
+        Error: Usage endpoint is rate limited. Please try again in a moment.
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 0, result.stderr)
+        XCTAssertTrue(result.stdout.contains(#""ok":false"#))
+        XCTAssertTrue(result.stdout.contains(#""error":"rate_limited""#))
+        XCTAssertFalse(result.stdout.contains("session_5h"))
+        XCTAssertFalse(result.stdout.contains("week_all_models"))
+    }
+
+    func testClaudeUsageCaptureFixtureRejectsPartialQuotaOutput() throws {
+        let fixture = """
+        Current session
+        82% left
+        Resets in 3h
+        """
+
+        let result = try runClaudeUsageCaptureFixture(fixture)
+
+        XCTAssertEqual(result.status, 16)
+        XCTAssertTrue(result.stdout.contains(#""error":"parsing_failed""#))
+        XCTAssertFalse(result.stdout.contains(#""ok": true"#))
+    }
+
+    func testCleanupPlannerValidatesExpectedLabelShape() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+
+        XCTAssertTrue(planner.isManagedProbeLabel("as-cc-AbCdEf1234g5"))
+        XCTAssertFalse(planner.isManagedProbeLabel("as-xy-AbCdEf1234g5"))
+        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-ABC123"))
+        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-1bCdEf1234g5"))
+        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-AbCdEf1234gX"))
+        XCTAssertFalse(planner.isManagedProbeLabel("as-cc-AbCdEf12_4g5"))
+    }
+
+    func testCleanupPlannerQueueExcludesProtectedAndActiveLabels() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+        let allLabels: Set<String> = [
+            "as-cc-AbCdEf1234g5",
+            "as-cc-ZyXwVu9876t4",
+            "as-cc-LmNoPq4567r8",
+            "as-cc-1badLabel234",
+            "other-prefix-AbCdEf1234g5"
+        ]
+        let protected: Set<String> = ["as-cc-ZyXwVu9876t4"]
+        let queue = planner.plannedQueue(
+            allLabels: allLabels,
+            protectedLabels: protected,
+            activeLabel: "as-cc-LmNoPq4567r8"
+        )
+
+        XCTAssertEqual(queue, ["as-cc-AbCdEf1234g5"])
+    }
+
+    func testCleanupPlannerSocketPathsForManagedLabel() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+
+        let paths = planner.socketPaths(uid: 501, label: "as-cc-AbCdEf1234g5")
+
+        XCTAssertEqual(
+            paths,
+            [
+                "/private/tmp/tmux-501/as-cc-AbCdEf1234g5",
+                "/tmp/tmux-501/as-cc-AbCdEf1234g5"
+            ]
+        )
+    }
+
+    func testCleanupPlannerSocketPathsRejectUnmanagedLabel() {
+        let planner = ClaudeTmuxCleanupPlanner(prefix: "as-cc-", tokenLength: 12)
+
+        XCTAssertTrue(planner.socketPaths(uid: 501, label: "as-cc-1bCdEf1234g5").isEmpty)
+        XCTAssertTrue(planner.socketPaths(uid: 501, label: "other-label").isEmpty)
+    }
+
+    func testParseManagedProbePIDs_matchesOnlyManagedTmuxAndClaudeProbeProcesses() {
+        let snapshot = """
+          101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage
+          102 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/as-cc-AbCdEf1234g5,123,0
+          103 /opt/homebrew/bin/tmux -L other-label new-session -d -s usage
+          104 /Users/alexm/.local/bin/claude --model sonnet WORKDIR=/Users/alexm/.config/agent-sessions/claude-probe TMUX=/private/tmp/tmux-501/other-label,123,0
+          105 /Users/alexm/.local/bin/claude --model sonnet
+        """
+
+        let pids = ClaudeStatusService.parseManagedProbePIDs(
+            from: snapshot,
+            label: "as-cc-AbCdEf1234g5",
+            uid: 501
+        )
+
+        XCTAssertEqual(pids, [101, 102])
+    }
+
+    func testParseManagedProbePIDs_rejectsUnmanagedLabels() {
+        let snapshot = "101 /opt/homebrew/bin/tmux -L as-cc-AbCdEf1234g5 new-session -d -s usage"
+
+        let pids = ClaudeStatusService.parseManagedProbePIDs(
+            from: snapshot,
+            label: "other-label",
+            uid: 501
+        )
+
+        XCTAssertTrue(pids.isEmpty)
+    }
+
+    private func runClaudeUsageCaptureFixture(_ fixture: String) throws -> (status: Int32, stdout: String, stderr: String) {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claude-usage-fixture-\(UUID().uuidString).txt")
+        try fixture.write(to: tempURL, atomically: true, encoding: .utf8)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scriptURL = repoRoot
+            .appendingPathComponent("AgentSessions")
+            .appendingPathComponent("Resources")
+            .appendingPathComponent("claude_usage_capture.sh")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["CLAUDE_USAGE_CAPTURE_FIXTURE"] = tempURL.path
+        process.environment = environment
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return (process.terminationStatus, stdout, stderr)
+    }
+
     // MARK: - Weekly calibration provenance
 
     /// Calibration must know which quota week a percentage belongs to. The tmux
