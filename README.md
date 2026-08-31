@@ -25,7 +25,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
 - Security & Privacy: Local-only. No telemetry. Details: `docs/PRIVACY.md` and `docs/security.md`
 
 <p align="center">
-  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1/AgentSessions-5.1.dmg"><b>Download Agent Sessions 5.1 (DMG)</b></a>
+  <a href="https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg"><b>Download Agent Sessions 5.1.1 (DMG)</b></a>
   •
   <a href="https://github.com/jazzyalex/agent-sessions/releases">All Releases</a>
   •
@@ -36,7 +36,7 @@ Plus searchable transcripts across [Codex](https://jazzyalex.github.io/agent-ses
   <a href="#development">Development</a>
 </p>
 
-> **New in 5.1** — Devin CLI and fx (vercel-labs) join as the fourteenth and fifteenth sources, both contributed and stewarded by @thedavidweng against the 5.0 recipe. [See what's new ↓](#whats-new-in-51)
+> **New in 5.1.1** — A small version number and a big fix list. Twelve fixes, three of them silent: Claude sessions were unsearchable since 2026-08-21, Claude `$` read a sixth low, and a stray `QWEN_HOME` emptied the Qwen list. Plus a weekly lens on the Session Runway. [See what's new ↓](#whats-new-in-511)
 
 ## Overview
 
@@ -78,12 +78,41 @@ It's also a local-first Mac app for finding useful work coding agents already wr
 
 Details: `docs/PRIVACY.md` and `docs/security.md`.
 
-## What's New in 5.1
+## What's New in 5.1.1
 
-**TL;DR** - Two more coding agents: Devin CLI and fx (vercel-labs). Both land in the same
-searchable list as the rest, each with a Settings pane and a resume command.
+**TL;DR** - A small version number and a big fix list. Twelve fixes, three of them silent
+failures you had no way to notice. Plus a weekly lens on the Session Runway.
 
-New in 5.1:
+Fixed in 5.1.1 — the three you could not have seen:
+- **Claude sessions are searchable again.** Since 2026-08-21 new Claude sessions were listed
+  with the right title, project and dates, but searching their text returned nothing and
+  nothing said so. 256 sessions on the development machine — nine days' worth. They are
+  picked up on the first launch after updating; nothing to re-index by hand.
+- **Claude `$` figures were about a sixth low.** Every cache write was charged at the
+  five-minute rate, when Claude Code almost only writes hour-long entries — which cost
+  twice as much. Anthropic's fast mode is priced at its own rates now too.
+- **A stray `QWEN_HOME` no longer empties your Qwen list.** Qwen 0.14.x ignores that
+  variable; the app did not. Anyone on 0.14.x who had exported it, for any unrelated reason,
+  saw zero Qwen sessions and no explanation.
+
+Also fixed: Copilot sessions carry their real title instead of `|-`, a custom Antigravity
+brain directory is actually read, Analytics counts the same agents the session list does,
+Droid is on only if you run it, and the What's New card stops asking once you have answered
+it. Full detail in the [changelog](docs/CHANGELOG.md).
+
+New in 5.1.1:
+- **A `Wk` unit on the Session Runway** — per session, in percent of your weekly quota per
+  hour. It reads each session's own activity rather than splitting one account-wide rate, so
+  a session working twice as hard reads twice as fast, and it learns the spend-to-quota
+  conversion from the weekly usage already on disk — a figure appears within seconds of
+  launch instead of hours later. Idle sessions read `quiet`; a provider with no weekly
+  window reads `n/a`.
+- **Claude's model-scoped weekly limit is visible** — the third window Claude reports
+  alongside the 5-hour and weekly ones, named in the menu-bar dropdown ("Wk Fable: 70% ·
+  resets …"). Agent Sessions could not see it at all: it moved to a new list in the usage
+  response while the fields the app read went empty.
+
+Also in 5.1:
 - **Devin CLI, the fourteenth agent source** — browsing, search, filtering, Analytics and
   the transcript view over Devin's shared SQLite store. Devin keeps every retry and edit as
   a branch, so a session shows the live conversation rather than every path it took to get
@@ -102,7 +131,7 @@ New in 5.1:
   session id resolve, but a full interactive reopen needs a terminal.
 
 
-**Recent releases** — 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
+**Recent releases** — 5.1: Devin CLI and fx join as the fourteenth and fifteenth sources. 5.0: agents became plug-in adapters and Qwen Code joined as the thirteenth source. 4.8: Grok CLI joins as the eleventh agent source, and Analytics
 counts every agent you have enabled. 4.7: Kimi Code joins as the tenth source, and active
 Claude cloud sessions appear in the Quota Meter. 4.6.4: Compact and Full Agent Cockpit
 retired, leaving the Quota Meter as the only mode. 4.6: paste-a-cookie Claude web usage,
@@ -202,7 +231,7 @@ Session rows read best when your terminal names them clearly:
 ## Install
 
 ### Option A — Download DMG
-1. [Download AgentSessions-5.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1/AgentSessions-5.1.dmg)
+1. [Download AgentSessions-5.1.1.dmg](https://github.com/jazzyalex/agent-sessions/releases/download/v5.1.1/AgentSessions-5.1.1.dmg)
 2. Drag **Agent Sessions.app** into Applications.
 
 ### Option B — Homebrew
