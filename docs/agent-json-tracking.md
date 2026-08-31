@@ -382,3 +382,6 @@ Record every upstream check, even if no changes are needed.
 
 ## Workflow
 - Use `docs/agent-support/workflow.md` for the error-proof update process.
+
+<!-- BEGIN tracker-derived history -->
+<!-- END tracker-derived history -->
