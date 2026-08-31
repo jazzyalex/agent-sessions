@@ -865,7 +865,12 @@ _NESTED_PAYLOAD_AGENTS = {"codex", "copilot", "claude", "grok", "qwen"}
 # recorded and the walk stops there.
 _NESTED_OPAQUE_KEYS: dict[str, set[str]] = {
     # `modelMetrics` is keyed by model id; the rest are whatever a tool happened to send.
-    "copilot": {"modelMetrics", "arguments", "toolArgs", "properties", "metrics"},
+    # `models` (on session.usage_checkpoint.data.promptCacheBreakState, new in 1.0.82) is
+    # keyed by model id too — observed `claude-haiku-4.5`. Same trap as `modelMetrics`
+    # above, and the third of its kind found in the 2026-08-31 sweep after claude's
+    # `artifacts` and `modelUsage`. Listed BEFORE copilot's baseline was rebuilt, so the
+    # ids never entered the fixture.
+    "copilot": {"modelMetrics", "arguments", "toolArgs", "properties", "metrics", "models"},
     # `changes` is keyed by ABSOLUTE FILE PATH — walking it both invents a new bucket
     # per edited file (permanent phantom drift) and writes the user's real paths into
     # report artifacts. `arguments`/`parameters`/`inputSchema`/`_meta` are free-form

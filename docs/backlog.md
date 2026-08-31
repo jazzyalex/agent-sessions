@@ -337,6 +337,37 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Transcript UI
 
+### Copilot 1.0.82 emits reasoning blocks and the transcript shows none of them
+> **open** · sev: med · urg: low · verified 2026-08-31
+
+- **What:** Copilot 1.0.82 added `assistant.message.data.reasoningBlocks`, a
+  `{provider, blocks[]}` object whose blocks are `{type: "thinking", thinking, signature}`.
+  That is the model's reasoning text, delivered as first-class structured data on the
+  assistant record. Nothing in `AgentSessions/` reads it, so the transcript renders the
+  reply and silently drops the thinking that produced it — while Claude's equivalent
+  thinking blocks *are* rendered, so the same user sees reasoning for one agent and not
+  the other.
+- **Where:** `reasoningBlocks` appears nowhere in `AgentSessions/`. It arrives on the
+  `assistant.message` record that the Copilot path already parses for `data.content`, so
+  this is an additional read on a record already being decoded, not a new discovery path.
+- **Fix shape:** decode `blocks[]` where `type == "thinking"` and render it the way Claude
+  thinking blocks are rendered today — collapsed by default, same styling — rather than
+  inventing a Copilot-specific presentation. `provider` names which backend produced the
+  reasoning and is worth showing on the block header when it is not the session's main
+  model.
+- **Risk if wrong:** `signature` is an opaque cryptographic attestation, not text — it
+  must never be rendered. Reasoning content is also the most sensitive part of a
+  transcript to surface by accident, so it should follow whatever collapse/redaction
+  default the Claude thinking path already uses, not a looser one.
+- **Why deferred / measure first:** only **2 records across the 13 local Copilot
+  sessions**, because reasoning is model- and mode-dependent. That is thin evidence for a
+  render path. Count again on a machine that uses Copilot heavily before building it —
+  the `budget_usd` lesson.
+- **To close:** a Copilot session carrying `reasoningBlocks` shows its thinking with the
+  same affordance as a Claude session; `signature` never reaches the view; a session
+  without the field is unchanged. Fixture covers a `thinking` block and an assistant
+  record with no `reasoningBlocks` at all.
+
 ### Codex `content_item_kinds` states what the app currently guesses by string-matching
 > **open** · sev: low · urg: low · verified 2026-08-30
 
@@ -507,6 +538,42 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 ---
 
 ## Agent Source Plumbing
+
+### Newest-5 sampling gives a thin-store agent a verdict about nothing
+> **open** · sev: med · urg: low · verified 2026-08-31
+
+- **What:** `_LOCAL_SCHEMA_SAMPLE_COUNT = 5`
+  ([agent_watch.py:562](../scripts/agent_watch.py:562)) is a global constant, and the
+  weekly unions the **newest** five sessions. For an agent whose store is mostly tiny
+  sessions that window can miss every informative transcript it has. **Measured
+  2026-08-31 for antigravity:** 31 transcripts on disk, **29 of them under 10 lines**;
+  the newest five total **19 events at 0.308 coverage**, which trips
+  `blocked_thin_sample`. The only two substantial transcripts — **60 and 81 lines** — are
+  from 07-21 and 06-24 and are excluded purely by age. The agent is therefore reported as
+  un-evidenced while the evidence sits on disk, unread.
+- **Not the diagnosis it first looked like.** This was initially written up as
+  self-inflicted: real-home prebumps dropping stub sessions into the newest-5 window
+  (§1a's documented degradation). Prebumps did contribute — three of the five sampled are
+  from prebump runs — but **two of the five are pre-existing 3-line sessions from 08-18**,
+  so the window would have been thin with zero prebumps. The root cause is the sampling
+  rule meeting a thin store, not the prebump.
+- **Fix shape:** make the sample width adaptive rather than a fixed count — keep taking
+  the next-newest session until the union clears the thin-sample floor (or a hard cap is
+  hit), instead of stopping at exactly five. A per-agent override in
+  `agent-watch-config.json` would also work and is smaller, but it needs a human to
+  notice and set it, which is the drift class the entry below this one is about.
+- **Risk if wrong:** do **not** just raise the constant. §5a explains what the count is
+  for — one session must not decide the verdict — and widening it globally pulls
+  progressively staler sessions into every agent's union, which is how a long-retired
+  event family starts re-reporting as present. Any change must keep the newest session
+  dominant and be pinned by the existing
+  `test_thin_prebump_does_not_override_rich_weekly_union`.
+- **Why deferred:** it changes the sampling rule for all 14 agents to fix one, and the
+  affected agent is low-traffic. Antigravity recovers on its own the moment the maintainer
+  uses it for real work.
+- **To close:** antigravity reports a real verdict from its existing 60/81-line
+  transcripts rather than `blocked_thin_sample`, and no other agent's union changes shape.
+
 
 ### `rebuild_stage0_baseline.py` is blind to `db_roots`, so it sweeps the wrong OpenCode store
 > **open** · sev: med · urg: low · verified 2026-08-21

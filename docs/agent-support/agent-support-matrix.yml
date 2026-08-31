@@ -68,7 +68,7 @@ agents:
       - "Resources/Fixtures/stage0/agents/antigravity/cli_small.jsonl"
       - "Resources/Fixtures/stage0/agents/antigravity/cli_schema_drift.jsonl"
   copilot_cli:
-    max_verified_version: "1.0.80"
+    max_verified_version: "1.0.82"
     version_field: "data.copilotVersion"
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/copilot/small.jsonl"
@@ -104,6 +104,20 @@ agents:
       - "Resources/Fixtures/stage0/agents/hermes/large.json"
       - "Resources/Fixtures/stage0/agents/hermes/schema_drift.json"
   openclaw:
+    # BLOCKED UPSTREAM 2026-08-31, do not re-diagnose. openclaw 2026.8.1 defers its own
+    # doctor-owned state migrations and then fails agent turns with "Legacy workspace
+    # setup state requires migration ...; run openclaw doctor --fix" - an instruction
+    # naming itself as the remedy and not performing it. Upstream openclaw/openclaw#133881
+    # and #133962, both CLOSED 2026-08-31. #133881's stated trigger (Gateway running) does
+    # NOT apply here: the LaunchAgent is not loaded and no openclaw process is up, and the
+    # migration is still dropped - which matches #133962 (preflight builds the step list
+    # with a hardcoded mode and silently drops doctor-only migrations). The fix is not in
+    # stable: npm dist-tags latest == 2026.8.1, and the first build carrying it is
+    # 2026.9.1-beta.1. RETRY CONDITION: when npm `latest` moves past 2026.8.1, update and
+    # re-run `agent_watch.py --mode prebump --agent openclaw --allow-real-home`. Do not
+    # hand-migrate openclaw state to clear this - the migration also covers
+    # ~/.openclaw/workspace-attestations/, so moving the workspace-state file achieves
+    # nothing (tried and reverted 2026-08-31).
     max_verified_version: "2026.7.1"
     version_field: "not_logged"
     evidence_fixtures:
