@@ -1,15 +1,21 @@
 # Format Sweep Automation — Spec
 
-**Status:** ready for planning
+**Status:** ready for planning (amended 2026-08-31 after review)
 **Date:** 2026-08-31
 **Scope:** `scripts/agent_watch*.py`, `scripts/rebuild_stage0_baseline.py`, a new
 `scripts/agent_format_tracker.py`, and `skills/agent-session-format-check/SKILL.md`.
-No Swift. See §11 before touching anything.
+One Swift file is read but **not modified** — see §10. Coordination in §12.
 
 **Evidence base:** the 2026-08-31 sweep — five passes, nine version bumps, three
 id-keyed-map traps caught, three of my own conclusions corrected, one near-miss data
 loss. Every requirement below is traceable to something that actually happened that day,
 and the numbers are cited so a reader can re-check them rather than take them on trust.
+
+**Amendment note.** A review found ten defects in the first draft, all confirmed against
+the code. Two were self-contradictions (§2's ordering was impossible; §10 banned the
+Swift change §3.1 required), one was a TOCTOU in the fixture gate, and one would have
+destroyed existing hand-written history. They are fixed below and called out where they
+land, because the original errors are instructive.
 
 ---
 
@@ -22,7 +28,7 @@ Today produced roughly forty distinct findings. All of them survived, but only b
 each was manually transcribed into `docs/agent-json-tracking.md`, the ledger, or
 `docs/backlog.md` at the end of each pass. Nothing enforced that. A session that ended
 mid-pass — or an agent that ran out of context — would have lost everything discovered
-since the last write, and there would be no trace that it had ever been known.
+since the last write, with no trace that it had ever been known.
 
 Three secondary problems compound it:
 
@@ -34,41 +40,44 @@ Three secondary problems compound it:
 
 **This spec does not ask for a smarter sweep. It asks for a sweep that cannot forget.**
 
-## 2. What becomes automatic, and what does not
+## 2. Pipeline
 
-The pipeline runs unattended from end to end **except two gates**. Everything up to and
-including a *proposal* is automatic. The two actions that write something we cannot
-easily take back stay gated.
+Two weekly snapshots, not one. **This is amendment (7).** The first draft placed
+conditional session generation before fingerprinting, which cannot work: the thinness and
+staleness that decide whether to generate are computed *from* `schema_diff`, which only
+exists after fingerprinting ([agent_watch.py:2831](../../../scripts/agent_watch.py:2831)).
 
 ```
-preflight auth (§4)                     ── one prompt, batched, at minute zero
-  ↓
-per agent, unattended:
-  detect installed / upstream version
-  generate sample session, conditionally (§5)
-  fingerprint + gap report
-  fetch upstream release notes / changelog
-  triage each new field (§6)
-  APPEND every finding to the tracker (§7)   ← happens at discovery, not at the end
-  ↓
-GATE 1 — write to committed fixtures (§3.1)
-  ↓
-GATE 2 — claim a verified version (§3.2)
-  ↓
-propose fixes via subagents (§8)
+1  batched auth preflight (§4)          ── one prompt, at minute zero
+2  INITIAL weekly snapshot              ── fingerprint, verdicts, thinness, staleness
+3  conditional prebump selection (§5)   ── decided FROM snapshot 1
+4  one batched prebump for eligible agents
+5  post-prebump installed-version reread   ── CLIs self-update; see §3.2
+6  FINAL weekly snapshot
+7  triage + proposal generation (§6)
+      ↳ every finding appended to the tracker as it is made (§7)
+   ─────────────────────────────────────────────────────────────
+   GATE 1 — apply a reviewed fixture patch (§3.1)
+   GATE 2 — apply a reviewed version claim (§3.2)
 ```
 
-The gates are cheap: **two confirmations per run**, not the dozens the current workflow
-asks for. Everything else — installs, prebumps, fingerprinting, upstream lookups, triage
-drafting, tracker writes — needs no human.
+Steps 1–7 run unattended. The gates are **two confirmations per run**, against the dozens
+the current workflow asks for.
 
-## 3. The two gates, and why they survive
+**v1 does not install or update any CLI.** *Amendment (8).* The first draft implied
+unattended installs with no adapter and no rollback policy. The sweep reports the exact
+install command per agent and mutates nothing globally. CLIs that self-update as a side
+effect of prebump are still handled — that is what step 5 exists for, and it is not
+optional: on 2026-08-31 grok was already 1.0.13 before its loop began and pi moved
+0.84.3 → 0.84.4 *between* two prebumps.
 
-### 3.1 Gate 1 — writing to committed fixtures
+## 3. The two gates
 
-`rebuild_stage0_baseline.py --emit` appends redacted records to files that are committed
-and public. `_redact` blanks string **values** but never dict **keys**, so a map keyed by
-an identifier serialises real identifiers into a public artifact.
+### 3.1 Gate 1 — fixture patches
+
+`rebuild_stage0_baseline.py --emit` appends redacted records to committed, public files.
+`_redact` blanks string **values** but never dict **keys**, so a map keyed by an
+identifier serialises real identifiers into a public artifact.
 
 On 2026-08-31 this was one command away from happening three times:
 
@@ -78,48 +87,84 @@ On 2026-08-31 this was one command away from happening three times:
 | claude | `cost-state.modelUsage` | model slug (`claude-fable-5`) | every new model reads as drift |
 | copilot | `promptCacheBreakState.models` | model id (`claude-haiku-4.5`) | same |
 
-The first was caught **only** because a human asked to see the gap report before the
-emit. A fully unattended pipeline would have shipped it.
+The first was caught **only** because a human asked to see the gap report before the emit.
 
-**Requirement.** `--emit` never runs unattended. The run stops, prints the gap report,
-and names every bucket whose key set differs across records — the machine-checkable
-signature of a free-form map — with a recommendation to opaque-list or proceed.
+**Requirement — split the tool in two.** *Amendment (4).* Reviewing a report and then
+re-running `--emit` reviews one thing and applies another: the second run re-harvests
+against a corpus that may have changed in between. Today's own corpus grew by two Codex
+sessions mid-sweep. Refactor into:
 
-**Requirement.** The existing guard test only matches UUID-shaped keys, so it would not
-have caught `modelUsage` or `models`. Widen it: a committed fixture must contain no dict
-key that (a) matches a UUID, **or** (b) appears as a key in fewer than N% of records of
-that bucket type — the shape test, not the format test.
+- `build_plan()` — pure, produces an immutable **patch manifest**:
+  - the exact redacted JSONL lines to append, verbatim
+  - `fixture_base_sha256` of every target fixture
+  - `source_manifest`: path + sha256 of every session harvested from
+  - the uncovered (bucket, key) pairs the patch closes
+  - `suspected_variable_key_maps`: every bucket whose key set differs across records
+- `apply_plan()` — re-verifies `fixture_base_sha256` and `source_manifest`, runs the
+  safety scan and `git apply --check`, and **refuses if any hash moved**.
 
-### 3.2 Gate 2 — claiming a verified version
+Unattended mode may build a plan. It may never apply one.
 
-`max_verified_version` asserts the app parses sessions *written by that build*. Nothing
-mechanical can confirm the claim is honest, and two failure modes showed up today:
+**Requirement — variable-key detection at gate time is authoritative.** *Amendment (5).*
+The first draft specified "a key appearing in fewer than N% of records" without defining
+N, the denominator, the minimum sample, or the exceptions — a naive rule would reject
+legitimate optional fields. The order of work is therefore:
 
-- **Self-updating CLIs.** grok was already 1.0.13 before its loop began; pi went
-  0.84.3 → 0.84.4 *between* two prebumps. A bump written from the version observed at
-  run start would have been wrong both times.
-- **A verdict that reads as evidence but is not.** antigravity reported
-  `rec=bump_verified_version` off a sample that merely *matched* — with a failed prebump
-  and 19 events at 0.308 coverage behind it.
+1. Audit the current fixtures and record every bucket whose key set varies today.
+2. Classify each as a genuine variable-key map or a fixed map with optional keys, and
+   write the fixed ones into an explicit exception list with a reason each.
+3. Only then pick a threshold, and require **zero unexplained failures** against the
+   audited corpus before the rule is enforced.
 
-**Requirement.** A bump proposal must print its evidence as assertions the human can
-check in one screen, not a verdict string:
+Until that audit exists, the gate relies on the structural check — key set differs across
+records of the same bucket — which needs no threshold and is what actually caught all
+three maps today.
+
+**Requirement — the widened guard is Python, and the Swift guard stays.** *Amendment (6).*
+The first draft told the implementer to widen the existing guard while §10 forbade Swift
+changes; the guard is Swift, at
+[Stage0GoldenFixturesTests.swift:442](../../../AgentSessionsTests/Stage0GoldenFixturesTests.swift:442).
+Resolution: the widened check (UUID **and** slug **and** path **and** header shapes) is
+implemented in Python where the sweep can act on it, and the existing Swift UUID test is
+left byte-for-byte unchanged as defence in depth. Document in both places that the Swift
+test is the narrower of the two, so nobody reads a green Xcode run as full coverage —
+it would not have caught `modelUsage` or `models`.
+
+### 3.2 Gate 2 — version claims
+
+`max_verified_version` asserts the app parses sessions *written by that build*. Two
+failure modes showed up today: self-updating CLIs (above), and a verdict that reads as
+evidence but is not — antigravity reported `rec=bump_verified_version` off a sample that
+merely *matched*, with a failed prebump and 19 events at 0.308 coverage behind it.
+
+**Requirement.** A proposal prints checkable assertions, not a verdict string:
 
 ```
 antigravity  1.1.14 -> 1.1.22
-  fresh_evidence_source      = latest_prebump_report
+  fresh_evidence_source        = latest_prebump_report
   latest_real_session_evidence = true
-  blockers                   = []
+  blockers                     = []
   sample mtime 17:10:18Z  >  cli binary mtime 06:02:37Z   ✓ written by this build
-  coverage 0.308  events 34   (thin gate: needs <25 events AND <50% coverage)
+  coverage 0.308  events 34    (thin gate: needs <25 events AND <50% coverage)
 ```
 
-**Requirement.** The proposal states which of `installed` / `upstream` it is claiming and
-refuses to offer a version that is merely *available*. Today pi was correctly bumped to
-the installed 0.84.4 and not the upstream-only 0.84.4-successor; that discipline must be
-enforced, not remembered.
+**Requirement.** Refuse to generate a proposal when any of these hold: the target is
+upstream-only and not installed; prebump failed; evidence predates the **post-run** binary
+mtime; schema unknowns or other blockers remain; or the installed version changed after
+the proposal was generated.
 
-## 4. Auth preflight — batch the interruptions
+**Requirement — the gate covers every write the claim implies.** *Amendment (9).* A bump
+is not a YAML edit. Gate 2 applies **one exact patch spanning
+`agent-support-matrix.yml` and `agent-support-ledger.yml`**, then appends tracker claim
+events and regenerates the rendered section (§7). Proposal and application are **separate
+tracker events**, so a crash between them is recoverable rather than ambiguous.
+
+The ledger patch must be strictly additive. Today an insert replaced the previous entry's
+`as_of_commit` line, merging two entries into one mapping with duplicate keys — and YAML
+kept the last, so the file parsed cleanly while the new record vanished. The patch is
+rejected unless the diff contains **zero deletions**.
+
+## 4. Auth preflight
 
 The only human input the sweep genuinely needs is authentication. Today it needed four,
 discovered serially across several hours, each stopping a different pass.
@@ -135,184 +180,210 @@ auth preflight: 14 agents
     qwen   — OAuth free tier discontinued 2026-04-15; needs a paid plan (not fixable here)
   warning (2):
     pi     — ~/.pi/agent/auth.json is 94 days old; may expire mid-run
-    openclaw — config rejected by 2026.8.1 (see tracker: openclaw/openclaw#133962)
+    openclaw — config rejected by 2026.8.1 (tracker: openclaw/openclaw#133962)
 ```
 
-**Requirement.** Preflight must distinguish the three §1c categories — *fixable ours*,
-*fixable theirs*, *not fixable* — because they need different responses and only the
-first two are worth a prompt. opencode's failure looked like a vendor outage for a full
-pass; it was an empty `credential_files` on our side. Preflight tests the credential path
-directly rather than inferring it from a driver failure.
+**Requirement.** Per-agent preflight metadata is declared in
+`docs/agent-support/agent-watch-config.json`, not hard-coded — the repo already carries
+one hand-maintained per-source list too many.
 
-## 5. Sample generation is conditional, not universal
+**Requirement.** Report **credential presence** separately from **proven
+authentication**. They are different facts, and conflating them is what produced today's
+worst misdiagnosis: opencode's `credential_files` was empty, the sandbox therefore had no
+credentials, and OpenCode's backend reported that as an opaque `UnknownError` that read
+as a vendor outage for a full pass.
 
-"Generate a sample session for every agent every run" would actively damage the
-monitoring. `real_home_session` agents write their prebump session into the real store,
-where it enters the newest-`_LOCAL_SCHEMA_SAMPLE_COUNT` window.
+**Requirement.** Preflight generates no session, exposes no credential value, and
+classifies each failure into the three §1c categories — *fixable ours*, *fixable theirs*,
+*not fixable* — because only the first two are worth a prompt.
+
+## 5. Session generation is conditional
+
+`real_home_session` agents write their prebump session into the real store, where it
+enters the newest-`_LOCAL_SCHEMA_SAMPLE_COUNT` window.
 
 Measured today: antigravity has **31 transcripts, 29 of them under 10 lines**. Repeated
 prebumps pushed its weekly union to **19 events at 0.308 coverage** and flipped it to
-`blocked_thin_sample`. Its only two substantial transcripts (60 and 81 lines) are
-excluded purely by age. One real user session restored it.
+`blocked_thin_sample`. Its only two substantial transcripts (60 and 81 lines) are excluded
+purely by age. One real user session restored it.
 
-**Requirement.** Generate a session only when it would change the answer:
+**Requirement.** Decided from the *initial* snapshot (§2), with explicit priority:
 
 | Condition | Generate? |
 |---|---|
+| `real_home_session` **and** newest-5 union already below the thin gate | **no — refuses, and says running would make the verdict worse.** Highest priority: wins even over stale sample and newer version |
 | Sample predates the installed CLI (`blocked_stale_sample`) | yes |
 | A version bump is being proposed | yes |
-| Verdict is already `supports_latest` and not stale | no |
-| Agent is `real_home_session` **and** its store's newest-5 union is already thin | no — refuse, and say that running would make the verdict worse |
+| Already `supports_latest` and not stale | no — skip |
 
-The last row is the important one and is the opposite of what an eager automation does.
+The first row is the opposite of what an eager automation does, and is the row that
+matters.
 
 ## 6. Triage contract
 
-The four buckets map onto §1e's existing three plus severity. The gap to close is not the
-taxonomy — it is that **the funnel keeps answering "does it still parse?" when the
-question that matters is "did upstream start telling us something we should show?"**
-
-Two of the most valuable findings today were invisible to a parse-safety check:
-
-- Claude cache writes billed at the 5-minute rate when 100% of 182.9M local
-  cache-creation tokens are 1-hour — the `$` view understated by **16.6%**. A wrong
-  *rate* parses perfectly.
-- Claude's new `cost-state.totalCostUSD` — the session's *measured* cost, ground truth
-  for the number the runway estimates.
-
-**Requirement.** Every new key or type is assigned exactly one bucket, and the assignment
-is written to the tracker with its evidence:
+The gap to close is not the taxonomy — it is that **the funnel keeps answering "does it
+still parse?" when the question that matters is "did upstream start telling us something
+we should show?"** Two of today's most valuable findings were invisible to a parse check:
+Claude cache writes billed at the 5-minute rate when 100% of 182.9M local cache-creation
+tokens are 1-hour (the `$` view understated by **16.6%** — a wrong *rate* parses
+perfectly), and Claude's new `cost-state.totalCostUSD`, the session's *measured* cost.
 
 | Bucket | Meaning | Automatic action |
 |---|---|---|
-| **urgent** | wrong data shown, data loss, or discovery broken | subagent proposes a fix (§8); never auto-applied |
-| **support now** | upstream ships information a user would want and we drop it | draft an implementation prompt + one-paragraph rationale, for the maintainer to accept or decline |
-| **backlog** | real but not actionable yet | append a `docs/backlog.md` entry in that file's own format |
-| **log only** | plumbing, ids, telemetry | tracker line only, so it is never re-litigated |
+| **urgent** | wrong data shown, data loss, or discovery broken | read-only subagent returns a patch + evidence (§8); never auto-applied |
+| **support now** | upstream ships information a user would want and we drop it | implementation prompt + one-paragraph user-impact rationale, for you to accept or decline |
+| **backlog** | real but not actionable yet | a **backlog patch proposal**, not a direct write — see below |
+| **log only** | plumbing, ids, telemetry | tracker event only, so it is never re-litigated |
 
-**Requirement.** Triage records a **frequency measurement** with every assignment —
-"1 record in 1 of 80 sessions" for `cost-state`, "2 records in 13 sessions" for
-copilot's `reasoningBlocks`. Today's `budget_usd` precedent (2 of 410 sessions) is why:
-a field that looks transformative may occur almost never, and promoting on first sighting
-wastes the maintainer's time.
+**Requirement — backlog writes are proposals and must be idempotent.** *Amendment (10).*
+`docs/backlog.md` has structured status/severity/urgency/verified conventions
+([backlog.md:6](../../backlog.md:6)) and a re-run must not file the same finding twice.
+Each generated entry carries a stable marker derived from `finding_id`; generation skips
+any finding whose marker is already present. **Accepting a backlog entry is post-sweep
+product triage and is explicitly not one of the two sweep gates** — otherwise every
+run acquires a third confirmation.
 
-**Requirement.** Triage must never assign a bucket from a field *name*. My
-`SubAgentActivity` count was a substring grep and was wrong by ~20× (1561 lines claimed,
-78 actual); it drove an "urgent" framing that a real count demoted to minor.
+**Requirement — triage consumes values, not names.** It reads actual field values, parser
+behaviour, the frequency measurement (§7), and release-note hints. A bucket is never
+assigned from a field name: my `SubAgentActivity` count was a substring grep, wrong by
+~20× (1561 lines claimed, 78 actual), and it drove an "urgent" framing that a real count
+demoted to minor.
 
-## 7. The tracker — append at discovery
+**Requirement — frequency is measured before promotion.** `cost-state` is 1 record in 1
+of 80 sessions; copilot's `reasoningBlocks` is 2 records in 13 sessions. The `budget_usd`
+precedent (2 of 410) is why: a field that looks transformative may occur almost never.
 
-This is the core of the request and the part that must not be compromised.
+## 7. The tracker
 
-**Requirement.** A new machine-appendable log, `docs/agent-support/agent-format-tracker.jsonl`,
-written **at the moment a finding is made**, not at the end of a pass. If the process dies
-mid-run, everything discovered up to that instant is already on disk.
+**Requirement — a finding is a stream of events, not a row.** *Amendment (1).* The first
+draft required a `bucket` on the record appended at discovery, while §6 requires a
+corpus-wide frequency that is not known until later. That is a contradiction. Findings
+are identified by a stable `finding_id`; events append under it:
 
-**Requirement: JSONL, not YAML.** Today's ledger edit merged two entries into one mapping
-with duplicate `note:`/`verified:` keys. **YAML resolves duplicates by keeping the last,
-so the file parsed cleanly while the newly written block was silently discarded.** A
-"does it parse?" check passed it; only an assertion that history was intact caught it.
-An append-only JSONL log cannot merge two records.
+| Event | When | Carries |
+|---|---|---|
+| `discovered` | the instant a new type/key is confirmed, mid-scan | field, first observation, evidence, `confidence` |
+| `triaged` | after frequency measurement | `bucket`, frequency, rationale |
+| `corrected` | any time | `supersedes`, what changed and why |
+| `action_applied` | after a gate | what was written, patch hash |
 
-One record per finding:
+**Requirement — `record_id` and `finding_id`, not timestamps.** *Amendment (2).* The
+first draft had `supersedes` reference a second-resolution `ts`, which is not unique.
+Every record carries a UUID `record_id`; `supersedes` references a `record_id`. `ts` is
+microsecond UTC and is for humans and ordering, never identity.
+
+**Requirement — JSONL, appended durably.** Locked `O_APPEND` write, flush, `fsync`; the
+call returns only once the record is durable. Format is JSONL rather than YAML precisely
+because of today's duplicate-key loss: an append-only JSONL log cannot merge two records.
 
 ```json
 {
-  "ts": "2026-08-31T17:27:53Z",
+  "schema_version": 1,
+  "record_id": "0198f3c2-6b41-7a10-9c3e-2f7d5a1e4b88",
+  "finding_id": "copilot/session.usage_checkpoint.data.promptCacheBreakState.models",
+  "event": "triaged",
+  "ts": "2026-08-31T17:27:53.412887Z",
   "run_id": "20260831-172753Z",
   "agent": "copilot",
-  "kind": "schema_drift",
-  "field": "session.usage_checkpoint.data.promptCacheBreakState.models",
-  "observation": "dict keyed by model id; observed key claude-haiku-4.5",
-  "frequency": {"records": 1, "sessions": 1, "of_sessions": 13},
   "bucket": "urgent",
   "confidence": "verified",
+  "observation": "dict keyed by model id; observed key claude-haiku-4.5",
+  "frequency": {"records": 1, "sessions": 1, "of_sessions": 13},
   "evidence": ["scripts/probe_scan_output/agent_watch/20260831-172753Z-prebump/report.json"],
-  "action_taken": "added to _NESTED_OPAQUE_KEYS[copilot] before baseline rebuild",
   "supersedes": null
 }
 ```
 
-**Requirement.** `confidence` is mandatory and has exactly two values: `verified` (a
-command was run and its output is in `evidence`) or `assumed`. Today "opencode: vendor
-outage" was recorded with the same authority as measured facts and was wrong; it took a
-pass to correct. Had it been stamped `assumed`, the next pass would have known to re-test
-rather than trust it.
+**Requirement — `confidence` is mandatory**, with exactly two values: `verified` (a
+command ran and its output is in `evidence`) or `assumed`. Today "opencode: vendor
+outage" was recorded with the same authority as measured fact and was wrong; stamped
+`assumed`, the next pass would have re-tested rather than trusted it.
 
-**Requirement.** `supersedes` carries the `ts` of a record this one corrects. Corrections
-are appended, never edited in place — three conclusions were revised today
-(`SubAgentActivity` volume, opencode's cause, antigravity's cause) and the revision is
-often more instructive than the original.
-
-**Requirement.** The tracker is the **source**; `docs/agent-json-tracking.md` becomes a
-rendered view of it. Nobody hand-writes both.
+**Requirement — existing history is frozen, not migrated.** *Amendment (3).*
+`docs/agent-json-tracking.md` already holds extensive heterogeneous hand-written history
+that cannot be reconstructed from a tracker that did not exist when it happened. The
+first draft's "becomes a rendered view" would have destroyed it. Instead: everything
+before 2026-09-01 stays **byte-for-byte frozen** as legacy history, and the renderer
+writes only inside fixed generated-section markers below it.
+`agent_format_tracker.py render --check` fails when the committed view is stale, so the
+rendered section cannot drift from the log.
 
 ## 8. Subagents propose, one verifier applies
 
 Subagents were the strongest part of today's run — three ran in parallel, and one
-contradicted my own wrong number, which is precisely the value. But an autonomous fixer
-is how the UUID leak ships.
+contradicted my own wrong number, which is precisely the value. An autonomous fixer is
+how the UUID leak ships.
 
-**Requirement.** Subagents are read-only. They return a diff and its evidence; they do
-not write to the repo, and they never run `xcodebuild` — the existing repo rule that
-parallel edit-agents must not build.
+**Requirement.** Subagents are read-only: they return patch text and evidence, write
+nothing to the repo, and never run `xcodebuild` — the existing repo rule that parallel
+edit-agents must not build.
 
-**Requirement.** One serialized verifier applies accepted diffs and runs the suite once.
-Test count is an invariant read from the result bundle, never from stdout, and must not
+**Requirement.** One serialized verifier applies accepted patches and runs the suite once.
+Test count is an invariant read from the `.xcresult` bundle, never stdout, and must not
 decrease.
-
-**Requirement.** For **support now**, the output is a prompt plus a rationale of at most
-one paragraph, stating what upstream now emits, how often, and what the user would see.
-The maintainer accepts or declines; nothing is applied on their behalf.
 
 ## 9. Acceptance tests
 
-1. **Tracker survives a kill.** Start a sweep, `SIGKILL` it mid-agent. Every finding
-   logged before the kill is present and valid JSONL.
-2. **Duplicate-merge is impossible.** Append two records with the same `run_id` and
-   `agent`; both are present and readable. (The YAML failure cannot be reproduced.)
-3. **Gate 1 holds.** Run unattended with a fixture gap containing a UUID-keyed map. The
-   run stops before `--emit` and names the bucket. No fixture file is modified.
-4. **Widened guard test.** Add a fixture record containing a model-slug-keyed dict. The
-   fixture guard test fails. (It passes today — this is the hole.)
-5. **Gate 2 evidence.** A bump proposal for an agent with a failed prebump prints
-   `blockers` non-empty and refuses to offer the bump.
-6. **Preflight batches.** With two agents unauthenticated, preflight reports both in one
-   report before any agent work begins.
-7. **Thin-store refusal.** With a `real_home_session` agent whose newest-5 union is
-   below the thin gate, the run declines to generate a session and states why.
-8. **Correction chain.** Append a finding, then a correction with `supersedes` set. The
-   rendered view shows the correction and preserves the original.
+1. **Tracker survives a kill.** `SIGKILL` after an acknowledged `discovered` append —
+   the record is present and the file is valid JSONL.
+2. **Concurrent appends** do not merge or truncate records.
+3. **Legacy history preserved.** The renderer leaves all pre-2026-09-01 content
+   byte-for-byte identical; `render --check` fails on a stale committed view.
+4. **Gate 1 refuses moved hashes.** Build a plan, modify a source session, apply — the
+   apply is rejected on `source_manifest` mismatch.
+5. **Gate 1 catches all four key shapes.** Fixtures containing UUID-, model-slug-,
+   path- and header-keyed maps each fail the Python guard. (Today's Swift guard catches
+   only the first.)
+6. **Gate 2 refuses.** An agent with a failed prebump, and separately one whose target is
+   upstream-only, each produce no proposal.
+7. **Ledger patch is additive.** A patch containing any deletion is rejected.
+8. **Preflight batches.** Two unauthenticated agents appear in one report, before any
+   agent work begins, with no session generated and no credential value printed.
+9. **Thin-store refusal.** A `real_home_session` agent below the thin gate never invokes
+   a driver, even when its sample is stale and a newer version exists.
+10. **Correction chain.** A `corrected` event referencing a `record_id` renders the
+    correction while preserving the original.
+11. **Idempotent re-run.** Re-running the same `run_id` produces no duplicate findings
+    and no duplicate backlog entries.
+
+Run: `pytest -q scripts/tests`. **No Xcode build is required** for this Python/docs work.
+A separately accepted Swift fix uses `./scripts/xcode_test_stable.sh`, reads the total
+from the `.xcresult`, and then runs the Debug build.
 
 ## 10. Out of scope
 
-- Any Swift change. Fixes to the app arising from triage are separate work.
-- Replacing `docs/agent-support/agent-support-ledger.yml`. It stays the release-verified
-  record; the tracker is the finding log. They answer different questions.
-- Automating `steward_check.py`. Steward-owned agents follow §1g — ping, do not chase.
-- Auto-installing beta builds to work around upstream bugs (openclaw's fix rides
-  `2026.9.1-beta.1`; installing it unasked is not the sweep's call).
+- **Modifying any Swift file.** The existing Swift UUID guard is read and referenced but
+  left unchanged (§3.1). Product fixes arising from triage are separate work.
+- **Installing or updating agent CLIs** (§2). v1 reports the command and mutates nothing.
+- **Replacing `agent-support-ledger.yml`.** It stays the release-verified record; the
+  tracker is the finding log. They answer different questions.
+- **Automating `steward_check.py`.** Steward-owned agents follow §1g — ping, do not chase.
+- **Auto-installing beta builds to work around upstream bugs.** openclaw's fix rides
+  `2026.9.1-beta.1`; installing it unasked is not the sweep's call.
 
 ## 11. Honest limitations
 
-- **This does not make the sweep correct, only unforgetful.** Three of today's
-  conclusions were wrong on first pass. The tracker records wrongness faithfully; the
-  `confidence` field and `supersedes` chain are the mitigation, not a cure.
+- **This makes the sweep unforgetful, not correct.** Three of today's conclusions were
+  wrong on first pass. `confidence` and the `supersedes` chain are the mitigation, not a
+  cure.
 - **Two gates is not zero.** The request was "as few asks as possible". Two per run is
-  the floor I can defend, and §3 is the argument for why removing them costs more than
-  they save. If they are removed anyway, do it knowingly.
+  the floor I can defend; §3 is the argument. If they are removed anyway, do it knowingly.
 - **The thin-sample weakness is untouched.** antigravity clears today because one real
   session exists; it will fail again the next time five thin sessions lead the window.
-  The sampling fix is filed separately in `docs/backlog.md` and deliberately not folded
-  in here.
+  Filed separately in `docs/backlog.md` and deliberately not folded in here.
 - **Upstream release-note parsing will be unreliable.** Vendors do not publish schema
-  changes. Today's Codex 0.151 subagent-identity move appeared in no release note; it was
-  found by counting fields. Treat the online channel as a hint, never as the evidence.
+  changes. Codex 0.151's subagent-identity move appeared in no release note; it was found
+  by counting fields. Treat the online channel as a hint, never as evidence.
+- **The shared corpus layer is the largest risk in the build.** Frequency measurement
+  requires one enumeration path across JSONL, SQLite and bespoke stores; today
+  `_all_sessions` reads only `roots`/`glob` and never `db_roots`, which is already filed
+  at [backlog.md:578](../../backlog.md:578). Getting this wrong silently mis-measures
+  every frequency the triage depends on.
 
 ## 12. Coordination
 
-A parallel session owns Qwen work (`docs/superpowers/plans/2026-08-31-qwen-0.22-format-brief.md`)
-and recently landed runway pricing (`c1dcb058`) and the CI test job (`5e4e59c7`). This
-spec touches neither Swift nor CI. If it grows to, coordinate first — today two sessions
-building the same project concurrently corrupted a module cache and produced two runs
-that reported failures having executed zero tests.
+A parallel session owns Qwen work (`2026-08-31-qwen-0.22-format-brief.md`) and recently
+landed runway pricing (`c1dcb058`) and the CI test job (`5e4e59c7`). This spec touches
+neither Swift nor CI. If it grows to, coordinate first — today two sessions building the
+same project concurrently corrupted a module cache and produced two runs that reported
+failures having executed zero tests.
