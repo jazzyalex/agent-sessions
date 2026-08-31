@@ -40,13 +40,34 @@ Keep that derived-data path **relative**. It once read `"$PWD/.deriveddata-tests
 copied it into a context that didn't expand `$PWD`, and a literal `$PWD/` directory sat in
 the repo root unnoticed for four months. Relative can't fail that way.
 
-**The test COUNT is an invariant, not a statistic.** Read the `Executed N tests` line and
-compare it to the previous run. If N fell and you did not deliberately delete tests, treat
-it as a failing suite and find out why before doing anything else. Green with fewer tests
-is byte-identical to green — the signal you are trusting cannot detect the damage. On
-2026-08-30 a block deletion took eleven unrelated tests plus a fixture helper (probe
-cleanup, usage-capture parsing); the run went 2364 → 2355, reported "0 failures", and was
-committed and pushed. Both numbers had been printed one message apart.
+**Review the test-count delta; green with fewer tests is byte-identical to green.** A
+suite that loses coverage still reports "0 failures", so the signal you are watching cannot
+detect the damage. On 2026-08-30 a block deletion took eleven unrelated tests plus a
+fixture helper (probe cleanup, usage-capture parsing) while removing one superseded test;
+the run reported zero failures and was committed and pushed.
+
+A drop is not automatically a fault — consolidating tests legitimately reduces it — so the
+rule is that a fall must be **explained**, not that the number may never fall.
+
+Get the count from the result bundle, not from stdout:
+
+```bash
+xcrun xcresulttool get test-results summary --path .deriveddata-tests/Logs/Test/Run-*.xcresult
+```
+
+The `Executed N tests` lines in the log are **per test bundle**, and this scheme has two
+(55 and ~2366, totalling 2421). Grepping the last one reads only the larger bundle, so a
+regression in the smaller one is invisible — that mistake is why the totals in the first
+version of this note were wrong.
+
+And counts are an alarm, not a proof: identical totals can still hide a renamed or gutted
+test. When a change could have removed coverage, diff the test-name inventory against the
+previous revision:
+
+```bash
+diff <(git show <rev>:<path> | grep -o "func test[A-Za-z0-9_]*" | sort) \
+     <(grep -o "func test[A-Za-z0-9_]*" <path> | sort)
+```
 
 ## Swift/macOS QA
 - If a QA script forces macOS Appearance to Dark, set it back to System when done.
