@@ -592,9 +592,16 @@ hdiutil detach /dev/diskN -force && hdiutil verify dist/AgentSessions-X.Y.Z.dmg
 ```
 
 `build_sign_notarize_release.sh` now does this automatically (detach, then verify, retrying
-twice for a slow DiskArbitration unmount), so this should not resurface. It is **intermittent**
-— 5.1 never tripped it and 5.1.1 did on one run and not the next — so a clean run is not
-evidence the guard works. Keep this entry until a run logs `==> Detaching stale mount`.
+twice for a slow DiskArbitration unmount), so this should not resurface.
+
+The guard was tested directly rather than inferred from a clean release: under
+`set -euo pipefail`, with the DMG deliberately attached it detached all four listed devices
+and verify passed on the first attempt, and with nothing mounted the empty-match pipeline
+returned cleanly instead of tripping `set -e`. Both are the paths that matter.
+
+The underlying race is **intermittent** — 5.1 never tripped it, 5.1.1 tripped it on one run
+and not the next — so if it ever does resurface, expect a `==> Detaching stale mount` line in
+the release log rather than a failure. A release that never logs one simply did not race.
 
 ### Corrupted DMG (notarytool hangs or fails)
 

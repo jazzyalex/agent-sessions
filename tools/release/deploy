@@ -642,8 +642,11 @@ run_release_qa_core() {
   # release stdout said 2396 where the real total was 2448. agents.md makes the count an
   # invariant; print the authoritative one here so a release operator compares against
   # the same number the handover records.
-  local xcresult
-  xcresult=$(ls -td .deriveddata-tests/Logs/Test/Run-*.xcresult 2>/dev/null | head -1)
+  # `|| xcresult=""` is required, not defensive: on a clean checkout the glob matches
+  # nothing, ls exits non-zero, pipefail propagates it out of the command substitution,
+  # and set -e would abort QA over a missing convenience readout.
+  local xcresult=""
+  xcresult=$(ls -td .deriveddata-tests/Logs/Test/Run-*.xcresult 2>/dev/null | head -1) || xcresult=""
   if [[ -n "$xcresult" ]]; then
     echo "==> Test totals (from the result bundle, not stdout)"
     xcrun xcresulttool get test-results summary --path "$xcresult" 2>/dev/null \
