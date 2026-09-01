@@ -20,10 +20,6 @@ struct CopilotTelemetryAccumulator {
     /// Copilot's placeholder for "model not yet resolved". Never a real model.
     private static let autoModel = "auto"
 
-    /// The token keys a real `modelMetrics[*].usage` breakdown carries. At least one
-    /// must be present for the object to count as a breakdown at all.
-    private static let usageKeys = ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]
-
     /// Convenience for tests and small inputs. The engine drives `consume`/`finish`.
     static func accumulate<S: Sequence<String>>(lines: S) -> SessionTelemetry {
         var accumulator = CopilotTelemetryAccumulator()
@@ -78,19 +74,25 @@ struct CopilotTelemetryAccumulator {
             var consumedAny = false
             for (modelID, raw) in models.sorted(by: { $0.key < $1.key }) {
                 guard let entry = raw as? [String: Any],
-                      let usage = entry["usage"] as? [String: Any],
-                      // A `usage` object with none of the token keys is an empty
-                      // shell, not a breakdown. Accepting it would mark this record
-                      // consumed and suppress the tokenDetails fallback below,
-                      // discarding the whole process's tokens.
-                      Self.usageKeys.contains(where: { usage[$0] != nil }) else { continue }
-                consumedAny = true
+                      let usage = entry["usage"] as? [String: Any] else { continue }
                 func int(_ key: String) -> Int { Int(ClaudeRunwayLog.double(usage[key]) ?? 0) }
-                slices.addComponents(fresh: int("inputTokens"),
-                         cacheRead: int("cacheReadTokens"),
-                         write5m: int("cacheWriteTokens"),
+                let fresh = int("inputTokens")
+                let cacheRead = int("cacheReadTokens")
+                let write = int("cacheWriteTokens")
+                let output = int("outputTokens")
+                // The gate is "did this entry actually produce tokens", NOT "did the
+                // `usage` key parse". A `usage` block that is empty — or present with
+                // every value zero — is not a breakdown, and treating it as one marks
+                // the record consumed, suppresses the tokenDetails fallback below,
+                // and reports a silent zero for the whole process. A model that spent
+                // nothing also earns no slice, so it cannot dilute the breakdown.
+                guard fresh + cacheRead + write + output > 0 else { continue }
+                consumedAny = true
+                slices.addComponents(fresh: fresh,
+                         cacheRead: cacheRead,
+                         write5m: write,
                          write1h: 0,
-                         output: int("outputTokens"),
+                         output: output,
                          model: modelID,
                          effort: timeline.effort,
                          speed: RunwaySpeedTier.standard.rawValue)

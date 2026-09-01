@@ -138,6 +138,39 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.tokenDetails"])
     }
 
+    /// The same failure one step further in: `usage` carries the real keys but every
+    /// value is zero. Gating the fallback on "did the keys parse" still reports a
+    /// silent zero here; the gate has to be "did this produce any tokens".
+    func testAllZeroUsageValuesFallBackToTokenDetails() {
+        let zeros = json(["type": "session.shutdown", "timestamp": "2025-12-18T21:32:19.000Z",
+                          "data": ["currentModel": "gpt-5-mini",
+                                   "tokenDetails": ["input": ["tokenCount": 100],
+                                                    "output": ["tokenCount": 15]],
+                                   "modelMetrics": ["gpt-5-mini": ["usage": ["inputTokens": 0,
+                                                                            "outputTokens": 0,
+                                                                            "cacheReadTokens": 0,
+                                                                            "cacheWriteTokens": 0]]]]])
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [modelChange(new: "gpt-5-mini"), zeros])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 115)
+        XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.tokenDetails"])
+    }
+
+    /// A model that genuinely spent nothing must not suppress a sibling that did.
+    func testZeroModelDoesNotSuppressNonZeroSibling() {
+        let mixed = json(["type": "session.shutdown", "timestamp": "2025-12-18T21:32:19.000Z",
+                          "data": ["currentModel": "gpt-5-mini",
+                                   "tokenDetails": ["input": ["tokenCount": 999],
+                                                    "output": ["tokenCount": 999]],
+                                   "modelMetrics": [
+                                       "gpt-5-mini": ["usage": ["inputTokens": 0, "outputTokens": 0]],
+                                       "claude-haiku-4.5": ["usage": ["inputTokens": 100, "outputTokens": 15]]
+                                   ]]])
+        let t = CopilotTelemetryAccumulator.accumulate(lines: [modelChange(new: "gpt-5-mini"), mixed])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 115, "per-model still wins; tokenDetails not added")
+        XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.modelMetrics"])
+        XCTAssertNil(slice(t, model: "gpt-5-mini"), "a model that spent nothing gets no slice")
+    }
+
     /// A resume appends a second process's shutdown. Each reports only its own
     /// lifetime, so they sum.
     func testMultipleShutdownsSum() {
