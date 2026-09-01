@@ -53,5 +53,42 @@ final class DBSmokeTests: XCTestCase {
             "archivesRootURL() should not collapse to the home root"
         )
     }
+
+    /// An `IndexDB` built with no provider must never reach the developer's real index.
+    ///
+    /// The test bundle is hosted by `AgentSessions.app`, so the app's startup constructs an
+    /// `IndexDB` before any test installs a provider — and `testOpenAndSchema` above does the
+    /// same deliberately. Both used to open `~/Library/Application Support/AgentSessions/`
+    /// and run `bootstrap` against it, so whatever migrations the current branch carried
+    /// executed on live data.
+    ///
+    /// Asserted the failing way round: the real file's modification date must be untouched
+    /// across an unprovided open. A guard that cannot fail is not a guard, so this also
+    /// pins the detector itself — if `isRunningTests` ever stops being true under XCTest,
+    /// the redirect is silently inert and the first assertion says so.
+    func testUnprovidedIndexDBStaysOutOfTheRealApplicationSupport() throws {
+        XCTAssertTrue(IndexDBTestHooks.isRunningTests,
+                      "XCTestConfigurationFilePath is unset, so the host-app redirect is inert")
+
+        let fm = FileManager.default
+        let realDB = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("AgentSessions/index.db", isDirectory: false)
+        let modifiedDate: () -> Date? = {
+            (try? realDB.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        }
+        let before = modifiedDate()
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+        IndexDBTestHooks.applicationSupportDirectoryProvider = nil
+        _ = try IndexDB()
+
+        let sandboxed = IndexDBTestHooks.hostSandboxDirectory
+            .appendingPathComponent("AgentSessions/index.db", isDirectory: false)
+        XCTAssertTrue(fm.fileExists(atPath: sandboxed.path),
+                      "an unprovided IndexDB should have been created under the host sandbox")
+        XCTAssertEqual(modifiedDate(), before,
+                       "an unprovided IndexDB wrote to the real index at \(realDB.path)")
+    }
 #endif
 }

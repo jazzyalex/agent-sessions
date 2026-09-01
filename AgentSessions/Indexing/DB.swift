@@ -7,6 +7,23 @@ enum IndexDBTestHooks {
     /// Overrides `IndexDB.defaultFilteredSearchScanSlack` so tests can pin that the
     /// SQL `LIMIT` really reaches SQLite on the filtered search path.
     static var filteredSearchScanSlack: Int?
+
+    /// True while this process is hosting an XCTest run.
+    ///
+    /// `xcodebuild test` hosts the test bundle in `AgentSessions.app`, so the app's own
+    /// startup builds an `IndexDB` before any test installs a provider. Without this the
+    /// host opens the developer's real index and runs `bootstrap` against it — a branch's
+    /// migrations then execute on live data, which is how an unmerged
+    /// `session_meta_mtime_seconds_v1` reached a real 699 MB database on 2026-08-31.
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    /// Where unprovided `IndexDB`s go during a test run. One directory per process, so
+    /// the host's several opens share a database and behave as they would in production.
+    static let hostSandboxDirectory: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("AgentSessionsTestHost-\(ProcessInfo.processInfo.processIdentifier)",
+                                isDirectory: true)
 }
 #endif
 
@@ -49,6 +66,11 @@ actor IndexDB {
 #if DEBUG
         if let provider = IndexDBTestHooks.applicationSupportDirectoryProvider {
             return provider()
+        }
+        // No provider and we are under XCTest: this is the host app's startup, not a test.
+        // Sandbox it rather than letting it reach the real index (see `isRunningTests`).
+        if IndexDBTestHooks.isRunningTests {
+            return IndexDBTestHooks.hostSandboxDirectory
         }
 #endif
         return fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
