@@ -131,6 +131,14 @@ actor SearchIngestService {
         let dbGeneration: Int64
     }
 
+    /// `session_meta` timestamps (`mtime`, `start_ts`, `end_ts`) are seconds-scaled.
+    /// Identity-backed providers report their logical revision in milliseconds, so
+    /// normalize only the value written to `session_meta.mtime`. The search and tool-I/O
+    /// tables deliberately retain the millisecond revision used by the ingest skip gate.
+    nonisolated static func normalizedMtime(_ value: Int64) -> Int64 {
+        value >= 1_000_000_000_000 ? value / 1_000 : value
+    }
+
     nonisolated static func contentRevision(for session: Session) -> ContentRevision {
         let updated = session.endTime ?? session.startTime ?? Date(timeIntervalSince1970: 0)
         return ContentRevision(updatedMillis: Int64((updated.timeIntervalSince1970 * 1_000.0).rounded()),
@@ -526,8 +534,10 @@ actor SearchIngestService {
             // For shared SQLite storage, analytics freshness must follow the logical
             // session revision rather than the database file stat (which can remain
             // unchanged while writes live in the WAL). Ordinary files still resolve
-            // these accessors to their physical mtime/size.
-            mtime: file.searchMtime,
+            // these accessors to their physical mtime/size. Normalize only the
+            // session_meta write; session_search/session_tool_io keep the original
+            // identity revision so their skip-gate comparisons remain stable.
+            mtime: Self.normalizedMtime(file.searchMtime),
             size: file.searchSize,
             startTS: Int64(start.timeIntervalSince1970),
             endTS: Int64(end.timeIntervalSince1970),

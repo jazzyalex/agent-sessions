@@ -14,16 +14,20 @@ import XCTest
 /// these tests fail.
 final class MigrationCorpusPreservationTests: XCTestCase {
 
-    private func seedSession(_ db: IndexDB, source: String, id: String) async throws {
+    private func seedSession(_ db: IndexDB,
+                             source: String,
+                             id: String,
+                             metaMtime: Int64 = 100,
+                             searchMtime: Int64 = 100) async throws {
         try await db.upsertSessionMeta(SessionMetaRow(
             sessionID: id, source: source, path: "/tmp/\(id).jsonl",
-            mtime: 100, size: 200, startTS: 100, endTS: 200,
+            mtime: metaMtime, size: 200, startTS: 100, endTS: 200,
             model: nil, cwd: nil, repo: nil, title: "t",
             codexInternalSessionID: nil, isHousekeeping: false,
             messages: 3, commands: 1,
             parentSessionID: nil, subagentType: nil, customTitle: nil))
         try await db.upsertSessionSearch(sessionID: id, source: source,
-            mtime: 100, size: 200, text: "hello \(source) searchable")
+            mtime: searchMtime, size: 200, text: "hello \(source) searchable")
         try await db.upsertSessionToolIO(sessionID: id, source: source,
             mtime: 100, size: 200, refTS: 200, text: "tool io \(source)")
     }
@@ -135,6 +139,81 @@ final class MigrationCorpusPreservationTests: XCTestCase {
             XCTAssertEqual(search, 1, "session_search[\(source)] must survive bootstrap's codex guardian reindex marker")
             XCTAssertEqual(toolIO, 1, "session_tool_io[\(source)] must survive bootstrap's codex guardian reindex marker")
         }
+    }
+
+    /// Locks the in-place mtime migration: millisecond-scale session_meta rows are
+    /// converted for every source, seconds-scale rows and row counts stay unchanged,
+    /// and session_search retains the millisecond identity revision used by ingest.
+    func testBootstrapSessionMetaMtimeMigrationNormalizesAllSourcesInPlace() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentSessionsTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let originalProvider = IndexDBTestHooks.applicationSupportDirectoryProvider
+        defer { IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider }
+
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        var db: IndexDB? = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        let millis: Int64 = 1_776_370_012_000
+        let seconds: Int64 = 1_776_370_012
+        try await seedSession(db!, source: "opencode", id: "opencode-ms",
+                              metaMtime: millis, searchMtime: millis)
+        try await seedSession(db!, source: "hermes", id: "hermes-ms",
+                              metaMtime: millis, searchMtime: millis)
+        try await seedSession(db!, source: "opencode", id: "opencode-seconds",
+                              metaMtime: seconds, searchMtime: seconds)
+        try await seedSession(db!, source: "claude", id: "claude-seconds",
+                              metaMtime: seconds, searchMtime: seconds)
+        try await db!.begin()
+        for source in ["opencode", "hermes", "claude"] {
+            _ = try await db!.populateSessionDaysFromMeta(for: source)
+        }
+        try await db!.commit()
+
+        // Simulate the upgrade where this marker has never run.
+        try await db!.exec("DELETE FROM schema_migrations WHERE key = 'session_meta_mtime_seconds_v1';")
+        db = nil
+
+        IndexDBTestHooks.applicationSupportDirectoryProvider = { tmpDir }
+        let reopened = try IndexDB()
+        IndexDBTestHooks.applicationSupportDirectoryProvider = originalProvider
+
+        let metaCount = try await reopened.rowCountForTesting(table: "session_meta")
+        let searchCount = try await reopened.rowCountForTesting(table: "session_search")
+        let toolIOCount = try await reopened.rowCountForTesting(table: "session_tool_io")
+        let dayCount = try await reopened.rowCountForTesting(table: "session_days")
+        XCTAssertEqual(metaCount, 4)
+        XCTAssertEqual(searchCount, 4)
+        XCTAssertEqual(toolIOCount, 4)
+        XCTAssertEqual(dayCount, 4)
+
+        let opencodeMeta = Dictionary(uniqueKeysWithValues:
+            try await reopened.fetchSessionMeta(for: "opencode").map { ($0.sessionID, $0.mtime) })
+        let hermesMeta = Dictionary(uniqueKeysWithValues:
+            try await reopened.fetchSessionMeta(for: "hermes").map { ($0.sessionID, $0.mtime) })
+        let claudeMeta = Dictionary(uniqueKeysWithValues:
+            try await reopened.fetchSessionMeta(for: "claude").map { ($0.sessionID, $0.mtime) })
+        XCTAssertEqual(opencodeMeta["opencode-ms"], seconds)
+        XCTAssertEqual(hermesMeta["hermes-ms"], seconds)
+        XCTAssertEqual(opencodeMeta["opencode-seconds"], seconds)
+        XCTAssertEqual(claudeMeta["claude-seconds"], seconds)
+
+        let opencodeSearch = try await reopened.sessionSearchIdentityStatesByID(for: "opencode")
+        let hermesSearch = try await reopened.sessionSearchIdentityStatesByID(for: "hermes")
+        XCTAssertEqual(opencodeSearch["opencode-ms"]?.revision.updatedMillis, millis,
+                       "session_search must retain the millisecond identity revision")
+        XCTAssertEqual(hermesSearch["hermes-ms"]?.revision.updatedMillis, millis,
+                       "the migration must not normalize identity revisions")
+
+        let opencodeDayUpdates = try await reopened.findSessionsNeedingDayUpdate(source: "opencode")
+        let hermesDayUpdates = try await reopened.findSessionsNeedingDayUpdate(source: "hermes")
+        let claudeDayUpdates = try await reopened.findSessionsNeedingDayUpdate(source: "claude")
+        XCTAssertEqual(opencodeDayUpdates, ["opencode-ms"])
+        XCTAssertEqual(hermesDayUpdates, ["hermes-ms"])
+        XCTAssertTrue(claudeDayUpdates.isEmpty)
     }
 }
 #endif

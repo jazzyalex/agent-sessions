@@ -521,6 +521,17 @@ actor IndexDB {
             try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", claudeWorkflowReindex)
         }
 
+        // Identity-backed sources historically wrote their millisecond logical revision
+        // into session_meta.mtime, while the rest of session_meta uses Unix seconds.
+        // Repair those rows in place for every source. This preserves the search corpus,
+        // works for currently disabled providers, and leaves session_days.meta_mtime stale
+        // so the analytics refresh naturally re-derives affected day rows.
+        let sessionMetaMtimeSeconds = "session_meta_mtime_seconds_v1"
+        if !migrationApplied(db, key: sessionMetaMtimeSeconds) {
+            try exec(db, "UPDATE session_meta SET mtime = mtime / 1000 WHERE mtime >= 1000000000000;")
+            try execBind(db, "INSERT OR IGNORE INTO schema_migrations(key) VALUES(?);", sessionMetaMtimeSeconds)
+        }
+
         // Re-derive Codex session_meta so guardian approval-reviewer subagents
         // ({"subagent":{"other":"guardian"}}) get subagent_type/parent_session_id
         // populated by the fixed SessionIndexer extraction, and internal session
