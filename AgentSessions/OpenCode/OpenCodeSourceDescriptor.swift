@@ -13,8 +13,8 @@ extension SessionSourceDescriptor {
             telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "OpenCode",
             badgeInitials: "OC",
-            // Purple. Passthrough, same reasoning as antigravity's systemTeal (K6).
-            brandHue: .system(NSColor.systemPurple),
+            // Purple. Calibrated from `systemPurple`, same reasoning as antigravity's teal.
+            brandHue: .calibrated(red: 0.616472, green: 0.200378, blue: 0.838919),
             monochromeWhite: 0.7,
             onboardingAccent: { _ in Color(red: 0.62, green: 0.52, blue: 0.96) },
             enablementKey: PreferencesKey.Agents.openCodeEnabled,
@@ -67,7 +67,8 @@ extension SessionSourceDescriptor {
             ),
             supportsResume: true,
             resumeAgentLabel: "OpenCode",
-            otherAgentPill: PillSpec(color: .purple, shortcut: "4")
+            otherAgentPill: PillSpec(color: Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: .opencode)),
+                                     shortcut: "4")
         )
     }()
 }

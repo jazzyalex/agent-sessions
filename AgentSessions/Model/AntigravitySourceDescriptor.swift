@@ -17,8 +17,10 @@ extension SessionSourceDescriptor {
             telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Antigravity",
             badgeInitials: "AG",
-            // Teal. Passthrough: the system dynamic color is returned unwrapped (K6).
-            brandHue: .system(NSColor.systemTeal),
+            // Teal. Calibrated to what `systemTeal` drew in light mode through macOS 15;
+            // pinned as a literal so the brand no longer moves when Apple restyles the
+            // system palette (macOS 26 changed `systemTeal`).
+            brandHue: .calibrated(red: 0.289820, green: 0.617301, blue: 0.718147),
             monochromeWhite: 0.6,
             onboardingAccent: { $0.accentBlue },
             enablementKey: PreferencesKey.Agents.antigravityEnabled,
@@ -60,7 +62,8 @@ extension SessionSourceDescriptor {
             ),
             supportsResume: true,
             resumeAgentLabel: "Antigravity CLI",
-            otherAgentPill: PillSpec(color: .teal, shortcut: "3")
+            otherAgentPill: PillSpec(color: Color(nsColor: SessionSourceRegistry.resolvedBrandAccent(for: .antigravity)),
+                                     shortcut: "3")
         )
     }()
 }

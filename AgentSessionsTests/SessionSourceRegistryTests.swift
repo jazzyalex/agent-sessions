@@ -174,8 +174,8 @@ final class SessionSourceRegistryTests: XCTestCase {
     private static let brandAccentGoldens: [SessionSource: (aqua: [CGFloat], darkAqua: [CGFloat])] = [
         .codex: (aqua: [0.180158, 0.384268, 0.665022, 1.000000], darkAqua: [0.265213, 0.465081, 0.740000, 1.000000]),
         .claude: (aqua: [0.791664, 0.534844, 0.281364, 1.000000], darkAqua: [0.791664, 0.565662, 0.342600, 1.000000]),
-        .antigravity: (aqua: [0.349020, 0.678431, 0.768627, 1.000000], darkAqua: [0.415686, 0.768627, 0.862745, 1.000000]),
-        .opencode: (aqua: [0.686275, 0.321569, 0.870588, 1.000000], darkAqua: [0.749020, 0.352941, 0.949020, 1.000000]),
+        .antigravity: (aqua: [0.349020, 0.678431, 0.768627, 1.000000], darkAqua: [0.399373, 0.689254, 0.768627, 1.000000]),
+        .opencode: (aqua: [0.686275, 0.321569, 0.870588, 1.000000], darkAqua: [0.708393, 0.387451, 0.870588, 1.000000]),
         .hermes: (aqua: [0.681296, 0.690266, 0.233215, 1.000000], darkAqua: [0.731538, 0.740000, 0.308816, 1.000000]),
         .copilot: (aqua: [0.929563, 0.315907, 0.664030, 1.000000], darkAqua: [0.929563, 0.389546, 0.695894, 1.000000]),
         .droid: (aqua: [0.170852, 0.720353, 0.350321, 1.000000], darkAqua: [0.243251, 0.740000, 0.405491, 1.000000]),
@@ -191,12 +191,14 @@ final class SessionSourceRegistryTests: XCTestCase {
 
     /// The ten toolbar pill colors, recorded from the same pre-flip palette. These also
     /// pin what `UnifiedSessionsView.sourceAccent(_:)` now derives (`otherAgentPill?.color`
-    /// with a brand-accent fallback for codex/claude): the antigravity and opencode rows
-    /// are SwiftUI's `.teal`/`.purple`, which is what that switch used to return literally,
-    /// and they land on `systemTeal`/`systemPurple`'s components to well within tolerance.
+    /// with a brand-accent fallback for codex/claude). The antigravity and opencode rows
+    /// used to be SwiftUI's `.teal`/`.purple` — i.e. Apple's palette, which made these two
+    /// goldens OS-version-dependent and red them on macOS 26. Both now derive from their
+    /// own brand accent like the other thirteen, so light mode is byte-identical to the
+    /// system colors through macOS 15 and dark mode is `adaptiveBrand`'s derivation.
     private static let pillColorGoldens: [SessionSource: (aqua: [CGFloat], darkAqua: [CGFloat])] = [
-        .antigravity: (aqua: [0.349020, 0.678431, 0.768627, 1.000000], darkAqua: [0.415686, 0.768627, 0.862745, 1.000000]),
-        .opencode: (aqua: [0.686275, 0.321569, 0.870588, 1.000000], darkAqua: [0.749020, 0.352941, 0.949020, 1.000000]),
+        .antigravity: (aqua: [0.349020, 0.678431, 0.768627, 1.000000], darkAqua: [0.399373, 0.689254, 0.768627, 1.000000]),
+        .opencode: (aqua: [0.686275, 0.321569, 0.870588, 1.000000], darkAqua: [0.708393, 0.387451, 0.870588, 1.000000]),
         .hermes: (aqua: [0.681296, 0.690266, 0.233215, 1.000000], darkAqua: [0.731538, 0.740000, 0.308816, 1.000000]),
         .copilot: (aqua: [0.929563, 0.315907, 0.664030, 1.000000], darkAqua: [0.929563, 0.389546, 0.695894, 1.000000]),
         .droid: (aqua: [0.170852, 0.720353, 0.350321, 1.000000], darkAqua: [0.243251, 0.740000, 0.405491, 1.000000]),
@@ -344,9 +346,14 @@ final class SessionSourceRegistryTests: XCTestCase {
         }
     }
 
-    /// K6: exactly two sources hand back an AppKit *system dynamic* color unwrapped;
-    /// the other ten are light-calibrated triples that must go through `adaptiveBrand`.
-    func testSystemPassthroughSourcesAreExactlyAntigravityAndOpencode() {
+    /// K6: every source is a light-calibrated triple that goes through `adaptiveBrand`.
+    ///
+    /// Antigravity and opencode used to hand back `systemTeal`/`systemPurple` unwrapped.
+    /// That made their brand — and the goldens above — track Apple's palette, so macOS 26's
+    /// `systemTeal` change turned CI red while the same code passed on macOS 15. A brand hue
+    /// must be a value this repo owns. Adding a `.system` hue reintroduces that, so this
+    /// asserts the set is empty rather than naming the sources that used to be in it.
+    func testNoSourceUsesASystemPassthroughBrandHue() {
         var passthrough: Set<SessionSource> = []
         for s in SessionSource.allCases {
             switch SessionSourceRegistry.descriptor(for: s).brandHue {
@@ -356,7 +363,7 @@ final class SessionSourceRegistryTests: XCTestCase {
                 break
             }
         }
-        XCTAssertEqual(passthrough, [.antigravity, .opencode])
+        XCTAssertEqual(passthrough, [], "brand hues must not depend on Apple's system palette")
     }
 
     // MARK: - Enablement semantics (SPEC §10.5 / K7)
