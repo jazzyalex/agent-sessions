@@ -1,3 +1,55 @@
+## 2026-08-31 19:30 · telemetry-core-review · CI green again, test runs isolated from the live index
+status: in-progress
+
+**State:** The colour fix turned `main` green on the macOS 26 runner, test runs no longer
+touch the real index, and the telemetry core got a review that produced two proven defects,
+both since fixed. Three commits are unpushed and a parallel session is mid-fix on Copilot.
+
+**Verified:**
+- CI run `33461241930` on `61d8cd40`: **build success, test success**, 2527 total / 2524
+  passed / 3 skipped / 0 failures — the same numbers measured locally on macOS 15.7.9.
+  First green since the test job was added, so the gate itself is now proven end to end.
+- `HEAD` = `bb4e308d` on `main`, **3 ahead of `origin/main`** (`ab1201a2`, `72dbcd83`,
+  `bb4e308d`). `61d8cd40` and earlier are pushed.
+- Test-host isolation measured on a full run: opens of the real
+  `~/Library/Application Support/AgentSessions/index.db` went **18 → 0**, sandbox opens 21.
+  2530 total / 2527 passed / 3 skipped / 0 failures.
+
+**Unverified:**
+- The three unpushed commits have never run on CI. `72dbcd83` changes DB path resolution
+  under `#if DEBUG`, so a runner difference would show up as an unexpected sandbox path.
+- The parallel session's uncommitted Copilot tests appear to fail against the committed
+  accumulator (see Uncommitted). Not run — a handover authorizes no test runs.
+
+**Decided / don't redo:**
+- **Brand hues are literals now, not Apple's palette.** Antigravity and opencode each had
+  *two* system dependencies — `brandHue` and a separate `PillSpec(color: .teal/.purple)`.
+  Light mode is byte-identical to macOS 15; dark necessarily changed, since `.calibrated`
+  derives dark via `adaptiveBrand` instead of using Apple's variant. Re-recording the
+  goldens on macOS 26 was rejected — it only moves the breakage to the local machine.
+- **`.calibrated` is the calibrated RGB space, not sRGB.** Copying an sRGB golden into it
+  shifts the colour visibly (0.349020 → 0.412452). Convert and round-trip.
+- **Two telemetry defects were found by review and proven with throwaway probes**, not by
+  reading: Codex double-counted when `turn.completed` preceded `token_count` (fixed in
+  `ab1201a2` with separate per-family tables), and Copilot discarded a whole process's
+  tokens when `modelMetrics[*].usage` was an empty shell (fixed in `bb4e308d`).
+
+**Uncommitted / ownership:**
+- `AgentSessionsTests/CopilotTelemetryAccumulatorTests.swift` — **parallel session, in
+  flight.** Two added tests take the empty-`usage` fix a step further: `usage` carrying the
+  real keys with all-zero values. The committed accumulator gates on "did the keys parse",
+  so `testAllZeroUsageValuesFallBackToTokenDetails` expects 115 where that gate yields 0.
+  The gate has to become "did this produce any tokens". Leave it to that session.
+
+**Key files:**
+- `AgentSessions/Indexing/DB.swift:48` — `resolveApplicationSupportDirectoryURL`, the single
+  choke point where an unprovided `IndexDB` is redirected under XCTest.
+- `AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift:86` — the `usageKeys` gate.
+
+**Next:**
+1. Push the three commits and confirm CI stays green.
+2. Let the parallel session finish the Copilot zero-value gate; the test is already written.
+
 ## 2026-08-31 18:20 · pr-65-mtime-review · Merged PR #65, added the missing CI test gate
 status: done
 
