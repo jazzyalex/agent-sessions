@@ -232,6 +232,33 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.usageSummary?.usageFamilies.sorted(), ["token_count", "turn.completed"])
     }
 
+    /// Same two records as the test above, in the other order. The authority rule
+    /// is "cumulative wins if it appears ANYWHERE in the file", so the result must
+    /// be identical — a streaming flag that only looks backward gets this wrong and
+    /// counts the same turn twice.
+    func testBothFamiliesNeverDoubleCountedWhenTurnCompletedComesFirst() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("model-a", "medium"),
+            turnCompleted(input: 100, output: 10),
+            tokenCount(input: 100, output: 10, total: 110)
+        ])
+        XCTAssertEqual(slice(t, model: "model-a")?.freshInputTokens, 100)
+        XCTAssertEqual(slice(t, model: "model-a")?.outputTokens, 10)
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 110)
+        XCTAssertTrue(t.usageSummary?.usageFamilyConflict == true)
+    }
+
+    /// Order must not change the answer for any interleaving.
+    func testFamilyAuthorityIsOrderIndependent() {
+        let ctx = context("model-a", "medium")
+        let tc = tokenCount(input: 100, output: 10, total: 110)
+        let turn = turnCompleted(input: 100, output: 10)
+        let aFirst = CodexTelemetryAccumulator.accumulate(lines: [ctx, tc, turn])
+        let bFirst = CodexTelemetryAccumulator.accumulate(lines: [ctx, turn, tc])
+        XCTAssertEqual(aFirst.usageSlices, bFirst.usageSlices)
+        XCTAssertEqual(aFirst.usageSummary?.topLineTokens, bFirst.usageSummary?.topLineTokens)
+    }
+
     func testLegacyTotalOnly() {
         let legacy = json(["timestamp": "2026-08-26T10:00:01.000Z", "type": "event_msg",
                            "payload": ["type": "token_count",

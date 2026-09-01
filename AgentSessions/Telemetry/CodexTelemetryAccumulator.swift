@@ -22,13 +22,20 @@ struct CodexTelemetryAccumulator {
     }
 
     private var timeline = ConfigurationTimeline(provenance: .effectiveTurnContext)
-    private var slices = UsageSliceTable()
+    /// The two usage families accumulate into SEPARATE tables, and `finish()` picks
+    /// the winner. They cannot share one table: which family is authoritative is a
+    /// property of the whole file, and a single pass cannot know mid-stream whether
+    /// a `token_count` record is still coming. Merging as we go double-counted every
+    /// transcript whose `turn.completed` records preceded its `token_count` ones.
+    private var cumulativeSlices = UsageSliceTable()
+    private var turnSlices = UsageSliceTable()
     private var cumulative = CumulativeCounters()
     private var recordedTotal = 0
     private var sawCumulativeFamily = false
     private var sawTurnCompletedFamily = false
     private var turnCompletedTokens = 0
-    private var sawAnyComponent = false
+    private var cumulativeHasComponents = false
+    private var turnHasComponents = false
 
     mutating func consume(line: String, index: Int) {
         guard let obj = ClaudeRunwayLog.jsonObject(line) else { return }
@@ -63,8 +70,8 @@ struct CodexTelemetryAccumulator {
                 cumulative = CumulativeCounters()
             }
             let delta = cumulative.advance(to: sample)
-            if delta.hasComponents { sawAnyComponent = true }
-            slices.add(delta, model: timeline.model, effort: timeline.effort, speed: "standard")
+            if delta.hasComponents { cumulativeHasComponents = true }
+            cumulativeSlices.add(delta, model: timeline.model, effort: timeline.effort, speed: "standard")
             return
         }
 
@@ -75,12 +82,10 @@ struct CodexTelemetryAccumulator {
             // Per-turn records are incremental: sum them, never delta them.
             let increment = UsageDelta(sample: CumulativeCounters.Sample(usage: usage))
             turnCompletedTokens += increment.topLine
-            // If the cumulative family appears anywhere in the file it wins outright;
-            // adding these too would count the same tokens twice.
-            if !sawCumulativeFamily {
-                if increment.hasComponents { sawAnyComponent = true }
-                slices.add(increment, model: timeline.model, effort: timeline.effort, speed: "standard")
-            }
+            // Always recorded, into its own table. Whether it counts is decided in
+            // `finish()`, once the whole file has been seen.
+            if increment.hasComponents { turnHasComponents = true }
+            turnSlices.add(increment, model: timeline.model, effort: timeline.effort, speed: "standard")
         }
     }
 
@@ -91,13 +96,18 @@ struct CodexTelemetryAccumulator {
 
         let bankedTotal = recordedTotal + cumulative.lastTotal
 
+        // The authority decision, made once, with the whole file seen: cumulative
+        // wins wherever it appears, so the two families are never summed.
+        let winningSlices = sawCumulativeFamily ? cumulativeSlices : turnSlices
+        let hasComponents = sawCumulativeFamily ? cumulativeHasComponents : turnHasComponents
+
         let summary: TelemetryUsageSummary?
         if families.isEmpty {
             summary = nil
         } else {
             summary = TelemetryUsageSummary(
-                topLineTokens: slices.topLineTokens,
-                hasComponentBreakdown: sawAnyComponent,
+                topLineTokens: winningSlices.topLineTokens,
+                hasComponentBreakdown: hasComponents,
                 recordedTotalTokens: bankedTotal > 0 ? bankedTotal : nil,
                 usageFamilies: families,
                 // Both families reporting positive tokens is a real conflict: the
@@ -110,7 +120,7 @@ struct CodexTelemetryAccumulator {
                                 initialConfiguration: timeline.initialConfiguration,
                                 currentConfiguration: timeline.currentConfiguration,
                                 configurationChanges: timeline.changes,
-                                usageSlices: slices.ordered,
+                                usageSlices: winningSlices.ordered,
                                 usageSummary: summary,
                                 costEstimate: nil)
     }
