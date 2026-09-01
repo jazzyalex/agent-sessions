@@ -15,6 +15,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .grok,
+            telemetry: .allUnavailable("scalar model/effort metadata only; timeline and usage audit pending (Plan C)"),
             shortLabel: "Grok CLI",
             badgeInitials: "GK",
             // Slate blue-grey, echoing xAI's monochrome mark while staying clear of

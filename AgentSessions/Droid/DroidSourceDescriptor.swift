@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .droid,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Droid",
             badgeInitials: "D",
             // Green brand (disambiguation handled via styling, not hue).

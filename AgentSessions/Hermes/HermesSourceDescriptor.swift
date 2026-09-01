@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .hermes,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Hermes",
             badgeInitials: "HM",
             // Olive-gold accent, shifted away from Claude/OpenClaw warm oranges.

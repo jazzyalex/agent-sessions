@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .kimi,
+            telemetry: .allUnavailable("measured per-turn token records are retained but unparsed (Plan C)"),
             shortLabel: "Kimi Code",
             badgeInitials: "KM",
             // Indigo-violet accent, distinct from Codex's blue and OpenCode's purple.

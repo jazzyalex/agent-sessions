@@ -151,11 +151,59 @@ struct AvailabilityContext {
     }
 }
 
+// MARK: - Telemetry capability
+
+/// What one telemetry dimension can be produced for a source.
+///
+/// `partial` and `unavailable` carry a reason because the two read identically at
+/// a call site otherwise — and "we audited this format and it cannot express X" is
+/// a very different fact from "nobody has looked yet".
+enum TelemetryCapability: Equatable, Sendable {
+    case supported
+    case partial(String)
+    case unavailable(String)
+
+    /// True when this dimension can produce something worth showing.
+    var isAvailable: Bool {
+        if case .unavailable = self { return false }
+        return true
+    }
+}
+
+/// Per-source telemetry declarations, one per dimension.
+///
+/// Declared for every source rather than inferred, so `SessionTelemetryEngine`
+/// dispatches on capability instead of a hardcoded provider list: adding a provider
+/// later is a descriptor edit plus an accumulator, with no engine change.
+struct TelemetryCapabilities: Equatable, Sendable {
+    /// Initial/current model + reasoning effort, and the changes between them.
+    let configuration: TelemetryCapability
+    /// Token usage split into fresh input / cache read / cache write / output.
+    let tokens: TelemetryCapability
+    /// API-equivalent dollars, which needs both a priceable model and component tokens.
+    let cost: TelemetryCapability
+    /// Per-session share of an account's weekly quota. Unavailable everywhere until
+    /// account quota snapshots are persisted (Plan B).
+    let weeklyQuota: TelemetryCapability
+
+    /// The common Plan A shape: one reason, all four dimensions unavailable.
+    static func allUnavailable(_ reason: String) -> TelemetryCapabilities {
+        TelemetryCapabilities(configuration: .unavailable(reason),
+                              tokens: .unavailable(reason),
+                              cost: .unavailable(reason),
+                              weeklyQuota: .unavailable("no account-level quota feed"))
+    }
+}
+
 // MARK: - SessionSourceDescriptor
 
 struct SessionSourceDescriptor {
     /// The source this descriptor describes.
     let source: SessionSource
+
+    /// What telemetry this source can produce. Non-optional on purpose: the
+    /// compiler makes every one of the 15 sources state a verdict.
+    let telemetry: TelemetryCapabilities
 
     // MARK: Labels
 

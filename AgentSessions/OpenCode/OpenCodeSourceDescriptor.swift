@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .opencode,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "OpenCode",
             badgeInitials: "OC",
             // Purple. Passthrough, same reasoning as antigravity's systemTeal (K6).

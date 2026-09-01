@@ -14,6 +14,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .antigravity,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Antigravity",
             badgeInitials: "AG",
             // Teal. Passthrough: the system dynamic color is returned unwrapped (K6).

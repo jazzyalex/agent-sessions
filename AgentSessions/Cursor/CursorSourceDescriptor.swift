@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .cursor,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Cursor",
             badgeInitials: "CR",
             // Teal-ish (Cursor brand).

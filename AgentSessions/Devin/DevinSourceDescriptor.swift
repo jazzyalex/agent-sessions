@@ -16,6 +16,7 @@ extension SessionSourceDescriptor {
     static let devin: SessionSourceDescriptor = {
         return SessionSourceDescriptor(
             source: .devin,
+            telemetry: .allUnavailable("transcript format not audited for telemetry"),
             shortLabel: "Devin CLI",
             badgeInitials: "DV",
             // Warm amber, clear of Claude's brown and OpenClaw's orange.

@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .copilot,
+            telemetry: .allUnavailable("model-change events are preserved; accumulator not built (Plan C)"),
             shortLabel: "Copilot",
             badgeInitials: "CP",
             // Magenta-ish.

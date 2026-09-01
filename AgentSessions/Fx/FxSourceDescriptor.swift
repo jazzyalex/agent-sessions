@@ -24,6 +24,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .fx,
+            telemetry: .allUnavailable("scalar model/effort metadata only; timeline and usage audit pending (Plan C)"),
             shortLabel: "fx",
             badgeInitials: "FX",
             // fx ships no usable brand chroma — its mark and site are monochrome —

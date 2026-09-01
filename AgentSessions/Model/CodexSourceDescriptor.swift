@@ -13,6 +13,16 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .codex,
+            // turn_context states the effective model AND effort for every turn, so
+            // the configuration timeline is exact. Tokens are partial only because
+            // legacy rollouts exist that record a total with no component breakdown;
+            // those can report a token count but cannot be priced.
+            telemetry: TelemetryCapabilities(
+                configuration: .supported,
+                tokens: .partial("legacy total-only logs have no component breakdown"),
+                cost: .partial("legacy total-only logs cannot be priced"),
+                weeklyQuota: .unavailable("no persisted account quota snapshots (Plan B)")
+            ),
             shortLabel: "Codex",
             badgeInitials: "CX",
             // Deep blue.

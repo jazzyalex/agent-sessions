@@ -10,6 +10,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .pi,
+            telemetry: .allUnavailable("model/thinking-level change records exist in the logs; accumulator not built (Plan C)"),
             shortLabel: "Pi",
             badgeInitials: "PI",
             // Green-cyan accent, distinct from Gemini and Cursor.

@@ -28,6 +28,7 @@ extension SessionSourceDescriptor {
 
         return SessionSourceDescriptor(
             source: .qwen,
+            telemetry: .allUnavailable("dense per-call token telemetry is retained but unparsed (Plan C)"),
             shortLabel: "Qwen Code",
             badgeInitials: "QW",
             brandHue: .calibrated(red: 0.45, green: 0.31, blue: 0.77),

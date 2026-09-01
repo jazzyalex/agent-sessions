@@ -10,6 +10,16 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .claude,
+            // Claude stamps the model on the assistant record that used it and never
+            // records a session-start configuration, so the "initial" one is inferred
+            // from the first observation. Usage is per-message and complete, including
+            // the 5m/1h cache-write split and the fast-mode tier.
+            telemetry: TelemetryCapabilities(
+                configuration: .partial("initial config is first-observed, not recorded at session start"),
+                tokens: .supported,
+                cost: .supported,
+                weeklyQuota: .unavailable("no persisted account quota snapshots (Plan B)")
+            ),
             shortLabel: "Claude",
             badgeInitials: "CC",
             // Warm brown.

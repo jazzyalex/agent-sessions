@@ -12,6 +12,7 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .openclaw,
+            telemetry: .allUnavailable("model/thinking-level change records exist in the logs; accumulator not built (Plan C)"),
             shortLabel: "OpenClaw",
             badgeInitials: "CL",
             // Coral-orange accent, kept warm but separated from Claude/Hermes.

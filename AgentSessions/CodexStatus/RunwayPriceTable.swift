@@ -149,6 +149,9 @@ final class RunwayPriceTable: @unchecked Sendable {
 
     var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return models.isEmpty }
     var revision: Int { lock.lock(); defer { lock.unlock() }; return _revision }
+    /// `updated` date of the table currently loaded. Stamped onto stored telemetry
+    /// cost results so a saved figure can be re-judged when rates move.
+    var updatedDate: String { lock.lock(); defer { lock.unlock() }; return loadedUpdated }
 
     /// Longest-prefix price lookup. nil slug or no matching key → nil (→ $ unpriceable).
     func price(forModel slug: String?) -> RunwayModelPrice? {
