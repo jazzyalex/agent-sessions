@@ -253,8 +253,9 @@ struct UsageSliceTable {
         totals[key] = slice
     }
 
-    /// Adds a Claude contribution, which alone distinguishes cache-write TTLs.
-    mutating func addClaude(fresh: Int, cacheRead: Int, write5m: Int, write1h: Int, output: Int,
+    /// Adds a contribution whose components are already separated by the provider.
+    /// Only Claude distinguishes cache-write TTLs; the others pass write1h: 0.
+    mutating func addComponents(fresh: Int, cacheRead: Int, write5m: Int, write1h: Int, output: Int,
                             model: String?, effort: String?, speed: String) {
         let key = Key(model: model, effort: effort, speed: speed)
         var slice = slice(for: key)

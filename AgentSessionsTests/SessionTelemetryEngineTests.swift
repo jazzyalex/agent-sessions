@@ -45,6 +45,29 @@ final class SessionTelemetryEngineTests: XCTestCase {
         ]
     }
 
+    // MARK: - Dispatch / descriptor agreement
+
+    /// A source can declare telemetry available and still have no `case` in the
+    /// engine's switch. The `default` arm returns nil, which is indistinguishable
+    /// from a source that correctly declares nothing — so the feature would look
+    /// wired up and produce silence. This pins the two lists together.
+    func testEveryDispatchableSourceDeclaresTelemetryAvailable() {
+        for source in SessionTelemetryEngine.dispatchableSources {
+            let t = SessionSourceRegistry.descriptor(for: source).telemetry
+            XCTAssertTrue(t.configuration.isAvailable || t.tokens.isAvailable,
+                          "\(source) is dispatchable but declares no telemetry, so the engine's own gate rejects it")
+        }
+    }
+
+    func testEverySourceDeclaringTelemetryIsDispatchable() {
+        for source in SessionSource.allCases {
+            let t = SessionSourceRegistry.descriptor(for: source).telemetry
+            guard t.configuration.isAvailable || t.tokens.isAvailable else { continue }
+            XCTAssertTrue(SessionTelemetryEngine.dispatchableSources.contains(source),
+                          "\(source) declares telemetry but the engine has no accumulator for it")
+        }
+    }
+
     // MARK: - Computation
 
     func testCodexSessionProducesTelemetry() async throws {

@@ -10,7 +10,15 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .pi,
-            telemetry: .allUnavailable("model/thinking-level change records exist in the logs; accumulator not built (Plan C)"),
+            // Pi states its configuration changes outright (`model_change`,
+            // `thinking_level_change`) and gives every assistant message a complete
+            // usage block — the most cooperative format of the four supported.
+            telemetry: TelemetryCapabilities(
+                configuration: .supported,
+                tokens: .supported,
+                cost: .supported,
+                weeklyQuota: .unavailable("no account-level quota feed")
+            ),
             shortLabel: "Pi",
             badgeInitials: "PI",
             // Green-cyan accent, distinct from Gemini and Cursor.

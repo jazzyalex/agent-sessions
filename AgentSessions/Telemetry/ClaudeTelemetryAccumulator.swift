@@ -70,14 +70,18 @@ struct ClaudeTelemetryAccumulator {
         let cacheRead = Int(ClaudeRunwayLog.double(usage["cache_read_input_tokens"]) ?? 0)
         let output = Int(ClaudeRunwayLog.double(usage["output_tokens"]) ?? 0)
 
-        slices.addClaude(fresh: fresh,
+        slices.addComponents(fresh: fresh,
                          cacheRead: cacheRead,
                          write5m: Int(writes.fiveMinute),
                          write1h: Int(writes.oneHour),
                          output: output,
                          model: rawModel,
                          // A record that omits effort belongs to the effort still in
-                         // force, not to a separate "unknown effort" slice.
+                         // force, not to a separate "unknown effort" slice. Note the
+                         // carried value comes from the PARENT timeline, which
+                         // excludes sidechains — so a subagent record with no effort
+                         // of its own is attributed the parent's. That is the best
+                         // available answer, not a measured one.
                          effort: effort ?? timeline.effort,
                          speed: RunwaySpeedTier(usageValue: usage["speed"]).rawValue)
     }

@@ -174,6 +174,85 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
+### Telemetry: Kimi, Qwen and OpenClaw show a model but no tokens in fixtures
+> **open** · sev: med · urg: med · verified 2026-08-31
+
+- **What:** `SessionTelemetry` now covers Codex, Claude, Pi and Copilot. These three were
+  audited and **deferred**, because their stage0 fixtures carry a model name and no token
+  counts at all: Kimi 67 `model` / 51 `usage` occurrences but no numeric token fields
+  reachable by a key scan, Qwen 17 `model` and nothing else, OpenClaw only `modelId`.
+- **Why it is probably still there:** [docs/backlog.md](backlog.md) already claims Qwen has
+  "dense per-call token telemetry" and Kimi "measured per-turn token records". Both claims
+  predate this scan and neither is visible in the fixtures. Either the fixtures are trimmed
+  past the usage records, or the earlier claims were about a different field.
+- **To close:** scan REAL stores, not fixtures — `~/.kimi`, `~/.qwen`, OpenClaw's root — for
+  numeric token fields on assistant/turn records. If found, add an accumulator per
+  `AgentSessions/Telemetry/PiTelemetryAccumulator.swift` (the simplest of the four) and flip
+  the descriptor's `TelemetryCapabilities`. If genuinely absent, replace each descriptor's
+  reason string with the measured finding so nobody re-investigates.
+- **Risk if wrong:** none to runtime — all three declare every telemetry dimension
+  `unavailable`, so the engine returns nil for them and no number is ever shown.
+
+### Telemetry: seven sources expose almost nothing and it is not obvious why
+> **open** · sev: low · urg: med · verified 2026-08-31
+
+- **What:** a key scan across every stage0 fixture found effectively no model or token data
+  for **Antigravity, OpenCode and fx** (no matching fields at all) and only a bare `model`
+  string for **Cursor, Devin, Hermes** and only `reasoning_effort` for **Grok**.
+- **Why this is suspicious rather than settled:** these are working, shipping agents that
+  call paid APIs. An agent that spends tokens and records none of it is possible but
+  unusual — Antigravity, OpenCode and fx returning *nothing* more likely means the fixture
+  is trimmed, the data lives in a sidecar, or (for the DB-backed sources) it is in SQLite
+  columns a JSONL key scan cannot see. OpenCode and Devin are SQLite-backed; fx and
+  Antigravity were never checked beyond their fixture.
+- **To close:** for each, check the real store rather than the fixture, and for the
+  DB-backed ones inspect the schema directly. Record the finding per source even when the
+  answer is "genuinely absent" — the point is to stop the question recurring.
+- **Related:** [Grok session sidecars are neither watched nor read](#grok-session-sidecars-are-neither-watched-nor-read)
+  may explain Grok specifically.
+
+### Telemetry: Copilot subagent tokens may be invisible to the shutdown summary
+> **open** · sev: med · urg: low · verified 2026-08-31
+
+- **What:** `CopilotTelemetryAccumulator` reads tokens only from `session.shutdown`, taking
+  `data.modelMetrics[*].usage` when present and falling back to `data.tokenDetails`. Two
+  other places in the same record carry token-ish data and are NOT read:
+  `data.agentMetrics.<agent>.modelMetrics` (per-agent, empty in the fixture) and the separate
+  `subagent.completed` event, which carries `model` and `totalTokens`.
+- **Why it matters:** if Copilot accounts subagent spend under `agentMetrics` rather than
+  rolling it into the top-level `modelMetrics`, every session that used a subagent
+  **undercounts** — silently, since fail-closed pricing only triggers on unknown models, not
+  on missing ones.
+- **Why it was not just fixed:** the fixture cannot answer it. `agentMetrics.main.modelMetrics`
+  is `{}` and `subagent.completed.totalTokens` is `0`, so summing them would be guessing, and
+  guessing wrong here double-counts instead of undercounting.
+- **To close:** find a real Copilot session that ran a subagent. Compare
+  `sum(modelMetrics[*].usage)` against `sum(agentMetrics[*].modelMetrics[*].usage)` and the
+  `subagent.completed` totals. If the top-level map already includes subagent spend, record
+  that and close. If not, add the missing source and a test.
+- **Where:** [CopilotTelemetryAccumulator.swift](../AgentSessions/Telemetry/CopilotTelemetryAccumulator.swift)
+  `consumeShutdown`.
+
+### Telemetry: Pi's `usage.input` convention — RESOLVED, Claude-style
+> **closed** · sev: med · urg: — · verified 2026-08-31
+
+- **Question:** does Pi's `message.usage.input` mean FRESH input with `cacheRead` counted
+  separately (the Claude convention), or does it already INCLUDE cache reads (the Codex
+  convention, where fresh input is the difference)? The fixture could not tell: its cache
+  counters are all zero and `totalTokens` (19) equals `input + output` under either reading.
+- **Answer: Claude-style — `input` is fresh, `cacheRead` is additional.** Measured against
+  real sessions in `~/.pi/agent/sessions`: every record with a non-zero `cacheRead` satisfies
+  `totalTokens == input + output + cacheRead` exactly (1201 + 758 + 1024 = 2983;
+  1955 + 98 + 1024 = 3077). Under the Codex reading those totals would have been 1959 and
+  2053. Zero records matched the Codex shape.
+- **Caveat on sample size:** only 2 local Pi sessions exist, giving 4 usage records, 2 of them
+  with a non-zero `cacheRead`. The arithmetic is unambiguous on both, but the sample is small
+  — if Pi ever reports a total that disagrees with `input + output + cacheRead + cacheWrite`,
+  re-open this.
+- **Pinned by:** `testInputIsFreshAndCacheReadIsAdditional` in
+  [PiTelemetryAccumulatorTests.swift](../AgentSessionsTests/PiTelemetryAccumulatorTests.swift),
+  which uses the observed numbers and fails loudly if anyone switches the convention.
+
 ### Codex 0.151 moved subagent identity off `agent_role` and 28% of badges went blank
 > **open** · sev: med · urg: low · verified 2026-08-30
 

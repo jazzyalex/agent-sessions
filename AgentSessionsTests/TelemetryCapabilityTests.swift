@@ -32,13 +32,32 @@ final class TelemetryCapabilityTests: XCTestCase {
         }
     }
 
-    func testOnlyCodexAndClaudeHaveAnySupportInPlanA() {
-        for source in SessionSource.allCases where source != .codex && source != .claude {
+    /// The sources whose transcript format has actually been audited and wired to an
+    /// accumulator. Everything else must say so rather than guess — an unaudited
+    /// source silently reporting numbers is the failure this list prevents.
+    private static let supportedSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+
+    func testUnauditedSourcesDeclareNothingAvailable() {
+        for source in SessionSource.allCases where !Self.supportedSources.contains(source) {
             let t = SessionSourceRegistry.descriptor(for: source).telemetry
             for cap in [t.configuration, t.tokens, t.cost, t.weeklyQuota] {
                 guard case .unavailable = cap else {
-                    return XCTFail("\(source) must be unavailable until its format is audited (Plan C)")
+                    return XCTFail("\(source) must be unavailable until its format is audited")
                 }
+            }
+        }
+    }
+
+    /// Every source the engine can actually dispatch must declare it, and vice
+    /// versa — a mismatch means either dead code or a silently ignored source.
+    func testSupportedSourcesDeclareConfigurationAndTokens() {
+        for source in Self.supportedSources {
+            let t = SessionSourceRegistry.descriptor(for: source).telemetry
+            if case .unavailable = t.configuration {
+                XCTFail("\(source) must produce a configuration timeline")
+            }
+            if case .unavailable = t.tokens {
+                XCTFail("\(source) must produce token usage")
             }
         }
     }
@@ -54,15 +73,4 @@ final class TelemetryCapabilityTests: XCTestCase {
         }
     }
 
-    func testCodexAndClaudeCanProduceConfigurationAndTokens() {
-        for source in [SessionSource.codex, .claude] {
-            let t = SessionSourceRegistry.descriptor(for: source).telemetry
-            if case .unavailable = t.configuration {
-                XCTFail("\(source) must produce a configuration timeline")
-            }
-            if case .unavailable = t.tokens {
-                XCTFail("\(source) must produce token usage")
-            }
-        }
-    }
 }

@@ -13,6 +13,10 @@ public enum TelemetryProvenance: String, Codable, Sendable {
     /// Initial configuration backfilled from the first value ever observed for a
     /// field, rather than read from a session-start record.
     case inferredFirstObservation
+    /// A dedicated change event the provider emits in its own right — Pi's
+    /// `model_change` / `thinking_level_change`, Copilot's `session.model_change`.
+    /// Stronger than an inference: the provider is stating the change happened.
+    case providerChangeRecord
 }
 
 /// A model + reasoning-effort pair observed at one point in a transcript.

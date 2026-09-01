@@ -25,8 +25,18 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     private var order: [String] = []
     private let priceTable: RunwayPriceTable
 
+    /// The sources `compute` can actually dispatch. A source whose descriptor
+    /// declares telemetry available but is missing here returns nil forever, and
+    /// silently — the `default` arm cannot tell that case from a source that
+    /// correctly declares nothing. `SessionTelemetryEngineTests` asserts this set
+    /// matches the descriptors, so adding a provider cannot half-land.
+    static let dispatchableSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+
     /// Counts full parses, so cache tests can prove a second call did no work.
-    private(set) var parseCount = 0
+    private var _parseCount = 0
+    /// Lock-guarded: `compute` runs on a detached task, so an unsynchronized read
+    /// from the test thread is a data race even though the value is only a counter.
+    var parseCount: Int { lock.lock(); defer { lock.unlock() }; return _parseCount }
 
     init(priceTable: RunwayPriceTable = .shared) {
         self.priceTable = priceTable
@@ -83,12 +93,20 @@ final class SessionTelemetryEngine: @unchecked Sendable {
             var accumulator = ClaudeTelemetryAccumulator()
             guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
             telemetry = accumulator.finish()
+        case .pi:
+            var accumulator = PiTelemetryAccumulator()
+            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
+            telemetry = accumulator.finish()
+        case .copilot:
+            var accumulator = CopilotTelemetryAccumulator()
+            guard streamLines(at: url, into: { accumulator.consume(line: $0, index: $1) }) else { return nil }
+            telemetry = accumulator.finish()
         default:
             return nil
         }
 
         guard let base = telemetry else { return nil }
-        lock.lock(); parseCount += 1; lock.unlock()
+        lock.lock(); _parseCount += 1; lock.unlock()
 
         // Pricing needs both permission and component tokens: a legacy total-only
         // transcript reports a token count but can never be priced.

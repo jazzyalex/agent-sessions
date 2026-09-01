@@ -10,7 +10,17 @@ extension SessionSourceDescriptor {
         }
         return SessionSourceDescriptor(
             source: .copilot,
-            telemetry: .allUnavailable("model-change events are preserved; accumulator not built (Plan C)"),
+            // Configuration is stated outright by `session.model_change` (new model,
+            // previous model, reasoning effort). Tokens arrive only in the
+            // end-of-process `session.shutdown` summary, so a running session shows
+            // none, and spend can never be attributed to the configuration that
+            // incurred it.
+            telemetry: TelemetryCapabilities(
+                configuration: .supported,
+                tokens: .partial("only an end-of-process summary; no per-turn attribution"),
+                cost: .partial("priced from the session summary, not per turn"),
+                weeklyQuota: .unavailable("no account-level quota feed")
+            ),
             shortLabel: "Copilot",
             badgeInitials: "CP",
             // Magenta-ish.
