@@ -1,3 +1,175 @@
+## 2026-08-31 18:20 · pr-65-mtime-review · Merged PR #65, added the missing CI test gate
+status: done
+
+**State:** PR #65 (external, Rajeev-SG) fixes a real millisecond/seconds unit split in
+`session_meta.mtime`. Revision 1 was sent back with two defects; revision `da912919` fixes
+all of them and verifies clean. **Merged as `ccd6707e`** (merge commit, parents `c32f61bf` +
+`da912919` — exactly the pair verified together below).
+Separately: this repo had **no automated test gate at all** until today, and the one just
+added is red on `main` for a reason unrelated to any code here.
+
+**Verified:**
+- `da912919` merged onto `origin/main` locally: **2452 tests, 2449 passed, 3 skipped,
+  0 failures**, `** TEST SUCCEEDED **`. Main's own count is 2451, so the count moved by
+  exactly the +1 test the PR adds — the `agents.md` invariant holds.
+- The regression from revision 1 is gone:
+  `SessionParserTests/testOpenCodeSQLiteSearchIngestTracksIdentityUpdatesAndRemoval`
+  passes. `identityIsCurrent` is byte-identical to main's again (full `ContentRevision`
+  equality, `extent` restored).
+- `normalizedMtime` is applied at exactly one site — the `SessionMetaRow` write. Lines 583
+  and 589 (`session_search`, `session_tool_io`) still carry the millisecond identity
+  revision, which is required: `sessionSearchIdentityStatesByID` reads `session_search.mtime`
+  back *as* `updatedMillis`. `upsertSessionMeta` has one callsite, so the fix is total.
+- `files.mtime` was never contaminated — `upsertFile` takes `file.mtime` (the physical stat),
+  never `file.searchMtime`. The defect really was confined to `session_meta.mtime`.
+- Migration `session_meta_mtime_seconds_v1` is the source-agnostic in-place
+  `UPDATE session_meta SET mtime = mtime / 1000 WHERE mtime >= 1000000000000;`.
+  Threshold is safe in both directions: seconds reach 1e12 in the year 33658, and ms values
+  below 1e12 predate 2001-09-09.
+- The PR's new migration test pins both directions — opencode+hermes ms rows converted,
+  opencode+claude seconds rows untouched, all four table counts unchanged, `session_search`
+  revisions still ms, and `findSessionsNeedingDayUpdate` returning exactly the two migrated
+  sessions and nothing for claude. Stronger than what the review asked for.
+
+**Unverified:**
+- CI has not yet reported on the merge commit. It is expected to fail on exactly the two
+  colour-golden tests in hazard 1 and nothing else.
+
+**Decided / don't redo:**
+- **The reported symptom was never reproducible, and that is settled.** Every consumer reads
+  `COALESCE(end_ts, mtime)` and `end_ts` is non-null in all 5364 rows, so `mtime` is never
+  reached; `fetchSessionMeta` has no production callers; `session_days.meta_mtime` is a
+  change-detection token and scale-agnostic. This is a latent unit inconsistency worth
+  fixing, **not** user-visible misdating. The author has removed that claim from the PR text.
+- **Scope is opencode + hermes + devin, not opencode alone.** `parseFullByIdentity` and
+  `searchUsesIdentityAtURL` are non-nil for exactly those three. Revision 1's migration was
+  scoped to `["opencode"]`, which would have stranded the other two permanently.
+- **A `DELETE`-based migration was rejected** in favour of the in-place `UPDATE`: no
+  re-ingest, no window where sessions vanish from the list, the corpus is preserved by
+  construction rather than by test, and it repairs sources that are currently *disabled*
+  (the refresh loop is gated on `isAgentEnabled`, so deleted rows would not be rebuilt).
+- **Revision 1's "legacy detection" clause was a tautology** — `normalizedMtime(v) == v ||
+  v >= 1_000_000_000_000` is true for every `Int64`; 0 falses over 200,009 values including
+  both boundaries and `Int64.min`/`.max`. Removed, not repaired.
+- **The fork-PR approval policy is now `first_time_contributors_new_to_github`** (was
+  GitHub's `first_time_contributors` default), so known contributors no longer wait on a
+  click. The endpoint is undocumented in the obvious REST pages and was found by probing:
+  `repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval`. Accepted values:
+  `first_time_contributors_new_to_github`, `first_time_contributors`,
+  `all_external_contributors`. Three wrong guesses first: `fork-pr-workflows` → 404,
+  `access` → 422 (private only), `fork-pr-workflows-private-repos` → 422 (public not allowed).
+
+**Two hazards found along the way — both new, both worth acting on:**
+
+1. **CI is red on `main`, and it is an OS-palette drift, not a regression.**
+   `SessionSourceRegistryTests.testBrandAccentMatchesPinnedGoldens` and
+   `testOtherAgentPillColorsMatchPinnedGoldens` fail on the GitHub runner (macOS 26) and
+   pass locally (macOS 15.7.9). Only **antigravity** fails, in both tests, on component 0:
+   expected `0.349020`, got `0.0`. Antigravity's brand accent is a passthrough to
+   `NSColor.systemTeal`, and Apple changed `systemTeal` in macOS 26. Confirmed by resolving
+   it directly: local aqua = `0.349020 0.678431 0.768627`, exactly the pinned golden.
+   OpenCode passes because `systemPurple` is unchanged. **The goldens pin Apple's system
+   colors, so they are OS-version-dependent by construction** — the two rows that are
+   passthroughs to system colors are the only fragile ones.
+
+   **Resolved in `7a1b4e14`:** both now work like the other thirteen — a calibrated triple
+   through `adaptiveBrand`, pill derived from the resolved brand accent. Each had *two*
+   system dependencies, the `brandHue` and a separate `PillSpec(color: .teal/.purple)`,
+   which is why both tests failed rather than one. The literals are not the goldens copied
+   across: `.calibrated` is the calibrated RGB space, so each sRGB target was converted into
+   it and round-tripped, leaving light mode byte-identical. Dark mode necessarily changes
+   (one light value in, `adaptiveBrand`'s HSB derivation out instead of Apple's dark
+   variant). `testSystemPassthroughSourcesAreExactlyAntigravityAndOpencode` was inverted to
+   `testNoSourceUsesASystemPassthroughBrandHue` rather than deleted. Re-recording the
+   goldens on macOS 26 was rejected — that only moves the breakage to the local machine.
+   Still unproven on macOS 26 itself; CI is the proof.
+
+2. **`xcodebuild test` mutates the real production index.** The test *host* is
+   `AgentSessions.app`, and its normal startup opens
+   `~/Library/Application Support/AgentSessions/index.db` before any per-test
+   `IndexDBTestHooks.applicationSupportDirectoryProvider` redirect applies — 18 opens of the
+   real path in a single full-suite log. Running the suite from the PR worktree therefore
+   applied `session_meta_mtime_seconds_v1` to the live 699 MB database. Sanity-checked
+   clean afterwards: 5364 rows, min mtime `1763585922`, max `1788225216`, zero rows below
+   1e9 (no double division) and zero at or above 1e12 (repair complete), `end_ts` non-null
+   in all 5364 so `COALESCE` behaviour is unchanged. Harmless here because the migration is
+   the fix that is shipping anyway and is marker-guarded, but the general hazard is real:
+   **any test run can migrate, or corrupt, the user's live index.**
+
+**Key files:**
+- `AgentSessions/Search/SearchIngestService.swift:77` — `searchMtime`, the shared root of the
+  defect for all three identity sources.
+- `AgentSessions/Indexing/DB.swift:896` — `sessionSearchIdentityStatesByID`, the reason
+  `session_search.mtime` must stay on the millisecond scale.
+- `.github/workflows/ci.yml` — the `test` job added in `5e4e59c7`, with a `Test count` step
+  that reads the `.xcresult` bundle rather than stdout (stdout reports per-bundle totals).
+
+**Next:**
+1. Confirm CI goes green on macOS 26 now that the colour goldens no longer track Apple's
+   palette. That is the only unproven half of `7a1b4e14`.
+2. **Codex telemetry double-counts when `turn.completed` precedes `token_count`.** Landed
+   knowingly in `1afdbcdf`, filed here rather than fixed. `CodexTelemetryAccumulator` skips
+   `turn.completed` slices only while `sawCumulativeFamily` is still false, so the "cumulative
+   family wins outright" rule holds only for the ordering its test happens to use. Reversing
+   the two lines in `testBothFamiliesNeverDoubleCounted` yields exactly double — 200 vs 100
+   fresh input, 20 vs 10 output. `usageFamilyConflict` flags the collision, but the slices,
+   and any cost derived from them, are still inflated. Fix is either a second pass or
+   discarding `turn.completed` slices in `finish()` when `sawCumulativeFamily`. Nothing calls
+   the engine yet, so this is latent.
+3. Consider hazard 2: redirect the app host's startup `IndexDB` under `XCTestConfiguration`
+   so a test run can never touch the user's real database.
+
+## 2026-08-31 14:37 · release-5-1-1 · 5.1.1 shipped, then hardened the release tooling
+status: done
+
+**State:** 5.1.1 is live and the owner confirmed it installs. Five shipped fixes had no
+changelog entry until this session. The release then failed once on a false "DMG is
+corrupted" error; that fix was reviewed, found to be buggy itself, and rewritten as a
+shared helper.
+
+**Verified:**
+- `c32f61bf` on `main`, tree clean, nothing unpushed.
+- GitHub release `v5.1.1` published 2026-08-31T21:00:46Z, not draft; assets
+  `AgentSessions-5.1.1.dmg` (23,555,312 B) + `.sha256`. Remote tag → `75afd701`.
+- `deploy verify 5.1.1`: 0 errors, 0 warnings. Appcast 5.1.1 / build 72, edSignature present.
+- Suite **2448 pass / 3 skipped / 0 failures**, read from the `.xcresult` bundle. 186 Python
+  tests pass. stdout said 2396 — the per-bundle trap `agents.md` documents.
+
+**Unverified:**
+- **The DMG detach guard has never fired in a real release.** The race did not recur on the
+  retry, so it passed for the same reason 5.1 did — luck. The helper itself was tested
+  directly (mounted, unmounted, missing dir, missing DMG, path with a space, `hdiutil`
+  returning non-zero, all under `set -euo pipefail`). A run logging `==> Detaching stale
+  mount` would settle it.
+- Sparkle auto-update 5.1 → 5.1.1 and `brew upgrade` were not exercised.
+
+**Decided / don't redo:**
+- **"5.15" resolved to 5.1.1**, not 5.1.5 — `bump` only does major/minor/patch. Owner
+  rejected 5.2 despite two real features; copy leads on the fix weight instead.
+- **Site meta descriptions stay de-versioned.** The deploy skill demanded a version string
+  there and the 2026-08-29 SEO work had removed it; the skill was wrong and is now fixed in
+  all three places it said so. Do not re-add a version to those tags.
+- **Test count warns, never blocks** (owner call). A surprise release halt costs more than
+  the check saves — but a deleted suite still exits 0, so the warning must actually be read.
+- **Two fixes are deliberately absent from the changelog**: the `MainActor.assumeIsolated`
+  trap (`e27ea63b`) and the Antigravity discovery race (`dd10c1b5`) were both introduced
+  inside this cycle, so no released version carried them.
+- **`hdiutil verify` needs an exclusive handle.** "Resource temporarily unavailable" means
+  the image is mounted, not damaged. Both call sites now detach first.
+
+**Key files:**
+- `tools/release/dmg-verify.sh` — new, sourced by both the build script and the deploy smoke
+  test. The earlier inline version ended in a pipeline and could itself abort the release
+  under `set -e`, and matched the image path on awk `$3` (breaks on any path with a space).
+- `tools/release/test-count-baseline.txt` — holds `2448`. Update it in the same release that
+  legitimately changes the count.
+
+**Next:**
+1. Four Sendable warnings are filed in `docs/backlog.md` (Agent Source Plumbing). Only the
+   new one is a safe one-word `@Sendable`; the three older captures need their isolation
+   decided, not annotated away.
+2. `RepoHandover.md` is 1574 lines, past the ~1000 lint warn. Rotation needs its own request.
+
 ## 2026-08-31 11:54 · seo-discovery-and-qwen-outreach · Site SEO, IndexNow, Qwen listing + steward ask
 status: in-progress
 
