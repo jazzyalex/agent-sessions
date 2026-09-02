@@ -171,14 +171,10 @@ struct AgentToggleTile: View {
                     .font(.system(size: 12, weight: .semibold, design: .default))
                     .foregroundStyle(.primary)
                     .opacity(isEnabled ? 1.0 : 0.7)
-                HStack(spacing: 4) {
-                    Text("\(count)")
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                        .monospacedDigit()
-                    Text("sessions found")
-                        .font(.system(size: 11, weight: .regular, design: .default))
-                }
-                .foregroundStyle(.secondary)
+                Text(OnboardingLocalizedCopy.sessionsFound(count))
+                    .font(.system(size: 11, weight: .regular, design: .default))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -262,20 +258,45 @@ struct SlideHeader: View {
     }
 }
 
-// MARK: - Counting number
+// MARK: - Localized counts
 
-struct CountingNumberText: View {
+enum OnboardingLocalizedCopy {
+    static func sessionsFound(
+        _ count: Int,
+        locale: Locale = .current
+    ) -> LocalizedStringResource {
+        LocalizedStringResource(
+            "\(count) sessions found",
+            locale: locale,
+            comment: "Session discovery count. Use the singular form for one session."
+        )
+    }
+}
+
+struct CountingSessionsFoundText: View {
     var value: Double
-    var font: Font
+    var numberFont: Font
+    var labelFont: Font
+    var numberColor: Color
 
     var body: some View {
-        Text("\(Int(value.rounded()))")
-            .font(font)
+        let count = Int(value.rounded())
+        var copy = AttributedString(
+            localized: OnboardingLocalizedCopy.sessionsFound(count),
+            including: \.swiftUI
+        )
+        if let numberRange = copy.range(of: count.formatted()) {
+            copy[numberRange].font = numberFont
+            copy[numberRange].foregroundColor = numberColor
+        }
+        return Text(copy)
+            .font(labelFont)
+            .foregroundStyle(.primary)
             .monospacedDigit()
     }
 }
 
-extension CountingNumberText: Animatable {
+extension CountingSessionsFoundText: Animatable {
     var animatableData: Double {
         get { value }
         set { value = newValue }

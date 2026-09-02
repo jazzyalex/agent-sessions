@@ -9,6 +9,9 @@ import Combine
 /// button. Esc is equivalent to Start Exploring (completion is recorded either
 /// way).
 struct FirstRunSetupView: View {
+    static let sessionsSectionTitle: LocalizedStringResource = "Your sessions"
+    static let quotaMeterSectionTitle: LocalizedStringResource = "Quota Meter"
+
     @ObservedObject var coordinator: OnboardingCoordinator
     /// Replaces twelve positional indexer parameters. This view only ever reads each
     /// source's session list, so it goes through the type-erased handles and never needs a
@@ -131,14 +134,15 @@ struct FirstRunSetupView: View {
     // MARK: - Block A: Your sessions
 
     private var sessionsBlock: some View {
-        setupBlock(title: "Your sessions", fill: true) {
+        setupBlock(title: Self.sessionsSectionTitle, fill: true) {
             VStack(spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    CountingNumberText(value: animatedPrimarySessions, font: .system(size: 40, weight: .regular, design: .default))
-                        .foregroundStyle(palette.accentBlue)
-                    Text("sessions found")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
+                    CountingSessionsFoundText(
+                        value: animatedPrimarySessions,
+                        numberFont: .system(size: 40, weight: .regular, design: .default),
+                        labelFont: .system(size: 15, weight: .bold, design: .rounded),
+                        numberColor: palette.accentBlue
+                    )
                     if hiddenSessionsCount > 0 {
                         Spacer(minLength: 8)
                         Text("\(formattedCount(hiddenSessionsCount)) hidden")
@@ -174,7 +178,7 @@ struct FirstRunSetupView: View {
     // MARK: - Block B: Quota Meter
 
     private var quotaMeterBlock: some View {
-        setupBlock(title: "Quota Meter") {
+        setupBlock(title: Self.quotaMeterSectionTitle) {
             VStack(spacing: 16) {
                 quotaMeterDemo
 
@@ -211,9 +215,10 @@ struct FirstRunSetupView: View {
 
     /// One rounded, uppercase-titled block on the gray card background, matching
     /// the "Your sessions" / "Quota Meter" pairing.
-    private func setupBlock<Inner: View>(title: String, fill: Bool = false, @ViewBuilder content: () -> Inner) -> some View {
+    private func setupBlock<Inner: View>(title: LocalizedStringResource, fill: Bool = false, @ViewBuilder content: () -> Inner) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title.uppercased())
+            Text(title)
+                .textCase(.uppercase)
                 .font(.system(size: 11, weight: .semibold, design: .default))
                 .kerning(0.5)
                 .foregroundStyle(.secondary)

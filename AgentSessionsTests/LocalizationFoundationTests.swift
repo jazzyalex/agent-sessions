@@ -3,6 +3,34 @@ import XCTest
 @testable import AgentSessions
 
 final class LocalizationFoundationTests: XCTestCase {
+    func testOnboardingDynamicLabelsRetainLocalizedResources() {
+        let next: LocalizedStringResource = OnboardingSheetView.primaryActionTitle(isLast: false)
+        let done: LocalizedStringResource = OnboardingSheetView.primaryActionTitle(isLast: true)
+        let sessions: LocalizedStringResource = FirstRunSetupView.sessionsSectionTitle
+        let quota: LocalizedStringResource = FirstRunSetupView.quotaMeterSectionTitle
+
+        XCTAssertEqual(String(localized: next), "Next")
+        XCTAssertEqual(String(localized: done), "Done")
+        XCTAssertEqual(String(localized: sessions), "Your sessions")
+        XCTAssertEqual(String(localized: quota), "Quota Meter")
+    }
+
+    func testSessionCountUsesOnePluralizedLocalizationUnit() {
+        let locale = Locale(identifier: "en")
+        XCTAssertEqual(
+            String(localized: OnboardingLocalizedCopy.sessionsFound(0, locale: locale)),
+            "0 sessions found"
+        )
+        XCTAssertEqual(
+            String(localized: OnboardingLocalizedCopy.sessionsFound(1, locale: locale)),
+            "1 session found"
+        )
+        XCTAssertEqual(
+            String(localized: OnboardingLocalizedCopy.sessionsFound(2, locale: locale)),
+            "2 sessions found"
+        )
+    }
+
     func testMainWindowSceneIdentityPreservesPreLocalizationRoutingIdentifier() {
         XCTAssertEqual(AppWindowRouter.mainWindowSceneIdentifier, "Agent Sessions")
         XCTAssertEqual(AppWindowRouter.mainWindowIdentifier, "AgentSessionsMainWindow")
@@ -120,6 +148,27 @@ final class LocalizationFoundationTests: XCTestCase {
         )
 
         XCTAssertEqual(event.title, "Codex 5h usage is low")
-        XCTAssertEqual(event.body, "8% remaining, burning to empty in about 6m.")
+        XCTAssertEqual(event.body, "8% remaining, burning to empty in about 6 min.")
+
+        let weeklyEvent = UsageLimitAlertEvent(
+            provider: .claude,
+            kind: .approaching,
+            window: .weekly,
+            remainingPercent: 8,
+            resetDate: nil,
+            identifier: "localization-weekly-test"
+        )
+        XCTAssertEqual(weeklyEvent.title, "Claude weekly usage is low")
+        XCTAssertEqual(weeklyEvent.body, "8% remaining, for the weekly limit.")
+    }
+
+    func testUsageNotificationDurationsUseLocaleAwareUnits() {
+        let english = Locale(identifier: "en_US")
+        let simplifiedChinese = Locale(identifier: "zh-Hans")
+
+        XCTAssertEqual(UsageLimitAlertEvent.formatDuration(6 * 60, locale: english), "6 min")
+        XCTAssertEqual(UsageLimitAlertEvent.formatDuration(27 * 60 * 60, locale: english), "1 day, 3 hr")
+        XCTAssertEqual(UsageLimitAlertEvent.formatDuration(6 * 60, locale: simplifiedChinese), "6分钟")
+        XCTAssertEqual(UsageLimitAlertEvent.formatDuration(27 * 60 * 60, locale: simplifiedChinese), "1天3小时")
     }
 }

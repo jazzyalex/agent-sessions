@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import plistlib
 import re
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_DIR = ROOT / "AgentSessions" / "Resources"
 LOCALIZABLE = CATALOG_DIR / "Localizable.xcstrings"
 INFO_PLIST = CATALOG_DIR / "InfoPlist.xcstrings"
+INFO_PLIST_SOURCE = ROOT / "AgentSessions" / "Info.plist"
 
 EXPECTED_INFO_PLIST_KEYS = {
     "CFBundleDisplayName",
@@ -36,9 +38,10 @@ EXPECTED_INFO_PLIST_KEYS = {
     "NSDocumentsFolderUsageDescription",
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 140
+REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
+EXPECTED_LOCALIZABLE_KEY_COUNT = 145
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "cc40e94e086354ab3446069ed6b1f550ae73d87b640eb2e0835de59565c146ba"
+    "ee5bd7bd62577e294b496c774117784d233c3299f87fe68a14065fe15a0ac5ee"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
@@ -86,6 +89,19 @@ def load_catalog(path: Path) -> dict[str, Any]:
         fail(f"cannot parse {display_path(path)}: {error}")
     if not isinstance(value, dict):
         fail(f"catalog root must be an object: {display_path(path)}")
+    return value
+
+
+def load_info_plist(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        fail(f"missing source Info.plist {display_path(path)}")
+    try:
+        with path.open("rb") as stream:
+            value = plistlib.load(stream)
+    except (OSError, plistlib.InvalidFileException) as error:
+        fail(f"cannot parse source Info.plist {display_path(path)}: {error}")
+    if not isinstance(value, dict):
+        fail(f"source Info.plist root must be a dictionary: {display_path(path)}")
     return value
 
 
@@ -189,9 +205,40 @@ def validate_localizable_key_baseline(keys: set[str]) -> None:
         or digest != EXPECTED_LOCALIZABLE_KEY_SHA256
     ):
         fail(
-            "Localizable catalog key set differs from the reviewed 140-key "
-            f"foundation baseline; count={len(keys)}, sha256={digest}"
+            "Localizable catalog key set differs from the reviewed foundation "
+            f"baseline; count={len(keys)}, sha256={digest}"
         )
+
+
+def validate_info_plist_source_values(
+    catalog_path: Path,
+    catalog: dict[str, Any],
+    source_path: Path,
+) -> None:
+    source_values = load_info_plist(source_path)
+    strings = catalog.get("strings")
+    if not isinstance(strings, dict):
+        fail(f"{display_path(catalog_path)} has no strings object")
+
+    for key in sorted(EXPECTED_INFO_PLIST_KEYS):
+        entry = strings.get(key)
+        if not isinstance(entry, dict):
+            fail(f"{display_path(catalog_path)}:{key} must be an object")
+        if key in REQUIRED_INFO_COMMENT_KEYS:
+            comment = entry.get("comment")
+            if not isinstance(comment, str) or not comment.strip():
+                fail(f"{display_path(catalog_path)}:{key} requires a translator comment")
+
+        english = entry.get("localizations", {}).get("en")
+        catalog_values = localization_values(english)
+        source_value = source_values.get(key)
+        if not isinstance(source_value, str):
+            fail(f"{display_path(source_path)}:{key} must contain a string value")
+        if catalog_values != [source_value]:
+            fail(
+                f"{display_path(catalog_path)}:{key} English value differs from "
+                f"{display_path(source_path)}"
+            )
 
 
 def validate_shape(path: Path, catalog: dict[str, Any]) -> tuple[set[str], set[str]]:
@@ -355,19 +402,22 @@ def validate_catalogs(
     *,
     skip_xcstringstool: bool,
     extraction_root: Path | None = None,
+    info_plist_source_path: Path = INFO_PLIST_SOURCE,
 ) -> tuple[int, int, set[str]]:
     localizable_catalog = load_catalog(localizable_path)
     localizable_keys, localizable_locales = validate_shape(
         localizable_path, localizable_catalog
     )
     validate_localizable_key_baseline(localizable_keys)
-    info_keys, info_locales = validate_shape(
-        info_plist_path, load_catalog(info_plist_path)
-    )
+    info_catalog = load_catalog(info_plist_path)
+    info_keys, info_locales = validate_shape(info_plist_path, info_catalog)
     if info_keys != EXPECTED_INFO_PLIST_KEYS:
         missing = sorted(EXPECTED_INFO_PLIST_KEYS - info_keys)
         unexpected = sorted(info_keys - EXPECTED_INFO_PLIST_KEYS)
         fail(f"InfoPlist catalog keys differ; missing={missing}, unexpected={unexpected}")
+    validate_info_plist_source_values(
+        info_plist_path, info_catalog, info_plist_source_path
+    )
     if localizable_locales != info_locales:
         fail(
             "translation locales must be complete in both catalogs; "

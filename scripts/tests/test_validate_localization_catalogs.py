@@ -3,6 +3,7 @@ import copy
 import hashlib
 import io
 import json
+import plistlib
 import shutil
 import tempfile
 import unittest
@@ -42,6 +43,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.localizable_path = self.root / "Localizable.xcstrings"
         self.info_path = self.root / "InfoPlist.xcstrings"
+        self.info_source_path = self.root / "Info.plist"
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -87,10 +89,18 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         self,
         app_strings: dict[str, dict],
         info_strings: dict[str, dict] | None = None,
+        info_source_values: dict[str, str] | None = None,
     ) -> tuple[int, int, set[str]]:
         info_strings = info_strings or self.info_strings()
         self.write_catalog(self.localizable_path, catalog(app_strings))
         self.write_catalog(self.info_path, catalog(info_strings))
+        if info_source_values is None:
+            info_source_values = {
+                key: entry["localizations"]["en"]["stringUnit"]["value"]
+                for key, entry in info_strings.items()
+            }
+        with self.info_source_path.open("wb") as stream:
+            plistlib.dump(info_source_values, stream)
         keys = set(app_strings)
         with (
             mock.patch.object(validator, "EXPECTED_LOCALIZABLE_KEY_COUNT", len(keys)),
@@ -104,6 +114,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
                 self.localizable_path,
                 self.info_path,
                 skip_xcstringstool=True,
+                info_plist_source_path=self.info_source_path,
             )
 
     def assert_validation_fails(self, callback, message: str) -> None:
@@ -118,7 +129,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             validator.INFO_PLIST,
             skip_xcstringstool=False,
         )
-        self.assertEqual(counts, (140, 6, set()))
+        self.assertEqual(counts, (145, 6, set()))
 
     def test_complete_zh_hans_in_both_catalogs_passes(self) -> None:
         app_strings = {"Hello": string_entry("Hello")}
@@ -200,7 +211,7 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         ):
             self.assert_validation_fails(
                 lambda: validator.validate_localizable_key_baseline({"Hello"}),
-                "differs from the reviewed 140-key foundation baseline",
+                "differs from the reviewed foundation baseline",
             )
 
     def test_stale_source_key_fails(self) -> None:
@@ -219,6 +230,34 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             lambda: self.validate_fixture({"Hello": string_entry("Hello")}, info_strings),
             "InfoPlist catalog keys differ",
         )
+
+    def test_info_plist_source_value_drift_fails(self) -> None:
+        info_strings = self.info_strings()
+        source_values = {
+            key: entry["localizations"]["en"]["stringUnit"]["value"]
+            for key, entry in info_strings.items()
+        }
+        source_values["NSAppleEventsUsageDescription"] = "Changed permission copy."
+        self.assert_validation_fails(
+            lambda: self.validate_fixture(
+                {"Hello": string_entry("Hello")},
+                info_strings,
+                source_values,
+            ),
+            "English value differs from",
+        )
+
+    def test_info_product_name_comments_are_required(self) -> None:
+        for key in ("CFBundleDisplayName", "CFBundleName"):
+            with self.subTest(key=key):
+                info_strings = self.info_strings()
+                info_strings[key]["comment"] = ""
+                self.assert_validation_fails(
+                    lambda info_strings=info_strings: self.validate_fixture(
+                        {"Hello": string_entry("Hello")}, info_strings
+                    ),
+                    "requires a translator comment",
+                )
 
     def test_interpolation_shortcut_and_operator_require_comments(self) -> None:
         for key in ("Step %lld", "Use Command-F", "Use #side"):

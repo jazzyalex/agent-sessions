@@ -1169,7 +1169,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.window, .fiveHour)
         XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 6 * 60, accuracy: 0.001)
         XCTAssertEqual(events.first?.title, "Codex 5h usage is low")
-        XCTAssertTrue(events.first?.body.contains("8% remaining, burning to empty in about 6m") ?? false)
+        XCTAssertTrue(events.first?.body.contains("8% remaining, burning to empty in about 6 min") ?? false)
     }
 
     func testUsageLimitAlertEvaluatorUsesReadableWeeklyProjectionCopy() {
@@ -1204,7 +1204,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(events.first?.window, .weekly)
         XCTAssertEqual(events.first?.projectedSecondsUntilEmpty ?? 0, 30 * 60, accuracy: 0.001)
         XCTAssertTrue(events.first?.title.contains("weekly usage is burning fast") ?? false)
-        XCTAssertTrue(events.first?.body.contains("20% remaining, burning to empty in about 30m") ?? false)
+        XCTAssertTrue(events.first?.body.contains("20% remaining, burning to empty in about 30 min") ?? false)
     }
 
     func testLimitAlertReadinessFormatterReportsUserFacingStates() {
@@ -2393,7 +2393,7 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(firstProjection.first?.kind, .projectedExhaustion)
         XCTAssertEqual(escalatedProjection.count, 1)
         XCTAssertEqual(escalatedProjection.first?.kind, .projectedExhaustion)
-        XCTAssertTrue(escalatedProjection.first?.body.contains("about 30m") ?? false)
+        XCTAssertTrue(escalatedProjection.first?.body.contains("about 30 min") ?? false)
     }
 
     func testUsageLimitAlertEvaluatorDoesNotProjectExhaustionAfterReset() {

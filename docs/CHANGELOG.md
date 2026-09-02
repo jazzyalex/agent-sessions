@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Maintenance
-- Established the localization foundation with English String Catalogs for app and permission copy, stable non-display identifiers, typed localized-copy boundaries, compiler-extraction drift validation, and contributor conventions for the planned Simplified Chinese translation.
+- Established the localization foundation with English String Catalogs for app and permission copy, stable non-display identifiers, typed localized-copy boundaries, pluralized session counts, locale-aware notification durations, compiler-extraction drift validation, and contributor conventions for the planned Simplified Chinese translation.
 
 ## [5.1.1] - 2026-08-31
 

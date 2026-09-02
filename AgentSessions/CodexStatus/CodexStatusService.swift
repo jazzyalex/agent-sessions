@@ -1058,17 +1058,6 @@ enum UsageLimitAlertWindow: String {
         }
     }
 
-    var localizedTitle: String {
-        switch self {
-        case .fiveHour:
-            return "5h"
-        case .weekly:
-            return String(
-                localized: "weekly",
-                comment: "Usage-limit window label interpolated into a complete notification sentence."
-            )
-        }
-    }
 }
 
 enum UsageLimitAlertKind {
@@ -1106,19 +1095,37 @@ struct UsageLimitAlertEvent: Equatable {
     var title: String {
         switch kind {
         case .approaching:
-            return String(
-                localized: "\(provider.title) \(window.localizedTitle) usage is low",
-                comment: "Notification title shown when a provider usage window is approaching its configured alert threshold."
+            return localizedWindowTitle(
+                fiveHour: LocalizedStringResource(
+                    "\(provider.title) 5h usage is low",
+                    comment: "Notification title for a provider five-hour usage window approaching its alert threshold."
+                ),
+                weekly: LocalizedStringResource(
+                    "\(provider.title) weekly usage is low",
+                    comment: "Notification title for a provider weekly usage window approaching its alert threshold."
+                )
             )
         case .projectedExhaustion:
-            return String(
-                localized: "\(provider.title) \(window.localizedTitle) usage is burning fast",
-                comment: "Notification title shown when a provider usage window is projected to exhaust soon."
+            return localizedWindowTitle(
+                fiveHour: LocalizedStringResource(
+                    "\(provider.title) 5h usage is burning fast",
+                    comment: "Notification title for a provider five-hour usage window projected to exhaust soon."
+                ),
+                weekly: LocalizedStringResource(
+                    "\(provider.title) weekly usage is burning fast",
+                    comment: "Notification title for a provider weekly usage window projected to exhaust soon."
+                )
             )
         case .exhausted:
-            return String(
-                localized: "\(provider.title) \(window.localizedTitle) limit is exhausted",
-                comment: "Notification title shown when a provider usage window is exhausted."
+            return localizedWindowTitle(
+                fiveHour: LocalizedStringResource(
+                    "\(provider.title) 5h limit is exhausted",
+                    comment: "Notification title for an exhausted provider five-hour usage window."
+                ),
+                weekly: LocalizedStringResource(
+                    "\(provider.title) weekly limit is exhausted",
+                    comment: "Notification title for an exhausted provider weekly usage window."
+                )
             )
         case .resetComplete:
             return String(
@@ -1126,6 +1133,13 @@ struct UsageLimitAlertEvent: Equatable {
                 comment: "Notification title shown when a provider five-hour usage window resets."
             )
         }
+    }
+
+    private func localizedWindowTitle(
+        fiveHour: LocalizedStringResource,
+        weekly: LocalizedStringResource
+    ) -> String {
+        String(localized: window == .fiveHour ? fiveHour : weekly)
     }
 
     var body: String {
@@ -1180,15 +1194,31 @@ struct UsageLimitAlertEvent: Equatable {
                 comment: "Complete notification body for a usage window with a burn projection and no reset estimate."
             )
         case let (.none, .some(resetDuration)):
-            return String(
-                localized: "\(remainingPercent)% remaining, for the \(window.localizedTitle) limit, reset in \(resetDuration).",
-                comment: "Complete notification body for a usage window with a reset estimate and no burn projection."
-            )
+            switch window {
+            case .fiveHour:
+                return String(
+                    localized: "\(remainingPercent)% remaining, for the 5h limit, reset in \(resetDuration).",
+                    comment: "Complete notification body for a five-hour usage window with a reset estimate and no burn projection."
+                )
+            case .weekly:
+                return String(
+                    localized: "\(remainingPercent)% remaining, for the weekly limit, reset in \(resetDuration).",
+                    comment: "Complete notification body for a weekly usage window with a reset estimate and no burn projection."
+                )
+            }
         case (.none, .none):
-            return String(
-                localized: "\(remainingPercent)% remaining, for the \(window.localizedTitle) limit.",
-                comment: "Complete notification body for a usage window with no projection or reset estimate."
-            )
+            switch window {
+            case .fiveHour:
+                return String(
+                    localized: "\(remainingPercent)% remaining, for the 5h limit.",
+                    comment: "Complete notification body for a five-hour usage window with no projection or reset estimate."
+                )
+            case .weekly:
+                return String(
+                    localized: "\(remainingPercent)% remaining, for the weekly limit.",
+                    comment: "Complete notification body for a weekly usage window with no projection or reset estimate."
+                )
+            }
         }
     }
 
@@ -1199,23 +1229,18 @@ struct UsageLimitAlertEvent: Equatable {
         return formatDuration(seconds)
     }
 
-    private static func formatDuration(_ seconds: TimeInterval) -> String {
+    static func formatDuration(
+        _ seconds: TimeInterval,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
         let minutes = max(1, Int(ceil(seconds / 60)))
-        let days = minutes / (24 * 60)
-        if days > 0 {
-            let hours = (minutes % (24 * 60)) / 60
-            if hours == 0 { return "\(days)d" }
-            return "\(days)d \(hours)h"
-        }
-        if minutes < 60 {
-            return "\(minutes)m"
-        }
-        let hours = minutes / 60
-        let remainingMinutes = minutes % 60
-        if remainingMinutes == 0 {
-            return "\(hours)h"
-        }
-        return "\(hours)h \(remainingMinutes)m"
+        let style = Duration.UnitsFormatStyle(
+            allowedUnits: [.days, .hours, .minutes],
+            width: .abbreviated,
+            maximumUnitCount: 2
+        )
+        .locale(locale)
+        return Duration.seconds(Double(minutes * 60)).formatted(style)
     }
 }
 

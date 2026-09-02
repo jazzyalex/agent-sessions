@@ -153,7 +153,7 @@ struct OnboardingSheetView: View {
                     .buttonStyle(OnboardingSecondaryButtonStyle(palette: palette))
                 }
 
-                Button(isLast ? "Done" : "Next") {
+                Button(Self.primaryActionTitle(isLast: isLast)) {
                     if isLast {
                         coordinator.complete()
                     } else {
@@ -176,6 +176,10 @@ struct OnboardingSheetView: View {
                 slideIndex = index
             }
         }
+    }
+
+    static func primaryActionTitle(isLast: Bool) -> LocalizedStringResource {
+        isLast ? "Done" : "Next"
     }
 
     private func triggerSlideAppear() {

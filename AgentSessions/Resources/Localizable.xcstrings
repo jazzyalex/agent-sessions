@@ -1,39 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ %@ limit is exhausted": {
-      "comment": "Notification title shown when a provider usage window is exhausted.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ %2$@ limit is exhausted"
-          }
-        }
-      }
-    },
-    "%@ %@ usage is burning fast": {
-      "comment": "Notification title shown when a provider usage window is projected to exhaust soon.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ %2$@ usage is burning fast"
-          }
-        }
-      }
-    },
-    "%@ %@ usage is low": {
-      "comment": "Notification title shown when a provider usage window is approaching its configured alert threshold.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ %2$@ usage is low"
-          }
-        }
-      }
-    },
     "%@ 5h is back again": {
       "comment": "Notification title shown when a provider five-hour usage window resets.",
       "localizations": {
@@ -41,6 +8,95 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 5h is back again"
+          }
+        }
+      }
+    },
+    "%@ 5h limit is exhausted": {
+      "comment": "Notification title for an exhausted provider five-hour usage window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 5h limit is exhausted"
+          }
+        }
+      }
+    },
+    "%@ 5h usage is burning fast": {
+      "comment": "Notification title for a provider five-hour usage window projected to exhaust soon.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 5h usage is burning fast"
+          }
+        }
+      }
+    },
+    "%@ 5h usage is low": {
+      "comment": "Notification title for a provider five-hour usage window approaching its alert threshold.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 5h usage is low"
+          }
+        }
+      }
+    },
+    "%@ weekly limit is exhausted": {
+      "comment": "Notification title for an exhausted provider weekly usage window.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ weekly limit is exhausted"
+          }
+        }
+      }
+    },
+    "%@ weekly usage is burning fast": {
+      "comment": "Notification title for a provider weekly usage window projected to exhaust soon.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ weekly usage is burning fast"
+          }
+        }
+      }
+    },
+    "%@ weekly usage is low": {
+      "comment": "Notification title for a provider weekly usage window approaching its alert threshold.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ weekly usage is low"
+          }
+        }
+      }
+    },
+    "%lld sessions found": {
+      "comment": "Session discovery count. Use the singular form for one session.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld session found"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld sessions found"
+                }
+              }
+            }
           }
         }
       }
@@ -67,24 +123,46 @@
         }
       }
     },
-    "%lld%% remaining, for the %@ limit, reset in %@.": {
-      "comment": "Complete notification body for a usage window with a reset estimate and no burn projection.",
+    "%lld%% remaining, for the 5h limit, reset in %@.": {
+      "comment": "Complete notification body for a five-hour usage window with a reset estimate and no burn projection.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld%% remaining, for the %2$@ limit, reset in %3$@."
+            "value": "%1$lld%% remaining, for the 5h limit, reset in %2$@."
           }
         }
       }
     },
-    "%lld%% remaining, for the %@ limit.": {
-      "comment": "Complete notification body for a usage window with no projection or reset estimate.",
+    "%lld%% remaining, for the 5h limit.": {
+      "comment": "Complete notification body for a five-hour usage window with no projection or reset estimate.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$lld%% remaining, for the %2$@ limit."
+            "value": "%lld%% remaining, for the 5h limit."
+          }
+        }
+      }
+    },
+    "%lld%% remaining, for the weekly limit, reset in %@.": {
+      "comment": "Complete notification body for a weekly usage window with a reset estimate and no burn projection.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld%% remaining, for the weekly limit, reset in %2$@."
+          }
+        }
+      }
+    },
+    "%lld%% remaining, for the weekly limit.": {
+      "comment": "Complete notification body for a weekly usage window with no projection or reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%% remaining, for the weekly limit."
           }
         }
       }
@@ -1422,17 +1500,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Workflow subagents nest under the session that launched them with a workflow badge."
-          }
-        }
-      }
-    },
-    "weekly": {
-      "comment": "Usage-limit window label interpolated into a complete notification sentence.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "weekly"
           }
         }
       }
