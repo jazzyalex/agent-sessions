@@ -459,9 +459,23 @@ def _report(agent: str, result: dict, out_dir: Path, write_sample: bool = True) 
         if agent == "grok" and isinstance(local.get("summary_file"), str):
             sidecar_spec = ("summary", Path(local["summary_file"]))
         elif agent == "fx":
-            sampled = _sampled_files(result)
-            if sampled:
-                sidecar_spec = ("session", sampled[0].parent / "session.json")
+            session_keys = {k for b, k in wanted if b.split(".")[0] == "session"}
+            needs_session = bool(session_keys) or any(
+                b.split(".")[0] == "session" for b in wanted_buckets
+            )
+            best_coverage = -1
+            if needs_session:
+                for checkpoint in _sampled_files(result):
+                    candidate = checkpoint.parent / "session.json"
+                    obj, _err = agent_watch._read_json_object(candidate)
+                    if not isinstance(obj, dict):
+                        continue
+                    coverage = len(session_keys & set(obj))
+                    if coverage > best_coverage:
+                        best_coverage = coverage
+                        sidecar_spec = ("session", candidate)
+                    if session_keys and coverage == len(session_keys):
+                        break
 
         if sidecar_spec is not None:
             bucket, sidecar_path = sidecar_spec

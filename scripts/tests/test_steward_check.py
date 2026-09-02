@@ -50,16 +50,16 @@ def _grok_session(tmp_path, extra_key=True):
     return d / "chat_history.jsonl"
 
 
-def _fx_session(tmp_path, model="demo/model"):
+def _fx_session(tmp_path, model="demo/model", name="session-1", sidecar_extra=None):
     """An fx checkpoint plus the sibling session sidecar the monitor fingerprints."""
-    d = tmp_path / "fx" / "session-1"
+    d = tmp_path / "fx" / name
     d.mkdir(parents=True)
     (d / "checkpoint.json").write_text(json.dumps({
         "schema_version": 3,
         "session_id": "019f6851-7ec4-7ef0-97d3-03f3eee38755",
         "state": {"history": []},
     }), encoding="utf-8")
-    (d / "session.json").write_text(json.dumps({
+    sidecar = {
         "schema_version": 3,
         "storage_format": "event_log_v1",
         "workspace_root": "/Users/steward/secret",
@@ -72,7 +72,9 @@ def _fx_session(tmp_path, model="demo/model"):
         "checkpoint_seq": 7,
         "checkpoint_sha256": "checkpoint-hash",
         "preferences": {"model": model},
-    }), encoding="utf-8")
+    }
+    sidecar.update(sidecar_extra or {})
+    (d / "session.json").write_text(json.dumps(sidecar), encoding="utf-8")
     return d / "checkpoint.json"
 
 
@@ -142,6 +144,40 @@ def test_fx_sidecar_drift_writes_redacted_session_json(tmp_path, capsys):
     assert "/Users/steward" not in issue
     assert "session.json" in issue
     assert "structural discriminators (`type`, `role`, `subtype`, `model`) remain" in issue
+
+
+def test_fx_sidecar_export_uses_the_sample_that_contains_the_reported_drift(tmp_path):
+    first = _fx_session(tmp_path, name="session-1")
+    drifted = _fx_session(
+        tmp_path,
+        name="session-2",
+        sidecar_extra={"brand_new_manifest_key": "/Users/steward/secret"},
+    )
+    result = _result(
+        verified_version="0.0.5",
+        installed={"argv": ["fx", "--version"], "parsed_version": "0.0.7", "stderr": ""},
+        weekly={"local_schema": {
+            "file": str(first),
+            "sampled_files": [str(first), str(drifted)],
+        }},
+        evidence={
+            "schema_matches_baseline": False,
+            "schema_diff": {
+                "unknown_types": [],
+                "unknown_keys": {"session": ["brand_new_manifest_key"]},
+                "missing_types": [],
+            },
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path / "out")
+
+    assert code == steward_check.EXIT_DRIFT
+    written = (tmp_path / "out" / "redacted-sample" / "session.json").read_text(
+        encoding="utf-8"
+    )
+    assert "brand_new_manifest_key" in written
+    assert "/Users/steward" not in written
 
 
 def test_fx_v007_sidecar_keys_are_covered_by_the_committed_baseline(tmp_path):
