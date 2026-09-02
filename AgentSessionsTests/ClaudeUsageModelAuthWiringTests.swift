@@ -91,13 +91,52 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertNil(model.authStatus)   // no auth update → banner untouched
     }
 
-    /// A later emit with a nil reason (e.g. a successful fetch) clears the caption.
-    func testTransientReasonClearsOnRecovery() {
+    /// A producer with no transient opinion must not clear another source's
+    /// active reason. This is the tmux-startup event that erased OAuth 429s.
+    func testNilTransientReasonLeavesExistingReasonUntouched() {
         let model = ClaudeUsageModel()
         model.applyAvailability(ClaudeServiceAvailability(
             cliUnavailable: false, tmuxUnavailable: false, transientReason: "temp"))
         model.applyAvailability(ClaudeServiceAvailability(
             cliUnavailable: false, tmuxUnavailable: false, transientReason: nil))
+        XCTAssertEqual(model.transientReason, "temp")
+    }
+
+    /// The complete model-to-presentation path keeps the calm 429 decision when
+    /// a fallback startup event arrives without a result.
+    func testFallbackNoOpinionKeepsQuotaMeterRateLimitedState() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false,
+            transientReason: "Rate limited — retrying shortly", captionOnly: true))
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false))
+
+        let quota = QuotaData.claude(from: model)
+        XCTAssertEqual(quota.presentationState, .reconnecting)
+        XCTAssertTrue(quota.isRateLimited)
+        XCTAssertEqual(quota.reconnectingCaption, "rate limited — retrying…")
+    }
+
+    /// Recovery is an explicit command, not an ambiguous nil from any producer.
+    func testExplicitTransientRecoveryClearsReason() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false, transientReason: "temp"))
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false,
+            transientReason: nil, clearsTransientReason: true))
+        XCTAssertNil(model.transientReason)
+    }
+
+    /// A usable fallback snapshot is authoritative recovery even if its legacy
+    /// availability event had no transient-reason command.
+    func testLiveSnapshotClearsTransientReason() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: false, tmuxUnavailable: false,
+            transientReason: "Rate limited — retrying shortly", captionOnly: true))
+        model.applyLimitSnapshotForTesting(Self.sampleSnapshot(source: .webEndpoint))
         XCTAssertNil(model.transientReason)
     }
 
@@ -166,5 +205,41 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
             transientReason: "temp", captionOnly: true))
         XCTAssertEqual(model.transientReason, "temp")
         XCTAssertTrue(model.setupRequired)   // NOT clobbered
+    }
+
+    func testDisablingTrackingClearsManagerScopedAvailability() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: true,
+            tmuxUnavailable: true,
+            loginRequired: true,
+            setupRequired: true,
+            setupHint: "old manager",
+            authState: .accountUnavailable,
+            transientReason: "old failure"
+        ))
+
+        model.setEnabled(false)
+
+        XCTAssertNil(model.authStatus)
+        XCTAssertNil(model.transientReason)
+        XCTAssertFalse(model.cliUnavailable)
+        XCTAssertFalse(model.tmuxUnavailable)
+        XCTAssertFalse(model.loginRequired)
+        XCTAssertFalse(model.setupRequired)
+        XCTAssertNil(model.setupHint)
+    }
+
+    func testLateAvailabilityFromStoppedManagerIsIgnored() {
+        let model = ClaudeUsageModel()
+        let stoppedGeneration = model.sourceManagerGenerationForTesting
+
+        model.setEnabled(false)
+        model.applyAvailability(
+            availability(.accountUnavailable),
+            sourceManagerGeneration: stoppedGeneration
+        )
+
+        XCTAssertNil(model.authStatus)
     }
 }

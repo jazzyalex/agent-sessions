@@ -742,10 +742,12 @@ struct AgentCockpitHUDView: View {
     @AppStorage(PreferencesKey.Agents.claudeEnabled) private var claudeAgentEnabledForLimits: Bool = true
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) private var runwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayPresentation) private var runwayPresentationRaw = RunwayPresentation.fiveHour.rawValue
+    @AppStorage(PreferencesKey.quotaMeterHiddenProviders) private var quotaMeterHiddenProvidersRaw = QuotaMeterProviderVisibility.defaultRawValue
     @AppStorage(PreferencesKey.quotaMeterEnlarged) private var quotaMeterEnlarged = false
     @AppStorage(PreferencesKey.quotaMeterChrome) private var quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
     @State private var showRunwayPopover = false
     @State private var showRunwayPresentationPopover = false
+    @State private var showProviderVisibilityPopover = false
     @State private var showChromePopover = false
     @State private var showProbePopover = false
     @ObservedObject private var probeCoordinator = ProbeCoordinator.shared
@@ -1001,7 +1003,8 @@ struct AgentCockpitHUDView: View {
 
             HUDLimitsRowsPanel(
                 activeRows: displayState.rowsForDisplay,
-                showsChrome: showsCompactToolbar
+                showsChrome: showsCompactToolbar,
+                hiddenProvidersRaw: $quotaMeterHiddenProvidersRaw
             )
 
             hiddenShortcuts
@@ -1030,7 +1033,7 @@ struct AgentCockpitHUDView: View {
     /// the HUD. Collapsing then would yank the chrome out from under the popover
     /// still anchored to it.
     private var isToolbarPopoverOpen: Bool {
-        showRunwayPopover || showRunwayPresentationPopover || showChromePopover || showProbePopover
+        showRunwayPopover || showRunwayPresentationPopover || showProviderVisibilityPopover || showChromePopover || showProbePopover
     }
 
     private func handleCompactWindowHoverChange(_ hovering: Bool) {
@@ -1214,7 +1217,50 @@ struct AgentCockpitHUDView: View {
     }
 
     private var runwayControlAvailable: Bool {
-        codexAgentEnabledForLimits && codexUsageEnabledForLimits
+        QuotaMeterProvider.allCases.contains { quotaMeterProviderShown($0) }
+    }
+
+    private func quotaMeterProviderConfigured(_ provider: QuotaMeterProvider) -> Bool {
+        switch provider {
+        case .codex: return codexAgentEnabledForLimits && codexUsageEnabledForLimits
+        case .claude: return claudeAgentEnabledForLimits && claudeUsageEnabledForLimits
+        }
+    }
+
+    private func quotaMeterProviderShown(_ provider: QuotaMeterProvider) -> Bool {
+        quotaMeterProviderConfigured(provider)
+            && QuotaMeterProviderVisibility.isVisible(provider, hiddenProvidersRaw: quotaMeterHiddenProvidersRaw)
+    }
+
+    private var quotaMeterProviderOptions: [QuotaMeterProviderOption] {
+        QuotaMeterProvider.allCases.map {
+            QuotaMeterProviderOption(provider: $0, configured: quotaMeterProviderConfigured($0))
+        }
+    }
+
+    private var cockpitProviderVisibilityButton: some View {
+        let filtering = QuotaMeterProvider.allCases.contains {
+            quotaMeterProviderConfigured($0) && !quotaMeterProviderShown($0)
+        }
+        return Button {
+            showProviderVisibilityPopover.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "person.2")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .opacity(0.6)
+            }
+        }
+        .buttonStyle(HUDIconButtonStyle(isOn: filtering, tint: nil))
+        .help("Choose which agent sections appear in Quota Meter.")
+        .popover(isPresented: $showProviderVisibilityPopover, arrowEdge: .bottom) {
+            HUDProviderVisibilityPopover(
+                hiddenProvidersRaw: $quotaMeterHiddenProvidersRaw,
+                options: quotaMeterProviderOptions
+            )
+        }
     }
 
     private var cockpitRunwayButton: some View {
@@ -1288,8 +1334,8 @@ struct AgentCockpitHUDView: View {
             HUDProbePopover(
                 claudeEligible: claudeProbeEligible,
                 codexEligible: codexProbeEligible,
-                claudeShown: claudeAgentEnabledForLimits && claudeUsageEnabledForLimits,
-                codexShown: codexAgentEnabledForLimits && codexUsageEnabledForLimits,
+                claudeShown: quotaMeterProviderShown(.claude),
+                codexShown: quotaMeterProviderShown(.codex),
                 claudeDisabledReason: claudeProbeDisabledReason,
                 codexDisabledReason: codexProbeDisabledReason,
                 onProbe: { claude, codex in
@@ -1299,17 +1345,18 @@ struct AgentCockpitHUDView: View {
                 }
             )
         }
+        .disabled(!QuotaMeterProvider.allCases.contains { quotaMeterProviderShown($0) })
     }
 
     private var claudeProbeEligible: Bool {
-        claudeAgentEnabledForLimits && claudeUsageEnabledForLimits
+        quotaMeterProviderShown(.claude)
             && !probeCoordinator.isBusy(.claude)
             && !claudeUsageModel.isUpdating
             && !(claudeUsageModel.authStatus?.state.isAlarming ?? false)
     }
 
     private var codexProbeEligible: Bool {
-        codexAgentEnabledForLimits && codexUsageEnabledForLimits
+        quotaMeterProviderShown(.codex)
             && !probeCoordinator.isBusy(.codex)
             && !codexUsageModel.isUpdating
             && !(codexUsageModel.authStatus?.state.isAlarming ?? false)
@@ -1357,6 +1404,9 @@ struct AgentCockpitHUDView: View {
             if showRunway {
                 runwayGroup(showPresentation: showRunwayPresentation)
             }
+            // This selector never sheds: it is the in-window route for restoring
+            // a provider after the user hides its section.
+            cockpitProviderVisibilityButton
             cockpitProbeButton
             // Presentation pair: how the window renders itself, as opposed to
             // what it reports.
@@ -2755,6 +2805,7 @@ private struct CockpitScrollViewScrollerConfigurator: NSViewRepresentable {
 // MARK: - HUD Limits Bar
 
 private struct HUDLimitsProviderEntry {
+    let provider: QuotaMeterProvider
     let source: UsageTrackingSource
     let fiveHourLeft: Int
     let weekLeft: Int
@@ -2793,6 +2844,10 @@ private struct HUDLimitsProviderEntry {
     /// limited — retrying…"), carried alongside `presentationState` so every
     /// HUD surface renders the actual cause instead of a generic spinner.
     var reconnectingCaption: String = "reconnecting…"
+    /// True when the provider explicitly returned a rate-limit response. Unlike
+    /// a short reconnect attempt, this can be a long server-directed pause and
+    /// should render without an endlessly spinning activity indicator.
+    var isRateLimited: Bool = false
 }
 
 private extension CodexRunwaySnapshot {
@@ -3448,6 +3503,29 @@ private struct HUDLimitsRowsPanel: View {
     /// The reset-credits line is part of the chrome layer, revealed and hidden
     /// with the toolbar rather than on its own hover.
     let showsChrome: Bool
+    /// Shared Quota Meter-only filter. The parent owns the `@AppStorage` binding
+    /// so toolbar changes rebuild this panel immediately.
+    @Binding var hiddenProvidersRaw: String
+
+    private func providerConfigured(_ provider: QuotaMeterProvider) -> Bool {
+        switch provider {
+        case .codex: return codexAgentEnabled && codexUsageEnabled
+        case .claude: return claudeAgentEnabled && claudeUsageEnabled
+        }
+    }
+
+    private func providerShown(_ provider: QuotaMeterProvider) -> Bool {
+        providerConfigured(provider)
+            && QuotaMeterProviderVisibility.isVisible(provider, hiddenProvidersRaw: hiddenProvidersRaw)
+    }
+
+    private func hideProvider(_ provider: QuotaMeterProvider) {
+        hiddenProvidersRaw = QuotaMeterProviderVisibility.setting(
+            provider,
+            visible: false,
+            hiddenProvidersRaw: hiddenProvidersRaw
+        )
+    }
 
     /// Claude's model-scoped weekly window ("Current week (Fable)") as an on-demand line
     /// under the Claude provider row — the same treatment Codex's reset-credits line gets,
@@ -3516,8 +3594,9 @@ private struct HUDLimitsRowsPanel: View {
 
     private var entries: [HUDLimitsProviderEntry] {
         var out: [HUDLimitsProviderEntry] = []
-        if codexAgentEnabled && codexUsageEnabled {
+        if providerShown(.codex) {
             out.append(HUDLimitsProviderEntry(
+                provider: .codex,
                 source: .codex,
                 fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
                 weekLeft: codexUsageModel.weekRemainingPercent,
@@ -3534,11 +3613,13 @@ private struct HUDLimitsRowsPanel: View {
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
-                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption
+                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption,
+                isRateLimited: QuotaData.codex(from: codexUsageModel).isRateLimited
             ))
         }
-        if claudeAgentEnabled && claudeUsageEnabled {
+        if providerShown(.claude) {
             out.append(HUDLimitsProviderEntry(
+                provider: .claude,
                 source: .claude,
                 fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
                 weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
@@ -3552,7 +3633,8 @@ private struct HUDLimitsRowsPanel: View {
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
-                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption
+                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption,
+                isRateLimited: QuotaData.claude(from: claudeUsageModel).isRateLimited
             ))
         }
         return out
@@ -3599,7 +3681,7 @@ private struct HUDLimitsRowsPanel: View {
         // and rows retained past their freshness). Those are the cases where silence
         // and "broken" would look identical, which is why this line exists.
         let quiet: Bool = {
-            if !enabled { return true }
+            if !enabled || !providerShown(.claude) { return true }
             switch state {
             case .empty: return true          // nothing running — unremarkable
             case .disabled: return true       // pre-first-poll; resolves within seconds
@@ -3708,7 +3790,12 @@ private struct HUDLimitsRowsPanel: View {
                 // Chip variant: "Claude auth expired · claude auth login [Copy]" —
                 // matches the footer's FooterAuthCell language and fits the QM's
                 // content-hugging width (the full headline banner would clip).
-                HUDLimitsAuthCell(source: entry.source, status: auth, chip: true)
+                HUDLimitsAuthCell(
+                    source: entry.source,
+                    status: auth,
+                    chip: true,
+                    onHide: auth.state == .accountUnavailable ? { hideProvider(entry.provider) } : nil
+                )
             case _ where isProbeVisible(probeState):
                 HUDLimitsProbeCell(source: entry.source,
                                    failed: isProbeFailed(probeState),
@@ -3716,7 +3803,15 @@ private struct HUDLimitsRowsPanel: View {
             case .idle(let auth):
                 HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
-                HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged, caption: entry.reconnectingCaption)
+                if entry.isRateLimited {
+                    HUDLimitsRateLimitedCell(
+                        source: entry.source,
+                        enlarged: quotaMeterEnlarged,
+                        onHide: { hideProvider(entry.provider) }
+                    )
+                } else {
+                    HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged, caption: entry.reconnectingCaption)
+                }
             case .live:
                 HUDLimitsProviderText(
                     entry: entry,
@@ -3757,7 +3852,9 @@ private struct HUDLimitsRowsPanel: View {
             Image(systemName: "gauge")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("Usage tracking is off")
+            Text(QuotaMeterProvider.allCases.contains(where: providerConfigured)
+                 ? "No providers shown"
+                 : "Usage tracking is off")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -3778,7 +3875,7 @@ private struct HUDLimitsRowsPanel: View {
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
             codexAgentEnabled: codexAgentEnabled,
-            codexUsageEnabled: codexUsageEnabled,
+            codexUsageEnabled: codexUsageEnabled && providerShown(.codex),
             fiveHourRemainingPercent: codexUsageModel.activeLimitRemainingPercent,
             fiveHourResetText: codexUsageModel.activeLimitResetText,
             fiveHourProjectedRunoutAt: codexUsageModel.fiveHourProjectedRunoutAt,
@@ -3799,7 +3896,7 @@ private struct HUDLimitsRowsPanel: View {
             activeRows: activeRows,
             projectedRunoutEnabled: projectedRunoutEnabled,
             claudeAgentEnabled: claudeAgentEnabled,
-            claudeUsageEnabled: claudeUsageEnabled,
+            claudeUsageEnabled: claudeUsageEnabled && providerShown(.claude),
             fiveHourRemainingPercent: claudeUsageModel.sessionRemainingPercent,
             fiveHourResetText: claudeUsageModel.sessionResetText,
             fiveHourProjectedRunoutAt: claudeUsageModel.fiveHourProjectedRunoutAt,
@@ -3973,6 +4070,70 @@ private struct HUDProbePopover: View {
         }
         .buttonStyle(.plain)
         .padding(10)
+    }
+}
+
+private struct QuotaMeterProviderOption: Identifiable {
+    let provider: QuotaMeterProvider
+    let configured: Bool
+    var id: QuotaMeterProvider { provider }
+}
+
+/// Mirrors the compact drawer style used by the runway controls while exposing
+/// independent checkboxes for every provider that owns a Quota Meter section.
+private struct HUDProviderVisibilityPopover: View {
+    @Binding var hiddenProvidersRaw: String
+    let options: [QuotaMeterProviderOption]
+
+    private func binding(for provider: QuotaMeterProvider) -> Binding<Bool> {
+        Binding(
+            get: {
+                QuotaMeterProviderVisibility.isVisible(
+                    provider,
+                    hiddenProvidersRaw: hiddenProvidersRaw
+                )
+            },
+            set: { visible in
+                hiddenProvidersRaw = QuotaMeterProviderVisibility.setting(
+                    provider,
+                    visible: visible,
+                    hiddenProvidersRaw: hiddenProvidersRaw
+                )
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Agents shown")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .kerning(0.4)
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(options) { option in
+                    Toggle(option.provider.displayName, isOn: binding(for: option.provider))
+                        .toggleStyle(.checkbox)
+                        .disabled(!option.configured)
+                        .help(option.configured
+                            ? "Show or hide the \(option.provider.displayName) section."
+                            : "Usage tracking is off for \(option.provider.displayName).")
+                }
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text("Choose which usage sections appear here. Tracking continues while a section is hidden.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(width: 236)
     }
 }
 
@@ -4640,11 +4801,19 @@ private struct HUDLimitsAuthCell: View {
     let source: UsageTrackingSource
     let status: UsageAuthStatus
     var chip: Bool = false
+    var onHide: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
             HUDLimitsProviderIcon(source: source)
             AuthRemediationBanner(status: status, compact: !chip, chip: chip, embedded: true)
+            if let onHide {
+                Button("Hide", action: onHide)
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .help("Hide this provider from Quota Meter. Tracking continues.")
+            }
         }
     }
 }
@@ -4724,6 +4893,34 @@ private struct HUDLimitsRetryCell: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+    }
+}
+
+/// A 429 can carry a long Retry-After window, during which no reconnect is in
+/// progress. Keep the state calm and truthful, and let the user remove that
+/// provider from Quota Meter without changing tracking anywhere else.
+private struct HUDLimitsRateLimitedCell: View {
+    let source: UsageTrackingSource
+    var enlarged: Bool = false
+    let onHide: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HUDLimitsProviderIcon(source: source)
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("rate limited")
+                .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Button("Hide", action: onHide)
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .help("Hide this provider from Quota Meter. Tracking continues.")
+        }
+        .help("The provider asked Agent Sessions to pause usage requests. Tracking will retry automatically; hiding affects only Quota Meter.")
     }
 }
 

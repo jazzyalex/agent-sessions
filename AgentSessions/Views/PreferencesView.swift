@@ -98,6 +98,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.stripMonochromeMeters) var stripMonochromeGlobal: Bool = false
     @AppStorage(PreferencesKey.usageDisplayMode) var usageDisplayModeRaw: String = UsageDisplayMode.left.rawValue
     @AppStorage(PreferencesKey.quotaMeterRunwayVisibility) var quotaMeterRunwayVisibilityRaw: String = QuotaMeterRunwayVisibility.automatic.rawValue
+    @AppStorage(PreferencesKey.quotaMeterHiddenProviders) var quotaMeterHiddenProvidersRaw: String = QuotaMeterProviderVisibility.defaultRawValue
     @AppStorage(PreferencesKey.quotaMeterOnTrackGlyph) var quotaMeterOnTrackGlyphRaw: String = QuotaMeterOnTrackGlyph.smile.rawValue
     @AppStorage(PreferencesKey.usageLimitNotificationsEnabled) var usageLimitNotificationsEnabled: Bool = true
     @AppStorage(PreferencesKey.usageLimitNotificationVisualEnabled) var usageLimitNotificationVisualEnabled: Bool = true
@@ -828,6 +829,7 @@ struct PreferencesView: View {
         quotaMeterEnlarged = false
         quotaMeterChromeRaw = QuotaMeterChrome.onDemand.rawValue
         quotaMeterRunwayVisibilityRaw = QuotaMeterRunwayVisibility.automatic.rawValue
+        quotaMeterHiddenProvidersRaw = QuotaMeterProviderVisibility.defaultRawValue
         quotaMeterOnTrackGlyphRaw = QuotaMeterOnTrackGlyph.smile.rawValue
 
         // Reset usage strip preferences

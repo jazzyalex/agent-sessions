@@ -491,6 +491,24 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(captured: 5, current: 6))
     }
 
+    /// Even if another failure path reaches retry planning, it must not replace
+    /// the server's Retry-After schedule with a 10-second cold-start retry.
+    func testActiveRateLimitDeadlineDominatesGenericRetryPlanning() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: now.addingTimeInterval(3_000),
+            now: now
+        ))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: now.addingTimeInterval(-1),
+            now: now
+        ))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: nil,
+            now: now
+        ))
+    }
+
     // MARK: - Failure-path token routing (env-token `.expired`)
 
     /// Any token source — keychain, creds-file, OR the env token — counts as token

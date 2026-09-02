@@ -1,5 +1,66 @@
 import Foundation
 
+/// Providers with a first-class quota section in the standalone Quota Meter.
+/// Deliberately narrower than `SessionSource`: an indexed agent belongs here
+/// only after it has an actual quota model, runway, and probe presentation.
+enum QuotaMeterProvider: String, CaseIterable, Identifiable, Sendable {
+    case codex
+    case claude
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .codex: return "Codex"
+        case .claude: return "Claude"
+        }
+    }
+
+    var usageSource: UsageTrackingSource {
+        switch self {
+        case .codex: return .codex
+        case .claude: return .claude
+        }
+    }
+}
+
+/// Codec and mutation helpers for the Quota Meter-only provider filter.
+/// Storing hidden IDs (rather than visible IDs) makes the default forward-safe:
+/// newly supported providers are visible until the user explicitly hides them.
+enum QuotaMeterProviderVisibility {
+    static let defaultRawValue = "[]"
+
+    static func hiddenIDs(from raw: String) -> Set<String> {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(decoded)
+    }
+
+    static func isVisible(_ provider: QuotaMeterProvider, hiddenProvidersRaw raw: String) -> Bool {
+        !hiddenIDs(from: raw).contains(provider.rawValue)
+    }
+
+    /// Returns canonical JSON while retaining unknown IDs written by a newer app.
+    static func setting(_ provider: QuotaMeterProvider,
+                        visible: Bool,
+                        hiddenProvidersRaw raw: String) -> String {
+        var hidden = hiddenIDs(from: raw)
+        if visible {
+            hidden.remove(provider.rawValue)
+        } else {
+            hidden.insert(provider.rawValue)
+        }
+        let ordered = hidden.sorted()
+        guard let data = try? JSONEncoder().encode(ordered),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return defaultRawValue
+        }
+        return encoded
+    }
+}
+
 /// Unified display mode for rate-limit percentages across Codex and Claude.
 ///
 /// The underlying models store **percent remaining** (\"left\").

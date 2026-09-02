@@ -18,11 +18,13 @@ final class QuotaDataPresentationTests: XCTestCase {
     func testCaption_rateLimited_saysRateLimited() {
         let q = claudeQuota(transientReason: "Rate limited — retrying shortly")
         XCTAssertEqual(q.reconnectingCaption, "rate limited — retrying…")
+        XCTAssertTrue(q.isRateLimited)
     }
 
     func testCaption_transientUnavailable_saysRetrying() {
         let q = claudeQuota(transientReason: "Temporarily unavailable — retrying")
         XCTAssertEqual(q.reconnectingCaption, "retrying…")
+        XCTAssertFalse(q.isRateLimited)
     }
 
     func testCaption_noReason_fallsBackToReconnecting() {
@@ -35,5 +37,32 @@ final class QuotaDataPresentationTests: XCTestCase {
         // into the compact QM cell.
         let q = claudeQuota(transientReason: "Some future caption we have not mapped")
         XCTAssertEqual(q.reconnectingCaption, "reconnecting…")
+    }
+
+    func testQuotaMeterProviderVisibilityDefaultsToAllShown() {
+        for provider in QuotaMeterProvider.allCases {
+            XCTAssertTrue(QuotaMeterProviderVisibility.isVisible(provider, hiddenProvidersRaw: ""))
+            XCTAssertTrue(QuotaMeterProviderVisibility.isVisible(provider, hiddenProvidersRaw: "[]"))
+        }
+    }
+
+    func testQuotaMeterProviderVisibilityTogglesIndependently() {
+        let claudeHidden = QuotaMeterProviderVisibility.setting(
+            .claude,
+            visible: false,
+            hiddenProvidersRaw: QuotaMeterProviderVisibility.defaultRawValue
+        )
+        XCTAssertFalse(QuotaMeterProviderVisibility.isVisible(.claude, hiddenProvidersRaw: claudeHidden))
+        XCTAssertTrue(QuotaMeterProviderVisibility.isVisible(.codex, hiddenProvidersRaw: claudeHidden))
+
+        let bothHidden = QuotaMeterProviderVisibility.setting(.codex, visible: false, hiddenProvidersRaw: claudeHidden)
+        XCTAssertFalse(QuotaMeterProviderVisibility.isVisible(.claude, hiddenProvidersRaw: bothHidden))
+        XCTAssertFalse(QuotaMeterProviderVisibility.isVisible(.codex, hiddenProvidersRaw: bothHidden))
+    }
+
+    func testQuotaMeterProviderVisibilityPreservesUnknownFutureIDs() {
+        let raw = "[\"future-provider\",\"claude\"]"
+        let updated = QuotaMeterProviderVisibility.setting(.claude, visible: true, hiddenProvidersRaw: raw)
+        XCTAssertEqual(QuotaMeterProviderVisibility.hiddenIDs(from: updated), ["future-provider"])
     }
 }

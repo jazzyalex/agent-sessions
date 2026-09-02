@@ -34,6 +34,59 @@ final class RunwayAuthDegradationTests: XCTestCase {
         XCTAssertNil(p.reason)
     }
 
+    func testAccountUnavailablePublicationWaitsThenEscalates() {
+        XCTAssertEqual(ClaudeUsageSourceManager.accountUnavailableEscalationThreshold, 90)
+
+        let checking = ClaudeUsageSourceManager.accountUnavailablePublication(escalated: false)
+        XCTAssertNil(checking.authState)
+        XCTAssertEqual(checking.reason, ClaudeUsageSourceManager.accountUnavailableCheckingReason)
+
+        let escalated = ClaudeUsageSourceManager.accountUnavailablePublication(escalated: true)
+        XCTAssertEqual(escalated.authState, .accountUnavailable)
+        XCTAssertNil(escalated.reason)
+    }
+
+    func testPreEscalationAccountStateCannotBypassTimerThroughTmuxSuppression() {
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldPublishSuppressedTmuxAuth(
+            .accountUnavailable,
+            lastPublished: .ok
+        ))
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldPublishSuppressedTmuxAuth(
+            .accountUnavailable,
+            lastPublished: .accountUnavailable
+        ))
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldPublishSuppressedTmuxAuth(
+            .signedOut,
+            lastPublished: nil
+        ))
+    }
+
+    func testRateLimitEndsPendingAccountUnavailableEpisode() {
+        XCTAssertTrue(ClaudeUsageSourceManager.transientFailureEndsAccountEpisode(
+            currentState: .accountUnavailable,
+            hasEpisodeStart: true
+        ))
+        XCTAssertFalse(ClaudeUsageSourceManager.transientFailureEndsAccountEpisode(
+            currentState: .unknown,
+            hasEpisodeStart: false
+        ))
+    }
+
+    func testAccountUnavailableResponseRequiresBillingEvidenceForForbiddenStatus() {
+        XCTAssertTrue(ClaudeOAuthUsageClient.isAccountUnavailableResponse(statusCode: 402, body: Data()))
+        XCTAssertTrue(ClaudeOAuthUsageClient.isAccountUnavailableResponse(
+            statusCode: 403,
+            body: Data(#"{"error":{"message":"Subscription plan inactive"}}"#.utf8)
+        ))
+        XCTAssertFalse(ClaudeOAuthUsageClient.isAccountUnavailableResponse(
+            statusCode: 403,
+            body: Data(#"{"error":{"message":"OAuth token does not meet scope user:profile"}}"#.utf8)
+        ))
+        for status in [400, 401, 404, 429, 500, 503] {
+            XCTAssertFalse(ClaudeOAuthUsageClient.isAccountUnavailableResponse(statusCode: status, body: Data("billing".utf8)), "HTTP \(status)")
+        }
+    }
+
     func testFailurePublicationAlarmingVerdictPassesThrough() {
         let p = ClaudeUsageSourceManager.failurePublication(verdict: .signedOut)
         XCTAssertEqual(p.authState, .signedOut)

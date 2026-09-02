@@ -83,6 +83,10 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil
 
     private var sourceManager: ClaudeUsageSourceManager?
+    /// Invalidates callbacks already queued by a stopped source manager. The
+    /// callbacks deliberately yield before touching published state, so manager
+    /// identity must survive that suspension explicitly.
+    private var sourceManagerGeneration: UInt64 = 0
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
     private let limitNotifier = UsageLimitNotifier.shared
@@ -221,11 +225,15 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func applyAvailability(_ availability: ClaudeServiceAvailability) {
-        // Transient caption is written on every emit (NOT authState-gated) so a
-        // recovery clears it; change-check avoids churning objectWillChange on
-        // steady polls (mirror F7).
-        if transientReason != availability.transientReason {
-            transientReason = availability.transientReason
+        // A nil transient reason means "this availability producer has no
+        // opinion", not "clear another producer's active failure". OAuth, Web,
+        // and tmux all share this channel; treating every legacy nil as a global
+        // clear let fallback startup erase an OAuth 429 before Quota Meter drew
+        // it. Recovery must be explicit, or arrive as a live usage snapshot.
+        if let reason = availability.transientReason {
+            if transientReason != reason { transientReason = reason }
+        } else if availability.clearsTransientReason, transientReason != nil {
+            transientReason = nil
         }
         // A caption-only emit (a transient blip: 429 / pre-escalation) carries no
         // meaningful legacy bools or authState — leave the orthogonal setup/CLI/login
@@ -257,12 +265,15 @@ final class ClaudeUsageModel: ObservableObject {
 
     private func start() {
         guard !AppRuntime.isRunningTests else { return }
+        sourceManagerGeneration &+= 1
+        let generation = sourceManagerGeneration
         let model = self
         let snapshotHandler: @Sendable (ClaudeLimitSnapshot) -> Void = { snapshot in
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates (can happen when the menu bar
                 // or strip visibility flips and the service immediately delivers a snapshot).
                 await Task.yield()
+                guard model.sourceManagerGeneration == generation else { return }
                 model.applyLimitSnapshot(snapshot)
             }
         }
@@ -270,7 +281,7 @@ final class ClaudeUsageModel: ObservableObject {
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates.
                 await Task.yield()
-                model.applyAvailability(availability)
+                model.applyAvailability(availability, sourceManagerGeneration: generation)
             }
         }
 
@@ -286,6 +297,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func stop() {
+        sourceManagerGeneration &+= 1
         let mgr = sourceManager
         Task.detached {
             await mgr?.stop()
@@ -298,9 +310,31 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourOnTrackObservedAt = nil
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
+        // A replacement source manager starts with no knowledge of the previous
+        // manager's auth episode. Do not let an old alarming verdict mask a new
+        // transient response (notably a 429) after tracking is re-enabled.
+        authStatus = nil
+        transientReason = nil
+        cliUnavailable = false
+        tmuxUnavailable = false
+        loginRequired = false
+        setupRequired = false
+        setupHint = nil
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
+
+    /// Applies manager output only while it belongs to the currently active
+    /// manager generation. Internal for deterministic lifecycle regression tests.
+    func applyAvailability(_ availability: ClaudeServiceAvailability,
+                           sourceManagerGeneration generation: UInt64) {
+        guard generation == sourceManagerGeneration else { return }
+        applyAvailability(availability)
+    }
+
+#if DEBUG
+    var sourceManagerGenerationForTesting: UInt64 { sourceManagerGeneration }
+#endif
 
     private func installWakeObservers() {
         guard wakeObservers.isEmpty else { return }
@@ -536,6 +570,10 @@ final class ClaudeUsageModel: ObservableObject {
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
         let now = Date()
         let freshness = Self.alertFreshness(for: s, now: now)
+        // A serving source is authoritative recovery. Failed fallback
+        // availability alone is not; it must not clear an OAuth rate-limit
+        // episode until a usable snapshot actually arrives.
+        if s.health == .live, transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: s.source)
         sessionRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weeklyRemainingPercent)
@@ -676,6 +714,7 @@ final class ClaudeUsageModel: ObservableObject {
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
         let now = Date()
+        if transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: .tmuxUsage)
         sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)
@@ -834,11 +873,14 @@ struct ClaudeServiceAvailability {
     /// so existing constructions and callers that don't classify stay valid.
     var authState: UsageAuthState? = nil
     /// Calm, non-alarming caption for transient failures (network / 5xx / 429).
-    /// The strip shows it in `.secondary` without raising the banner; `nil`
-    /// clears it. Written unconditionally by `applyAvailability` (unlike the
-    /// authState-gated fields) so a recovery silently clears the caption.
+    /// The strip shows it in `.secondary` without raising the banner. `nil`
+    /// means no update; recovery uses `clearsTransientReason` or a live snapshot.
     /// (P2, spec §3/§4.)
     var transientReason: String? = nil
+    /// Explicit permission to clear a prior transient cause. The default is
+    /// deliberately false because legacy dependency/fallback availability with
+    /// no reason is "unchanged", not proof that usage recovered.
+    var clearsTransientReason: Bool = false
     /// This emit carries ONLY the transient caption — `applyAvailability` updates
     /// `transientReason` and leaves the orthogonal legacy bools (setup/CLI/login)
     /// and the banner untouched, so a rate-limit/transient blip can't clobber an

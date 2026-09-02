@@ -19,6 +19,14 @@ final class UsageAuthStatusTests: XCTestCase {
     func testUnknownIsSilent() {
         XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .unknown).remediation, .none)
     }
+    func testAccountUnavailableDoesNotSuggestReauthentication() {
+        let status = UsageAuthStatus.make(provider: .claude, state: .accountUnavailable)
+        XCTAssertTrue(status.state.isAlarming)
+        XCTAssertEqual(status.remediation, .none)
+        XCTAssertEqual(status.chipLabel, "Claude plan inactive")
+        XCTAssertTrue(status.detail.localizedCaseInsensitiveContains("plan"))
+        XCTAssertFalse(status.detail.contains("claude auth login"))
+    }
     /// Claude with no CLI now offers the no-CLI ladder (rung 1 Web API mode,
     /// rung 2 guided install) rather than a bare install link (P3, spec §5).
     func testCliNotInstalledClaudeUsesNoCLILadder() {

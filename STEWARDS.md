@@ -86,7 +86,7 @@ writes a redacted sample you can attach to an issue.
 | OpenClaw | steward wanted | 2026-08-13 · 2026.7.1 | Best-effort |
 | Hermes | steward wanted | 2026-06-24 · 0.17.0 | Best-effort |
 | Qwen Code | steward wanted | 2026-08-17 · 0.14.3 (see note) | Best-effort |
-| Devin CLI | @thedavidweng | 2026-08-27 · 3000.5.20 (see note) | Steward-verified |
+| Devin CLI | @thedavidweng | 2026-09-01 · 3000.6.7 (see note) | Steward-verified |
 | fx (vercel-labs) | @thedavidweng | 2026-08-27 · 0.0.5 (see note) | Steward-verified |
 
 Dates and versions come from
@@ -99,7 +99,14 @@ but the agent is excluded from active format checks and takes no steward.
 
 Honest footnotes:
 
-- **Devin CLI.** Verified 2026-08-27 on CLI 3000.5.20 (2d902011) with a schema
+- **Devin CLI.** Format compatibility re-verified 2026-09-01 on CLI 3000.6.7
+  (260a97c8): `steward_check.py devin` reported the newer installed build matches the
+  baseline. A separate read-only audit over 253 sessions / 394,495 message nodes found no
+  usable token or cost telemetry: `cogs_json` is configuration, `metadata.num_tokens` is
+  always null, `num_tokens_preceding` is a context cursor, and the stored cost fields are
+  uniformly zero ([#67](https://github.com/jazzyalex/agent-sessions/issues/67#issuecomment-5501897068)).
+  The original end-to-end product verification remains 2026-08-27 on CLI 3000.5.20
+  (2d902011), with a schema
   probe over 247 visible sessions (253 total, 6 `hidden=1`) in `~/.local/share/devin/cli/sessions.db` and the 9-point checklist against a running `upstream/main` build (`issuecomment-5433779336`): list count 247, titles recognisable (1 expected `Untitled`), main-chain transcript renders `user/assistant(tool_calls)/tool_result` with no blank middle, timestamps epoch seconds (no 1970), search `Greptile` hits main chain, `has-commands` 241/6, Analytics `devin` counts, Copy Resume `devin --resume <slug>` pasteable and launch-in-terminal uses the same plan. Resume was closed the same night via `devin --resume stump-zebu -p "resume test: say hello"` (exit 0, assistant reply) with `devin auth status` `Logged in via Devin` (`user-b19f15…`). Weekly monitoring: `steward_check.py devin` `All good` (verified 3000.3.27 → 3000.5.20 drift is only the version bump, schema matches).
 - **Qwen Code.** Verified against 0.14.3 transcripts. The installed CLI is 0.21.13, but the
   Qwen OAuth free tier was discontinued on 2026-04-15, so no newer transcript can be
@@ -109,3 +116,8 @@ Honest footnotes:
 - **Hermes.** Held at 0.17.0 since 2026-06-24. The automated driver stopped producing a
   usable sample, so newer Hermes builds have no fresh evidence either way.
 - **fx (vercel-labs).** Re-verified 2026-08-27 on CLI 0.0.5 (df7e624) with 5 dirs under `~/.fx/sessions` (`178719436754…` etc., 3 with history, 2 empty `history_len 0`): `checkpoint.json` + `session.json` + `display.json` layout holds, all four `kind`s still render (live data covers `assistant` + `interrupted`; `background_command`/`compacted_summary` via fixture), `durableString` for `base64` text, `tool_calls[].arguments_json` as JSON string, `tool_result` keyed by `tool_call_id`. 9-point checklist (`issuecomment-5433779336`): count 5 (3 visible after `hideZeroMessageSessions`), titles from `display.json`/first prompt, no 1970, search `Skills: 25` hits, `has-commands` 3/2, Analytics counts, Copy `fx --resume <id>` (`--continue` only with `cwd`). `fx --help` advertises `--resume [last|<id>]`/`-c`; `fx session --id <id> --json` succeeds 3/3 non-corrupt (the fourth `178719436754…` is CLI-reported `InvalidSessionFormat` but browsable via direct `checkpoint.json`); `expect` spawning `fx --resume <id>` reaches `UnableToReadTerminalSize` not unknown-flag, so the flag is valid and the session is found — full interactive reopen needs a TTY and was not driven to a prompt. `steward_check.py fx` now runs (fixed `MATRIX_KEY` + `verified_map` + baseline `checkpoint.json` note) and reports additive 0.0.5 `unknown_keys` (`checkpoint_seq` etc.) with `format_drift_detected` but no missing render path. Format is young (3/`event_log_v1`), so drift is expected.
+
+  Source inspection of fx 0.0.7 on 2026-09-02 found the same four history kinds and
+  eight required additive `session.json` manifest fields. The fixture and steward export
+  now cover those fields, but the verified ceiling stays at 0.0.5 until a session created
+  natively by 0.0.7 passes the check; the evidence in #66 only re-read 0.0.5 sessions.

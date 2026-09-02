@@ -175,6 +175,22 @@ extension PreferencesView {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                labeledRow("Agents shown") {
+                    HStack(spacing: 16) {
+                        ForEach(QuotaMeterProvider.allCases) { provider in
+                            Toggle(provider.displayName, isOn: quotaMeterProviderVisibilityBinding(provider))
+                                .toggleStyle(.checkbox)
+                                .disabled(!quotaMeterProviderConfigured(provider))
+                                .help(quotaMeterProviderConfigured(provider)
+                                    ? "Show or hide the \(provider.displayName) section in Quota Meter. Tracking continues while hidden."
+                                    : "Enable \(provider.displayName) usage tracking before showing it in Quota Meter.")
+                        }
+                    }
+                }
+                Text("This controls only the standalone Quota Meter. Tracking, the main-window footer, the menu bar, and session indexing are unchanged.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 labeledRow("Session Runway") {
                     Picker("", selection: Binding(
                         get: { QuotaMeterRunwayVisibility.current(raw: quotaMeterRunwayVisibilityRaw) },
@@ -217,6 +233,31 @@ extension PreferencesView {
         if ![120, 180].contains(claudePollingInterval) {
             claudePollingInterval = 180
         }
+    }
+
+    private func quotaMeterProviderConfigured(_ provider: QuotaMeterProvider) -> Bool {
+        switch provider {
+        case .codex: return codexAgentEnabled && codexUsageEnabled
+        case .claude: return claudeAgentEnabled && claudeUsageEnabled
+        }
+    }
+
+    private func quotaMeterProviderVisibilityBinding(_ provider: QuotaMeterProvider) -> Binding<Bool> {
+        Binding(
+            get: {
+                QuotaMeterProviderVisibility.isVisible(
+                    provider,
+                    hiddenProvidersRaw: quotaMeterHiddenProvidersRaw
+                )
+            },
+            set: { visible in
+                quotaMeterHiddenProvidersRaw = QuotaMeterProviderVisibility.setting(
+                    provider,
+                    visible: visible,
+                    hiddenProvidersRaw: quotaMeterHiddenProvidersRaw
+                )
+            }
+        )
     }
 
     var limitAlertsTab: some View {

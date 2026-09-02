@@ -7,6 +7,37 @@ final class AuthStatusNotifierTests: XCTestCase {
         func isAuthorized() async -> Bool { authorized }
         func post(title: String, body: String) { posts += 1 }
     }
+    final class SuspendedGate: NotificationGate {
+        private let lock = NSLock()
+        private var continuations: [CheckedContinuation<Bool, Never>] = []
+        private(set) var posts = 0
+        private(set) var titles: [String] = []
+        var onCheck: (() -> Void)?
+
+        func isAuthorized() async -> Bool {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                continuations.append(continuation)
+                lock.unlock()
+                onCheck?()
+            }
+        }
+
+        func post(title: String, body: String) {
+            lock.lock()
+            posts += 1
+            titles.append(title)
+            lock.unlock()
+        }
+
+        func releaseChecks() {
+            lock.lock()
+            let pending = continuations
+            continuations.removeAll()
+            lock.unlock()
+            pending.forEach { $0.resume(returning: true) }
+        }
+    }
     private func store() -> AuthEpisodeStore {
         UserDefaults.standard.removeObject(forKey: "AuthEpisode.claude")
         return AuthEpisodeStore()
@@ -22,6 +53,44 @@ final class AuthStatusNotifierTests: XCTestCase {
         await n.onStatus(.make(provider: .claude, state: .signedOut), provider: .claude)
         await n.onStatus(.make(provider: .claude, state: .expired), provider: .claude)
         XCTAssertEqual(g.posts, 1)
+    }
+    func testAccountUnavailableUsesSameOneShotEpisode() async {
+        let g = FakeGate(); let n = AuthStatusNotifier(gate: g, store: store())
+        await n.onStatus(.make(provider: .claude, state: .accountUnavailable), provider: .claude)
+        await n.onStatus(.make(provider: .claude, state: .accountUnavailable), provider: .claude)
+        XCTAssertEqual(g.posts, 1)
+    }
+    func testConcurrentAccountUnavailablePublicationsPostOnce() async {
+        let gate = SuspendedGate()
+        let checkStarted = expectation(description: "authorization check started")
+        gate.onCheck = { checkStarted.fulfill() }
+        let notifier = AuthStatusNotifier(gate: gate, store: store())
+        let status = UsageAuthStatus.make(provider: .claude, state: .accountUnavailable)
+
+        let calls = (0..<12).map { _ in Task { await notifier.onStatus(status, provider: .claude) } }
+        await fulfillment(of: [checkStarted], timeout: 1)
+        await Task.yield()
+        gate.releaseChecks()
+        for call in calls { await call.value }
+
+        XCTAssertEqual(gate.posts, 1)
+    }
+    func testNewestAlarmingStatusWinsWhileAuthorizationIsSuspended() async {
+        let gate = SuspendedGate()
+        let checkStarted = expectation(description: "authorization check started")
+        gate.onCheck = { checkStarted.fulfill() }
+        let notifier = AuthStatusNotifier(gate: gate, store: store())
+        let unavailable = UsageAuthStatus.make(provider: .claude, state: .accountUnavailable)
+        let expired = UsageAuthStatus.make(provider: .claude, state: .expired)
+
+        let first = Task { await notifier.onStatus(unavailable, provider: .claude) }
+        await fulfillment(of: [checkStarted], timeout: 1)
+        await notifier.onStatus(expired, provider: .claude)
+        gate.releaseChecks()
+        await first.value
+
+        XCTAssertEqual(gate.posts, 1)
+        XCTAssertEqual(gate.titles, [expired.headline])
     }
     func testRecoveryThenSignedOutRefires() async {
         let g = FakeGate(); let st = store(); let n = AuthStatusNotifier(gate: g, store: st)

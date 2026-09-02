@@ -107,6 +107,8 @@ struct AuthRemediationBanner: View {
             return ("exclamationmark.triangle.fill", .red)
         case .expired:
             return ("clock.badge.exclamationmark", .orange)
+        case .accountUnavailable:
+            return ("person.crop.circle.badge.exclamationmark", .orange)
         case .cliNotInstalled:
             return ("bolt.horizontal.circle", .secondary)
         default:
@@ -117,7 +119,7 @@ struct AuthRemediationBanner: View {
     private var headlineColor: Color {
         switch status.state {
         case .signedOut: return .red
-        case .expired: return .orange
+        case .expired, .accountUnavailable: return .orange
         default: return .primary
         }
     }
@@ -248,7 +250,7 @@ struct AuthFixView: View {
                         }
                     }
 
-                    if isClaude {
+                    if isClaude && status.state != .accountUnavailable {
                         stepRow("B", "Use the Web API fallback", "If the CLI login keeps failing, Agent Sessions can read usage from your claude.ai browser session instead. Needs Full Disk Access on macOS 14+.") {
                             VStack(alignment: .leading, spacing: 6) {
                                 Toggle("Enable Web API fallback", isOn: $webApiEnabled)
@@ -269,7 +271,11 @@ struct AuthFixView: View {
                     }
 
                     if isClaude {
-                        stepRow("D", "Recheck now", "After trying the above, re-run the usage fetch to confirm.") {
+                        stepRow(status.state == .accountUnavailable ? "A" : "D",
+                                "Recheck now",
+                                status.state == .accountUnavailable
+                                    ? "After restoring account access, re-run the usage fetch to confirm."
+                                    : "After trying the above, re-run the usage fetch to confirm.") {
                             HStack(spacing: 10) {
                                 Button("Refresh now") { recheck() }
                                     .buttonStyle(.bordered)
@@ -386,6 +392,8 @@ struct AuthFixView: View {
         switch status.state {
         case .expired:
             return "Agent Sessions reads your \(providerName) usage using the \(providerName) CLI's saved login. That login has expired, so your account is now rejecting usage requests — retrying on its own won't recover it. Re-authenticate to restore it."
+        case .accountUnavailable:
+            return "The \(providerName) account is signed in, but it does not currently have access to usage data. This can happen when Claude Code plan access ends. Check the account plan, or hide Claude from Quota Meter while keeping tracking enabled."
         case .signedOut:
             return "You're signed out of the \(providerName) CLI, so Agent Sessions has no session to read usage from. Sign back in to restore it."
         case .cliNotInstalled:
@@ -402,6 +410,7 @@ struct AuthFixView: View {
         switch status.state {
         case .signedOut: return ("exclamationmark.triangle.fill", .red)
         case .expired: return ("clock.badge.exclamationmark", .orange)
+        case .accountUnavailable: return ("person.crop.circle.badge.exclamationmark", .orange)
         case .cliNotInstalled: return ("bolt.horizontal.circle", .secondary)
         default: return ("exclamationmark.triangle.fill", .orange)
         }

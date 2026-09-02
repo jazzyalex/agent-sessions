@@ -37,7 +37,7 @@ final class AuthEpisodeStore {
     func shouldNotify(provider p: AuthProvider, state: UsageAuthState) -> Bool {
         let d = UserDefaults.standard
         switch state {
-        case .signedOut, .expired, .cliNotInstalled:
+        case .signedOut, .expired, .accountUnavailable, .cliNotInstalled:
             if d.bool(forKey: key(p)) { return false }   // already notified this episode
             d.set(true, forKey: key(p)); return true
         case .ok:
@@ -49,13 +49,21 @@ final class AuthEpisodeStore {
     func reset(provider p: AuthProvider) { UserDefaults.standard.set(false, forKey: key(p)) }
 }
 
-final class AuthStatusNotifier {
+actor AuthStatusNotifier {
     private let gate: NotificationGate
     private let store: AuthEpisodeStore
+    private var notificationChecksInFlight: Set<String> = []
+    private var latestStatus: [String: UsageAuthStatus] = [:]
+
+    private func providerKey(_ provider: AuthProvider) -> String {
+        provider == .claude ? "claude" : "codex"
+    }
     init(gate: NotificationGate = SystemNotificationGate(), store: AuthEpisodeStore = AuthEpisodeStore()) {
         self.gate = gate; self.store = store
     }
     func onStatus(_ s: UsageAuthStatus, provider: AuthProvider) async {
+        let key = providerKey(provider)
+        latestStatus[key] = s
         // Order matters: for an alarming state, the episode must be consumed
         // (via `shouldNotify`, which flips the "already notified" flag) ONLY
         // once we know a notification will actually be posted. Otherwise an
@@ -70,9 +78,20 @@ final class AuthStatusNotifier {
             _ = store.shouldNotify(provider: provider, state: s.state)
             return
         }
+        // Actor methods are reentrant across the authorization await. Keep one
+        // check in flight per provider so two simultaneous publications cannot
+        // both observe the UserDefaults episode flag before either claims it.
+        guard notificationChecksInFlight.insert(key).inserted else { return }
+        defer { notificationChecksInFlight.remove(key) }
         guard await gate.isAuthorized() else { return }
-        guard store.shouldNotify(provider: provider, state: s.state) else { return }
-        gate.post(title: s.headline, body: "Open Agent Sessions to see how to fix it.")
+        // Recovery may have arrived while notification authorization was being
+        // checked. Never post a stale auth alert after a definite recovery.
+        // Another alarming verdict may have replaced the original one while
+        // notification permission was being checked. Post the newest status,
+        // not a stale headline, and consume the shared episode for that verdict.
+        guard let current = latestStatus[key], current.state.isAlarming else { return }
+        guard store.shouldNotify(provider: provider, state: current.state) else { return }
+        gate.post(title: current.headline, body: "Open Agent Sessions to see how to fix it.")
     }
 }
 

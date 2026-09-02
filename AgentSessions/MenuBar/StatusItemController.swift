@@ -398,6 +398,9 @@ final class StatusItemController: NSObject {
         case .expired:
             symbolName = "clock.badge.exclamationmark"
             tint = .systemOrange
+        case .accountUnavailable:
+            symbolName = "person.crop.circle.badge.exclamationmark"
+            tint = .systemOrange
         case .cliNotInstalled:
             symbolName = "bolt.horizontal.circle"
             tint = .secondaryLabelColor
@@ -415,6 +418,7 @@ final class StatusItemController: NSObject {
         switch state {
         case .signedOut: return "\(name) signed out — Fix…"
         case .expired: return "\(name) session expired — Fix…"
+        case .accountUnavailable: return "\(name) account access unavailable — Fix…"
         case .cliNotInstalled: return "\(name) CLI not installed — Fix…"
         default: return name
         }
