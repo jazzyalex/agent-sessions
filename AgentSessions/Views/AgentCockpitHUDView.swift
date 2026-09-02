@@ -2805,6 +2805,7 @@ private struct CockpitScrollViewScrollerConfigurator: NSViewRepresentable {
 // MARK: - HUD Limits Bar
 
 private struct HUDLimitsProviderEntry {
+    let provider: QuotaMeterProvider
     let source: UsageTrackingSource
     let fiveHourLeft: Int
     let weekLeft: Int
@@ -3514,8 +3515,7 @@ private struct HUDLimitsRowsPanel: View {
             && QuotaMeterProviderVisibility.isVisible(provider, hiddenProvidersRaw: hiddenProvidersRaw)
     }
 
-    private func hideProvider(_ source: UsageTrackingSource) {
-        let provider: QuotaMeterProvider = source == .claude ? .claude : .codex
+    private func hideProvider(_ provider: QuotaMeterProvider) {
         hiddenProvidersRaw = QuotaMeterProviderVisibility.setting(
             provider,
             visible: false,
@@ -3592,6 +3592,7 @@ private struct HUDLimitsRowsPanel: View {
         var out: [HUDLimitsProviderEntry] = []
         if providerShown(.codex) {
             out.append(HUDLimitsProviderEntry(
+                provider: .codex,
                 source: .codex,
                 fiveHourLeft: codexUsageModel.fiveHourRemainingPercent,
                 weekLeft: codexUsageModel.weekRemainingPercent,
@@ -3613,6 +3614,7 @@ private struct HUDLimitsRowsPanel: View {
         }
         if providerShown(.claude) {
             out.append(HUDLimitsProviderEntry(
+                provider: .claude,
                 source: .claude,
                 fiveHourLeft: claudeUsageModel.sessionRemainingPercent,
                 weekLeft: claudeUsageModel.weekAllModelsRemainingPercent,
@@ -3786,7 +3788,7 @@ private struct HUDLimitsRowsPanel: View {
                     source: entry.source,
                     status: auth,
                     chip: true,
-                    onHide: auth.state == .accountUnavailable ? { hideProvider(entry.source) } : nil
+                    onHide: auth.state == .accountUnavailable ? { hideProvider(entry.provider) } : nil
                 )
             case _ where isProbeVisible(probeState):
                 HUDLimitsProbeCell(source: entry.source,

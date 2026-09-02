@@ -109,6 +109,16 @@ actor ClaudeUsageSourceManager {
         state == .signedOut || state == .cliNotInstalled || state == .expired || state == .accountUnavailable
     }
 
+    static func shouldPublishSuppressedTmuxAuth(_ state: UsageAuthState,
+                                                lastPublished: UsageAuthState?) -> Bool {
+        state != .accountUnavailable || lastPublished == .accountUnavailable
+    }
+
+    static func transientFailureEndsAccountEpisode(currentState: UsageAuthState,
+                                                    hasEpisodeStart: Bool) -> Bool {
+        currentState == .accountUnavailable || hasEpisodeStart
+    }
+
     /// Reentrancy guard (I2): a verdict computation may commit its `currentAuthState`
     /// write / availability emit only if no NEWER computation started while it was
     /// suspended across an `await`. `authGeneration` is monotonic, so the captured
@@ -522,6 +532,10 @@ actor ClaudeUsageSourceManager {
 
         do {
             let (raw, bodyHash, rawBody, fromCache, fetchedAt) = try await usageClient.fetch(token: resolved.token)
+            // Claim this verdict before any success-path suspension or state reset.
+            // A newer failure/success that starts while normalization, persistence,
+            // fallback teardown, or the CLI advisory awaits must win.
+            let gen = nextAuthGeneration()
             lastRawOAuthPayload = rawBody
             guard var snapshot = Self.normalizedOAuthSnapshot(raw, bodyHash: bodyHash, fromCache: fromCache, fetchedAt: fetchedAt) else {
                 os_log("ClaudeOAuth: normalizer returned nil (empty payload)", log: log, type: .error)
@@ -529,6 +543,10 @@ actor ClaudeUsageSourceManager {
                 return
             }
             snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
+            guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
+                os_log("ClaudeOAuth: dropping stale success before state reset", log: log, type: .info)
+                return
+            }
 
             // Success — reset all failure state
             let recoveredFromFailure = oauthFailureCount > 0
@@ -570,7 +588,6 @@ actor ClaudeUsageSourceManager {
             // fetch NEVER alarms: a signed-out CLI becomes a gentle caption, never a
             // `.signedOut` verdict (which the HUD limits bar renders by REPLACING the
             // meters, blanking working runway). See `successAdvisory`.
-            let gen = nextAuthGeneration()
             let cli = await throttledClaudeAuthStatus()
             // I2: if a newer verdict computation started while we were suspended on
             // the probe above, drop this now-stale write instead of clobbering it.
@@ -648,12 +665,14 @@ actor ClaudeUsageSourceManager {
             let delay = retryAfter + 10
             oauthRateLimitRetryDeadline = Date().addingTimeInterval(delay)
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
+            let replacedAccountUnavailable = endAccountUnavailableEpisodeForTransientFailure()
             // Calm caption (captionOnly → banner AND legacy bools untouched). A rate
             // limit is transient and self-heals; it must never look like an auth
             // failure nor clobber an orthogonal setup/CLI state.
             availabilityHandler?(ClaudeServiceAvailability(cliUnavailable: false, tmuxUnavailable: false,
+                                                           authState: replacedAccountUnavailable ? .unknown : nil,
                                                            transientReason: Self.rateLimitedReason,
-                                                           captionOnly: true))
+                                                           captionOnly: !replacedAccountUnavailable))
             if var snap = lastOAuthSnapshot {
                 snap.health = .stale
                 publish(snap)
@@ -707,6 +726,10 @@ actor ClaudeUsageSourceManager {
             oauthRateLimitRetryDeadline = nil
             os_log("ClaudeOAuth: account access unavailable", log: log, type: .info)
             await handleOAuthFailure(reason: "account access unavailable", forcedAuthState: .accountUnavailable)
+        } catch ClaudeOAuthUsageClientError.forbidden {
+            oauthRateLimitRetryDeadline = nil
+            os_log("ClaudeOAuth: usage permission denied; keeping fallback routes eligible", log: log, type: .info)
+            await handleOAuthFailure(reason: "403 usage permission denied")
         } catch {
             oauthRateLimitRetryDeadline = nil
             os_log("ClaudeOAuth: fetch error: %{public}@", log: log, type: .error, error.localizedDescription)
@@ -728,7 +751,7 @@ actor ClaudeUsageSourceManager {
         // so the activation guard sees the up-to-date verdict rather than a pre-classify
         // one. `was401` distinguishes an expired-but-present token from a truly absent one.
         if forcedAuthState == .accountUnavailable {
-            await publishAccountUnavailable()
+            guard await publishAccountUnavailable() else { return }
         } else {
             cancelAccountUnavailableEscalation()
             await classifyAndPublishAuthState(was401: reason.contains("401"),
@@ -966,10 +989,16 @@ actor ClaudeUsageSourceManager {
         expiredEscalationTask = nil
     }
 
-    private func publishAccountUnavailable(now: Date = Date()) async {
+    @discardableResult
+    private func publishAccountUnavailable(now: Date = Date()) async -> Bool {
+        let gen = nextAuthGeneration()
         currentAuthState = .accountUnavailable
         if usingTmuxFallback {
             await deactivateTmuxFallback()
+        }
+        guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
+            os_log("ClaudeOAuth: dropping stale account-unavailable verdict", log: log, type: .info)
+            return false
         }
         if firstAccountUnavailableAt == nil { firstAccountUnavailableAt = now }
         let escalated = Self.shouldEscalateExpired(
@@ -994,6 +1023,7 @@ actor ClaudeUsageSourceManager {
         } else if let firstAccountUnavailableAt {
             scheduleAccountUnavailableEscalation(firstAt: firstAccountUnavailableAt)
         }
+        return true
     }
 
     private func scheduleAccountUnavailableEscalation(firstAt: Date) {
@@ -1007,6 +1037,24 @@ actor ClaudeUsageSourceManager {
                   self.firstAccountUnavailableAt != nil else { return }
             await self.publishAccountUnavailable()
         }
+    }
+
+    /// A different, explicitly transient response breaks the consecutive
+    /// account-unavailable episode. It also advances the verdict generation so
+    /// an older account path suspended in fallback teardown cannot re-arm it.
+    @discardableResult
+    private func endAccountUnavailableEpisodeForTransientFailure() -> Bool {
+        guard Self.transientFailureEndsAccountEpisode(
+            currentState: currentAuthState,
+            hasEpisodeStart: firstAccountUnavailableAt != nil
+        ) else { return false }
+        _ = nextAuthGeneration()
+        currentAuthState = .unknown
+        if lastPublishedAuthState == .accountUnavailable {
+            lastPublishedAuthState = .unknown
+        }
+        cancelAccountUnavailableEscalation()
+        return true
     }
 
     private func cancelAccountUnavailableEscalation(clearEpisode: Bool = true) {
@@ -1364,6 +1412,14 @@ actor ClaudeUsageSourceManager {
         if Self.shouldSuppressTmuxFallback(currentAuthState) {
             os_log("ClaudeOAuth: suppressing tmux fallback (auth state %{public}@)",
                    log: log, type: .info, String(describing: currentAuthState))
+            if !Self.shouldPublishSuppressedTmuxAuth(
+                currentAuthState,
+                lastPublished: lastPublishedAuthState
+            ) {
+                // The internal state suppresses an interactive CLI probe from the
+                // first failure, but the loud state is owned by the 90s timer.
+                return
+            }
             // Don't fail silently: publish the verdict so the banner explains why.
             // A .tmuxOnly signed-out/expired user would otherwise get no probe AND
             // no banner (P4 Task 12).

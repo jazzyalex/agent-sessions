@@ -82,7 +82,8 @@ enum ClaudeOAuthUsageClientError: Error {
     case httpError(Int)
     case decodingError(Error)
     case unauthorized           // 401 — token invalid/expired
-    case accountUnavailable     // 402/403 — signed in, but plan/account access is unavailable
+    case accountUnavailable     // 402, or a 403 body that explicitly names plan/billing access
+    case forbidden              // 403 permission/scope failure — not evidence of an inactive plan
     case rateLimited(retryAfter: TimeInterval)  // 429 — honor Retry-After
 }
 
@@ -101,8 +102,17 @@ actor ClaudeOAuthUsageClient {
     /// Resolved once at init from `claude --version`; falls back to a safe default.
     private let userAgent: String
 
-    nonisolated static func isAccountUnavailableStatus(_ statusCode: Int) -> Bool {
-        statusCode == 402 || statusCode == 403
+    nonisolated static func isAccountUnavailableResponse(statusCode: Int, body: Data) -> Bool {
+        if statusCode == 402 { return true }
+        guard statusCode == 403,
+              let message = String(data: body, encoding: .utf8)?.lowercased() else { return false }
+        // A setup-token 403 commonly says the token lacks `user:profile`; that is
+        // a scope problem, not a lapsed subscription. Only explicit account-plan
+        // language is strong enough to raise the plan-inactive state.
+        return message.contains("subscription")
+            || message.contains("billing")
+            || message.contains("plan inactive")
+            || message.contains("inactive plan")
     }
 
     init() {
@@ -182,9 +192,13 @@ actor ClaudeOAuthUsageClient {
                 os_log("ClaudeOAuth: 401 unauthorized", log: log, type: .info)
                 throw ClaudeOAuthUsageClientError.unauthorized
             }
-            if Self.isAccountUnavailableStatus(http.statusCode) {
+            if Self.isAccountUnavailableResponse(statusCode: http.statusCode, body: data) {
                 os_log("ClaudeOAuth: HTTP %d, account access unavailable", log: log, type: .info, http.statusCode)
                 throw ClaudeOAuthUsageClientError.accountUnavailable
+            }
+            if http.statusCode == 403 {
+                os_log("ClaudeOAuth: 403 permission/scope denied", log: log, type: .info)
+                throw ClaudeOAuthUsageClientError.forbidden
             }
             if http.statusCode == 429 {
                 // Clamp to minimum 5 minutes — server sometimes returns 0 which
