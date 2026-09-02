@@ -50,6 +50,32 @@ def _grok_session(tmp_path, extra_key=True):
     return d / "chat_history.jsonl"
 
 
+def _fx_session(tmp_path, model="demo/model"):
+    """An fx checkpoint plus the sibling session sidecar the monitor fingerprints."""
+    d = tmp_path / "fx" / "session-1"
+    d.mkdir(parents=True)
+    (d / "checkpoint.json").write_text(json.dumps({
+        "schema_version": 3,
+        "session_id": "019f6851-7ec4-7ef0-97d3-03f3eee38755",
+        "state": {"history": []},
+    }), encoding="utf-8")
+    (d / "session.json").write_text(json.dumps({
+        "schema_version": 3,
+        "storage_format": "event_log_v1",
+        "workspace_root": "/Users/steward/secret",
+        "log_generation": "generation",
+        "last_event_seq": 7,
+        "event_log_bytes": 4096,
+        "event_log_stat_fingerprint": "fingerprint",
+        "generation_base_seq": 1,
+        "generation_base_bytes": 512,
+        "checkpoint_seq": 7,
+        "checkpoint_sha256": "checkpoint-hash",
+        "preferences": {"model": model},
+    }), encoding="utf-8")
+    return d / "checkpoint.json"
+
+
 # --------------------------------------------------------------------------
 # Redaction
 # --------------------------------------------------------------------------
@@ -86,6 +112,76 @@ def test_harvested_sample_keeps_no_real_values(tmp_path):
     assert "brand_new_summary_key" in written
 
 
+def test_fx_sidecar_drift_writes_redacted_session_json(tmp_path, capsys):
+    checkpoint = _fx_session(tmp_path)
+    result = _result(
+        verified_version="0.0.5",
+        installed={"argv": ["fx", "--version"], "parsed_version": "0.0.7", "stderr": ""},
+        weekly={"local_schema": {"file": str(checkpoint), "sampled_files": [str(checkpoint)]}},
+        evidence={
+            "schema_matches_baseline": False,
+            "schema_diff": {"unknown_types": [],
+                            "unknown_keys": {"session": ["checkpoint_seq"]},
+                            "missing_types": []},
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path / "out")
+
+    assert code == steward_check.EXIT_DRIFT
+    sample = tmp_path / "out" / "redacted-sample" / "session.json"
+    assert sample.exists()
+    written = sample.read_text(encoding="utf-8")
+    assert "checkpoint_seq" in written
+    assert "demo/model" in written
+    assert "/Users/steward" not in written
+    assert steward_check._redaction_leaks(written) == []
+    assert "A redacted sample was written" in capsys.readouterr().out
+    issue = (tmp_path / "out" / "issue.md").read_text(encoding="utf-8")
+    assert str(sample) not in issue
+    assert "/Users/steward" not in issue
+    assert "session.json" in issue
+    assert "structural discriminators (`type`, `role`, `subtype`, `model`) remain" in issue
+
+
+def test_fx_v007_sidecar_keys_are_covered_by_the_committed_baseline(tmp_path):
+    checkpoint = _fx_session(tmp_path)
+    observed = agent_watch._fx_checkpoint_schema_fingerprint(checkpoint)
+    baseline = agent_watch._fx_checkpoint_schema_fingerprint(
+        steward_check.REPO / "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json"
+    )
+
+    diff = agent_watch._schema_diff(
+        observed_type_keys=observed["type_keys"],
+        baseline_type_keys=baseline["type_keys"],
+        observed_event_count=sum(observed["type_counts"].values()),
+    )
+
+    assert diff["unknown_types"] == []
+    assert diff["unknown_keys"] == {}
+
+
+def test_fx_sidecar_sample_is_withheld_when_structural_value_contains_pii(tmp_path, capsys):
+    checkpoint = _fx_session(tmp_path, model="steward@example.com")
+    result = _result(
+        installed={"argv": ["fx", "--version"], "parsed_version": "0.0.7", "stderr": ""},
+        weekly={"local_schema": {"file": str(checkpoint), "sampled_files": [str(checkpoint)]}},
+        evidence={
+            "schema_matches_baseline": False,
+            "schema_diff": {"unknown_types": [],
+                            "unknown_keys": {"session": ["checkpoint_seq"]},
+                            "missing_types": []},
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path / "out")
+
+    assert code == steward_check.EXIT_DRIFT
+    sample_dir = tmp_path / "out" / "redacted-sample"
+    assert not sample_dir.exists() or not list(sample_dir.iterdir())
+    assert "sample was NOT written" in capsys.readouterr().out
+
+
 def test_sample_is_withheld_when_something_survives(tmp_path):
     # Redaction is not the only defence: if a future agent's shape defeats it,
     # the tool must hand over nothing rather than something almost-clean.
@@ -109,7 +205,11 @@ def _result(**over):
         "upstream": {"parsed_version": "1.0.4"},
         "weekly": {"local_schema": {"file": "/x/chat_history.jsonl",
                                     "sampled_files": ["/x/chat_history.jsonl"] * 5}},
-        "evidence": {"schema_matches_baseline": True, "schema_diff": {}},
+        "evidence": {
+            "schema_matches_baseline": True,
+            "schema_diff": {},
+            "sample_freshness": {"is_stale": False},
+        },
     }
     base.update(over)
     return base
@@ -129,6 +229,27 @@ def test_clean_run_on_a_newer_cli_suggests_a_version_bump(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "newer than the verified" in out
+    assert "matrix entry can be bumped" in out
+
+
+def test_clean_but_stale_run_on_a_newer_cli_holds_verified_version(tmp_path, capsys):
+    result = _result(
+        verified_version="0.0.5",
+        installed={"argv": ["fx", "--version"], "parsed_version": "0.0.7", "stderr": ""},
+        evidence={
+            "schema_matches_baseline": True,
+            "schema_diff": {},
+            "sample_freshness": {"is_stale": True, "stale_reason": "sample_predates_cli"},
+        },
+    )
+
+    code = steward_check._report("fx", result, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "newer than the verified" in out
+    assert "Keep the verified version unchanged" in out
+    assert "matrix entry can be bumped" not in out
 
 
 def test_drift_exits_one_and_writes_a_pasteable_issue(tmp_path, capsys):

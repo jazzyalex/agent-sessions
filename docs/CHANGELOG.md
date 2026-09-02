@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- **Antigravity and OpenCode keep their intended colors across macOS releases.** Their accents and toolbar pills no longer inherit Apple system palette changes, so the same Agent Sessions build renders consistently on macOS 15 and 26.
+
+<!-- Headings the release-note generator does not recognise are dropped from the
+     Sparkle appcast and the GitHub release body (tools/release/sparkle_release_notes.py). -->
+### Maintenance
+- The telemetry foundation now reads configuration and token usage for Codex, Claude, Pi and Copilot, with order-independent accounting, fail-closed API-equivalent pricing, and no product surface attached yet.
+- Identity-backed session metadata now stores timestamps in seconds consistently while retaining millisecond identity revisions; the in-place migration preserves every indexed row and schedules analytics re-derivation naturally.
+- Test runs use a process-local index instead of opening or migrating the user's live database, and the release gate reads combined test totals from the result bundle. The FX steward tool also exports a redacted `session.json` when drift lives in that sidecar.
+
 ## [5.1.1] - 2026-08-31
 
 ### Highlights

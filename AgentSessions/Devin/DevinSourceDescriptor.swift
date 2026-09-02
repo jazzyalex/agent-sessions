@@ -16,7 +16,12 @@ extension SessionSourceDescriptor {
     static let devin: SessionSourceDescriptor = {
         return SessionSourceDescriptor(
             source: .devin,
-            telemetry: .allUnavailable("transcript format not audited for telemetry"),
+            telemetry: TelemetryCapabilities(
+                configuration: .unavailable("session rows expose only scalar model/mode; no configuration timeline"),
+                tokens: .unavailable("3000.6.7 audit: num_tokens is always null; num_tokens_preceding is a context cursor"),
+                cost: .unavailable("3000.6.7 audit: cogs_json is configuration and recorded cost fields are always zero"),
+                weeklyQuota: .unavailable("no account-level quota feed")
+            ),
             shortLabel: "Devin CLI",
             badgeInitials: "DV",
             // Warm amber, clear of Claude's brown and OpenClaw's orange.

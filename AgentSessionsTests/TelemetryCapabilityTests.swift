@@ -32,13 +32,12 @@ final class TelemetryCapabilityTests: XCTestCase {
         }
     }
 
-    /// The sources whose transcript format has actually been audited and wired to an
-    /// accumulator. Everything else must say so rather than guess — an unaudited
-    /// source silently reporting numbers is the failure this list prevents.
-    private static let supportedSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
+    /// The sources wired to an accumulator. Everything else must remain unavailable
+    /// even after an audit proves that its store has no usable telemetry.
+    private static let dispatchableSources: Set<SessionSource> = [.codex, .claude, .pi, .copilot]
 
-    func testUnauditedSourcesDeclareNothingAvailable() {
-        for source in SessionSource.allCases where !Self.supportedSources.contains(source) {
+    func testNonDispatchableSourcesDeclareNothingAvailable() {
+        for source in SessionSource.allCases where !Self.dispatchableSources.contains(source) {
             let t = SessionSourceRegistry.descriptor(for: source).telemetry
             for cap in [t.configuration, t.tokens, t.cost, t.weeklyQuota] {
                 guard case .unavailable = cap else {
@@ -51,7 +50,7 @@ final class TelemetryCapabilityTests: XCTestCase {
     /// Every source the engine can actually dispatch must declare it, and vice
     /// versa — a mismatch means either dead code or a silently ignored source.
     func testSupportedSourcesDeclareConfigurationAndTokens() {
-        for source in Self.supportedSources {
+        for source in Self.dispatchableSources {
             let t = SessionSourceRegistry.descriptor(for: source).telemetry
             if case .unavailable = t.configuration {
                 XCTFail("\(source) must produce a configuration timeline")
@@ -60,6 +59,23 @@ final class TelemetryCapabilityTests: XCTestCase {
                 XCTFail("\(source) must produce token usage")
             }
         }
+    }
+
+    func testDevinRecordsAuditedNegativeTelemetryEvidence() {
+        let telemetry = SessionSourceRegistry.descriptor(for: .devin).telemetry
+        XCTAssertEqual(
+            telemetry.configuration,
+            .unavailable("session rows expose only scalar model/mode; no configuration timeline")
+        )
+        XCTAssertEqual(
+            telemetry.tokens,
+            .unavailable("3000.6.7 audit: num_tokens is always null; num_tokens_preceding is a context cursor")
+        )
+        XCTAssertEqual(
+            telemetry.cost,
+            .unavailable("3000.6.7 audit: cogs_json is configuration and recorded cost fields are always zero")
+        )
+        XCTAssertEqual(telemetry.weeklyQuota, .unavailable("no account-level quota feed"))
     }
 
     // Weekly-quota attribution needs persisted account quota snapshots, which no

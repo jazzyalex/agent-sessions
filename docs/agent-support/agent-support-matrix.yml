@@ -242,8 +242,8 @@ agents:
     evidence_tests:
       - "AgentSessionsTests/QwenIntegrationTests.swift"
   devin_cli:
-    max_verified_version: "3000.5.20 (2d902011)"
-    version_field: "sessions.db records (verified via scripts/devin_sessions_schema_probe.py against the installed CLI)"
+    max_verified_version: "3000.6.7 (260a97c8)"
+    version_field: "sessions.db records (steward-verified against the installed CLI; initial schema probe via scripts/devin_sessions_schema_probe.py)"
     support_scope: "tier-2 identity-backed SQLite transcript discovery, browsing, search, Preferences controls, colors, active-session copy-resume command and launch-in-terminal resume, and analytics"
     unsupported_surfaces:
       - "live/active status"
@@ -251,8 +251,9 @@ agents:
       - "archive (Devin stores only active sessions in the sessions.db; archived history is not retained by the CLI)"
       - "custom storage root with an arbitrary structure (point it at the devin data directory or the cli directory containing sessions.db; the Settings field accepts directories only)"
     notes:
-      - "The installed Devin CLI is 3000.5.20 (2d902011). Storage is a single shared SQLite database at ~/.local/share/devin/cli/sessions.db; the reader parses the main-chain message tree (user/assistant/tool_result records) and derives cwd from the sessions table's working_directory column. resume --help advertises -c/--continue and -r/--resume <id>; session ids are human-readable slugs (sessions.id primary key) passed through verbatim."
+      - "The steward-verified Devin CLI is 3000.6.7 (260a97c8). Storage is a single shared SQLite database at ~/.local/share/devin/cli/sessions.db; the reader parses the main-chain message tree (user/assistant/tool_result records) and derives cwd from the sessions table's working_directory column. resume --help advertises -c/--continue and -r/--resume <id>; session ids are human-readable slugs (sessions.id primary key) passed through verbatim."
       - "Resume verified 2026-08-27 via `devin --resume stump-zebu -p \"resume test: say hello\"` (exit 0, returned assistant reply) on 3000.5.20; `devin --help` and `devin auth status` (Logged in via Devin, user-b19f15…) confirm the flags. Copy Resume Command (`devin --resume <id>` / fallback `--continue` with cd to working_directory) was the command exercised; launch-in-terminal uses the same shell-quoted plan."
+      - "2026-09-01 steward re-check on 3000.6.7: `steward_check.py devin` reports the format still matches the baseline. A separate read-only telemetry audit over 253 sessions / 394,495 message nodes found no usable per-session tokens or cost: cogs_json is Cognition configuration, metadata.num_tokens is always null, num_tokens_preceding is a context cursor, and the stored cost pair is uniformly zero. Evidence: issue #67, comment 5501897068."
       - "Devin is identity-backed and DB-only: parseFullByPath is nil, parseFullByIdentity is used, and no filesystem archives exist. The records carry inline base64 images on user and tool messages, rendered as [image] markers; image extraction is not yet supported, so the source is excluded from image browsing."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/devin/small.json"
@@ -282,6 +283,7 @@ agents:
       - "The format is young and expected to drift; the checkpoint/state.history shapes above are pinned by FxSessionParserTests against committed fixtures."
       - "2026-08-23: fx joined the weekly format-monitoring set. Baseline and live pass share one fingerprint (_fx_checkpoint_schema_fingerprint) because the live store is already JSON in the shape the reader parses — unlike Devin, there is no projection to keep in step. Turns bucket by kind, so a fifth kind or a new key on one of the four is reported; nested execution.tool_steps[] records and the session.json sidecar are bucketed too. ./scripts/steward_check.py fx runs on a machine with fx sessions on disk."
       - "2026-08-23 review round (upstream shipped 0.0.5 on 2026-08-22): every durable-bytes read now decodes the {\"encoding\": \"base64\", \"data\": …} object form writeDurableBytes emits for non-UTF-8 bytes (previously one non-UTF-8 byte silently dropped that field), and the image wording was corrected — user.images[] are {id, path, media_type, snapshot_path, snapshot_sha256} records pointing at files under the session directory (snapshot_path resolves to images/<basename>), not inline payloads. max_verified_version bumped 0.0.4 -> 0.0.5 from source inspection of session_codec.zig/session.zig at tag v0.0.5: same four history kinds, arguments_json still a JSON string via durable bytes, tool_results still keyed by tool_call_id with created_at_ms, interrupted gains optional cancelled_command (ignored additively). Installed CLI remains 0.0.4; resume stays end-to-end untested."
+      - "2026-09-02: source inspection at upstream tag v0.0.7 confirms session.json remains strict schema_version 3 / event_log_v1 and adds eight required manifest fields: log_generation, last_event_seq, event_log_bytes, event_log_stat_fingerprint, generation_base_seq, generation_base_bytes, checkpoint_seq and checkpoint_sha256. The same four history kinds remain. The committed schema fixture covers those additive keys, but max_verified_version stays at 0.0.5 until a 0.0.7-native session clears the freshness gate; issue #66's six sampled sessions were all created by 0.0.5."
     evidence_fixtures:
       - "Resources/Fixtures/stage0/agents/fx/small/checkpoint.json (+ session.json, display.json)"
       - "Resources/Fixtures/stage0/agents/fx/unsupported/checkpoint.json (malformed; sidecar facts must survive)"

@@ -4,7 +4,8 @@ import SQLite3
 
 /// Builds a miniature `sessions.db` matching the schema verified by
 /// `scripts/devin_sessions_schema_probe.py` against 253 real sessions at CLI
-/// 3000.3.27, then exercises the forest walk.
+/// 3000.3.27, with telemetry fields audited through steward evidence on
+/// 3000.6.7 in issue #67, then exercises the forest walk.
 ///
 /// The fixture is constructed rather than copied because the real store is a
 /// single 5.4 GB database containing every session on the machine; there is no
@@ -70,7 +71,7 @@ final class DevinSqliteReaderTests: XCTestCase {
         let rows = [
             node(1, "NULL", #"{"message_id":"m1","role":"system","content":"You are Devin.","metadata":{}}"#, 1786004275),
             node(2, "1", #"{"message_id":"m2","role":"user","content":"Fix the broken checks.","metadata":{"is_user_input":true}}"#, 1786004280),
-            node(3, "2", #"{"message_id":"m3","role":"assistant","content":"Reading the file.","thinking":{"signature":"sig","thinking":"I should read it first."},"tool_calls":[{"id":"call_1","index":0,"kind":"function","name":"read_file","arguments":{"path":"hello.py"}}],"metadata":{"num_tokens":42}}"#, 1786004290),
+            node(3, "2", #"{"message_id":"m3","role":"assistant","content":"Reading the file.","thinking":{"signature":"sig","thinking":"I should read it first."},"tool_calls":[{"id":"call_1","index":0,"kind":"function","name":"read_file","arguments":{"path":"hello.py"}}],"metadata":{"num_tokens":null}}"#, 1786004290),
             node(4, "3", #"{"message_id":"m4","role":"tool","content":"print(\"hello\")","tool_call_id":"call_1","metadata":{}}"#, 1786004300),
             node(5, "4", #"{"message_id":"m5","role":"assistant","content":"It prints hello.","thinking":null,"tool_calls":[],"metadata":{}}"#, 1786004400),
             // abandoned branch off node 2

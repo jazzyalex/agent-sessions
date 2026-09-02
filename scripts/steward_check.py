@@ -243,7 +243,7 @@ def _collect_drifting_records(agent: str, session_files: list[Path], wanted: set
 
 
 def _write_redacted_sample(agent: str, records: list[dict], sidecar: dict | None,
-                           sample_dir: Path) -> tuple[Path | None, list[str]]:
+                           sample_dir: Path, sidecar_name: str = "summary.json") -> tuple[Path | None, list[str]]:
     """Write the redacted sample, or withhold it and report what leaked.
 
     Returns (path_or_None, leaks). A non-empty `leaks` means nothing was written:
@@ -266,9 +266,9 @@ def _write_redacted_sample(agent: str, records: list[dict], sidecar: dict | None
     if sidecar is not None:
         # Named the way the agent names it on disk, so a maintainer can drop the
         # pair straight into a fixture directory.
-        (sample_dir / "summary.json").write_text(sidecar_text, encoding="utf-8")
+        (sample_dir / sidecar_name).write_text(sidecar_text, encoding="utf-8")
         if not records:
-            target = sample_dir / "summary.json"
+            target = sample_dir / sidecar_name
     return target, []
 
 
@@ -378,8 +378,8 @@ def _issue_body(agent: str, result: dict, diff: dict, sample_path: Path | None,
     if sample_path is not None:
         lines.extend([
             f"A redacted sample is attached. It was produced by `scripts/steward_check.py {agent}`,",
-            "which replaces every value (strings, numbers, booleans) and keeps only the structure.",
-            f"Attach the file at: {sample_path}",
+            "Content values were replaced; structural discriminators (`type`, `role`, `subtype`, `model`) remain.",
+            f"Attach the generated file named: {sample_path.name}",
             "Drag it into the GitHub issue; do not paste raw sessions.",
         ])
     else:
@@ -422,7 +422,11 @@ def _report(agent: str, result: dict, out_dir: Path, write_sample: bool = True) 
         verified_semver = agent_watch._extract_semver(verified) if verified else None
         if installed and verified_semver and agent_watch._compare_semver(installed, verified_semver) == 1:
             print(f"You are running {installed}, which is newer than the verified {verified}.")
-            print("Nothing is broken -- the matrix entry can be bumped to your version.")
+            freshness = evidence.get("sample_freshness")
+            if isinstance(freshness, dict) and freshness.get("is_stale") is False:
+                print("Nothing is broken -- the matrix entry can be bumped to your version.")
+            else:
+                print("Keep the verified version unchanged until a session created by this CLI is checked.")
         return EXIT_OK
 
     print(f"Something changed in {agent}'s session format.")
@@ -445,26 +449,40 @@ def _report(agent: str, result: dict, out_dir: Path, write_sample: bool = True) 
             for k in keys:
                 wanted.add((bucket, k))
 
-        # Grok's drift can live in the `summary.json` sidecar rather than the
-        # transcript, and no transcript record can ever carry those buckets.
+        # Some formats keep monitored structure in a sibling JSON sidecar rather
+        # than in the transcript itself. No transcript record can carry those
+        # buckets, so harvest and redact the named sidecar independently.
         sidecar: dict | None = None
+        sidecar_name = "summary.json"
         local = ((result.get("weekly") or {}).get("local_schema")) or {}
-        summary_file = local.get("summary_file")
-        if isinstance(summary_file, str) and any(
-            b.split(".")[0] == "summary" for b in {b for b, _ in wanted} | wanted_buckets
-        ):
-            obj, _err = agent_watch._read_json_object(Path(summary_file))
-            if isinstance(obj, dict):
-                sidecar = _redact_records(agent, [obj])[0]
+        sidecar_spec: tuple[str, Path] | None = None
+        if agent == "grok" and isinstance(local.get("summary_file"), str):
+            sidecar_spec = ("summary", Path(local["summary_file"]))
+        elif agent == "fx":
+            sampled = _sampled_files(result)
+            if sampled:
+                sidecar_spec = ("session", sampled[0].parent / "session.json")
+
+        if sidecar_spec is not None:
+            bucket, sidecar_path = sidecar_spec
+            if sidecar_path.exists() and any(
+                b.split(".")[0] == bucket for b in {b for b, _ in wanted} | wanted_buckets
+            ):
+                obj, _err = agent_watch._read_json_object(sidecar_path)
+                if isinstance(obj, dict):
+                    sidecar = _redact_records(agent, [obj])[0]
+                    sidecar_name = sidecar_path.name
 
         records = _collect_drifting_records(agent, _sampled_files(result), wanted,
                                             wanted_buckets, max_records=20)
         sample_dir = out_dir / "redacted-sample"
-        sample_path, leaks = _write_redacted_sample(agent, records, sidecar, sample_dir)
+        sample_path, leaks = _write_redacted_sample(
+            agent, records, sidecar, sample_dir, sidecar_name=sidecar_name
+        )
 
         if sample_path is not None:
             print(f"A redacted sample was written to: {sample_path}")
-            print("Every value in it was replaced; only the structure remains.")
+            print("Content values were replaced; structural type, role, subtype, and model values remain.")
         elif leaks:
             print("A sample was NOT written: after redaction it still contained "
                   + ", ".join(leaks) + ".")
