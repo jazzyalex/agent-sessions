@@ -83,6 +83,10 @@ final class ClaudeUsageModel: ObservableObject {
     @Published var weeklyBurnRateEstimate: UsageLimitBurnRateEstimate? = nil
 
     private var sourceManager: ClaudeUsageSourceManager?
+    /// Invalidates callbacks already queued by a stopped source manager. The
+    /// callbacks deliberately yield before touching published state, so manager
+    /// identity must survive that suspension explicitly.
+    private var sourceManagerGeneration: UInt64 = 0
     // Kept for hard-probe diagnostics that need direct tmux access
     private var service: ClaudeStatusService?
     private let limitNotifier = UsageLimitNotifier.shared
@@ -257,12 +261,15 @@ final class ClaudeUsageModel: ObservableObject {
 
     private func start() {
         guard !AppRuntime.isRunningTests else { return }
+        sourceManagerGeneration &+= 1
+        let generation = sourceManagerGeneration
         let model = self
         let snapshotHandler: @Sendable (ClaudeLimitSnapshot) -> Void = { snapshot in
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates (can happen when the menu bar
                 // or strip visibility flips and the service immediately delivers a snapshot).
                 await Task.yield()
+                guard model.sourceManagerGeneration == generation else { return }
                 model.applyLimitSnapshot(snapshot)
             }
         }
@@ -270,7 +277,7 @@ final class ClaudeUsageModel: ObservableObject {
             Task { @MainActor in
                 // Avoid publishing changes during SwiftUI view updates.
                 await Task.yield()
-                model.applyAvailability(availability)
+                model.applyAvailability(availability, sourceManagerGeneration: generation)
             }
         }
 
@@ -286,6 +293,7 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     private func stop() {
+        sourceManagerGeneration &+= 1
         let mgr = sourceManager
         Task.detached {
             await mgr?.stop()
@@ -311,6 +319,18 @@ final class ClaudeUsageModel: ObservableObject {
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }
+
+    /// Applies manager output only while it belongs to the currently active
+    /// manager generation. Internal for deterministic lifecycle regression tests.
+    func applyAvailability(_ availability: ClaudeServiceAvailability,
+                           sourceManagerGeneration generation: UInt64) {
+        guard generation == sourceManagerGeneration else { return }
+        applyAvailability(availability)
+    }
+
+#if DEBUG
+    var sourceManagerGenerationForTesting: UInt64 { sourceManagerGeneration }
+#endif
 
     private func installWakeObservers() {
         guard wakeObservers.isEmpty else { return }

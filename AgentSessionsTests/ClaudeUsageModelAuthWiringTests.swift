@@ -190,4 +190,17 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertFalse(model.setupRequired)
         XCTAssertNil(model.setupHint)
     }
+
+    func testLateAvailabilityFromStoppedManagerIsIgnored() {
+        let model = ClaudeUsageModel()
+        let stoppedGeneration = model.sourceManagerGenerationForTesting
+
+        model.setEnabled(false)
+        model.applyAvailability(
+            availability(.accountUnavailable),
+            sourceManagerGeneration: stoppedGeneration
+        )
+
+        XCTAssertNil(model.authStatus)
+    }
 }
