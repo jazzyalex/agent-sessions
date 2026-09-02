@@ -167,4 +167,27 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         XCTAssertEqual(model.transientReason, "temp")
         XCTAssertTrue(model.setupRequired)   // NOT clobbered
     }
+
+    func testDisablingTrackingClearsManagerScopedAvailability() {
+        let model = ClaudeUsageModel()
+        model.applyAvailability(ClaudeServiceAvailability(
+            cliUnavailable: true,
+            tmuxUnavailable: true,
+            loginRequired: true,
+            setupRequired: true,
+            setupHint: "old manager",
+            authState: .accountUnavailable,
+            transientReason: "old failure"
+        ))
+
+        model.setEnabled(false)
+
+        XCTAssertNil(model.authStatus)
+        XCTAssertNil(model.transientReason)
+        XCTAssertFalse(model.cliUnavailable)
+        XCTAssertFalse(model.tmuxUnavailable)
+        XCTAssertFalse(model.loginRequired)
+        XCTAssertFalse(model.setupRequired)
+        XCTAssertNil(model.setupHint)
+    }
 }

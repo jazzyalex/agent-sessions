@@ -542,6 +542,11 @@ actor ClaudeUsageSourceManager {
                 await handleOAuthFailure(reason: "empty payload")
                 return
             }
+            // The network response already proved recovery. Retire the old
+            // publication-only timer before the merge's first await; otherwise
+            // it can advance authGeneration while store.load() is suspended and
+            // make this newer success drop itself as stale.
+            cancelAccountUnavailableEscalation()
             snapshot = await mergeMissingFiveHourWindowIfNeeded(snapshot)
             guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
                 os_log("ClaudeOAuth: dropping stale success before state reset", log: log, type: .info)

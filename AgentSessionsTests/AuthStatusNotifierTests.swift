@@ -11,6 +11,7 @@ final class AuthStatusNotifierTests: XCTestCase {
         private let lock = NSLock()
         private var continuations: [CheckedContinuation<Bool, Never>] = []
         private(set) var posts = 0
+        private(set) var titles: [String] = []
         var onCheck: (() -> Void)?
 
         func isAuthorized() async -> Bool {
@@ -25,6 +26,7 @@ final class AuthStatusNotifierTests: XCTestCase {
         func post(title: String, body: String) {
             lock.lock()
             posts += 1
+            titles.append(title)
             lock.unlock()
         }
 
@@ -72,6 +74,23 @@ final class AuthStatusNotifierTests: XCTestCase {
         for call in calls { await call.value }
 
         XCTAssertEqual(gate.posts, 1)
+    }
+    func testNewestAlarmingStatusWinsWhileAuthorizationIsSuspended() async {
+        let gate = SuspendedGate()
+        let checkStarted = expectation(description: "authorization check started")
+        gate.onCheck = { checkStarted.fulfill() }
+        let notifier = AuthStatusNotifier(gate: gate, store: store())
+        let unavailable = UsageAuthStatus.make(provider: .claude, state: .accountUnavailable)
+        let expired = UsageAuthStatus.make(provider: .claude, state: .expired)
+
+        let first = Task { await notifier.onStatus(unavailable, provider: .claude) }
+        await fulfillment(of: [checkStarted], timeout: 1)
+        await notifier.onStatus(expired, provider: .claude)
+        gate.releaseChecks()
+        await first.value
+
+        XCTAssertEqual(gate.posts, 1)
+        XCTAssertEqual(gate.titles, [expired.headline])
     }
     func testRecoveryThenSignedOutRefires() async {
         let g = FakeGate(); let st = store(); let n = AuthStatusNotifier(gate: g, store: st)

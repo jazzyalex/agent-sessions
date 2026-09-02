@@ -298,6 +298,16 @@ final class ClaudeUsageModel: ObservableObject {
         fiveHourOnTrackObservedAt = nil
         weeklyBurnRateTracker.reset()
         weeklyBurnRateEstimate = nil
+        // A replacement source manager starts with no knowledge of the previous
+        // manager's auth episode. Do not let an old alarming verdict mask a new
+        // transient response (notably a 429) after tracking is re-enabled.
+        authStatus = nil
+        transientReason = nil
+        cliUnavailable = false
+        tmuxUnavailable = false
+        loginRequired = false
+        setupRequired = false
+        setupHint = nil
         recordProjectionDiagnostics(fiveHourProjectionTracker.lastDiagnostics, estimate: nil)
         removeWakeObservers()
     }

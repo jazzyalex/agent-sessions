@@ -53,7 +53,7 @@ actor AuthStatusNotifier {
     private let gate: NotificationGate
     private let store: AuthEpisodeStore
     private var notificationChecksInFlight: Set<String> = []
-    private var latestState: [String: UsageAuthState] = [:]
+    private var latestStatus: [String: UsageAuthStatus] = [:]
 
     private func providerKey(_ provider: AuthProvider) -> String {
         provider == .claude ? "claude" : "codex"
@@ -63,7 +63,7 @@ actor AuthStatusNotifier {
     }
     func onStatus(_ s: UsageAuthStatus, provider: AuthProvider) async {
         let key = providerKey(provider)
-        latestState[key] = s.state
+        latestStatus[key] = s
         // Order matters: for an alarming state, the episode must be consumed
         // (via `shouldNotify`, which flips the "already notified" flag) ONLY
         // once we know a notification will actually be posted. Otherwise an
@@ -86,9 +86,12 @@ actor AuthStatusNotifier {
         guard await gate.isAuthorized() else { return }
         // Recovery may have arrived while notification authorization was being
         // checked. Never post a stale auth alert after a definite recovery.
-        guard latestState[key]?.isAlarming == true else { return }
-        guard store.shouldNotify(provider: provider, state: s.state) else { return }
-        gate.post(title: s.headline, body: "Open Agent Sessions to see how to fix it.")
+        // Another alarming verdict may have replaced the original one while
+        // notification permission was being checked. Post the newest status,
+        // not a stale headline, and consume the shared episode for that verdict.
+        guard let current = latestStatus[key], current.state.isAlarming else { return }
+        guard store.shouldNotify(provider: provider, state: current.state) else { return }
+        gate.post(title: current.headline, body: "Open Agent Sessions to see how to fix it.")
     }
 }
 
