@@ -34,6 +34,26 @@ final class RunwayAuthDegradationTests: XCTestCase {
         XCTAssertNil(p.reason)
     }
 
+    func testAccountUnavailablePublicationWaitsThenEscalates() {
+        XCTAssertEqual(ClaudeUsageSourceManager.accountUnavailableEscalationThreshold, 90)
+
+        let checking = ClaudeUsageSourceManager.accountUnavailablePublication(escalated: false)
+        XCTAssertNil(checking.authState)
+        XCTAssertEqual(checking.reason, ClaudeUsageSourceManager.accountUnavailableCheckingReason)
+
+        let escalated = ClaudeUsageSourceManager.accountUnavailablePublication(escalated: true)
+        XCTAssertEqual(escalated.authState, .accountUnavailable)
+        XCTAssertNil(escalated.reason)
+    }
+
+    func testOnlyAccountAccessHTTPStatusesUseDurableAccountState() {
+        XCTAssertTrue(ClaudeOAuthUsageClient.isAccountUnavailableStatus(402))
+        XCTAssertTrue(ClaudeOAuthUsageClient.isAccountUnavailableStatus(403))
+        for status in [400, 401, 404, 429, 500, 503] {
+            XCTAssertFalse(ClaudeOAuthUsageClient.isAccountUnavailableStatus(status), "HTTP \(status)")
+        }
+    }
+
     func testFailurePublicationAlarmingVerdictPassesThrough() {
         let p = ClaudeUsageSourceManager.failurePublication(verdict: .signedOut)
         XCTAssertEqual(p.authState, .signedOut)

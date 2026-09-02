@@ -82,6 +82,7 @@ enum ClaudeOAuthUsageClientError: Error {
     case httpError(Int)
     case decodingError(Error)
     case unauthorized           // 401 — token invalid/expired
+    case accountUnavailable     // 402/403 — signed in, but plan/account access is unavailable
     case rateLimited(retryAfter: TimeInterval)  // 429 — honor Retry-After
 }
 
@@ -99,6 +100,10 @@ actor ClaudeOAuthUsageClient {
 
     /// Resolved once at init from `claude --version`; falls back to a safe default.
     private let userAgent: String
+
+    nonisolated static func isAccountUnavailableStatus(_ statusCode: Int) -> Bool {
+        statusCode == 402 || statusCode == 403
+    }
 
     init() {
         let config = URLSessionConfiguration.ephemeral
@@ -176,6 +181,10 @@ actor ClaudeOAuthUsageClient {
             if http.statusCode == 401 {
                 os_log("ClaudeOAuth: 401 unauthorized", log: log, type: .info)
                 throw ClaudeOAuthUsageClientError.unauthorized
+            }
+            if Self.isAccountUnavailableStatus(http.statusCode) {
+                os_log("ClaudeOAuth: HTTP %d, account access unavailable", log: log, type: .info, http.statusCode)
+                throw ClaudeOAuthUsageClientError.accountUnavailable
             }
             if http.statusCode == 429 {
                 // Clamp to minimum 5 minutes — server sometimes returns 0 which

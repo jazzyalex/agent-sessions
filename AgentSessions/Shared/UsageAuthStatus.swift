@@ -5,7 +5,7 @@ enum AuthProvider: Equatable { case claude, codex
 }
 
 enum UsageAuthState: Equatable {
-    case ok, signedOut, expired, cliNotInstalled, needsSetup, unknown
+    case ok, signedOut, expired, accountUnavailable, cliNotInstalled, needsSetup, unknown
     /// Signed in, but the saved access token lapsed from inactivity (nothing
     /// refreshes it between sessions — only a real Claude session does). The
     /// account is fine and usage resumes on the next session, so this is calm
@@ -13,7 +13,7 @@ enum UsageAuthState: Equatable {
     case idle
     /// States that should raise the loud banner + one-shot notification.
     var isAlarming: Bool {
-        switch self { case .signedOut, .expired, .cliNotInstalled: return true
+        switch self { case .signedOut, .expired, .accountUnavailable, .cliNotInstalled: return true
         default: return false }
     }
 }
@@ -46,6 +46,7 @@ struct UsageAuthStatus: Equatable {
         switch state {
         case .signedOut: return "\(name) signed out"
         case .expired: return "\(name) auth expired"
+        case .accountUnavailable: return "\(name) plan inactive"
         case .cliNotInstalled: return "\(name) token needed"
         case .needsSetup: return "\(name) needs setup"
         // Idle renders via the dedicated calm cells (footer / HUD / menu bar),
@@ -112,6 +113,14 @@ struct UsageAuthStatus: Equatable {
                 headline: "Runway paused — \(name) session expired",
                 detail: "Your \(name) credentials expired. Run the command below to re-authenticate.",
                 providerName: name)
+        case .accountUnavailable:
+            return .init(
+                state: state,
+                remediation: .none,
+                headline: "Runway paused — \(name) account access unavailable",
+                detail: "The account is signed in, but it does not currently have access to \(name) usage. Check the account plan, or hide this provider from Quota Meter while tracking remains enabled.",
+                providerName: name
+            )
         case .cliNotInstalled:
             // CLI-less by definition. Claude → the ladder (drops the cancelled
             // in-app-sign-in promise the old copy carried); Codex → its install

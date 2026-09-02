@@ -37,7 +37,7 @@ final class AuthEpisodeStore {
     func shouldNotify(provider p: AuthProvider, state: UsageAuthState) -> Bool {
         let d = UserDefaults.standard
         switch state {
-        case .signedOut, .expired, .cliNotInstalled:
+        case .signedOut, .expired, .accountUnavailable, .cliNotInstalled:
             if d.bool(forKey: key(p)) { return false }   // already notified this episode
             d.set(true, forKey: key(p)); return true
         case .ok:

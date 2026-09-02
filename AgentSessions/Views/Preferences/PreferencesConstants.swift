@@ -22,6 +22,10 @@ enum PreferencesKey {
     static let usageDisplayMode = "UsageDisplayMode"
     static let quotaMeterRunwayVisibility = "QuotaMeterRunwayVisibility"
     static let quotaMeterRunwayPresentation = "QuotaMeterRunwayPresentation"
+    /// JSON array of stable `QuotaMeterProvider` IDs hidden only from the
+    /// standalone Quota Meter. Missing/empty means every supported provider is
+    /// shown, so providers added by a future release appear by default.
+    static let quotaMeterHiddenProviders = "QuotaMeterHiddenProviders"
     static let usageLimitNotificationsEnabled = "UsageLimitNotificationsEnabled"
     static let usageLimitNotificationVisualEnabled = "UsageLimitNotificationVisualEnabled"
     static let usageLimitNotificationSoundEnabled = "UsageLimitNotificationSoundEnabled"

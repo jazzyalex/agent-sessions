@@ -23,6 +23,12 @@ final class AuthStatusNotifierTests: XCTestCase {
         await n.onStatus(.make(provider: .claude, state: .expired), provider: .claude)
         XCTAssertEqual(g.posts, 1)
     }
+    func testAccountUnavailableUsesSameOneShotEpisode() async {
+        let g = FakeGate(); let n = AuthStatusNotifier(gate: g, store: store())
+        await n.onStatus(.make(provider: .claude, state: .accountUnavailable), provider: .claude)
+        await n.onStatus(.make(provider: .claude, state: .accountUnavailable), provider: .claude)
+        XCTAssertEqual(g.posts, 1)
+    }
     func testRecoveryThenSignedOutRefires() async {
         let g = FakeGate(); let st = store(); let n = AuthStatusNotifier(gate: g, store: st)
         await n.onStatus(.make(provider: .claude, state: .signedOut), provider: .claude)
