@@ -1057,6 +1057,18 @@ enum UsageLimitAlertWindow: String {
         case .weekly: return "weekly"
         }
     }
+
+    var localizedTitle: String {
+        switch self {
+        case .fiveHour:
+            return "5h"
+        case .weekly:
+            return String(
+                localized: "weekly",
+                comment: "Usage-limit window label interpolated into a complete notification sentence."
+            )
+        }
+    }
 }
 
 enum UsageLimitAlertKind {
@@ -1094,13 +1106,25 @@ struct UsageLimitAlertEvent: Equatable {
     var title: String {
         switch kind {
         case .approaching:
-            return "\(provider.title) \(window.title) usage is low"
+            return String(
+                localized: "\(provider.title) \(window.localizedTitle) usage is low",
+                comment: "Notification title shown when a provider usage window is approaching its configured alert threshold."
+            )
         case .projectedExhaustion:
-            return "\(provider.title) \(window.title) usage is burning fast"
+            return String(
+                localized: "\(provider.title) \(window.localizedTitle) usage is burning fast",
+                comment: "Notification title shown when a provider usage window is projected to exhaust soon."
+            )
         case .exhausted:
-            return "\(provider.title) \(window.title) limit is exhausted"
+            return String(
+                localized: "\(provider.title) \(window.localizedTitle) limit is exhausted",
+                comment: "Notification title shown when a provider usage window is exhausted."
+            )
         case .resetComplete:
-            return "\(provider.title) 5h is back again"
+            return String(
+                localized: "\(provider.title) 5h is back again",
+                comment: "Notification title shown when a provider five-hour usage window resets."
+            )
         }
     }
 
@@ -1121,12 +1145,21 @@ struct UsageLimitAlertEvent: Equatable {
                 projectedSecondsUntilEmpty: projectedSecondsUntilEmpty
             )
         case .exhausted:
-            if let resetText = Self.formatResetETA(resetDate) {
-                return "0% remaining. Reset \(resetText)."
+            if let resetDuration = Self.resetDuration(resetDate) {
+                return String(
+                    localized: "0% remaining. Reset in \(resetDuration).",
+                    comment: "Notification body shown for an exhausted usage window with a reset estimate."
+                )
             }
-            return "0% remaining."
+            return String(
+                localized: "0% remaining.",
+                comment: "Notification body shown for an exhausted usage window without a reset estimate."
+            )
         case .resetComplete:
-            return "The 5h limit window has reset."
+            return String(
+                localized: "The 5h limit window has reset.",
+                comment: "Notification body shown when a provider five-hour usage window resets."
+            )
         }
     }
 
@@ -1134,27 +1167,36 @@ struct UsageLimitAlertEvent: Equatable {
                                           window: UsageLimitAlertWindow,
                                           resetDate: Date?,
                                           projectedSecondsUntilEmpty: TimeInterval?) -> String {
-        var parts = ["\(remainingPercent)% remaining"]
-        if let projectedSecondsUntilEmpty {
-            parts.append("burning to empty in \(formatProjectionETA(projectedSecondsUntilEmpty))")
-        } else {
-            parts.append("for the \(window.title) limit")
+        let resetDuration = resetDuration(resetDate)
+        switch (projectedSecondsUntilEmpty, resetDuration) {
+        case let (.some(projectedSeconds), .some(resetDuration)):
+            return String(
+                localized: "\(remainingPercent)% remaining, burning to empty in about \(formatDuration(projectedSeconds)), reset in \(resetDuration).",
+                comment: "Complete notification body for a usage window with a burn projection and reset estimate."
+            )
+        case let (.some(projectedSeconds), .none):
+            return String(
+                localized: "\(remainingPercent)% remaining, burning to empty in about \(formatDuration(projectedSeconds)).",
+                comment: "Complete notification body for a usage window with a burn projection and no reset estimate."
+            )
+        case let (.none, .some(resetDuration)):
+            return String(
+                localized: "\(remainingPercent)% remaining, for the \(window.localizedTitle) limit, reset in \(resetDuration).",
+                comment: "Complete notification body for a usage window with a reset estimate and no burn projection."
+            )
+        case (.none, .none):
+            return String(
+                localized: "\(remainingPercent)% remaining, for the \(window.localizedTitle) limit.",
+                comment: "Complete notification body for a usage window with no projection or reset estimate."
+            )
         }
-        if let resetText = formatResetETA(resetDate) {
-            parts.append("reset \(resetText)")
-        }
-        return parts.joined(separator: ", ") + "."
     }
 
-    private static func formatResetETA(_ resetDate: Date?) -> String? {
+    private static func resetDuration(_ resetDate: Date?) -> String? {
         guard let resetDate else { return nil }
         let seconds = resetDate.timeIntervalSince(Date())
         guard seconds > 0 else { return nil }
-        return "in \(formatDuration(seconds))"
-    }
-
-    private static func formatProjectionETA(_ seconds: TimeInterval) -> String {
-        "about \(formatDuration(seconds))"
+        return formatDuration(seconds)
     }
 
     private static func formatDuration(_ seconds: TimeInterval) -> String {

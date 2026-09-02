@@ -125,6 +125,9 @@ New Swift files must be added with `scripts/xcode_add_file.rb`; the source guide
 the exact commands. Do not hand-edit the Xcode project unless the guide explicitly requires
 it.
 
+For interface translations, follow the [localization conventions](localization.md). They
+define catalog ownership, stable identifiers, translator context, validation, and PR scope.
+
 ## Testing your source against your own sessions
 
 A green build and a green suite prove the code compiles and the fixtures parse. They do not

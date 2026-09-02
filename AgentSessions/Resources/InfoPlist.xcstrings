@@ -1,0 +1,72 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "The name shown by Finder and system UI. Keep Agent Sessions unchanged as the product name.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions"
+          }
+        }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "The short bundle name used by system UI. Keep Agent Sessions unchanged as the product name.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions"
+          }
+        }
+      }
+    },
+    "NSAppleEventsUsageDescription" : {
+      "comment" : "Why the app requests Apple Events access to resume sessions in Terminal.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions controls Terminal to resume Codex sessions on your behalf."
+          }
+        }
+      }
+    },
+    "NSDownloadsFolderUsageDescription" : {
+      "comment" : "Why the app requests Downloads access for exported artifacts.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions saves exported images and terminal recordings to your Downloads folder."
+          }
+        }
+      }
+    },
+    "NSDesktopFolderUsageDescription" : {
+      "comment" : "Why the app requests Desktop access for session files.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions needs access to read session files in this location."
+          }
+        }
+      }
+    },
+    "NSDocumentsFolderUsageDescription" : {
+      "comment" : "Why the app requests Documents access for session files.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions needs access to read session files in this location."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

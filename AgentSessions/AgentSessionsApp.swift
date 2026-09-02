@@ -32,27 +32,31 @@ struct PendingCockpitNavigationRequest {
 }
 
 enum AppWindowRouter {
+    /// Historical SwiftUI scene identifier used by openWindow(id:). Treat the
+    /// value as opaque program identity even though it matches the English title.
+    static let mainWindowSceneIdentifier = "Agent Sessions"
+
+    /// Stable AppKit window identifier used by routing and close observers.
+    /// This is deliberately independent from the localized window title.
+    static let mainWindowIdentifier = "AgentSessionsMainWindow"
+    static let savedSessionsWindowIdentifier = "PinnedSessions"
+    static let cockpitWindowIdentifier = "AgentCockpit"
+
     @MainActor static var openAgentSessionsWindow: (() -> Void)?
     @MainActor static var openAgentCockpitWindow: (() -> Void)?
     @MainActor private static var didAttemptPinnedCockpitLaunchRestore: Bool = false
-
-    @MainActor private static func existingWindow(title: String, identifier: String? = nil) -> NSWindow? {
-        if let identifier {
-            if let identifiedWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == identifier }) {
-                return identifiedWindow
-            }
-        }
-
-        return NSApp.windows.first(where: { $0.title == title })
-    }
 
     @MainActor private static func existingWindow(identifier: String) -> NSWindow? {
         NSApp.windows.first(where: { $0.identifier?.rawValue == identifier })
     }
 
+    static func isAgentSessionsWindow(_ window: NSWindow) -> Bool {
+        window.identifier?.rawValue == mainWindowIdentifier
+    }
+
     @MainActor static func showAgentSessionsWindow() {
         NSApp.activate(ignoringOtherApps: true)
-        if let main = existingWindow(title: "Agent Sessions") {
+        if let main = existingWindow(identifier: mainWindowIdentifier) {
             main.makeKeyAndOrderFront(nil)
             return
         }
@@ -63,16 +67,16 @@ enum AppWindowRouter {
     }
 
     @MainActor static var isAgentSessionsWindowVisible: Bool {
-        existingWindow(title: "Agent Sessions")?.isVisible ?? false
+        existingWindow(identifier: mainWindowIdentifier)?.isVisible ?? false
     }
 
     @MainActor static func closeAgentSessionsWindow() {
-        existingWindow(title: "Agent Sessions")?.close()
+        existingWindow(identifier: mainWindowIdentifier)?.close()
     }
 
     @MainActor static func showAgentCockpitWindow() {
         NSApp.activate(ignoringOtherApps: true)
-        if let cockpit = existingWindow(identifier: "AgentCockpit") {
+        if let cockpit = existingWindow(identifier: cockpitWindowIdentifier) {
             cockpit.makeKeyAndOrderFront(nil)
             return
         }
@@ -83,11 +87,11 @@ enum AppWindowRouter {
     }
 
     @MainActor static var isAgentCockpitWindowVisible: Bool {
-        existingWindow(identifier: "AgentCockpit")?.isVisible ?? false
+        existingWindow(identifier: cockpitWindowIdentifier)?.isVisible ?? false
     }
 
     @MainActor static func closeAgentCockpitWindow() {
-        existingWindow(identifier: "AgentCockpit")?.close()
+        existingWindow(identifier: cockpitWindowIdentifier)?.close()
     }
 
     @MainActor
@@ -103,7 +107,7 @@ enum AppWindowRouter {
         didAttemptPinnedCockpitLaunchRestore = true
         guard !AppRuntime.isRunningTests else { return }
         guard shouldRestorePinnedCockpitOnLaunch() else { return }
-        guard existingWindow(identifier: "AgentCockpit") == nil else { return }
+        guard existingWindow(identifier: cockpitWindowIdentifier) == nil else { return }
         openWindow()
     }
 }
@@ -305,7 +309,7 @@ struct AgentSessionsApp: App {
         .environmentObject(updaterController)
         .environmentObject(onboardingCoordinator)
         .background(WindowAutosave(name: "MainWindow"))
-        .background(WindowOpenRegistrationView())
+        .background(WindowOpenRegistrationView(windowIdentifier: AppWindowRouter.mainWindowIdentifier))
         .onAppear {
             runSharedLaunchBootstrap(windowLabel: "Unified main window")
         }
@@ -373,7 +377,7 @@ struct AgentSessionsApp: App {
 
     var body: some Scene {
         // Default unified window
-        WindowGroup("Agent Sessions", id: "Agent Sessions") {
+        WindowGroup("Agent Sessions", id: AppWindowRouter.mainWindowSceneIdentifier) {
             unifiedWindowRoot
         }
         .commands {
@@ -442,7 +446,7 @@ struct AgentSessionsApp: App {
             }
         }
 
-        WindowGroup("Saved Sessions", id: "PinnedSessions") {
+        WindowGroup("Saved Sessions", id: AppWindowRouter.savedSessionsWindowIdentifier) {
             if AppRuntime.isRunningTests {
                 EmptyView()
             } else {
@@ -450,14 +454,14 @@ struct AgentSessionsApp: App {
                     unified: unifiedIndexerHolder.makeUnified(catalog: catalog)
                 )
                 .environmentObject(archiveManager)
-                .background(WindowOpenRegistrationView())
+                .background(WindowOpenRegistrationView(windowIdentifier: AppWindowRouter.savedSessionsWindowIdentifier))
                 .onAppear {
                     runSharedLaunchBootstrap(windowLabel: "Saved Sessions window")
                 }
             }
         }
 
-        Window("Quota Meter", id: "AgentCockpit") {
+        Window("Quota Meter", id: AppWindowRouter.cockpitWindowIdentifier) {
             if AppRuntime.isRunningTests {
                 EmptyView()
             } else {
@@ -469,7 +473,7 @@ struct AgentSessionsApp: App {
                 .environment(activeCodexSessions)
                 .environmentObject(codexUsageModel)
                 .environmentObject(claudeUsageModel)
-                .background(WindowOpenRegistrationView())
+                .background(WindowOpenRegistrationView(windowIdentifier: AppWindowRouter.cockpitWindowIdentifier))
                 .onAppear {
                     runSharedLaunchBootstrap(windowLabel: "Agent Cockpit window")
                     // Retires the Quota Meter card's audience test: usage
@@ -642,7 +646,10 @@ final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         let item = NSMenuItem(
-            title: "Hide Dock Icon",
+            title: String(
+                localized: "Hide Dock Icon",
+                comment: "Dock menu action that hides the app icon while leaving the menu bar item available."
+            ),
             action: #selector(toggleDockIconHiddenFromDockMenu),
             keyEquivalent: ""
         )
@@ -658,8 +665,6 @@ final class AgentSessionsApplicationDelegate: NSObject, NSApplicationDelegate {
 
 
 extension AgentSessionsApp {
-    private static let mainUnifiedWindowTitle = "Agent Sessions"
-
     private static let crashSupportRecipient = "jazzyalex@gmail.com"
     private static let crashIssueURL = URL(string: "https://github.com/jazzyalex/agent-sessions/issues/new?title=Crash%20Report&body=Please%20attach%20the%20exported%20crash%20report%20JSON%20file%20and%20steps%20to%20reproduce.")!
 
@@ -811,12 +816,15 @@ extension AgentSessionsApp {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Analytics Is Now On Demand"
-        alert.informativeText = """
-        Agent Sessions now prioritizes Unified and Cockpit responsiveness.
-        Analytics indexing starts only when you open Analytics and press Build.
-        """
-        alert.addButton(withTitle: "OK")
+        alert.messageText = String(
+            localized: "Analytics Is Now On Demand",
+            comment: "Informational alert title shown once after analytics became explicitly user-triggered."
+        )
+        alert.informativeText = String(
+            localized: "Agent Sessions now prioritizes Unified and Cockpit responsiveness.\nAnalytics indexing starts only when you open Analytics and press Build.",
+            comment: "Informational alert body. Keep the two sentences and line break together."
+        )
+        alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in an informational alert."))
         _ = alert.runModal()
     }
 
@@ -849,7 +857,7 @@ extension AgentSessionsApp {
 
         let unifiedHolder = unifiedIndexerHolder
         let isMainUnifiedWindow: (NSWindow) -> Bool = { window in
-            window.title == Self.mainUnifiedWindowTitle
+            AppWindowRouter.isAgentSessionsWindow(window)
         }
 
         mainWindowCloseObserver = NotificationCenter.default.addObserver(
@@ -1196,18 +1204,57 @@ extension AgentSessionsApp {
     }
 }
 
+private struct WindowIdentifierRegistration: NSViewRepresentable {
+    let identifier: String
+
+    func makeNSView(context: Context) -> WindowIdentifierView {
+        WindowIdentifierView(identifier: identifier)
+    }
+
+    func updateNSView(_ nsView: WindowIdentifierView, context: Context) {
+        nsView.applyIdentifier(identifier)
+    }
+}
+
+final class WindowIdentifierView: NSView {
+    private var identifierValue: String
+
+    init(identifier: String) {
+        identifierValue = identifier
+        super.init(frame: .zero)
+        applyIdentifier(identifier)
+    }
+
+    required init?(coder: NSCoder) {
+        identifierValue = ""
+        super.init(coder: coder)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyIdentifier(identifierValue)
+    }
+
+    func applyIdentifier(_ identifier: String) {
+        identifierValue = identifier
+        window?.identifier = NSUserInterfaceItemIdentifier(identifier)
+    }
+}
+
 private struct WindowOpenRegistrationView: View {
+    let windowIdentifier: String
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
+            .background(WindowIdentifierRegistration(identifier: windowIdentifier))
             .onAppear {
                 AppWindowRouter.openAgentSessionsWindow = {
-                    openWindow(id: "Agent Sessions")
+                    openWindow(id: AppWindowRouter.mainWindowSceneIdentifier)
                 }
                 let openCockpitWindow = {
-                    openWindow(id: "AgentCockpit")
+                    openWindow(id: AppWindowRouter.cockpitWindowIdentifier)
                 }
                 AppWindowRouter.openAgentCockpitWindow = {
                     openCockpitWindow()

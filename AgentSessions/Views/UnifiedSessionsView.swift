@@ -709,7 +709,7 @@ struct UnifiedSessionsView: View {
 						setActiveSelection(id, source: source, userInitiated: true)
 						CodexImagesWindowController.shared.sendToBack()
 					NSApp.activate(ignoringOtherApps: true)
-					if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
+					if let main = NSApp.windows.first(where: { $0.isVisible && AppWindowRouter.isAgentSessionsWindow($0) }) ?? NSApp.mainWindow {
 						main.makeKeyAndOrderFront(nil)
 					}
 					DispatchQueue.main.async {
@@ -2434,7 +2434,7 @@ struct UnifiedSessionsView: View {
         CockpitNavigationBridge.clearIfMatching(unifiedSessionID: target.unifiedSessionID)
 
         NSApp.activate(ignoringOtherApps: true)
-        if let main = NSApp.windows.first(where: { $0.isVisible && $0.title == "Agent Sessions" }) ?? NSApp.mainWindow {
+		if let main = NSApp.windows.first(where: { $0.isVisible && AppWindowRouter.isAgentSessionsWindow($0) }) ?? NSApp.mainWindow {
             main.makeKeyAndOrderFront(nil)
         }
         return true

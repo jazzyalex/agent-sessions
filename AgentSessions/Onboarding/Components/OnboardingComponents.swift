@@ -5,14 +5,62 @@ import AppKit
 // What's New panel/card, feedback prompt) and the legacy Power Tips renderer.
 // Extracted from OnboardingSheetView so the surfaces stay visually consistent.
 
+/// Text at a shared onboarding boundary. Static product copy uses a
+/// LocalizedStringResource; imported What's New data remains verbatim user-facing
+/// content until that catalog is migrated deliberately.
+enum OnboardingText {
+    case localized(LocalizedStringResource)
+    case verbatim(String)
+
+    @ViewBuilder
+    func makeView() -> some View {
+        switch self {
+        case .localized(let resource):
+            Text(resource)
+        case .verbatim(let value):
+            Text(verbatim: value)
+        }
+    }
+}
+
 // MARK: - Feature / tip rows
 
 struct FeatureRow: View {
     let palette: OnboardingPalette
     let icon: String
     let iconColor: Color
-    let title: String
-    let description: String
+    let title: OnboardingText
+    let description: OnboardingText
+
+    init(
+        palette: OnboardingPalette,
+        icon: String,
+        iconColor: Color,
+        title: LocalizedStringResource,
+        description: LocalizedStringResource
+    ) {
+        self.palette = palette
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = .localized(title)
+        self.description = .localized(description)
+    }
+
+    /// Legacy What's New content is deliberately rendered verbatim. It is not
+    /// converted into a runtime localization key.
+    init(
+        palette: OnboardingPalette,
+        icon: String,
+        iconColor: Color,
+        verbatimTitle: String,
+        verbatimDescription: String
+    ) {
+        self.palette = palette
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = .verbatim(verbatimTitle)
+        self.description = .verbatim(verbatimDescription)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -26,10 +74,10 @@ struct FeatureRow: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+                title.makeView()
                     .font(.system(size: 14, weight: .semibold, design: .default))
                     .foregroundStyle(.primary)
-                Text(description)
+                description.makeView()
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(.secondary)
             }
@@ -50,7 +98,7 @@ struct FeatureRow: View {
 }
 
 struct TipBox: View {
-    let text: String
+    let text: LocalizedStringResource
     let palette: OnboardingPalette
 
     var body: some View {
@@ -192,14 +240,14 @@ struct SlideHeader: View {
     let palette: OnboardingPalette
     let icon: SlideIcon
     let iconGradient: LinearGradient
-    let title: String?
-    let subtitle: String
+    let title: LocalizedStringResource?
+    let subtitle: LocalizedStringResource
 
     var body: some View {
         VStack(spacing: 10) {
             SlideIconView(icon: icon, gradient: iconGradient, palette: palette)
 
-            if let title, !title.isEmpty {
+            if let title {
                 Text(title)
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)

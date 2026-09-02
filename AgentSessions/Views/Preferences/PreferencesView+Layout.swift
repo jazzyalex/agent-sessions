@@ -3,10 +3,10 @@ import SwiftUI
 let labelColumnWidth: CGFloat = 170
 
 struct PreferenceKeyValueRow<Content: View>: View {
-    let label: String
+    let label: LocalizedStringResource
     let content: Content
 
-    init(label: String, @ViewBuilder content: () -> Content) {
+    init(label: LocalizedStringResource, @ViewBuilder content: () -> Content) {
         self.label = label
         self.content = content()
     }
@@ -52,7 +52,7 @@ struct PreferenceCallout<Content: View>: View {
 
 extension PreferencesView {
     // Shared toggle row for label + switch alignment
-    func toggleRow(_ label: String, isOn: Binding<Bool>, help: String) -> some View {
+    func toggleRow(_ label: LocalizedStringResource, isOn: Binding<Bool>, help: LocalizedStringResource) -> some View {
         HStack(spacing: 16) {
             Text(label)
                 .frame(width: labelColumnWidth, alignment: .leading)
@@ -60,15 +60,15 @@ extension PreferencesView {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text(label))
-                .help(help)
+                .help(Text(help))
         }
     }
 
-    func labeledRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+    func labeledRow<Content: View>(_ label: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
         PreferenceKeyValueRow(label: label, content: content)
     }
 
-    func sectionHeader(_ title: String) -> some View {
+    func sectionHeader(_ title: LocalizedStringResource) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.headline)

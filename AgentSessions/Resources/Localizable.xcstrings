@@ -1,0 +1,1442 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ %@ limit is exhausted": {
+      "comment": "Notification title shown when a provider usage window is exhausted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@ limit is exhausted"
+          }
+        }
+      }
+    },
+    "%@ %@ usage is burning fast": {
+      "comment": "Notification title shown when a provider usage window is projected to exhaust soon.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@ usage is burning fast"
+          }
+        }
+      }
+    },
+    "%@ %@ usage is low": {
+      "comment": "Notification title shown when a provider usage window is approaching its configured alert threshold.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@ usage is low"
+          }
+        }
+      }
+    },
+    "%@ 5h is back again": {
+      "comment": "Notification title shown when a provider five-hour usage window resets.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 5h is back again"
+          }
+        }
+      }
+    },
+    "%lld%% remaining, burning to empty in about %@, reset in %@.": {
+      "comment": "Complete notification body for a usage window with a burn projection and reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld%% remaining, burning to empty in about %2$@, reset in %3$@."
+          }
+        }
+      }
+    },
+    "%lld%% remaining, burning to empty in about %@.": {
+      "comment": "Complete notification body for a usage window with a burn projection and no reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld%% remaining, burning to empty in about %2$@."
+          }
+        }
+      }
+    },
+    "%lld%% remaining, for the %@ limit, reset in %@.": {
+      "comment": "Complete notification body for a usage window with a reset estimate and no burn projection.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld%% remaining, for the %2$@ limit, reset in %3$@."
+          }
+        }
+      }
+    },
+    "%lld%% remaining, for the %@ limit.": {
+      "comment": "Complete notification body for a usage window with no projection or reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld%% remaining, for the %2$@ limit."
+          }
+        }
+      }
+    },
+    "0% remaining.": {
+      "comment": "Notification body shown for an exhausted usage window without a reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0% remaining."
+          }
+        }
+      }
+    },
+    "0%% remaining. Reset in %@.": {
+      "comment": "Notification body shown for an exhausted usage window with a reset estimate.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "0%% remaining. Reset in %@."
+          }
+        }
+      }
+    },
+    "A couple of useful settings are easy to miss.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A couple of useful settings are easy to miss."
+          }
+        }
+      }
+    },
+    "About Agent Sessions": {
+      "comment": "App menu item that opens the About tab.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About Agent Sessions"
+          }
+        }
+      }
+    },
+    "Adjust text size": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust text size"
+          }
+        }
+      }
+    },
+    "Agent Sessions": {
+      "comment": "Product name shown in app-owned UI; keep the product name unchanged.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions"
+          }
+        }
+      }
+    },
+    "Agent Sessions can combine multiple local agent histories.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions can combine multiple local agent histories."
+          }
+        }
+      }
+    },
+    "Agent Sessions now prioritizes Unified and Cockpit responsiveness.\nAnalytics indexing starts only when you open Analytics and press Build.": {
+      "comment": "Informational alert body. Keep the two sentences and line break together.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions now prioritizes Unified and Cockpit responsiveness.\nAnalytics indexing starts only when you open Analytics and press Build."
+          }
+        }
+      }
+    },
+    "Agent Sources": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sources"
+          }
+        }
+      }
+    },
+    "Analytics Is Now On Demand": {
+      "comment": "Informational alert title shown once after analytics became explicitly user-triggered.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analytics Is Now On Demand"
+          }
+        }
+      }
+    },
+    "Archived Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archived Sessions"
+          }
+        }
+      }
+    },
+    "Back": {
+      "comment": "Power Tips navigation button that moves to the previous screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        }
+      }
+    },
+    "Browse one unified list": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Browse one unified list"
+          }
+        }
+      }
+    },
+    "Change transcript view": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change transcript view"
+          }
+        }
+      }
+    },
+    "Check for Updates…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for Updates…"
+          }
+        }
+      }
+    },
+    "Choose active agents": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose active agents"
+          }
+        }
+      }
+    },
+    "Claude Code workflows stay readable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code workflows stay readable."
+          }
+        }
+      }
+    },
+    "Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions.": {
+      "comment": "Power Tip description. Keep Command-1 unchanged as the literal keyboard shortcut.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click the archive icon on the Codex filter (Command-1) to narrow to archived Desktop sessions."
+          }
+        }
+      }
+    },
+    "Cockpit Workflow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cockpit Workflow"
+          }
+        }
+      }
+    },
+    "Cockpit rows expose useful session context.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cockpit rows expose useful session context."
+          }
+        }
+      }
+    },
+    "Codex Desktop side chats are recoverable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex Desktop side chats are recoverable."
+          }
+        }
+      }
+    },
+    "Collapse All": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse All"
+          }
+        }
+      }
+    },
+    "Copy Resume Command gives you the CLI command without launching it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Resume Command gives you the CLI command without launching it."
+          }
+        }
+      }
+    },
+    "Copy Session ID on a side chat copies its parent thread ID.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Session ID on a side chat copies its parent thread ID."
+          }
+        }
+      }
+    },
+    "Copy exact commands": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy exact commands"
+          }
+        }
+      }
+    },
+    "Copy the transcript": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the transcript"
+          }
+        }
+      }
+    },
+    "Disable unused providers from Settings so they stay out of filters.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable unused providers from Settings so they stay out of filters."
+          }
+        }
+      }
+    },
+    "Done": {
+      "comment": "Power Tips navigation button shown on the final screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        }
+      }
+    },
+    "Double-click project names in the session list.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double-click project names in the session list."
+          }
+        }
+      }
+    },
+    "Enable live session detection (Beta) in Settings → Quota Meter.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable live session detection (Beta) in Settings → Quota Meter."
+          }
+        }
+      }
+    },
+    "Enable usage strips": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable usage strips"
+          }
+        }
+      }
+    },
+    "Expand All": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand All"
+          }
+        }
+      }
+    },
+    "Export as Markdown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export as Markdown"
+          }
+        }
+      }
+    },
+    "Filter by project": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter by project"
+          }
+        }
+      }
+    },
+    "Filter to favorites": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter to favorites"
+          }
+        }
+      }
+    },
+    "Filter to side chats": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter to side chats"
+          }
+        }
+      }
+    },
+    "Filters keep the session list focused.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filters keep the session list focused."
+          }
+        }
+      }
+    },
+    "Find in Transcript…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find in Transcript…"
+          }
+        }
+      }
+    },
+    "Find the parent thread": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find the parent thread"
+          }
+        }
+      }
+    },
+    "Focus a live agent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Focus a live agent"
+          }
+        }
+      }
+    },
+    "Hide Dock Icon": {
+      "comment": "Dock menu action that hides the app icon while leaving the menu bar item available.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Dock Icon"
+          }
+        }
+      }
+    },
+    "Hide noisy sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide noisy sessions"
+          }
+        }
+      }
+    },
+    "Hide the Dock icon": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide the Dock icon"
+          }
+        }
+      }
+    },
+    "Image Browser": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image Browser"
+          }
+        }
+      }
+    },
+    "Image-heavy sessions have dedicated navigation.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image-heavy sessions have dedicated navigation."
+          }
+        }
+      }
+    },
+    "Images": {
+      "comment": "Transcript toolbar control that jumps between image prompts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images"
+          }
+        }
+      }
+    },
+    "Jump image prompts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump image prompts"
+          }
+        }
+      }
+    },
+    "Jump to the repo folder for the active agent session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jump to the repo folder for the active agent session."
+          }
+        }
+      }
+    },
+    "Keep Agent Cockpit in a screen corner so active and waiting sessions stay visible.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Agent Cockpit in a screen corner so active and waiting sessions stay visible."
+          }
+        }
+      }
+    },
+    "Keep important sessions easy to find.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep important sessions easy to find."
+          }
+        }
+      }
+    },
+    "Keep live agent work visible without switching terminal tabs.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep live agent work visible without switching terminal tabs."
+          }
+        }
+      }
+    },
+    "Keep usage state visible without opening the main window.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep usage state visible without opening the main window."
+          }
+        }
+      }
+    },
+    "Later": {
+      "comment": "Power Tips button that dismisses the tour for now.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        }
+      }
+    },
+    "Live Session Context": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Session Context"
+          }
+        }
+      }
+    },
+    "Long transcripts are easier with keyboard controls.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Long transcripts are easier with keyboard controls."
+          }
+        }
+      }
+    },
+    "Move through matches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move through matches"
+          }
+        }
+      }
+    },
+    "Next": {
+      "comment": "Power Tips navigation button that moves to the next screen.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next"
+          }
+        }
+      }
+    },
+    "OK": {
+      "comment": "Confirmation button in an informational alert.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Old Desktop sessions stay reachable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Old Desktop sessions stay reachable."
+          }
+        }
+      }
+    },
+    "Only enable the providers you use.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only enable the providers you use."
+          }
+        }
+      }
+    },
+    "Open Image Browser": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Image Browser"
+          }
+        }
+      }
+    },
+    "Open View > Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open View > Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+          }
+        }
+      }
+    },
+    "Open the session log in Finder from a live Cockpit row.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the session log in Finder from a live Cockpit row."
+          }
+        }
+      }
+    },
+    "Open the working directory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the working directory"
+          }
+        }
+      }
+    },
+    "Pin Cockpit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin Cockpit"
+          }
+        }
+      }
+    },
+    "Power Tips": {
+      "comment": "Title of the Power Tips onboarding tour.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power Tips"
+          }
+        }
+      }
+    },
+    "Quick Navigation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick Navigation"
+          }
+        }
+      }
+    },
+    "Quota Meter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quota Meter"
+          }
+        }
+      }
+    },
+    "Reading Controls": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading Controls"
+          }
+        }
+      }
+    },
+    "Reduce Noise": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reduce Noise"
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "comment": "Button that refreshes the current session or usage data.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        }
+      }
+    },
+    "Reopen from Help → Power Tips": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reopen from Help → Power Tips"
+          }
+        }
+      }
+    },
+    "Reopen them later from Saved Sessions.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reopen them later from Saved Sessions."
+          }
+        }
+      }
+    },
+    "Restore Claude archives": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Claude archives"
+          }
+        }
+      }
+    },
+    "Resume Work": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume Work"
+          }
+        }
+      }
+    },
+    "Resume past work": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume past work"
+          }
+        }
+      }
+    },
+    "Resume the parent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume the parent"
+          }
+        }
+      }
+    },
+    "Resuming a workflow child resolves to its parent session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resuming a workflow child resolves to its parent session."
+          }
+        }
+      }
+    },
+    "Return to past agent sessions from the session list.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Return to past agent sessions from the session list."
+          }
+        }
+      }
+    },
+    "Reveal the log": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal the log"
+          }
+        }
+      }
+    },
+    "Review images embedded in sessions.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review images embedded in sessions."
+          }
+        }
+      }
+    },
+    "Right-click supported sessions to continue where you left off.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Right-click supported sessions to continue where you left off."
+          }
+        }
+      }
+    },
+    "Save a session transcript when you need to keep or share it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save a session transcript when you need to keep or share it."
+          }
+        }
+      }
+    },
+    "Saved Only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved Only"
+          }
+        }
+      }
+    },
+    "Saved Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved Sessions"
+          }
+        }
+      }
+    },
+    "Search": {
+      "comment": "Label for the app's session search surface.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        }
+      }
+    },
+    "Search Codex archives": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Codex archives"
+          }
+        }
+      }
+    },
+    "Search Faster": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Faster"
+          }
+        }
+      }
+    },
+    "Search Sessions…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Sessions…"
+          }
+        }
+      }
+    },
+    "Search across sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search across sessions"
+          }
+        }
+      }
+    },
+    "Search inside one session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search inside one session"
+          }
+        }
+      }
+    },
+    "Settings can hide zero-message, low-message, housekeeping, or probe sessions.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings can hide zero-message, low-message, housekeeping, or probe sessions."
+          }
+        }
+      }
+    },
+    "Settings…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings…"
+          }
+        }
+      }
+    },
+    "Show Onboarding": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Onboarding"
+          }
+        }
+      }
+    },
+    "Show command sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show command sessions"
+          }
+        }
+      }
+    },
+    "Show or hide the Quota Meter.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show or hide the Quota Meter."
+          }
+        }
+      }
+    },
+    "Side Chats": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Side Chats"
+          }
+        }
+      }
+    },
+    "Small shortcuts help when scanning lots of history.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Small shortcuts help when scanning lots of history."
+          }
+        }
+      }
+    },
+    "Spot fan-out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spot fan-out"
+          }
+        }
+      }
+    },
+    "Star important sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Star important sessions"
+          }
+        }
+      }
+    },
+    "Step %lld of %lld": {
+      "comment": "Power Tips progress label. The first value is the current step and the second is the total number of steps.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "Switch between Session, Text, and JSON views for readability or raw structure.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch between Session, Text, and JSON views for readability or raw structure."
+          }
+        }
+      }
+    },
+    "Switch views depending on what you need.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch views depending on what you need."
+          }
+        }
+      }
+    },
+    "The 5h limit window has reset.": {
+      "comment": "Notification body shown when a provider five-hour usage window resets.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The 5h limit window has reset."
+          }
+        }
+      }
+    },
+    "Toggle Dark/Light": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle Dark/Light"
+          }
+        }
+      }
+    },
+    "Track Codex and Claude rate-limit state in the app.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Track Codex and Claude rate-limit state in the app."
+          }
+        }
+      }
+    },
+    "Transcript Tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript Tools"
+          }
+        }
+      }
+    },
+    "Transcript Window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcript Window"
+          }
+        }
+      }
+    },
+    "Turn it on from Settings > Advanced. Agent Sessions keeps the menu bar item enabled so the app remains reachable.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn it on from Settings > Advanced. Agent Sessions keeps the menu bar item enabled so the app remains reachable."
+          }
+        }
+      }
+    },
+    "Usage Limits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage Limits"
+          }
+        }
+      }
+    },
+    "Usage surfaces can stay visible while agents run.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usage surfaces can stay visible while agents run."
+          }
+        }
+      }
+    },
+    "Use #side, or #side phrase to search within them.": {
+      "comment": "Power Tip description. Keep both #side occurrences unchanged as literal search operators.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use #side, or #side phrase to search within them."
+          }
+        }
+      }
+    },
+    "Use Agent Cockpit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Agent Cockpit"
+          }
+        }
+      }
+    },
+    "Use Back and Next to move through the Power Tips tour.": {
+      "comment": "Help text at the bottom of the Power Tips onboarding tour.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Back and Next to move through the Power Tips tour."
+          }
+        }
+      }
+    },
+    "Use Command-F while reading a transcript.": {
+      "comment": "Power Tip description. Keep Command-F unchanged as the literal keyboard shortcut.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Command-F while reading a transcript."
+          }
+        }
+      }
+    },
+    "Use Command-G and Shift-Command-G after searching a transcript.": {
+      "comment": "Power Tip description. Keep Command-G and Shift-Command-G unchanged as literal keyboard shortcuts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Command-G and Shift-Command-G after searching a transcript."
+          }
+        }
+      }
+    },
+    "Use Command-Plus and Command-Minus while reading.": {
+      "comment": "Power Tip description. Keep Command-Plus and Command-Minus unchanged as literal keyboard shortcuts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Command-Plus and Command-Minus while reading."
+          }
+        }
+      }
+    },
+    "Use Focus in iTerm2 from Cockpit when you need to jump back to a running agent.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Focus in iTerm2 from Cockpit when you need to jump back to a running agent."
+          }
+        }
+      }
+    },
+    "Use System Appearance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use System Appearance"
+          }
+        }
+      }
+    },
+    "Use Unified Search with Option-Command-F.": {
+      "comment": "Power Tip description. Keep Option-Command-F unchanged as the literal keyboard shortcut.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Unified Search with Option-Command-F."
+          }
+        }
+      }
+    },
+    "Use favorites-only mode when you want a short working set.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use favorites-only mode when you want a short working set."
+          }
+        }
+      }
+    },
+    "Use menu bar meters": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use menu bar meters"
+          }
+        }
+      }
+    },
+    "Use the Images control in a transcript to move between image prompts.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the Images control in a transcript to move between image prompts."
+          }
+        }
+      }
+    },
+    "Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript.": {
+      "comment": "Power Tip description. Keep Claude and Command-2 unchanged as literal product and keyboard shortcut names.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the archive icon on the Claude filter (Command-2), then restore in place from the transcript."
+          }
+        }
+      }
+    },
+    "Use the commands-only filter to focus on sessions that ran tools or shell commands.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the commands-only filter to focus on sessions that ran tools or shell commands."
+          }
+        }
+      }
+    },
+    "Use the transcript toolbar to copy the full session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the transcript toolbar to copy the full session."
+          }
+        }
+      }
+    },
+    "Use the two search surfaces for different jobs.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the two search surfaces for different jobs."
+          }
+        }
+      }
+    },
+    "View": {
+      "comment": "Menu title containing commands for changing the visible app surface.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View"
+          }
+        }
+      }
+    },
+    "What's New": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What's New"
+          }
+        }
+      }
+    },
+    "Workflow Subagents": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workflow Subagents"
+          }
+        }
+      }
+    },
+    "Workflow subagents nest under the session that launched them with a workflow badge.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Workflow subagents nest under the session that launched them with a workflow badge."
+          }
+        }
+      }
+    },
+    "weekly": {
+      "comment": "Usage-limit window label interpolated into a complete notification sentence.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "weekly"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

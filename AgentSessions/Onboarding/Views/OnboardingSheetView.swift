@@ -72,7 +72,6 @@ struct OnboardingSheetView: View {
         let screen = screens.indices.contains(slideIndex) ? screens[slideIndex] : screens.first
         return Group {
             if let screen {
-                let tips = screen.bullets.map(splitPowerTip)
                 VStack(spacing: 18) {
                     SlideHeader(
                         palette: palette,
@@ -83,7 +82,7 @@ struct OnboardingSheetView: View {
                     )
 
                     VStack(spacing: 12) {
-                        ForEach(Array(tips.enumerated()), id: \.offset) { offset, tip in
+                        ForEach(Array(screen.bullets.enumerated()), id: \.element.id) { offset, tip in
                             FeatureRow(
                                 palette: palette,
                                 icon: offset == 0 ? "1.circle.fill" : "2.circle.fill",
@@ -114,15 +113,6 @@ struct OnboardingSheetView: View {
             insertion: .opacity.combined(with: .offset(x: isForward ? 28 : -28)),
             removal: .opacity.combined(with: .offset(x: isForward ? -28 : 28))
         )
-    }
-
-    private func splitPowerTip(_ text: String) -> (title: String, description: String) {
-        guard let separator = text.firstIndex(of: ":") else {
-            return ("Tip", text)
-        }
-        let title = String(text[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = String(text[text.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (title, description)
     }
 
     private var footer: some View {

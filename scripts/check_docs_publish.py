@@ -37,6 +37,7 @@ CONFIG = os.path.join(REPO_ROOT, "docs", "_config.yml")
 # the site, not for us.
 PUBLIC_ROOT_MARKDOWN = {
     "adding-a-session-source.md",
+    "localization.md",
 }
 
 # Excluding any of these breaks something users depend on.

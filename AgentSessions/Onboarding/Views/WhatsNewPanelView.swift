@@ -113,8 +113,8 @@ struct WhatsNewPanelView: View {
                 palette: palette,
                 icon: item.iconSystemName,
                 iconColor: palette.accentBlue,
-                title: item.title,
-                description: item.body
+                verbatimTitle: item.title,
+                verbatimDescription: item.body
             )
         case .promo:
             promoRow(item)

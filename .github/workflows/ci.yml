@@ -17,6 +17,11 @@ jobs:
       - name: Docs publish guard
         shell: bash
         run: python3 scripts/check_docs_publish.py
+      - name: Localization catalog validation
+        shell: bash
+        run: |
+          python3 -m unittest scripts.tests.test_validate_localization_catalogs
+          python3 scripts/validate_localization_catalogs.py
       - name: Xcode version
         run: xcodebuild -version
       - name: Build (macOS, no signing)
@@ -28,8 +33,14 @@ jobs:
             -scheme AgentSessions \
             -configuration Debug \
             -destination 'platform=macOS' \
+            -derivedDataPath .deriveddata-localization \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Localization extraction drift
+        shell: bash
+        run: |
+          python3 scripts/validate_localization_catalogs.py \
+            --extraction-root .deriveddata-localization/Build/Intermediates.noindex/AgentSessions.build/Debug/AgentSessions.build/Objects-normal
 
   # Runs in parallel with `build`. Test artifacts stay in `.deriveddata-tests`,
   # which avoids the intermittent nested-code-signature failures described in
