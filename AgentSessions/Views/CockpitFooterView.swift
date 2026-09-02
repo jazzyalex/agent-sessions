@@ -140,6 +140,13 @@ struct QuotaData: Equatable {
         return "reconnecting…"
     }
 
+    /// A server-directed 429 pause is not an active reconnect attempt. Quota
+    /// Meter uses this distinction to replace the endless spinner with a calm,
+    /// actionable row while the provider-enforced retry window is in effect.
+    var isRateLimited: Bool {
+        transientReason?.localizedCaseInsensitiveContains("rate limit") == true
+    }
+
     /// Live within the last 5 minutes. Mirrors the usage strip's freshness gate
     /// for choosing the compact banner (over dimmed meters) vs the full banner
     /// (replacing meters) when auth is alarming.

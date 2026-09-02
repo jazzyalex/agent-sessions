@@ -2844,6 +2844,10 @@ private struct HUDLimitsProviderEntry {
     /// limited — retrying…"), carried alongside `presentationState` so every
     /// HUD surface renders the actual cause instead of a generic spinner.
     var reconnectingCaption: String = "reconnecting…"
+    /// True when the provider explicitly returned a rate-limit response. Unlike
+    /// a short reconnect attempt, this can be a long server-directed pause and
+    /// should render without an endlessly spinning activity indicator.
+    var isRateLimited: Bool = false
 }
 
 private extension CodexRunwaySnapshot {
@@ -3609,7 +3613,8 @@ private struct HUDLimitsRowsPanel: View {
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .codex)?.aggregateTokensPerHour,
                 authStatus: codexUsageModel.authStatus,
                 presentationState: QuotaData.codex(from: codexUsageModel).presentationState,
-                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption
+                reconnectingCaption: QuotaData.codex(from: codexUsageModel).reconnectingCaption,
+                isRateLimited: QuotaData.codex(from: codexUsageModel).isRateLimited
             ))
         }
         if providerShown(.claude) {
@@ -3628,7 +3633,8 @@ private struct HUDLimitsRowsPanel: View {
                 aggregateTokensPerHour: visibleRunwaySnapshot(for: .claude)?.aggregateTokensPerHour,
                 authStatus: claudeUsageModel.authStatus,
                 presentationState: QuotaData.claude(from: claudeUsageModel).presentationState,
-                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption
+                reconnectingCaption: QuotaData.claude(from: claudeUsageModel).reconnectingCaption,
+                isRateLimited: QuotaData.claude(from: claudeUsageModel).isRateLimited
             ))
         }
         return out
@@ -3797,7 +3803,15 @@ private struct HUDLimitsRowsPanel: View {
             case .idle(let auth):
                 HUDLimitsIdleCell(source: entry.source, detail: auth.detail, enlarged: quotaMeterEnlarged)
             case .reconnecting:
-                HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged, caption: entry.reconnectingCaption)
+                if entry.isRateLimited {
+                    HUDLimitsRateLimitedCell(
+                        source: entry.source,
+                        enlarged: quotaMeterEnlarged,
+                        onHide: { hideProvider(entry.provider) }
+                    )
+                } else {
+                    HUDLimitsRetryCell(source: entry.source, enlarged: quotaMeterEnlarged, caption: entry.reconnectingCaption)
+                }
             case .live:
                 HUDLimitsProviderText(
                     entry: entry,
@@ -4879,6 +4893,34 @@ private struct HUDLimitsRetryCell: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+    }
+}
+
+/// A 429 can carry a long Retry-After window, during which no reconnect is in
+/// progress. Keep the state calm and truthful, and let the user remove that
+/// provider from Quota Meter without changing tracking anywhere else.
+private struct HUDLimitsRateLimitedCell: View {
+    let source: UsageTrackingSource
+    var enlarged: Bool = false
+    let onHide: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HUDLimitsProviderIcon(source: source)
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text("rate limited")
+                .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Button("Hide", action: onHide)
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .help("Hide this provider from Quota Meter. Tracking continues.")
+        }
+        .help("The provider asked Agent Sessions to pause usage requests. Tracking will retry automatically; hiding affects only Quota Meter.")
     }
 }
 

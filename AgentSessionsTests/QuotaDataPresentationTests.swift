@@ -18,11 +18,13 @@ final class QuotaDataPresentationTests: XCTestCase {
     func testCaption_rateLimited_saysRateLimited() {
         let q = claudeQuota(transientReason: "Rate limited — retrying shortly")
         XCTAssertEqual(q.reconnectingCaption, "rate limited — retrying…")
+        XCTAssertTrue(q.isRateLimited)
     }
 
     func testCaption_transientUnavailable_saysRetrying() {
         let q = claudeQuota(transientReason: "Temporarily unavailable — retrying")
         XCTAssertEqual(q.reconnectingCaption, "retrying…")
+        XCTAssertFalse(q.isRateLimited)
     }
 
     func testCaption_noReason_fallsBackToReconnecting() {
