@@ -671,6 +671,14 @@ actor ClaudeUsageSourceManager {
             oauthRateLimitRetryDeadline = Date().addingTimeInterval(delay)
             os_log("ClaudeOAuth: rate limited, retrying in %.0fs", log: log, type: .info, delay)
             let replacedAccountUnavailable = endAccountUnavailableEpisodeForTransientFailure()
+            if !replacedAccountUnavailable {
+                // A cold-start Keychain miss may already be suspended inside the
+                // auth classifier when this newer authenticated request returns
+                // 429. Claim a generation even when there is no account episode
+                // to clear, so that older classifier cannot resume afterward and
+                // overwrite the precise rate-limit caption with "reconnecting".
+                _ = nextAuthGeneration()
+            }
             // Calm caption (captionOnly → banner AND legacy bools untouched). A rate
             // limit is transient and self-heals; it must never look like an auth
             // failure nor clobber an orthogonal setup/CLI state.

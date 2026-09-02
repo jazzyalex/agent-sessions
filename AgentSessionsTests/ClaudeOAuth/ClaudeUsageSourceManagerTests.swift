@@ -491,6 +491,18 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(captured: 5, current: 6))
     }
 
+    /// A newer transient response such as 429 must invalidate an older auth
+    /// classifier that is still suspended on CLI/Keychain work. Otherwise the
+    /// old result can replace the rate-limit caption with generic reconnecting.
+    func testNewerTransientGenerationInvalidatesPendingClassifier() {
+        let pendingClassifierGeneration: UInt64 = 11
+        let transientResponseGeneration = pendingClassifierGeneration + 1
+        XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(
+            captured: pendingClassifierGeneration,
+            current: transientResponseGeneration
+        ))
+    }
+
     // MARK: - Failure-path token routing (env-token `.expired`)
 
     /// Any token source — keychain, creds-file, OR the env token — counts as token
