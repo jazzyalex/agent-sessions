@@ -225,11 +225,15 @@ final class ClaudeUsageModel: ObservableObject {
     }
 
     func applyAvailability(_ availability: ClaudeServiceAvailability) {
-        // Transient caption is written on every emit (NOT authState-gated) so a
-        // recovery clears it; change-check avoids churning objectWillChange on
-        // steady polls (mirror F7).
-        if transientReason != availability.transientReason {
-            transientReason = availability.transientReason
+        // A nil transient reason means "this availability producer has no
+        // opinion", not "clear another producer's active failure". OAuth, Web,
+        // and tmux all share this channel; treating every legacy nil as a global
+        // clear let fallback startup erase an OAuth 429 before Quota Meter drew
+        // it. Recovery must be explicit, or arrive as a live usage snapshot.
+        if let reason = availability.transientReason {
+            if transientReason != reason { transientReason = reason }
+        } else if availability.clearsTransientReason, transientReason != nil {
+            transientReason = nil
         }
         // A caption-only emit (a transient blip: 429 / pre-escalation) carries no
         // meaningful legacy bools or authState — leave the orthogonal setup/CLI/login
@@ -566,6 +570,10 @@ final class ClaudeUsageModel: ObservableObject {
     private func applyLimitSnapshot(_ s: ClaudeLimitSnapshot) {
         let now = Date()
         let freshness = Self.alertFreshness(for: s, now: now)
+        // A serving source is authoritative recovery. Failed fallback
+        // availability alone is not; it must not clear an OAuth rate-limit
+        // episode until a usable snapshot actually arrives.
+        if s.health == .live, transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: s.source)
         sessionRemainingPercent = clampPercent(s.fiveHourRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weeklyRemainingPercent)
@@ -706,6 +714,7 @@ final class ClaudeUsageModel: ObservableObject {
     /// Apply a ClaudeUsageSnapshot from the legacy tmux path (used for hard-probe results).
     private func apply(_ s: ClaudeUsageSnapshot) {
         let now = Date()
+        if transientReason != nil { transientReason = nil }
         prepareWeeklyBurnRateTracker(for: .tmuxUsage)
         sessionRemainingPercent = clampPercent(s.sessionRemainingPercent)
         weekAllModelsRemainingPercent = clampPercent(s.weekAllModelsRemainingPercent)
@@ -864,11 +873,14 @@ struct ClaudeServiceAvailability {
     /// so existing constructions and callers that don't classify stay valid.
     var authState: UsageAuthState? = nil
     /// Calm, non-alarming caption for transient failures (network / 5xx / 429).
-    /// The strip shows it in `.secondary` without raising the banner; `nil`
-    /// clears it. Written unconditionally by `applyAvailability` (unlike the
-    /// authState-gated fields) so a recovery silently clears the caption.
+    /// The strip shows it in `.secondary` without raising the banner. `nil`
+    /// means no update; recovery uses `clearsTransientReason` or a live snapshot.
     /// (P2, spec §3/§4.)
     var transientReason: String? = nil
+    /// Explicit permission to clear a prior transient cause. The default is
+    /// deliberately false because legacy dependency/fallback availability with
+    /// no reason is "unchanged", not proof that usage recovered.
+    var clearsTransientReason: Bool = false
     /// This emit carries ONLY the transient caption — `applyAvailability` updates
     /// `transientReason` and leaves the orthogonal legacy bools (setup/CLI/login)
     /// and the banner untouched, so a rate-limit/transient blip can't clobber an

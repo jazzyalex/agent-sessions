@@ -608,11 +608,13 @@ actor ClaudeUsageSourceManager {
             authClassifier.reset()
             currentAuthState = .ok
             lastPublishedAuthState = .ok
+            let advisory = Self.successAdvisory(cli: cli)
             availabilityHandler?(ClaudeServiceAvailability(
                 cliUnavailable: false, tmuxUnavailable: false,
                 loginRequired: false, setupRequired: false, setupHint: nil,
                 authState: .ok,
-                transientReason: Self.successAdvisory(cli: cli)))
+                transientReason: advisory,
+                clearsTransientReason: advisory == nil))
             os_log("ClaudeOAuth: fetch succeeded, source=%{public}@", log: log, type: .info, resolved.source.rawValue)
             scheduleOAuthRefresh(delay: Self.refreshInterval)
 
@@ -767,8 +769,13 @@ actor ClaudeUsageSourceManager {
             guard await publishAccountUnavailable() else { return }
         } else {
             cancelAccountUnavailableEscalation()
-            await classifyAndPublishAuthState(was401: reason.contains("401"),
-                                              failedTokenHash: failedTokenHash)
+            guard await classifyAndPublishAuthState(was401: reason.contains("401"),
+                                                    failedTokenHash: failedTokenHash) else {
+                // The whole failed fetch is stale, not only its auth verdict.
+                // Continuing here can start a fallback and replace a newer
+                // server-directed 429 retry with the cold-start 10s schedule.
+                return
+            }
         }
 
         if forcedAuthState == .accountUnavailable {
@@ -850,7 +857,8 @@ actor ClaudeUsageSourceManager {
     /// token vanished — or any other failure — defers to the stateful classifier.
     /// Then it publishes the verdict and tears down a live tmux fallback if the
     /// new state is one the probe must never run in (signed out / CLI missing).
-    private func classifyAndPublishAuthState(was401: Bool, failedTokenHash: String? = nil) async {
+    @discardableResult
+    private func classifyAndPublishAuthState(was401: Bool, failedTokenHash: String? = nil) async -> Bool {
         let gen = nextAuthGeneration()
 
         // Token evidence (cheap, no subprocess): keychain read + creds-file check.
@@ -908,7 +916,7 @@ actor ClaudeUsageSourceManager {
         guard Self.verdictIsCurrent(captured: gen, current: authGeneration) else {
             os_log("ClaudeOAuth: dropping stale failure-path auth verdict (newer computation started)",
                    log: log, type: .info)
-            return
+            return false
         }
 
         currentAuthState = state
@@ -976,8 +984,10 @@ actor ClaudeUsageSourceManager {
             setupHint: nil,
             authState: published.authState,
             transientReason: published.reason,
+            clearsTransientReason: published.authState != nil && published.reason == nil,
             captionOnly: published.authState == nil
         ))
+        return true
     }
 
     // MARK: - Expired escalation timer (P2 follow-up)
@@ -1029,6 +1039,7 @@ actor ClaudeUsageSourceManager {
             setupHint: nil,
             authState: publication.authState,
             transientReason: publication.reason,
+            clearsTransientReason: publication.authState != nil && publication.reason == nil,
             captionOnly: publication.authState == nil
         ))
         if escalated {
@@ -1106,6 +1117,7 @@ actor ClaudeUsageSourceManager {
             setupHint: nil,
             authState: .expired,
             transientReason: nil,
+            clearsTransientReason: true,
             captionOnly: false
         ))
     }
@@ -1126,10 +1138,16 @@ actor ClaudeUsageSourceManager {
     }
 
     private func scheduleOAuthRetry() {
+        let now = Date()
+        if Self.shouldPreserveRateLimitRetry(deadline: oauthRateLimitRetryDeadline, now: now) {
+            os_log("ClaudeOAuth: preserving server-directed rate-limit retry schedule",
+                   log: log, type: .info)
+            return
+        }
         let plan = Self.oauthRetryPlan(
             usingTmuxFallback: usingTmuxFallback,
             startedAt: startedAt,
-            now: Date(),
+            now: now,
             failureCount: oauthFailureCount,
             visible: visible
         )
@@ -1147,6 +1165,10 @@ actor ClaudeUsageSourceManager {
             os_log("ClaudeOAuth: entering credential-gated retry mode", log: log, type: .info)
             startCredentialWatch()
         }
+    }
+
+    static func shouldPreserveRateLimitRetry(deadline: Date?, now: Date) -> Bool {
+        deadline.map { $0 > now } ?? false
     }
 
     static func oauthRetryPlan(usingTmuxFallback: Bool,
@@ -1303,9 +1325,7 @@ actor ClaudeUsageSourceManager {
                 // caption, never an auth banner) instead of dying as a log line.
                 os_log("ClaudeOAuth: web API — Safari cookie read denied (needs Full Disk Access)",
                        log: log, type: .info)
-                availabilityHandler?(ClaudeServiceAvailability(
-                    cliUnavailable: false, tmuxUnavailable: false,
-                    transientReason: Self.webNeedsFullDiskAccessReason, captionOnly: true))
+                publishWebTransientReason(Self.webNeedsFullDiskAccessReason)
                 await handleWebFailure(reason: "cookie read permission denied")
                 return
             case .cookieExpired:
@@ -1313,9 +1333,7 @@ actor ClaudeUsageSourceManager {
                 // sign in again (or paste a fresh cookie). Distinct remedy from a
                 // missing session, so it gets its own caption.
                 os_log("ClaudeOAuth: web API — Safari claude.ai session cookie expired", log: log, type: .info)
-                availabilityHandler?(ClaudeServiceAvailability(
-                    cliUnavailable: false, tmuxUnavailable: false,
-                    transientReason: Self.webSessionExpiredReason, captionOnly: true))
+                publishWebTransientReason(Self.webSessionExpiredReason)
                 await handleWebFailure(reason: "claude.ai session cookie expired")
                 return
             case .storeMissing, .validStoreNoCookie, .unsupportedFormat, .malformedRecord:
@@ -1325,9 +1343,7 @@ actor ClaudeUsageSourceManager {
                 // pasted session cookie — rather than telling them to sign in again.
                 os_log("ClaudeOAuth: web API — no readable claude.ai session (%{public}@)",
                        log: log, type: .info, String(describing: cookieOutcome))
-                availabilityHandler?(ClaudeServiceAvailability(
-                    cliUnavailable: false, tmuxUnavailable: false,
-                    transientReason: Self.webNoSafariSessionReason, captionOnly: true))
+                publishWebTransientReason(Self.webNoSafariSessionReason)
                 await handleWebFailure(reason: "no claude.ai session available")
                 return
             }
@@ -1354,7 +1370,7 @@ actor ClaudeUsageSourceManager {
             // someone else's state.
             availabilityHandler?(ClaudeServiceAvailability(
                 cliUnavailable: false, tmuxUnavailable: false,
-                transientReason: nil, captionOnly: true))
+                transientReason: nil, clearsTransientReason: true, captionOnly: true))
             os_log("ClaudeOAuth: web API fetch succeeded (fromCache=%{public}@)",
                    log: log, type: .info, fromCache ? "true" : "false")
             scheduleWebRefresh(delay: Self.refreshInterval)
@@ -1370,9 +1386,7 @@ actor ClaudeUsageSourceManager {
                 // The pasted cookie no longer authenticates — it can't be
                 // refreshed, so tell the user to paste a fresh one rather than
                 // silently retrying the dead token.
-                availabilityHandler?(ClaudeServiceAvailability(
-                    cliUnavailable: false, tmuxUnavailable: false,
-                    transientReason: Self.webSessionExpiredReason, captionOnly: true))
+                publishWebTransientReason(Self.webSessionExpiredReason)
             } else {
                 await webCookieResolver.invalidateCache()
             }
@@ -1404,6 +1418,23 @@ actor ClaudeUsageSourceManager {
         }
     }
 
+    /// A non-serving fallback cannot replace the active OAuth 429 cause. Web
+    /// recovery is authoritative only after it publishes a usable live snapshot;
+    /// until then Quota Meter must keep the server-directed rate-limit episode.
+    private func publishWebTransientReason(_ reason: String) {
+        if Self.shouldPreserveRateLimitRetry(deadline: oauthRateLimitRetryDeadline, now: Date()) {
+            os_log("ClaudeOAuth: preserving OAuth rate-limit reason over failed web fallback",
+                   log: log, type: .info)
+            return
+        }
+        availabilityHandler?(ClaudeServiceAvailability(
+            cliUnavailable: false,
+            tmuxUnavailable: false,
+            transientReason: reason,
+            captionOnly: true
+        ))
+    }
+
     // MARK: - Tmux Fallback
 
     /// Publish an auth verdict through the availability channel so a suppressed or
@@ -1418,7 +1449,8 @@ actor ClaudeUsageSourceManager {
             loginRequired: effective == .signedOut,
             setupRequired: false,
             setupHint: nil,
-            authState: effective))
+            authState: effective,
+            clearsTransientReason: effective.isAlarming))
     }
 
     private func activateTmuxFallback(reason: String) async {

@@ -491,15 +491,21 @@ final class ClaudeUsageSourceManagerTests: XCTestCase {
         XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(captured: 5, current: 6))
     }
 
-    /// A newer transient response such as 429 must invalidate an older auth
-    /// classifier that is still suspended on CLI/Keychain work. Otherwise the
-    /// old result can replace the rate-limit caption with generic reconnecting.
-    func testNewerTransientGenerationInvalidatesPendingClassifier() {
-        let pendingClassifierGeneration: UInt64 = 11
-        let transientResponseGeneration = pendingClassifierGeneration + 1
-        XCTAssertFalse(ClaudeUsageSourceManager.verdictIsCurrent(
-            captured: pendingClassifierGeneration,
-            current: transientResponseGeneration
+    /// Even if another failure path reaches retry planning, it must not replace
+    /// the server's Retry-After schedule with a 10-second cold-start retry.
+    func testActiveRateLimitDeadlineDominatesGenericRetryPlanning() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        XCTAssertTrue(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: now.addingTimeInterval(3_000),
+            now: now
+        ))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: now.addingTimeInterval(-1),
+            now: now
+        ))
+        XCTAssertFalse(ClaudeUsageSourceManager.shouldPreserveRateLimitRetry(
+            deadline: nil,
+            now: now
         ))
     }
 
