@@ -4910,7 +4910,7 @@ private struct HUDLimitsRateLimitedCell: View {
             Image(systemName: "clock.badge.exclamationmark")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text("rate limited")
+            Text(source == .claude ? "rate limited · check plan" : "rate limited")
                 .font(.system(size: QuotaMeterTextMetrics.providerFontSize(enlarged: enlarged), weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -4920,7 +4920,9 @@ private struct HUDLimitsRateLimitedCell: View {
                 .fontWeight(.semibold)
                 .help("Hide this provider from Quota Meter. Tracking continues.")
         }
-        .help("The provider asked Agent Sessions to pause usage requests. Tracking will retry automatically; hiding affects only Quota Meter.")
+        .help(source == .claude
+              ? "Claude rejected usage requests. Your subscription may be inactive, or Claude may be temporarily rate limiting requests. Tracking will retry automatically; hiding affects only Quota Meter."
+              : "The provider asked Agent Sessions to pause usage requests. Tracking will retry automatically; hiding affects only Quota Meter.")
     }
 }
 
