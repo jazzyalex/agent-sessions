@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Deploy docs drift guard
         shell: bash
         run: scripts/check_deploy_drift.sh
