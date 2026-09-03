@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Added complete Simplified Chinese localization for app copy, menus, onboarding, notifications, accessibility labels, and macOS permission prompts.
+
 ### Bug Fixes
 - **Quota Meter no longer reconnects forever when Claude account access is unavailable.** A persistent Claude billing response becomes an actionable `Claude plan inactive` row after 90 seconds, with a one-shot notification and a compact Hide action; a long server-directed rate limit now stays a calm `rate limited` row with its own Hide action instead of being erased by a failed fallback and returning to an endless spinner. Server retry timing also wins over stale cold-start work. A permission-only 403 still uses the normal fallback routes. A new agent selector in Quota Meter and Usage Tracking settings can independently hide Codex or Claude without stopping tracking, menu-bar data, the main-window footer, or session indexing.
 - **Antigravity and OpenCode keep their intended colors across macOS releases.** Their accents and toolbar pills no longer inherit Apple system palette changes, so the same Agent Sessions build renders consistently on macOS 15 and 26.

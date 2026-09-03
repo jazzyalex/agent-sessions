@@ -9,6 +9,12 @@
             "state" : "translated",
             "value" : "Agent Sessions"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions"
+          }
         }
       }
     },
@@ -16,6 +22,12 @@
       "comment" : "The short bundle name used by system UI. Keep Agent Sessions unchanged as the product name.",
       "localizations" : {
         "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions"
+          }
+        },
+        "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent Sessions"
@@ -31,6 +43,12 @@
             "state" : "translated",
             "value" : "Agent Sessions controls Terminal to resume Codex sessions on your behalf."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions 会控制 Terminal，代你继续 Codex 会话。"
+          }
         }
       }
     },
@@ -41,6 +59,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent Sessions saves exported images and terminal recordings to your Downloads folder."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions 会将导出的图像和终端录制保存到“下载”文件夹。"
           }
         }
       }
@@ -53,6 +77,12 @@
             "state" : "translated",
             "value" : "Agent Sessions needs access to read session files in this location."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions 需要访问此位置，以读取其中的会话文件。"
+          }
         }
       }
     },
@@ -63,6 +93,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent Sessions needs access to read session files in this location."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Sessions 需要访问此位置，以读取其中的会话文件。"
           }
         }
       }
