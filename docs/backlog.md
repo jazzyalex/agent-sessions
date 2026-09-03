@@ -174,42 +174,133 @@ CHANGELOG already records it. The `##` sections are areas of the codebase, not p
 
 ## Agent Source Coverage
 
-### Telemetry: Kimi, Qwen and OpenClaw show a model but no tokens in fixtures
+### Telemetry: Kimi, Qwen and OpenClaw all carry token telemetry — build the accumulators
 > **open** · sev: med · urg: med · verified 2026-08-31
 
-- **What:** `SessionTelemetry` now covers Codex, Claude, Pi and Copilot. These three were
-  audited and **deferred**, because their stage0 fixtures carry a model name and no token
-  counts at all: Kimi 67 `model` / 51 `usage` occurrences but no numeric token fields
-  reachable by a key scan, Qwen 17 `model` and nothing else, OpenClaw only `modelId`.
-- **Why it is probably still there:** [docs/backlog.md](backlog.md) already claims Qwen has
-  "dense per-call token telemetry" and Kimi "measured per-turn token records". Both claims
-  predate this scan and neither is visible in the fixtures. Either the fixtures are trimmed
-  past the usage records, or the earlier claims were about a different field.
-- **To close:** scan REAL stores, not fixtures — `~/.kimi`, `~/.qwen`, OpenClaw's root — for
-  numeric token fields on assistant/turn records. If found, add an accumulator per
-  `AgentSessions/Telemetry/PiTelemetryAccumulator.swift` (the simplest of the four) and flip
-  the descriptor's `TelemetryCapabilities`. If genuinely absent, replace each descriptor's
-  reason string with the measured finding so nobody re-investigates.
+- **What:** `SessionTelemetry` covers Codex, Claude, Pi and Copilot. These three were
+  deferred on a fixture key scan that found "a model name and no token counts at all".
+  **That scan was wrong.** Measured against the real stores on 2026-08-31, all three carry
+  full per-turn token telemetry, and one carries cost.
+- **Kimi** — `~/.kimi-code/sessions` (26 files, 390 records). `usage.inputOther`
+  (28 records, 119–10,982), `usage.inputCacheRead` (28, 1,792–40,960),
+  `usage.inputCacheCreation` (28, all 0), `usage.output` (28, 42–937). The same four repeat
+  under `event.usage.*`. `usageScope` is `"turn"` or `"session"` — Kimi emits per-turn
+  records **and** a session rollup. `maxTokens` gives the context window (131,072 /
+  262,144). No cost field. Convention is Claude-style by construction: the field is named
+  `inputOther`, i.e. the non-cache remainder. There is no `totalTokens` to cross-check, so
+  the naming is the only evidence — say so in the test rather than implying a measurement.
+  **This fixture really is trimmed:** `Resources/Fixtures/stage0/agents/kimi/` has only
+  `maxTokens` / `tokensBefore` / `tokensAfter`, no `usage.*`. Refresh it first.
+- **Qwen** — `~/.qwen/projects` (9 files, 296 records). Three overlapping layers:
+  `systemPayload.uiEvent.{input,output,thoughts,tool,cached_content,total}_token_count`
+  (57 records, input 12,131–118,830); `usageMetadata.{promptTokenCount,
+  candidatesTokenCount, thoughtsTokenCount, cachedContentTokenCount, totalTokenCount}`
+  (13 records, Gemini-shaped); and session rollups under
+  `toolCallResult.resultDisplay.executionSummary.*` (up to 1,239,327 total). Model is
+  `systemInfo.modelVersion`. No cost field. Pick **one** layer and pin the choice in a test.
+  The fixture is **not** trimmed — `qwen/system_telemetry.jsonl` already carries all six
+  `*_token_count` fields; their values are zero, which is the likely reason a nonzero filter
+  reported them missing. Caveat: the only real `.jsonl` files here are from April, so
+  re-check field names against a fresh session before pinning.
+- **OpenClaw** — `~/.openclaw/agents/main/sessions` (44 files, 3,196 records). The richest
+  of the ten and **the only source that ships vendor-computed dollars**:
+  `message.usage.{input, output, cacheRead, cacheWrite, totalTokens}` (363 records, 179
+  nonzero, input to 172,970) plus `message.usage.cost.{input, output, cacheRead, cacheWrite,
+  total}` (total to $0.5225). A second, Codex-shaped layer sits on 316 records —
+  `payload.info.{last,total}_token_usage.*` — because OpenClaw proxies an OpenAI provider
+  (`systemPromptReport.model` = `gpt-5.4`). Decide which layer is authoritative first.
+  Fixture carries no token fields at all, so it needs refreshing too.
+- **OpenClaw convention: Claude-style, measured.** Over all 133 records with a nonzero
+  `cacheRead`, `totalTokens == input + output + cacheRead + cacheWrite` holds **133/133**;
+  the Codex reading (input already includes cache) matches **0/133**. Same shape as the
+  resolved Pi entry below — pin it with the same kind of test.
+- **To close:** refresh the Kimi and OpenClaw fixtures, add an accumulator per
+  `AgentSessions/Telemetry/PiTelemetryAccumulator.swift`, and flip each descriptor's
+  `TelemetryCapabilities`. OpenClaw can declare `cost: .available` without a price table;
+  Kimi and Qwen cannot.
 - **Risk if wrong:** none to runtime — all three declare every telemetry dimension
   `unavailable`, so the engine returns nil for them and no number is ever shown.
 
-### Telemetry: seven sources expose almost nothing and it is not obvious why
-> **open** · sev: low · urg: med · verified 2026-08-31
+### Telemetry: the seven "near-empty" sources, measured — five have data, two do not
+> **partial** · sev: low · urg: med · verified 2026-09-01
 
-- **What:** a key scan across every stage0 fixture found effectively no model or token data
-  for **Antigravity, OpenCode and fx** (no matching fields at all) and only a bare `model`
-  string for **Cursor, Devin, Hermes** and only `reasoning_effort` for **Grok**.
-- **Why this is suspicious rather than settled:** these are working, shipping agents that
-  call paid APIs. An agent that spends tokens and records none of it is possible but
-  unusual — Antigravity, OpenCode and fx returning *nothing* more likely means the fixture
-  is trimmed, the data lives in a sidecar, or (for the DB-backed sources) it is in SQLite
-  columns a JSONL key scan cannot see. OpenCode and Devin are SQLite-backed; fx and
-  Antigravity were never checked beyond their fixture.
-- **To close:** for each, check the real store rather than the fixture, and for the
-  DB-backed ones inspect the schema directly. Record the finding per source even when the
-  answer is "genuinely absent" — the point is to stop the question recurring.
+- **What it said:** a key scan across every stage0 fixture found no model or token data for
+  **Antigravity, OpenCode and fx**, only a bare `model` for **Cursor, Devin, Hermes**, and
+  only `reasoning_effort` for **Grok**. The entry flagged this as suspicious. It was right
+  to.
+- **Root cause of the entry itself:** the scan under-reported against **its own fixtures**.
+  `qwen` fixtures carry all six `*_token_count` fields, `opencode` carries
+  `"tokens":{"input":120,"output":16}`, `fx` carries `total_input_tokens` /
+  `total_output_tokens`, and the synthetic `devin` fixture claimed `num_tokens: 42` even
+  though the real store never populates it. Only the **kimi, openclaw, grok, hermes, cursor
+  and antigravity** fixtures genuinely carry none. So "the fixtures are trimmed" explains
+  two sources; a broken scan explains three; and Devin's hand-written value was not real
+  evidence. Do not re-run that scan — measure the real store.
+- **OpenCode — SQLite, rich.** `~/.local/share/opencode/opencode.db`, `session` table:
+  `model`, `cost` REAL, `tokens_input`, `tokens_output`, `tokens_reasoning`,
+  `tokens_cache_read`, `tokens_cache_write`. 76 sessions: 75 nonzero input and output,
+  62 cache-read, 27 reasoning, 25 cache-write, 3 nonzero cost. Per-message detail also
+  exists in `message.data` JSON — `tokens.{input, output, reasoning, cache.read,
+  cache.write, total}`, `cost`, `modelID`. **Trap:** the `session.model` column is a JSON
+  blob (`{"id":"grok-4.6","providerID":"xai","variant":"default"}`) populated on only
+  20/76 rows; `message.data.modelID` is the reliable model source.
+- **Hermes — SQLite, rich, and already open.** `~/.hermes/state.db`, `sessions` table
+  carries a complete pre-aggregated row: `model`, `input_tokens`, `output_tokens`,
+  `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`, `estimated_cost_usd`,
+  `actual_cost_usd`, `cost_status`, `cost_source`, `pricing_version`, `billing_provider`,
+  `billing_mode`, `api_call_count`. 121 sessions: 120 with a model, 64 with nonzero
+  input/output, 40 cache-read, 16 reasoning, 5 cache-write, 64 with `estimated_cost_usd`.
+  AS already opens this database read-only at
+  [HermesSessionParser.swift:441](../AgentSessions/Services/HermesSessionParser.swift).
+  This is a column read, not an accumulator. **Two traps:** `messages.token_count` exists
+  but is NULL in all 1,283 rows — do not read it; and `estimated_cost_usd = 0.0` with
+  `cost_status = 'included'` and `billing_provider = 'openai-codex'` means *subscription-
+  billed, not priceable*, never "$0".
+- **Grok — rich, in a file we do not read.** `~/.grok/sessions/<project>/<uuid>/updates.jsonl`
+  carries `params.update.usage.{inputTokens, outputTokens, reasoningTokens, cachedReadTokens,
+  cacheCreationTokens, totalTokens, costUsdTicks, modelCalls, numTurns, apiDurationMs}` plus
+  a per-model breakdown under `usage.modelUsage.<model>.*`, and `params._meta.totalTokens`
+  on 724 records. AS reads only `chat_history.jsonl` and `summary.json`. Same root cause as
+  the related entry below, which **blocks** this one. `costUsdTicks`
+  (833,561,000–24,434,540,000) needs its scale calibrated before it is shown as dollars.
+- **fx — mis-scanned; session totals only.** `session.json` carries `total_input_tokens`,
+  `total_output_tokens`, `preferences.model`, `preferences.effort` at the top level — in the
+  repo's own fixture. Enough for `tokens: .available`, **not** for `cost`: no cache or
+  reasoning split, so the cost calculator has nothing to price. Not verifiable further here
+  — `fx` is not installed and `~/.fx/sessions` does not exist.
+- **Devin — genuine negative, steward-measured.** On 2026-09-01 @thedavidweng ran the
+  read-only query from [#67](https://github.com/jazzyalex/agent-sessions/issues/67#issuecomment-5501897068)
+  against 253 sessions / 394,495 message nodes on CLI 3000.6.7. `cogs_json` is Cognition
+  configuration, not cost: all 898 `num_tokens` leaves are null. The message-node
+  `metadata.num_tokens` field is populated in **0/394,495** nodes. `num_tokens_preceding`
+  is populated but is a compaction/context cursor, not usage. `sessions.metadata` carries
+  `total_credit_cost` and `total_acu_cost`, but both are zero in every one of 251 populated
+  rows. Verdict: the local store has no trustworthy per-session token or cost telemetry.
+  This is steward evidence and cannot be independently reproduced on the maintainer's empty
+  Devin store; the reported counts are sufficient for the negative capability decision.
+- **Cursor — genuine negative, measured.** `~/.cursor/chats/<md5>/<uuid>/store.db` is a
+  content-addressed blob store (`blobs(id, data)` + `meta(key, value)`, hex-encoded JSON in
+  `meta`). Across 6 databases: 177 blobs, 52 JSON, 125 protobuf. The JSON blobs carry
+  `content[].providerOptions.cursor.modelName` (`composer-2.5`, `cursor-grok-4.5-high`) and
+  nothing else relevant. A top-level protobuf varint scan over all 125 binary blobs found
+  zero values in a token-plausible range. A binary-inclusive grep for every token key name
+  across the whole of `~/.cursor` returns nothing. `ai-tracking/ai-code-tracking.db` counts
+  lines of AI-authored code, not tokens. Note `meta` carries a `blobEncryptionKey` — future
+  blobs may be encrypted. Verdict: `configuration` available, everything else genuinely
+  absent.
+- **Antigravity — genuine negative, measured.** 32 `transcript.jsonl` files across
+  `~/.gemini/antigravity/brain` and `~/.gemini/antigravity-cli/brain`, 357 records,
+  12 record types. The complete key set is `type`, `content`, `created_at`, `source`,
+  `status`, `step_index`, `truncated_fields[]`, `tool_calls[].name`, `tool_calls[].args.*`.
+  No model, no tokens, no usage anywhere; a recursive grep across both brain roots returns
+  one hit, inside a task log's prose. The rest of the store is `task.md` / `walkthrough.md`
+  documents, screenshots and a git-object store. Verdict: nothing to read.
+- **To close:** Hermes and OpenCode first (column reads, both yield `cost` directly), then
+  fx (`tokens` only). Grok waits on the sidecar entry. For **Devin, Cursor and Antigravity
+  the answer is now final** — keep their telemetry unavailable, record the measured reasons,
+  and stop re-investigating unless their storage formats change.
 - **Related:** [Grok session sidecars are neither watched nor read](#grok-session-sidecars-are-neither-watched-nor-read)
-  may explain Grok specifically.
+  explains Grok and blocks it.
 
 ### Telemetry: Copilot subagent tokens may be invisible to the shutdown summary
 > **open** · sev: med · urg: low · verified 2026-08-31

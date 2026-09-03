@@ -1,3 +1,26 @@
+## 2026-09-03 12:24 · quota-meter-claude-access · Claude unavailable state and provider visibility shipped
+status: done
+
+**State:** Quota Meter now exits Claude's eternal reconnecting state, preserves long server retry schedules, and lets each supported provider be hidden independently without disabling tracking.
+
+**Verified:**
+- `HEAD` is `4c922508bc55afc060b22d33590d369089234212` on `main`; push `e55b0614..4c922508` to `origin/main` succeeded.
+- The focused `QuotaDataPresentationTests` run passed 7 tests with 0 failures, and the manual Debug app build succeeded before the final rebase onto upstream localization commits.
+- The user confirmed the freshly launched app no longer reconnects forever and displays the Claude rate-limit state.
+
+**Decided / don't redo:**
+- Claude's compact row says `rate limited · check plan`; help text explains that the subscription may be inactive or Claude may be temporarily rate limiting. Codex retains `rate limited`.
+- Provider visibility is Quota Meter-only. Tracking, the main-window footer, menu-bar data, and session indexing remain unchanged.
+- The final rebased `HEAD` was not rebuilt after integrating upstream localization commits; do not describe it as post-rebase build-verified.
+
+**Uncommitted / ownership:**
+- `docs/backlog.md` — pre-existing unrelated edit owned by another session; preserve it.
+- `RepoHandover.md` and `AGENTS.md` — this handover checkpoint and required startup pointer; intentionally uncommitted.
+
+**Key files:**
+- `AgentSessions/Views/AgentCockpitHUDView.swift` — Claude inactive/rate-limited presentation and inline provider Hide action.
+- `AgentSessions/Views/Preferences/PreferencesView+Usage.swift` — provider visibility controls under Usage Tracking.
+
 ## 2026-08-31 19:30 · telemetry-core-review · CI green again, test runs isolated from the live index
 status: in-progress
 

@@ -4,6 +4,8 @@ Shared playbook for every agent working in this repo (Claude, Codex, Cursor, Xco
 Write like a person: plain words, short sentences, no filler, no emoji. If a rule here
 needs decoding, that's a bug — fix the wording.
 
+Before starting, read `PROGRESS.md` when present and the newest entry in `RepoHandover.md`.
+
 ## Marketing / promo
 All marketing, promo, and growth work goes through `Marketing/STATUS.md` — read it first,
 update it last. It indexes the detail files (goals, star log, angles, launch kits).
