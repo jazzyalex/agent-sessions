@@ -1,9 +1,9 @@
 # Localization conventions
 
 Agent Sessions uses English as its source language. Simplified Chinese,
-identified as `zh-Hans`, is the planned first translation; it is not currently
-supported. A locale is not considered supported until both catalogs are
-complete and a human has reviewed them.
+identified as `zh-Hans`, is the first supported translation. Both catalogs are
+complete and human-reviewed. Some user-visible source strings are not yet in
+the catalogs; expanding that source coverage is separate follow-up work.
 
 ## Catalogs
 
@@ -12,7 +12,7 @@ complete and a human has reviewed them.
   `AgentSessions/Resources/InfoPlist.xcstrings`.
 - Both catalogs declare `en` as their source language. Do not add a locale to a
   catalog until its translation is ready for review.
-- CI permits the planned `zh-Hans` locale only when it is present, non-empty,
+- CI permits the `zh-Hans` locale only when it is present, non-empty,
   and marked translated for every key in both catalogs. Partial locale imports
   and unreviewed locale identifiers fail validation.
 - Keep catalog changes deterministic and reviewable. CI compiles catalogs into a
@@ -68,7 +68,7 @@ unchanged unless a future translation decision explicitly documents otherwise.
 
 ## Review and validation
 
-Before adding `zh-Hans`:
+Before adding or updating a locale:
 
 1. Build the app and run the focused localization tests.
 2. Run `scripts/validate_localization_catalogs.py` and confirm both catalogs
