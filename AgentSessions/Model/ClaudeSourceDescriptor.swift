@@ -18,7 +18,7 @@ extension SessionSourceDescriptor {
                 configuration: .partial("initial config is first-observed, not recorded at session start"),
                 tokens: .supported,
                 cost: .supported,
-                weeklyQuota: .unavailable("no persisted account quota snapshots (Plan B)")
+                weeklyQuota: .partial("raw quota evidence is available, but per-session attribution requires stable account identity")
             ),
             shortLabel: "Claude",
             badgeInitials: "CC",

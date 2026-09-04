@@ -93,6 +93,9 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(slice(t, model: "pi-model-a")?.freshInputTokens, 24)
         XCTAssertEqual(slice(t, model: "pi-model-a")?.outputTokens, 14)
         XCTAssertEqual(t.usageSummary?.topLineTokens, 38)
+        XCTAssertEqual(t.usageEvents.count, 2)
+        XCTAssertEqual(t.usageEvents.first?.contextInputTokens, 12)
+        XCTAssertTrue(t.usageEvents.allSatisfy { $0.ownership == .session })
     }
 
     func testCacheReadAndWriteCounted() {
@@ -125,6 +128,7 @@ final class PiTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(s?.outputTokens, 758)
         XCTAssertEqual(t.usageSummary?.topLineTokens, 2983,
                        "must equal Pi's own totalTokens for the same record")
+        XCTAssertEqual(t.usageEvents.first?.contextInputTokens, 2225)
     }
 
     func testUserMessagesContributeNothing() {

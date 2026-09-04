@@ -92,6 +92,10 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(t.currentConfiguration?.model, "claude-opus-5")
         XCTAssertEqual(slice(t, model: "claude-haiku-4-5")?.freshInputTokens, 100, "subagent tokens are real spend")
         XCTAssertEqual(slice(t, model: "claude-haiku-4-5")?.outputTokens, 50)
+        XCTAssertEqual(t.usageEvents.map(\.ownership), [.session, .descendant])
+        XCTAssertEqual(t.usageEvents[1].recordID, "m2")
+        XCTAssertEqual(t.usageEvents[1].model, "claude-haiku-4-5")
+        XCTAssertEqual(t.usageEvents[1].reasoningEffort, "low")
     }
 
     func testEffortObservedBeforeModelBackfillsWithoutChange() {
@@ -146,6 +150,7 @@ final class ClaudeTelemetryAccumulatorTests: XCTestCase {
         ])
         XCTAssertEqual(slice(t, model: "claude-opus-5")?.freshInputTokens, 100)
         XCTAssertEqual(slice(t, model: "claude-opus-5")?.outputTokens, 50)
+        XCTAssertEqual(t.usageEvents.count, 1)
     }
 
     /// The id is consumed BEFORE any token check, matching

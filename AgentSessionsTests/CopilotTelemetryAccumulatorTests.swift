@@ -97,6 +97,9 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(slice(t, model: "gpt-4.1")?.outputTokens, 50)
         XCTAssertEqual(slice(t, model: "gpt-4.1")?.cacheReadTokens, 800)
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.modelMetrics"])
+        XCTAssertEqual(t.usageEvents.first?.usageFamily, "session.shutdown.modelMetrics")
+        XCTAssertNil(t.usageEvents.first?.contextInputTokens,
+                     "a process-lifetime summary is not a request context")
     }
 
     /// `tokenDetails` and `modelMetrics.usage` describe the SAME tokens. Reading
@@ -110,6 +113,7 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(slice(t, model: "gpt-5-mini")?.outputTokens, 15)
         XCTAssertEqual(t.usageSummary?.topLineTokens, 120)
         XCTAssertEqual(t.usageSummary?.usageFamilies, ["session.shutdown.tokenDetails"])
+        XCTAssertEqual(t.usageEvents.first?.usageFamily, "session.shutdown.tokenDetails")
     }
 
     func testModelMetricsWinOverTokenDetailsInTheSameRecord() {
@@ -181,6 +185,7 @@ final class CopilotTelemetryAccumulatorTests: XCTestCase {
         ])
         XCTAssertEqual(slice(t, model: "gpt-5-mini")?.freshInputTokens, 150)
         XCTAssertEqual(slice(t, model: "gpt-5-mini")?.outputTokens, 15)
+        XCTAssertEqual(t.usageEvents.count, 2)
     }
 
     func testAllZeroShutdownContributesNothing() {

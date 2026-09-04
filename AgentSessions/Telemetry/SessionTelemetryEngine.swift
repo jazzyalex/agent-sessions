@@ -24,6 +24,8 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     /// Least-recently-used last.
     private var order: [String] = []
     private let priceTable: RunwayPriceTable
+    private let quotaStore: WeeklyQuotaCalibrationStore
+    private let now: @Sendable () -> Date
 
     /// The sources `compute` can actually dispatch. A source whose descriptor
     /// declares telemetry available but is missing here returns nil forever, and
@@ -38,13 +40,18 @@ final class SessionTelemetryEngine: @unchecked Sendable {
     /// from the test thread is a data race even though the value is only a counter.
     var parseCount: Int { lock.lock(); defer { lock.unlock() }; return _parseCount }
 
-    init(priceTable: RunwayPriceTable = .shared) {
+    init(priceTable: RunwayPriceTable = .shared,
+         quotaStore: WeeklyQuotaCalibrationStore = .shared,
+         now: @escaping @Sendable () -> Date = { Date() }) {
         self.priceTable = priceTable
+        self.quotaStore = quotaStore
+        self.now = now
     }
 
     private struct Entry {
         let signature: RunwayFileSignature
         let parserVersion: Int
+        let priceTableRevision: Int
         let telemetry: SessionTelemetry
     }
 
@@ -61,17 +68,23 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         // A nil signature means the file is missing or unstat-able. Bypass the cache
         // entirely rather than risk serving a stale result for a file we cannot check.
         guard let signature = RunwayFileSignature.read(path: path) else { return nil }
-        if let cached = cachedTelemetry(path: path, signature: signature) { return cached }
+        if let cached = cachedTelemetry(path: path, signature: signature,
+                                        priceTableRevision: priceTable.revision) {
+            return applyingWeeklyQuota(to: cached, source: session.source,
+                                       capabilities: capabilities, now: now())
+        }
 
         let source = session.source
         let priceTable = self.priceTable
         let computed = await Task.detached(priority: .utility) { [weak self] in
-            self?.compute(path: path, source: source, capabilities: capabilities, priceTable: priceTable)
+            self?.compute(path: path, source: source, capabilities: capabilities,
+                          priceTable: priceTable)
         }.value
 
         guard let computed else { return nil }
         store(computed, path: path, signature: signature)
-        return computed
+        return applyingWeeklyQuota(to: computed, source: source,
+                                   capabilities: capabilities, now: now())
     }
 
     // MARK: - Computation
@@ -113,15 +126,100 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         guard capabilities.cost.isAvailable, base.usageSummary?.hasComponentBreakdown == true else {
             return base
         }
-        let cost = TelemetryCostCalculator.estimate(slices: base.usageSlices, priceTable: priceTable)
+        let priced = TelemetryCostCalculator.price(events: base.usageEvents,
+                                                   fallbackSlices: base.usageSlices,
+                                                   priceTable: priceTable)
         return SessionTelemetry(source: base.source,
                                 initialConfiguration: base.initialConfiguration,
                                 currentConfiguration: base.currentConfiguration,
                                 configurationChanges: base.configurationChanges,
                                 usageSlices: base.usageSlices,
+                                usageEvents: priced.events,
                                 usageSummary: base.usageSummary,
-                                costEstimate: cost,
+                                costEstimate: priced.estimate,
+                                weeklyQuotaEstimate: nil,
                                 parserVersion: base.parserVersion)
+    }
+
+    /// Weekly attribution depends on live account calibration, not transcript
+    /// bytes. Apply it after the transcript cache so a new quota observation can
+    /// update the estimate without forcing a full re-parse of a large session.
+    private func applyingWeeklyQuota(to telemetry: SessionTelemetry,
+                                     source: SessionSource,
+                                     capabilities: TelemetryCapabilities,
+                                     now: Date) -> SessionTelemetry {
+        let weekly = weeklyQuotaEstimate(source: source,
+                                         capabilities: capabilities,
+                                         cost: telemetry.costEstimate,
+                                         quotaStore: quotaStore,
+                                         now: now)
+        return SessionTelemetry(source: telemetry.source,
+                                initialConfiguration: telemetry.initialConfiguration,
+                                currentConfiguration: telemetry.currentConfiguration,
+                                configurationChanges: telemetry.configurationChanges,
+                                usageSlices: telemetry.usageSlices,
+                                usageEvents: telemetry.usageEvents,
+                                usageSummary: telemetry.usageSummary,
+                                costEstimate: telemetry.costEstimate,
+                                weeklyQuotaEstimate: weekly,
+                                parserVersion: telemetry.parserVersion)
+    }
+
+    private func weeklyQuotaEstimate(source: SessionSource,
+                                     capabilities: TelemetryCapabilities,
+                                     cost: TelemetryCostEstimate?,
+                                     quotaStore: WeeklyQuotaCalibrationStore,
+                                     now: Date) -> TelemetryWeeklyQuotaEstimate? {
+        guard capabilities.weeklyQuota.isAvailable else { return nil }
+        guard let cost else {
+            return TelemetryWeeklyQuotaEstimate(
+                status: .unavailable, percentPoints: nil,
+                unavailableReason: "session has no priceable component breakdown",
+                percentPointsPerAPIDollar: nil, accountScoped: false,
+                sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calculatedAt: now, priceTableRevision: priceTable.revision)
+        }
+        guard let dollars = cost.apiEquivalentUSD else {
+            return TelemetryWeeklyQuotaEstimate(
+                status: .unavailable, percentPoints: nil,
+                unavailableReason: "session has unpriced usage",
+                percentPointsPerAPIDollar: nil, accountScoped: false,
+                sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calculatedAt: now, priceTableRevision: cost.priceTableRevision)
+        }
+        guard let context = quotaStore.attributionContext(provider: source.rawValue, now: now),
+              context.scope.priceRevision == cost.priceTableRevision else {
+            return TelemetryWeeklyQuotaEstimate(
+                status: .unavailable, percentPoints: nil,
+                unavailableReason: "no compatible account-window calibration",
+                percentPointsPerAPIDollar: nil, accountScoped: false,
+                sourceFamily: nil, quotaResetAt: nil, quotaObservedAt: nil, quotaPrecision: nil,
+                calculatedAt: now, priceTableRevision: cost.priceTableRevision)
+        }
+        guard context.scope.accountHash != nil else {
+            return TelemetryWeeklyQuotaEstimate(
+                status: .unavailable, percentPoints: nil,
+                unavailableReason: "provider does not expose a stable account identity",
+                percentPointsPerAPIDollar: context.percentPointsPerDollar,
+                accountScoped: false,
+                sourceFamily: context.scope.sourceFamily,
+                quotaResetAt: context.latestSnapshot?.resetAt,
+                quotaObservedAt: context.latestSnapshot?.observedAt,
+                quotaPrecision: context.latestSnapshot?.precision.rawValue,
+                calculatedAt: now, priceTableRevision: cost.priceTableRevision)
+        }
+        return TelemetryWeeklyQuotaEstimate(
+            status: .estimated,
+            percentPoints: dollars * context.percentPointsPerDollar,
+            unavailableReason: nil,
+            percentPointsPerAPIDollar: context.percentPointsPerDollar,
+            accountScoped: true,
+            sourceFamily: context.scope.sourceFamily,
+            quotaResetAt: context.latestSnapshot?.resetAt,
+            quotaObservedAt: context.latestSnapshot?.observedAt,
+            quotaPrecision: context.latestSnapshot?.precision.rawValue,
+            calculatedAt: now,
+            priceTableRevision: cost.priceTableRevision)
     }
 
     /// Feeds the shared JSONL reader's emitted records, numbering them as it goes.
@@ -142,11 +240,14 @@ final class SessionTelemetryEngine: @unchecked Sendable {
 
     // MARK: - Cache
 
-    private func cachedTelemetry(path: String, signature: RunwayFileSignature) -> SessionTelemetry? {
+    private func cachedTelemetry(path: String,
+                                 signature: RunwayFileSignature,
+                                 priceTableRevision: Int) -> SessionTelemetry? {
         lock.lock(); defer { lock.unlock() }
         guard let entry = cache[path],
               entry.signature == signature,
-              entry.parserVersion == SessionTelemetry.parserVersion else { return nil }
+              entry.parserVersion == SessionTelemetry.parserVersion,
+              entry.priceTableRevision == priceTableRevision else { return nil }
         touch(path)
         return entry.telemetry
     }
@@ -155,6 +256,7 @@ final class SessionTelemetryEngine: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         cache[path] = Entry(signature: signature,
                             parserVersion: SessionTelemetry.parserVersion,
+                            priceTableRevision: telemetry.costEstimate?.priceTableRevision ?? priceTable.revision,
                             telemetry: telemetry)
         touch(path)
         while order.count > Self.cacheCapacity {

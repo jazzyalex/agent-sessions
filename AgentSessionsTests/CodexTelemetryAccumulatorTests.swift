@@ -230,6 +230,36 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertEqual(slice(t, model: "model-a")?.outputTokens, 10)
         XCTAssertTrue(t.usageSummary?.usageFamilyConflict == true)
         XCTAssertEqual(t.usageSummary?.usageFamilies.sorted(), ["token_count", "turn.completed"])
+        XCTAssertEqual(t.usageEvents.count, 1, "losing-family request evidence must not survive")
+        XCTAssertEqual(t.usageEvents.first?.usageFamily, "token_count")
+    }
+
+    func testCumulativeRecordsEmitRequestLevelEventsWithContext() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("gpt-5.6-sol", "xhigh"),
+            tokenCount(input: 200_000, cached: 50_000, output: 10),
+            tokenCount(input: 500_001, cached: 100_000, output: 20)
+        ])
+        XCTAssertEqual(t.usageEvents.count, 2)
+        XCTAssertEqual(t.usageEvents[0].contextInputTokens, 200_000)
+        XCTAssertEqual(t.usageEvents[1].contextInputTokens, 300_001)
+        XCTAssertEqual(t.usageEvents[1].freshInputTokens, 250_001)
+        XCTAssertEqual(t.usageEvents[1].cacheReadTokens, 50_000)
+        XCTAssertEqual(t.usageEvents[1].reasoningEffort, "xhigh")
+        XCTAssertEqual(t.usageEvents[1].ownership, .session)
+    }
+
+    func testMalformedCumulativeMarkerDoesNotSuppressValidTurnUsage() {
+        let t = CodexTelemetryAccumulator.accumulate(lines: [
+            context("model-a", "medium"),
+            #"{"type":"event_msg","payload":{"type":"token_count","info":null}}"#,
+            turnCompleted(input: 100, cached: 20, output: 10)
+        ])
+        XCTAssertEqual(t.usageSummary?.topLineTokens, 110)
+        XCTAssertEqual(t.usageSummary?.usageFamilies, ["token_count", "turn.completed"])
+        XCTAssertFalse(t.usageSummary?.usageFamilyConflict == true,
+                       "a malformed marker is not a second positive usage source")
+        XCTAssertEqual(t.usageEvents.first?.usageFamily, "turn.completed")
     }
 
     /// Same two records as the test above, in the other order. The authority rule
@@ -274,6 +304,7 @@ final class CodexTelemetryAccumulatorTests: XCTestCase {
         XCTAssertNil(t.initialConfiguration)
         XCTAssertNil(t.usageSummary)
         XCTAssertTrue(t.usageSlices.isEmpty)
+        XCTAssertTrue(t.usageEvents.isEmpty)
         XCTAssertEqual(t.source, .codex)
     }
 }

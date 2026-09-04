@@ -78,13 +78,15 @@ final class TelemetryCapabilityTests: XCTestCase {
         XCTAssertEqual(telemetry.weeklyQuota, .unavailable("no account-level quota feed"))
     }
 
-    // Weekly-quota attribution needs persisted account quota snapshots, which no
-    // source has yet. Plan B adds the store; until then every source says so.
-    func testWeeklyQuotaIsUnavailableEverywhereInPlanA() {
+    func testWeeklyQuotaIsAvailableOnlyForProvidersWithAccountQuotaFeeds() {
         for source in SessionSource.allCases {
             let cap = SessionSourceRegistry.descriptor(for: source).telemetry.weeklyQuota
-            guard case .unavailable = cap else {
-                return XCTFail("\(source) weeklyQuota must be unavailable until Plan B")
+            if source == .codex || source == .claude {
+                XCTAssertTrue(cap.isAvailable, "\(source) has a weekly quota feed")
+            } else if case .unavailable = cap {
+                continue
+            } else {
+                XCTFail("\(source) has no audited account-level weekly quota feed")
             }
         }
     }

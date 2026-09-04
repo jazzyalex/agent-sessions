@@ -24,6 +24,16 @@ final class TelemetryCostCalculatorTests: XCTestCase {
                             outputTokens: output)
     }
 
+    private func event(_ model: String, input: Int, context: Int,
+                       ownership: TelemetryUsageOwnership = .session) -> TelemetryUsageEvent {
+        TelemetryUsageEvent(recordID: UUID().uuidString, observedAt: Date(), anchorLine: 0,
+                            usageFamily: "token_count", ownership: ownership,
+                            model: model, reasoningEffort: "high", speed: "standard",
+                            freshInputTokens: input, cacheReadTokens: 0,
+                            cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+                            outputTokens: 0, contextInputTokens: context)
+    }
+
     // MARK: - Priced
 
     func testMixedModelSessionSumsPerSlice() {
@@ -64,6 +74,47 @@ final class TelemetryCostCalculatorTests: XCTestCase {
             slices: [slice("claude-opus-5", fresh: 10)], priceTable: t)
         XCTAssertEqual(result.priceTableUpdated, t.updatedDate)
         XCTAssertFalse(result.priceTableUpdated.isEmpty)
+        XCTAssertEqual(result.priceTableRevision, t.revision)
+    }
+
+    func testRequestLevelPricingAppliesLongContextPerRequest() throws {
+        let t = table()
+        let result = TelemetryCostCalculator.price(
+            events: [
+                event("gpt-5.6-sol", input: 200_000, context: 200_000),
+                event("gpt-5.6-sol", input: 300_000, context: 300_000)
+            ],
+            fallbackSlices: [],
+            priceTable: t)
+        // $0.80 at the base $4/MTok + $2.40 at the long-context $8/MTok.
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 3.2, accuracy: 0.000001)
+        XCTAssertEqual(result.events.map(\.priceTableRevision), [t.revision, t.revision])
+        XCTAssertEqual(result.events.compactMap(\.apiEquivalentUSD).reduce(0, +), 3.2, accuracy: 0.000001)
+    }
+
+    func testDescendantEvidenceIsPricedButExcludedFromSessionTotal() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [
+                event("gpt-5.6-sol", input: 100_000, context: 100_000),
+                event("gpt-5.6-sol", input: 200_000, context: 200_000, ownership: .descendant)
+            ],
+            fallbackSlices: [],
+            priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 0.4, accuracy: 0.000001)
+        XCTAssertEqual(try XCTUnwrap(result.events[1].apiEquivalentUSD), 0.8, accuracy: 0.000001)
+    }
+
+    func testUnpricedDescendantDoesNotPoisonSessionTotal() throws {
+        let result = TelemetryCostCalculator.price(
+            events: [
+                event("gpt-5.6-sol", input: 100_000, context: 100_000),
+                event("mystery-model-9", input: 100_000, context: 100_000, ownership: .descendant)
+            ],
+            fallbackSlices: [],
+            priceTable: table())
+        XCTAssertEqual(try XCTUnwrap(result.estimate.apiEquivalentUSD), 0.4, accuracy: 0.000001)
+        XCTAssertTrue(result.estimate.unpricedModels.isEmpty)
+        XCTAssertNil(result.events[1].apiEquivalentUSD)
     }
 
     // MARK: - Fail closed

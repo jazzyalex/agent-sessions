@@ -58,18 +58,65 @@ final class SessionTelemetryTypesTests: XCTestCase {
         let cost = TelemetryCostEstimate(apiEquivalentUSD: 1.25,
                                          unpricedModels: [],
                                          missingPriceComponents: [],
-                                         priceTableUpdated: "2026-08-30")
+                                         priceTableUpdated: "2026-08-30",
+                                         priceTableRevision: 7)
+        let event = TelemetryUsageEvent(
+            recordID: "request-1", observedAt: cfg.observedAt, anchorLine: 4,
+            usageFamily: "token_count", ownership: .session,
+            model: "gpt-5.6-sol", reasoningEffort: "medium", speed: "standard",
+            freshInputTokens: 12_757, cacheReadTokens: 3_584,
+            cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
+            outputTokens: 81, reasoningOutputTokens: 63,
+            contextInputTokens: 16_341, apiEquivalentUSD: 1.25,
+            priceTableRevision: 7, priceTableUpdated: "2026-08-30")
+        let weekly = TelemetryWeeklyQuotaEstimate(
+            status: .estimated, percentPoints: 0.5, unavailableReason: nil,
+            percentPointsPerAPIDollar: 0.4, accountScoped: true,
+            sourceFamily: "oauth", quotaResetAt: Date(timeIntervalSince1970: 8_000),
+            quotaObservedAt: Date(timeIntervalSince1970: 2_100), quotaPrecision: "exact",
+            calculatedAt: Date(timeIntervalSince1970: 2_200), priceTableRevision: 7)
         let telemetry = SessionTelemetry(source: .codex,
                                          initialConfiguration: cfg,
                                          currentConfiguration: cfg,
                                          configurationChanges: [change],
                                          usageSlices: [slice],
+                                         usageEvents: [event],
                                          usageSummary: summary,
                                          costEstimate: cost,
+                                         weeklyQuotaEstimate: weekly,
                                          parserVersion: SessionTelemetry.parserVersion)
         let data = try JSONEncoder().encode(telemetry)
         let decoded = try JSONDecoder().decode(SessionTelemetry.self, from: data)
         XCTAssertEqual(decoded, telemetry)
+    }
+
+    func testOlderCodablePayloadDefaultsNewEvidenceFields() throws {
+        let cost = TelemetryCostEstimate(apiEquivalentUSD: 1,
+                                         unpricedModels: [],
+                                         missingPriceComponents: [],
+                                         priceTableUpdated: "2026-08-30")
+        let telemetry = SessionTelemetry(source: .codex,
+                                         initialConfiguration: nil,
+                                         currentConfiguration: nil,
+                                         configurationChanges: [],
+                                         usageSlices: [],
+                                         usageSummary: nil,
+                                         costEstimate: cost,
+                                         parserVersion: 1)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(telemetry))
+            as? [String: Any])
+        object.removeValue(forKey: "usageEvents")
+        object.removeValue(forKey: "weeklyQuotaEstimate")
+        var encodedCost = try XCTUnwrap(object["costEstimate"] as? [String: Any])
+        encodedCost.removeValue(forKey: "priceTableRevision")
+        object["costEstimate"] = encodedCost
+
+        let decoded = try JSONDecoder().decode(
+            SessionTelemetry.self,
+            from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(decoded.usageEvents, [])
+        XCTAssertNil(decoded.weeklyQuotaEstimate)
+        XCTAssertEqual(decoded.costEstimate?.priceTableRevision, 0)
     }
 
     // An unavailable dollar result must carry a reason. nil USD with both arrays

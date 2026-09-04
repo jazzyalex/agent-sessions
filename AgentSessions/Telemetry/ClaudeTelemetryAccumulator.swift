@@ -26,6 +26,7 @@ struct ClaudeTelemetryAccumulator {
     private var timeline = ConfigurationTimeline(provenance: .assistantRecord,
                                                  initialProvenance: .inferredFirstObservation)
     private var slices = UsageSliceTable()
+    private var events: [TelemetryUsageEvent] = []
     private var seenMessageIDs = Set<String>()
     private var sawAssistantRecord = false
     private var sawUsageRecord = false
@@ -69,6 +70,8 @@ struct ClaudeTelemetryAccumulator {
         let fresh = Int(ClaudeRunwayLog.double(usage["input_tokens"]) ?? 0)
         let cacheRead = Int(ClaudeRunwayLog.double(usage["cache_read_input_tokens"]) ?? 0)
         let output = Int(ClaudeRunwayLog.double(usage["output_tokens"]) ?? 0)
+        let effectiveEffort = effort ?? timeline.effort
+        let speed = RunwaySpeedTier(usageValue: usage["speed"]).rawValue
 
         slices.addComponents(fresh: fresh,
                          cacheRead: cacheRead,
@@ -82,8 +85,29 @@ struct ClaudeTelemetryAccumulator {
                          // excludes sidechains — so a subagent record with no effort
                          // of its own is attributed the parent's. That is the best
                          // available answer, not a measured one.
-                         effort: effort ?? timeline.effort,
-                         speed: RunwaySpeedTier(usageValue: usage["speed"]).rawValue)
+                         effort: effectiveEffort,
+                         speed: speed)
+
+        let write5m = Int(writes.fiveMinute)
+        let write1h = Int(writes.oneHour)
+        if fresh + cacheRead + write5m + write1h + output > 0 {
+            events.append(TelemetryUsageEvent(
+                recordID: (message["id"] as? String) ?? "message.usage:\(index)",
+                observedAt: ClaudeRunwayLog.date(obj["timestamp"]),
+                anchorLine: index,
+                usageFamily: "message.usage",
+                ownership: isSidechain ? .descendant : .session,
+                model: rawModel,
+                reasoningEffort: effectiveEffort,
+                speed: speed,
+                freshInputTokens: fresh,
+                cacheReadTokens: cacheRead,
+                cacheWrite5mTokens: write5m,
+                cacheWrite1hTokens: write1h,
+                outputTokens: output,
+                contextInputTokens: fresh + cacheRead + write5m + write1h
+            ))
+        }
     }
 
     func finish() -> SessionTelemetry {
@@ -102,6 +126,7 @@ struct ClaudeTelemetryAccumulator {
                                 currentConfiguration: timeline.currentConfiguration,
                                 configurationChanges: timeline.changes,
                                 usageSlices: slices.ordered,
+                                usageEvents: events,
                                 usageSummary: summary,
                                 costEstimate: nil)
     }

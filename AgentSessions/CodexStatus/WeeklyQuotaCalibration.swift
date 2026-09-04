@@ -46,6 +46,33 @@ struct WeeklyQuotaCalibrationScope: Equatable, Codable, Sendable {
     }
 }
 
+enum AccountQuotaPrecision: String, Codable, Sendable {
+    case exact
+    case wholePercentagePoint
+}
+
+/// One account-level weekly-quota observation. Raw account identifiers are never
+/// stored. Snapshots are scoped to the source family, window shape, absolute reset
+/// anchor and price revision so later attribution cannot join unlike regimes.
+struct AccountQuotaSnapshot: Equatable, Codable, Sendable {
+    let provider: String
+    let accountHash: String?
+    let sourceFamily: String
+    let limitShape: String
+    let resetAt: Date
+    let observedAt: Date
+    let remainingPercent: Double
+    let usedPercent: Double
+    let precision: AccountQuotaPrecision
+    let priceRevision: Int
+}
+
+struct WeeklyQuotaAttributionContext: Sendable {
+    let percentPointsPerDollar: Double
+    let scope: WeeklyQuotaCalibrationScope
+    let latestSnapshot: AccountQuotaSnapshot?
+}
+
 /// One accepted observation of the conversion.
 struct WeeklyQuotaCalibration: Equatable, Codable, Sendable {
     let percentPointsPerDollar: Double
@@ -528,6 +555,12 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     private var ledgers: [String: WeeklyQuotaActivityLedger] = [:]
     private var trackers: [String: WeeklyQuotaCalibrationTracker] = [:]
     private var restored: Set<String> = []
+    private var snapshots: [String: [AccountQuotaSnapshot]] = [:]
+    private var restoredSnapshotKeys: Set<String> = []
+    private var lastSnapshotPersistedAt: [String: Date] = [:]
+    /// Persist a same-value observation occasionally so provenance stays fresh
+    /// without turning the five-second quota poll into a disk-write loop.
+    private static let snapshotPersistenceHeartbeat: TimeInterval = 30 * 60
     /// Historical calibration computed from transcripts at launch — the reason
     /// `Wk` shows a number in seconds instead of waiting hours for a 1pp tick.
     private var bootstraps: [String: WeeklyQuotaBootstrapResult] = [:]
@@ -624,6 +657,10 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         "quotaMeter.weeklyCalibration.\(provider).\(scope.accountHash ?? "unscoped")"
     }
 
+    private static func snapshotDefaultsKey(provider: String, scope: WeeklyQuotaCalibrationScope) -> String {
+        "quotaMeter.weeklyQuotaSnapshots.\(provider).\(scope.accountHash ?? "unscoped")"
+    }
+
     /// Bootstrap cache key. Includes the weekly anchor, so a new window never
     /// reads the previous one's ratio, and the account hash where the provider
     /// exposes one. Claude has no account scope, but its anchor is an account's
@@ -681,6 +718,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     /// bootstrap it would replace.
     func percentPointsPerDollar(provider: String, now: Date) -> Double? {
         lock.lock(); defer { lock.unlock() }
+        return percentPointsPerDollarLocked(provider: provider, now: now)
+    }
+
+    /// Caller holds `lock`.
+    private func percentPointsPerDollarLocked(provider: String, now: Date) -> Double? {
         let tracker = trackers[provider]
         let live = tracker?.percentPointsPerDollar(now: now)
         let livePoints = tracker?.conditioningPercentPoints(now: now) ?? 0
@@ -694,6 +736,22 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                 ?? bootstrap.calibratedPercentPointsPerDollar
         }
         return live
+    }
+
+    func attributionContext(provider: String, now: Date) -> WeeklyQuotaAttributionContext? {
+        lock.lock(); defer { lock.unlock() }
+        guard let ratio = percentPointsPerDollarLocked(provider: provider, now: now) else { return nil }
+        guard let scope = trackers[provider]?.currentScope else { return nil }
+        let latest = snapshots[provider]?.last.flatMap { snapshot in
+            snapshot.provider == scope.provider
+                && snapshot.accountHash == scope.accountHash
+                && snapshot.sourceFamily == scope.sourceFamily
+                && snapshot.limitShape == scope.limitShape
+                && snapshot.priceRevision == scope.priceRevision ? snapshot : nil
+        }
+        return WeeklyQuotaAttributionContext(percentPointsPerDollar: ratio,
+                                             scope: scope,
+                                             latestSnapshot: latest)
     }
 
     /// Ledger activity since a bootstrap was measured, or nil when the ledger
@@ -831,12 +889,65 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
 
         var tracker = trackers[provider] ?? WeeklyQuotaCalibrationTracker()
         let restoreKey = Self.defaultsKey(provider: provider, scope: scope)
+        let snapshotKey = Self.snapshotDefaultsKey(provider: provider, scope: scope)
         if scope.isPersistable, !restored.contains(restoreKey) {
             restored.insert(restoreKey)
             if let data = defaults.data(forKey: restoreKey) {
                 tracker.restore(from: data, scope: scope, now: now)
             }
         }
+
+        if scope.isPersistable, !restoredSnapshotKeys.contains(snapshotKey) {
+            restoredSnapshotKeys.insert(snapshotKey)
+            if let data = defaults.data(forKey: snapshotKey),
+               let restoredSnapshots = try? JSONDecoder().decode([AccountQuotaSnapshot].self, from: data) {
+                snapshots[provider] = restoredSnapshots.filter {
+                    $0.provider == provider
+                        && $0.accountHash == scope.accountHash
+                        && $0.sourceFamily == scope.sourceFamily
+                        && $0.limitShape == scope.limitShape
+                        && $0.priceRevision == scope.priceRevision
+                }
+                lastSnapshotPersistedAt[snapshotKey] = snapshots[provider]?.last?.observedAt
+            } else {
+                // The in-memory map is provider-keyed. An account switch with no
+                // stored history must not inherit the prior account's snapshots.
+                snapshots[provider] = []
+            }
+        }
+
+        let snapshot = AccountQuotaSnapshot(
+            provider: provider,
+            accountHash: scope.accountHash,
+            sourceFamily: scope.sourceFamily,
+            limitShape: scope.limitShape,
+            resetAt: resetAt,
+            observedAt: observedAt,
+            remainingPercent: remainingPercent,
+            usedPercent: 100 - remainingPercent,
+            precision: hasExactPercent ? .exact : .wholePercentagePoint,
+            priceRevision: scope.priceRevision)
+        var providerSnapshots = snapshots[provider] ?? []
+        let last = providerSnapshots.last
+        let snapshotIsCurrent = last.map { snapshot.observedAt >= $0.observedAt } ?? true
+        let materiallyChanged = snapshotIsCurrent && (last == nil
+            || last?.provider != snapshot.provider
+            || last?.accountHash != snapshot.accountHash
+            || last?.remainingPercent != snapshot.remainingPercent
+            || last?.resetAt != snapshot.resetAt
+            || last?.sourceFamily != snapshot.sourceFamily
+            || last?.limitShape != snapshot.limitShape
+            || last?.precision != snapshot.precision
+            || last?.priceRevision != snapshot.priceRevision)
+        if materiallyChanged {
+            providerSnapshots.append(snapshot)
+            providerSnapshots = Array(providerSnapshots.suffix(512))
+        } else if snapshotIsCurrent, !providerSnapshots.isEmpty {
+            // Keep the live data contract on the newest observation while
+            // retaining one compact record for an unchanged quota state.
+            providerSnapshots[providerSnapshots.count - 1] = snapshot
+        }
+        snapshots[provider] = providerSnapshots
 
         let accepted = tracker.update(remainingPercent: remainingPercent,
                                       hasExactPercent: hasExactPercent,
@@ -846,12 +957,21 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
                                       ledger: ledger,
                                       now: now)
         trackers[provider] = tracker
-        // Captured under the lock, written outside it: a synchronous defaults write
-        // must not block the 5s runway cycle's reader on disk I/O.
         let payload = accepted != nil ? tracker.persistedData() : nil
-        lock.unlock()
+        let heartbeatDue = snapshotIsCurrent
+            && observedAt.timeIntervalSince(lastSnapshotPersistedAt[snapshotKey] ?? .distantPast)
+            >= Self.snapshotPersistenceHeartbeat
+        let shouldPersistSnapshot = scope.isPersistable && (materiallyChanged || heartbeatDue)
+        let snapshotPayload = shouldPersistSnapshot
+            ? try? JSONEncoder().encode(providerSnapshots)
+            : nil
+        // Keep writes ordered under the same lock as the arrays they encode. Two
+        // simultaneous observations must not let an older payload land last.
         if let payload { defaults.set(payload, forKey: restoreKey) }
-        lock.lock()
+        if let snapshotPayload {
+            defaults.set(snapshotPayload, forKey: snapshotKey)
+            lastSnapshotPersistedAt[snapshotKey] = observedAt
+        }
         return accepted
     }
 
@@ -944,6 +1064,13 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
             // restore, leaving its persisted live samples unread.
             restored = restored.filter {
                 !$0.hasPrefix("quotaMeter.weeklyCalibration.\(provider).")
+            }
+            snapshots[provider] = nil
+            restoredSnapshotKeys = restoredSnapshotKeys.filter {
+                !$0.hasPrefix("quotaMeter.weeklyQuotaSnapshots.\(provider).")
+            }
+            lastSnapshotPersistedAt = lastSnapshotPersistedAt.filter {
+                !$0.key.hasPrefix("quotaMeter.weeklyQuotaSnapshots.\(provider).")
             }
             migratedProviders.remove(provider)
             scanCooldownUntil[provider] = nil
@@ -1116,6 +1243,9 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
         ledgers.removeAll()
         trackers.removeAll()
         restored.removeAll()
+        snapshots.removeAll()
+        restoredSnapshotKeys.removeAll()
+        lastSnapshotPersistedAt.removeAll()
         bootstraps.removeAll()
         bestBootstraps.removeAll()
         latestUsedPercentPoints.removeAll()
@@ -1145,6 +1275,11 @@ final class WeeklyQuotaCalibrationStore: @unchecked Sendable {
     func setBestBootstrapForTesting(provider: String, result: WeeklyQuotaBootstrapResult) {
         lock.lock(); defer { lock.unlock() }
         bestBootstraps[provider] = result
+    }
+
+    func snapshotsForTesting(provider: String) -> [AccountQuotaSnapshot] {
+        lock.lock(); defer { lock.unlock() }
+        return snapshots[provider] ?? []
     }
 
     /// Whether a rescan was DISPATCHED for this provider. Distinct from

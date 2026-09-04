@@ -29,8 +29,11 @@ struct CodexTelemetryAccumulator {
     /// transcript whose `turn.completed` records preceded its `token_count` ones.
     private var cumulativeSlices = UsageSliceTable()
     private var turnSlices = UsageSliceTable()
+    private var cumulativeEvents: [TelemetryUsageEvent] = []
+    private var turnEvents: [TelemetryUsageEvent] = []
     private var cumulative = CumulativeCounters()
     private var recordedTotal = 0
+    private var sawCumulativeMarker = false
     private var sawCumulativeFamily = false
     private var sawTurnCompletedFamily = false
     private var turnCompletedTokens = 0
@@ -55,13 +58,12 @@ struct CodexTelemetryAccumulator {
         let payloadType = (payload["type"] as? String)?.lowercased()
 
         if payloadType == "token_count" {
-            // Marked before the payload guard on purpose: a record with `info: null`
-            // still means this transcript uses the token_count family. A zeroed
-            // summary says "usage records existed but carried no numbers", which is
-            // a different and more useful fact than a nil summary's "none at all".
-            sawCumulativeFamily = true
+            sawCumulativeMarker = true
             guard let info = payload["info"] as? [String: Any],
                   let usage = info["total_token_usage"] as? [String: Any] else { return }
+            // Authority requires a usable cumulative payload. A malformed
+            // token_count marker must not suppress valid turn.completed usage.
+            sawCumulativeFamily = true
             let sample = CumulativeCounters.Sample(usage: usage)
             // A decrease means the counters restarted (a resume). Close the epoch,
             // bank its final total, and treat this record as the new baseline.
@@ -72,6 +74,10 @@ struct CodexTelemetryAccumulator {
             let delta = cumulative.advance(to: sample)
             if delta.hasComponents { cumulativeHasComponents = true }
             cumulativeSlices.add(delta, model: timeline.model, effort: timeline.effort, speed: "standard")
+            if delta.topLine > 0 {
+                cumulativeEvents.append(event(delta: delta, payload: payload, observedAt: observedAt,
+                                              anchorLine: index, family: "token_count"))
+            }
             return
         }
 
@@ -86,12 +92,42 @@ struct CodexTelemetryAccumulator {
             // `finish()`, once the whole file has been seen.
             if increment.hasComponents { turnHasComponents = true }
             turnSlices.add(increment, model: timeline.model, effort: timeline.effort, speed: "standard")
+            if increment.topLine > 0 {
+                turnEvents.append(event(delta: increment, payload: payload, observedAt: observedAt,
+                                        anchorLine: index, family: "turn.completed"))
+            }
         }
+    }
+
+    private func event(delta: UsageDelta,
+                       payload: [String: Any],
+                       observedAt: Date?,
+                       anchorLine: Int,
+                       family: String) -> TelemetryUsageEvent {
+        TelemetryUsageEvent(
+            recordID: (payload["id"] as? String)
+                ?? ((payload["data"] as? [String: Any])?["id"] as? String)
+                ?? "\(family):\(anchorLine)",
+            observedAt: observedAt,
+            anchorLine: anchorLine,
+            usageFamily: family,
+            ownership: .session,
+            model: timeline.model,
+            reasoningEffort: timeline.effort,
+            speed: RunwaySpeedTier.standard.rawValue,
+            freshInputTokens: delta.fresh,
+            cacheReadTokens: delta.cacheRead,
+            cacheWrite5mTokens: delta.cacheWrite,
+            cacheWrite1hTokens: 0,
+            outputTokens: delta.output,
+            reasoningOutputTokens: delta.reasoning,
+            contextInputTokens: delta.contextInput
+        )
     }
 
     func finish() -> SessionTelemetry {
         var families: [String] = []
-        if sawCumulativeFamily { families.append("token_count") }
+        if sawCumulativeMarker { families.append("token_count") }
         if sawTurnCompletedFamily { families.append("turn.completed") }
 
         let bankedTotal = recordedTotal + cumulative.lastTotal
@@ -99,6 +135,7 @@ struct CodexTelemetryAccumulator {
         // The authority decision, made once, with the whole file seen: cumulative
         // wins wherever it appears, so the two families are never summed.
         let winningSlices = sawCumulativeFamily ? cumulativeSlices : turnSlices
+        let winningEvents = sawCumulativeFamily ? cumulativeEvents : turnEvents
         let hasComponents = sawCumulativeFamily ? cumulativeHasComponents : turnHasComponents
 
         let summary: TelemetryUsageSummary?
@@ -121,6 +158,7 @@ struct CodexTelemetryAccumulator {
                                 currentConfiguration: timeline.currentConfiguration,
                                 configurationChanges: timeline.changes,
                                 usageSlices: winningSlices.ordered,
+                                usageEvents: winningEvents,
                                 usageSummary: summary,
                                 costEstimate: nil)
     }
@@ -185,7 +223,8 @@ struct CumulativeCounters {
             cacheWrite: max(0, sample.cacheWrite - base.cacheWrite),
             output: max(0, sample.output - base.output),
             reasoning: max(0, sample.reasoning - base.reasoning),
-            hasComponents: sample.hasComponents
+            hasComponents: sample.hasComponents,
+            contextInput: sample.hasComponents ? max(0, sample.input - base.input) : nil
         )
     }
 }
@@ -198,14 +237,17 @@ struct UsageDelta {
     let output: Int
     let reasoning: Int
     let hasComponents: Bool
+    let contextInput: Int?
 
-    init(fresh: Int, cacheRead: Int, cacheWrite: Int, output: Int, reasoning: Int, hasComponents: Bool) {
+    init(fresh: Int, cacheRead: Int, cacheWrite: Int, output: Int, reasoning: Int,
+         hasComponents: Bool, contextInput: Int? = nil) {
         self.fresh = fresh
         self.cacheRead = cacheRead
         self.cacheWrite = cacheWrite
         self.output = output
         self.reasoning = reasoning
         self.hasComponents = hasComponents
+        self.contextInput = contextInput
     }
 
     /// A whole sample counted as one contribution — the first record of an epoch,
@@ -216,7 +258,8 @@ struct UsageDelta {
                   cacheWrite: sample.cacheWrite,
                   output: sample.output,
                   reasoning: sample.reasoning,
-                  hasComponents: sample.hasComponents)
+                  hasComponents: sample.hasComponents,
+                  contextInput: sample.hasComponents ? sample.input : nil)
     }
 
     var topLine: Int { fresh + cacheRead + cacheWrite + output }

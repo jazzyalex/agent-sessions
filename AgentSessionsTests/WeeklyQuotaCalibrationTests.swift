@@ -727,6 +727,89 @@ final class WeeklyQuotaCalibrationTests: XCTestCase {
         XCTAssertNotNil(tracker.percentPointsPerDollar(now: end))
         XCTAssertNil(tracker.percentPointsPerDollar(now: end.addingTimeInterval(8 * 24 * 3600)))
     }
+
+    func testAccountQuotaSnapshotsPersistOnlyWhenScopedAndOnlyOnMaterialChange() throws {
+        let suiteName = "wk-snapshot-test-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(account: "account-a")
+
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0, defaults: suite)
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0.addingTimeInterval(5),
+                           scope: scoped, now: t0.addingTimeInterval(5), defaults: suite)
+        store.observeQuota(provider: "codex", remainingPercent: 89, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0.addingTimeInterval(10),
+                           scope: scoped, now: t0.addingTimeInterval(10), defaults: suite)
+
+        let snapshots = store.snapshotsForTesting(provider: "codex")
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots.last?.usedPercent, 11)
+        XCTAssertEqual(snapshots.last?.precision, .wholePercentagePoint)
+        XCTAssertTrue(suite.dictionaryRepresentation().keys.contains { $0.hasPrefix("quotaMeter.weeklyQuotaSnapshots.codex.") })
+
+        let unscoped = WeeklyQuotaCalibrationScope(provider: "claude", accountHash: nil,
+                                                   sourceFamily: "oauth", limitShape: "weekly",
+                                                   priceRevision: scoped.priceRevision)
+        store.observeQuota(provider: "claude", remainingPercent: 80, hasExactPercent: true,
+                           resetAt: reset, observedAt: t0, scope: unscoped, now: t0, defaults: suite)
+        XCTAssertEqual(store.snapshotsForTesting(provider: "claude").count, 1)
+        XCTAssertFalse(suite.dictionaryRepresentation().keys.contains { $0.hasPrefix("quotaMeter.weeklyQuotaSnapshots.claude.") })
+    }
+
+    func testAccountQuotaSnapshotsDoNotCrossAccountSwitch() throws {
+        let suiteName = "wk-snapshot-switch-test-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let reset = t0.addingTimeInterval(604_800)
+        let accountA = scope(account: "account-a")
+        let accountB = scope(account: "account-b")
+
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: accountA, now: t0, defaults: suite)
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0.addingTimeInterval(5),
+                           scope: accountB, now: t0.addingTimeInterval(5), defaults: suite)
+
+        let snapshots = store.snapshotsForTesting(provider: "codex")
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots.first?.accountHash, accountB.accountHash)
+    }
+
+    func testQuotaSnapshotRefreshesTimestampAndPrecisionWithoutPollBloat() throws {
+        let suiteName = "wk-snapshot-freshness-test-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let store = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: t0)
+        let reset = t0.addingTimeInterval(604_800)
+        let scoped = scope(account: "account-a")
+
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: t0, scope: scoped, now: t0, defaults: suite)
+        let later = t0.addingTimeInterval(5)
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: false,
+                           resetAt: reset, observedAt: later, scope: scoped, now: later, defaults: suite)
+        XCTAssertEqual(store.snapshotsForTesting(provider: "codex").count, 1)
+        XCTAssertEqual(store.snapshotsForTesting(provider: "codex").last?.observedAt, later)
+
+        let exact = later.addingTimeInterval(5)
+        store.observeQuota(provider: "codex", remainingPercent: 90, hasExactPercent: true,
+                           resetAt: reset, observedAt: exact, scope: scoped, now: exact, defaults: suite)
+        let snapshots = store.snapshotsForTesting(provider: "codex")
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots.last?.precision, .exact)
+        XCTAssertEqual(snapshots.last?.observedAt, exact)
+
+        store.observeQuota(provider: "codex", remainingPercent: 88, hasExactPercent: true,
+                           resetAt: reset, observedAt: t0,
+                           scope: scoped, now: exact, defaults: suite)
+        XCTAssertEqual(store.snapshotsForTesting(provider: "codex").last?.remainingPercent, 90,
+                       "an out-of-order poll must not replace the latest snapshot")
+    }
 }
 
 /// The `Wk` display contract. These are the rules that keep the row honest: an

@@ -99,6 +99,37 @@ struct RunwayLongContextPrice: Equatable, Sendable {
     let outputMultiplier: Double
 }
 
+/// Immutable view of one accepted price manifest. Session telemetry takes one
+/// snapshot before pricing so a background refresh cannot mix revisions inside a
+/// single session or between its event rows and total.
+struct RunwayPriceSnapshot: Sendable {
+    let models: [String: RunwayModelPrice]
+    let updatedDate: String
+    let revision: Int
+
+    func price(forModel slug: String?) -> RunwayModelPrice? {
+        guard let slug, !slug.isEmpty else { return nil }
+        if let exact = models[slug] { return exact }
+        var best: (key: String, price: RunwayModelPrice)?
+        for (key, price) in models where slug.hasPrefix(key) {
+            if key.hasPrefix("gpt-"), !Self.isRecognizedGPTSnapshot(slug, extending: key) { continue }
+            if best == nil || key.count > best!.key.count { best = (key, price) }
+        }
+        return best?.price
+    }
+
+    private static func isRecognizedGPTSnapshot(_ slug: String, extending key: String) -> Bool {
+        let suffix = String(slug.dropFirst(key.count))
+        if suffix.count == 9, suffix.first == "-", suffix.dropFirst().allSatisfy(\.isNumber) { return true }
+        guard suffix.count == 11, suffix.first == "-" else { return false }
+        let date = Array(suffix.dropFirst())
+        return date[4] == "-" && date[7] == "-"
+            && date.enumerated().allSatisfy { index, character in
+                index == 4 || index == 7 ? character == "-" : character.isNumber
+            }
+    }
+}
+
 /// Model→price lookup for `$` burn. Ships a compiled-in default snapshot and,
 /// optionally, refreshes from a read-only public manifest so prices can be
 /// corrected without an app release. The fetch is a plain GET of a static file —
@@ -171,6 +202,11 @@ final class RunwayPriceTable: @unchecked Sendable {
     /// `updated` date of the table currently loaded. Stamped onto stored telemetry
     /// cost results so a saved figure can be re-judged when rates move.
     var updatedDate: String { lock.lock(); defer { lock.unlock() }; return loadedUpdated }
+
+    func snapshot() -> RunwayPriceSnapshot {
+        lock.lock(); defer { lock.unlock() }
+        return RunwayPriceSnapshot(models: models, updatedDate: loadedUpdated, revision: _revision)
+    }
 
     /// nil slug or no safe matching key → nil (→ $ unpriceable).
     func price(forModel slug: String?) -> RunwayModelPrice? {

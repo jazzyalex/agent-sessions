@@ -31,6 +31,7 @@ struct CopilotTelemetryAccumulator {
 
     private var timeline = ConfigurationTimeline(provenance: .providerChangeRecord)
     private var slices = UsageSliceTable()
+    private var events: [TelemetryUsageEvent] = []
     private var sawAnyRecord = false
     private var sawModelMetrics = false
     private var sawTokenDetails = false
@@ -96,6 +97,17 @@ struct CopilotTelemetryAccumulator {
                          model: modelID,
                          effort: timeline.effort,
                          speed: RunwaySpeedTier.standard.rawValue)
+                events.append(TelemetryUsageEvent(
+                    recordID: "session.shutdown.modelMetrics:\(anchorLine):\(modelID)",
+                    observedAt: observedAt, anchorLine: anchorLine,
+                    usageFamily: "session.shutdown.modelMetrics", ownership: .session,
+                    model: modelID, reasoningEffort: timeline.effort,
+                    speed: RunwaySpeedTier.standard.rawValue,
+                    freshInputTokens: fresh, cacheReadTokens: cacheRead,
+                    cacheWrite5mTokens: write, cacheWrite1hTokens: 0,
+                    outputTokens: output,
+                    // Shutdown metrics aggregate a process lifetime, not one request.
+                    contextInputTokens: nil))
             }
             if consumedAny {
                 sawModelMetrics = true
@@ -109,16 +121,32 @@ struct CopilotTelemetryAccumulator {
             return Int(ClaudeRunwayLog.double(entry["tokenCount"]) ?? 0)
         }
         sawTokenDetails = true
-        slices.addComponents(fresh: count("input"),
-                         cacheRead: count("cache_read"),
-                         write5m: count("cache_write"),
+        let fresh = count("input")
+        let cacheRead = count("cache_read")
+        let cacheWrite = count("cache_write")
+        let output = count("output")
+        let model = (data["currentModel"] as? String) ?? timeline.model
+        slices.addComponents(fresh: fresh,
+                         cacheRead: cacheRead,
+                         write5m: cacheWrite,
                          write1h: 0,
-                         output: count("output"),
+                         output: output,
                          // No per-model split available, so the process's own
                          // current model is the best attribution there is.
-                         model: (data["currentModel"] as? String) ?? timeline.model,
+                         model: model,
                          effort: timeline.effort,
                          speed: RunwaySpeedTier.standard.rawValue)
+        if fresh + cacheRead + cacheWrite + output > 0 {
+            events.append(TelemetryUsageEvent(
+                recordID: "session.shutdown.tokenDetails:\(anchorLine)",
+                observedAt: observedAt, anchorLine: anchorLine,
+                usageFamily: "session.shutdown.tokenDetails", ownership: .session,
+                model: model, reasoningEffort: timeline.effort,
+                speed: RunwaySpeedTier.standard.rawValue,
+                freshInputTokens: fresh, cacheReadTokens: cacheRead,
+                cacheWrite5mTokens: cacheWrite, cacheWrite1hTokens: 0,
+                outputTokens: output, contextInputTokens: nil))
+        }
     }
 
     func finish() -> SessionTelemetry {
@@ -142,6 +170,7 @@ struct CopilotTelemetryAccumulator {
                                 currentConfiguration: timeline.currentConfiguration,
                                 configurationChanges: timeline.changes,
                                 usageSlices: slices.ordered,
+                                usageEvents: events,
                                 usageSummary: summary,
                                 costEstimate: nil)
     }

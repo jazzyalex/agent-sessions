@@ -87,6 +87,24 @@ final class SessionTelemetryEngineTests: XCTestCase {
         XCTAssertEqual(engine.parseCount, 1, "unchanged file must not be re-parsed")
     }
 
+    func testPriceRevisionChangeInvalidatesCachedCost() async throws {
+        let url = try write(codexLines())
+        let prices = RunwayPriceTable.makeForTesting()
+        let engine = SessionTelemetryEngine(priceTable: prices)
+        let firstValue = await engine.telemetry(for: session(url, source: .codex))
+        let first = try XCTUnwrap(firstValue)
+        let firstRevision = try XCTUnwrap(first.costEstimate?.priceTableRevision)
+
+        let replacement = Data(#"{"version":1,"updated":"2099-01-01","models":{"gpt-5.6-codex":{"inputPerMTok":8,"cachedInputPerMTok":0.8,"outputPerMTok":40,"cacheWritePerMTok":10}}}"#.utf8)
+        XCTAssertTrue(prices.loadForTesting(json: replacement))
+        let secondValue = await engine.telemetry(for: session(url, source: .codex))
+        let second = try XCTUnwrap(secondValue)
+
+        XCTAssertNotEqual(second.costEstimate?.priceTableRevision, firstRevision)
+        XCTAssertEqual(engine.parseCount, 2, "same bytes must be re-priced after a manifest revision")
+        XCTAssertEqual(second.usageEvents.first?.priceTableRevision, prices.revision)
+    }
+
     /// The exact staleness case a mtime-only key misses.
     func testSizeChangeWithFixedMtimeRecomputes() async throws {
         let url = try write(codexLines())
@@ -129,6 +147,70 @@ final class SessionTelemetryEngineTests: XCTestCase {
         // 1000 fresh @ $5/MTok + 500 output @ $25/MTok
         XCTAssertEqual(try XCTUnwrap(cost.apiEquivalentUSD), 0.0175, accuracy: 0.000001)
         XCTAssertFalse(cost.priceTableUpdated.isEmpty)
+        XCTAssertEqual(try XCTUnwrap(telemetry?.usageEvents.first?.apiEquivalentUSD),
+                       0.0175, accuracy: 0.000001)
+    }
+
+    func testClaudeWeeklyQuotaFailsClosedWithoutStableAccountIdentity() async throws {
+        let url = try write(claudeLines())
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: now)
+        quota.setBootstrapForTesting(provider: "claude", result: WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now))
+        let scope = WeeklyQuotaCalibrationScope(provider: "claude", accountHash: nil,
+                                                sourceFamily: "oauth", limitShape: "weekly",
+                                                priceRevision: prices.revision)
+        quota.observeQuota(provider: "claude", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: now, scope: scope, now: now)
+
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+        let telemetryValue = await engine.telemetry(for: session(url, source: .claude))
+        let telemetry = try XCTUnwrap(telemetryValue)
+        let estimate = try XCTUnwrap(telemetry.weeklyQuotaEstimate)
+        XCTAssertEqual(estimate.status, .unavailable)
+        XCTAssertEqual(estimate.unavailableReason,
+                       "provider does not expose a stable account identity")
+        XCTAssertEqual(try XCTUnwrap(estimate.percentPointsPerAPIDollar), 0.2, accuracy: 0.000001)
+        XCTAssertNil(estimate.percentPoints)
+        XCTAssertFalse(estimate.accountScoped, "Claude exposes no stable account identity")
+    }
+
+    func testCachedTranscriptRefreshesWeeklyQuotaWithoutReparsing() async throws {
+        let priceableLines = codexLines().map {
+            $0.replacingOccurrences(of: "gpt-5.6-codex", with: "gpt-5.6-sol")
+        }
+        let url = try write(priceableLines)
+        let prices = RunwayPriceTable.makeForTesting()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let reset = now.addingTimeInterval(604_800)
+        let quota = WeeklyQuotaCalibrationStore.makeForTesting(launchedAt: now)
+        let engine = SessionTelemetryEngine(priceTable: prices, quotaStore: quota, now: { now })
+
+        let beforeValue = await engine.telemetry(for: session(url, source: .codex))
+        let before = try XCTUnwrap(beforeValue)
+        XCTAssertEqual(before.weeklyQuotaEstimate?.status, .unavailable)
+        XCTAssertEqual(engine.parseCount, 1)
+
+        quota.setBootstrapForTesting(provider: "codex", result: WeeklyQuotaBootstrapResult(
+            usedPercentPoints: 19.5, dollars: 100, unpricedVolumeShare: 0,
+            windowStart: now.addingTimeInterval(-3600), resetsAt: reset, scannedAt: now))
+        let scope = WeeklyQuotaCalibrationScope(provider: "codex",
+                                                accountHash: WeeklyQuotaCalibrationScope.hashAccount("account-a"),
+                                                sourceFamily: "oauth", limitShape: "weekly",
+                                                priceRevision: prices.revision)
+        quota.observeQuota(provider: "codex", remainingPercent: 80, hasExactPercent: false,
+                           resetAt: reset, observedAt: now, scope: scope, now: now)
+
+        let afterValue = await engine.telemetry(for: session(url, source: .codex))
+        let after = try XCTUnwrap(afterValue)
+        XCTAssertEqual(after.weeklyQuotaEstimate?.status, .estimated)
+        XCTAssertEqual(try XCTUnwrap(after.weeklyQuotaEstimate?.percentPointsPerAPIDollar),
+                       0.2, accuracy: 0.000001)
+        XCTAssertTrue(after.weeklyQuotaEstimate?.accountScoped == true)
+        XCTAssertEqual(engine.parseCount, 1, "quota changes must reuse the parsed transcript")
     }
 
     func testCodexLegacyTotalOnlySessionHasNoCostEstimate() async throws {
@@ -141,6 +223,9 @@ final class SessionTelemetryEngineTests: XCTestCase {
         let telemetry = await engine.telemetry(for: session(url, source: .codex))
         XCTAssertEqual(telemetry?.usageSummary?.recordedTotalTokens, 4_242)
         XCTAssertNil(telemetry?.costEstimate, "no component breakdown means nothing to price")
+        XCTAssertEqual(telemetry?.weeklyQuotaEstimate?.status, .unavailable)
+        XCTAssertEqual(telemetry?.weeklyQuotaEstimate?.unavailableReason,
+                       "session has no priceable component breakdown")
     }
 
     // MARK: - Parity with direct accumulation

@@ -21,7 +21,7 @@ extension SessionSourceDescriptor {
                 configuration: .supported,
                 tokens: .partial("legacy total-only logs have no component breakdown"),
                 cost: .partial("legacy total-only logs cannot be priced"),
-                weeklyQuota: .unavailable("no persisted account quota snapshots (Plan B)")
+                weeklyQuota: .partial("estimated from account-wide quota calibration; other-device activity is unobservable")
             ),
             shortLabel: "Codex",
             badgeInitials: "CX",

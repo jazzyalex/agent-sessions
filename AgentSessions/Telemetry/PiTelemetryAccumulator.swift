@@ -27,6 +27,7 @@ struct PiTelemetryAccumulator {
 
     private var timeline = ConfigurationTimeline(provenance: .providerChangeRecord)
     private var slices = UsageSliceTable()
+    private var events: [TelemetryUsageEvent] = []
     private var sawAnyRecord = false
     private var sawUsageRecord = false
 
@@ -59,17 +60,31 @@ struct PiTelemetryAccumulator {
             func int(_ key: String) -> Int {
                 Int(ClaudeRunwayLog.double(usage[key]) ?? 0)
             }
-            slices.addComponents(fresh: int("input"),
-                         cacheRead: int("cacheRead"),
+            let fresh = int("input")
+            let cacheRead = int("cacheRead")
+            let cacheWrite = int("cacheWrite")
+            let output = int("output")
+            slices.addComponents(fresh: fresh,
+                         cacheRead: cacheRead,
                              // Pi reports one undifferentiated cache-write figure,
                              // like Codex; it goes in the 5-minute bucket, which is
                              // what a single such column has always meant.
-                         write5m: int("cacheWrite"),
+                         write5m: cacheWrite,
                          write1h: 0,
-                         output: int("output"),
+                         output: output,
                          model: model,
                          effort: timeline.effort,
                              speed: RunwaySpeedTier.standard.rawValue)
+            if fresh + cacheRead + cacheWrite + output > 0 {
+                events.append(TelemetryUsageEvent(
+                    recordID: (message["id"] as? String) ?? "message.usage:\(index)",
+                    observedAt: observedAt, anchorLine: index, usageFamily: "message.usage",
+                    ownership: .session, model: model, reasoningEffort: timeline.effort,
+                    speed: RunwaySpeedTier.standard.rawValue,
+                    freshInputTokens: fresh, cacheReadTokens: cacheRead,
+                    cacheWrite5mTokens: cacheWrite, cacheWrite1hTokens: 0,
+                    outputTokens: output, contextInputTokens: fresh + cacheRead + cacheWrite))
+            }
         default:
             return
         }
@@ -89,6 +104,7 @@ struct PiTelemetryAccumulator {
                                 currentConfiguration: timeline.currentConfiguration,
                                 configurationChanges: timeline.changes,
                                 usageSlices: slices.ordered,
+                                usageEvents: events,
                                 usageSummary: summary,
                                 costEstimate: nil)
     }
