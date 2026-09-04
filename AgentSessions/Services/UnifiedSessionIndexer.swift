@@ -2490,7 +2490,7 @@ final class UnifiedSessionIndexer: ObservableObject {
 
         var statusDescription: String {
             if isInteractive { return "Ready" }
-            var text = overallPhase.statusDescription
+            var text = String(localized: overallPhase.statusDescription)
             if !blockingSources.isEmpty {
                 let joined = blockingSources.map { $0.displayName }.joined(separator: ", ")
                 text += " (\(joined))"

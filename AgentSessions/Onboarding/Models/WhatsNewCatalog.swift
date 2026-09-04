@@ -14,20 +14,21 @@ struct WhatsNewItem: Identifiable, Equatable {
 
     let kind: Kind
     let iconSystemName: String
-    let title: String
-    let body: String
+    let title: LocalizedStringResource
+    let body: LocalizedStringResource
     /// Optional external link (used by promo / support rows).
-    let linkTitle: String?
+    let linkTitle: LocalizedStringResource?
     let linkURL: URL?
 
     init(
         kind: Kind,
         iconSystemName: String,
-        title: String,
-        body: String,
-        linkTitle: String? = nil,
+        title: LocalizedStringResource,
+        body: LocalizedStringResource,
+        linkTitle: LocalizedStringResource? = nil,
         linkURL: URL? = nil
     ) {
+        self.id = "\(kind.rawValue)|\(iconSystemName)|\(title.key)"
         self.kind = kind
         self.iconSystemName = iconSystemName
         self.title = title
@@ -36,8 +37,8 @@ struct WhatsNewItem: Identifiable, Equatable {
         self.linkURL = linkURL
     }
 
-    /// Stable identity (kind + title) so SwiftUI diffing and tests are deterministic.
-    var id: String { "\(kind.rawValue)|\(title)" }
+    /// Stable, locale-independent identity used by SwiftUI diffing.
+    let id: String
 }
 
 /// Bundled, per-release What's New content. Assembly combines authored highlights,
@@ -47,7 +48,7 @@ enum WhatsNewCatalog {
     // MARK: - Public API
 
     /// One-line teaser shown on the dismissible session-list card.
-    static func teaser(for majorMinor: String) -> String? {
+    static func teaser(for majorMinor: String) -> LocalizedStringResource? {
         teasers[majorMinor]
     }
 
@@ -104,7 +105,7 @@ enum WhatsNewCatalog {
     private static let githubRepositoryURL = URL(string: "https://github.com/jazzyalex/agent-sessions")
     private static let githubSponsorsURL = URL(string: "https://github.com/sponsors/jazzyalex")
 
-    private static let teasers: [String: String] = [
+    private static let teasers: [String: LocalizedStringResource] = [
         "4.3": "A calmer first run, and a What's New you open on your own terms.",
         "4.7": "Kimi Code joins the lineup, and the Quota Meter now sees Claude's cloud sessions.",
         "4.8": "Grok CLI joins the lineup, and Analytics now counts every agent you have enabled.",

@@ -87,7 +87,7 @@ struct SessionsChartView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
-                .help(metric.detailDescription)
+                .help(Text(metric.detailDescription))
 
                 // Flip hint icon
                 if !isFlipped {
@@ -112,7 +112,7 @@ struct SessionsChartView: View {
         Chart(data) { item in
             BarMark(
                 x: .value("Date", item.date, unit: dateUnit),
-                y: .value(metric.axisLabel, item.value(for: metric)),
+                y: .value(String(localized: metric.axisLabel), item.value(for: metric)),
                 stacking: .standard
             )
             .foregroundStyle(by: .value("Agent", item.agentDisplayName))
@@ -262,7 +262,7 @@ struct SessionsChartView: View {
                                 .tracking(0.5)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                ForEach(patterns, id: \.self) { pattern in
+                                ForEach(Array(patterns.enumerated()), id: \.offset) { _, pattern in
                                     HStack(spacing: 8) {
                                         Circle()
                                             .fill(Color.blue.opacity(0.5))
@@ -434,8 +434,8 @@ struct SessionsChartView: View {
         return dayName
     }
 
-    private var patterns: [String] {
-        var result: [String] = []
+    private var patterns: [LocalizedStringResource] {
+        var result: [LocalizedStringResource] = []
 
         // Weekend vs weekday pattern
         let weekdayData = data.filter { Calendar.current.component(.weekday, from: $0.date) >= 2 && Calendar.current.component(.weekday, from: $0.date) <= 6 }

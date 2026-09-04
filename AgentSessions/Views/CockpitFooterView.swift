@@ -131,13 +131,31 @@ struct QuotaData: Equatable {
     /// multi-minute 429 windows. Contains-matching keeps this resilient to
     /// minor copy edits in the manager constants; anything unrecognized falls
     /// back to the generic caption rather than leaking prose into the cell.
-    var reconnectingCaption: String {
+    private enum ReconnectingCaptionKind {
+        case generic
+        case rateLimited
+        case unavailable
+    }
+
+    private var reconnectingCaptionKind: ReconnectingCaptionKind {
         guard let reason = transientReason?.lowercased(), !reason.isEmpty else {
-            return "reconnecting…"
+            return .generic
         }
-        if reason.contains("rate limit") { return "rate limited — retrying…" }
-        if reason.contains("unavailable") { return "retrying…" }
-        return "reconnecting…"
+        if reason.contains("rate limit") { return .rateLimited }
+        if reason.contains("unavailable") { return .unavailable }
+        return .generic
+    }
+
+    var reconnectingCaption: LocalizedStringResource {
+        switch reconnectingCaptionKind {
+        case .generic: return "reconnecting…"
+        case .rateLimited: return "rate limited — retrying…"
+        case .unavailable: return "retrying…"
+        }
+    }
+
+    var reconnectingCaptionUsesProviderName: Bool {
+        reconnectingCaptionKind == .generic
     }
 
     /// A server-directed 429 pause is not an active reconnect attempt. Quota
@@ -304,7 +322,7 @@ struct CockpitFooterView: View {
     /// provider's usual source, or nil when the usual source served it (the common
     /// case, which stays unlabelled). Kept as one mapping so the footer can't drift
     /// from the menu bar's equivalent note.
-    static func fallbackSourceTag(for source: ClaudeUsageSource?) -> String? {
+    static func fallbackSourceTag(for source: ClaudeUsageSource?) -> LocalizedStringResource? {
         switch source {
         case .tmuxUsage:
             return "via CLI probe"
@@ -373,7 +391,7 @@ private struct FooterAuthCell: View {
 /// tooltip carries the full explanation.
 private struct FooterIdleChip: View {
     let provider: QuotaData.Provider
-    let detail: String
+    let detail: LocalizedStringResource
 
     var body: some View {
         HStack(spacing: 5) {
@@ -396,7 +414,7 @@ private struct FooterIdleChip: View {
 /// fix, so the user is never left staring at an endless "retrying".
 private struct FooterRetryChip: View {
     let provider: QuotaData.Provider
-    var caption: String = "reconnecting…"
+    var caption: LocalizedStringResource = "reconnecting…"
     @State private var spinning = false
 
     var body: some View {
@@ -547,21 +565,21 @@ private struct IndexingIndicator: View {
 	        let weekResetDate = data.resetDate(kind: "Wk", raw: data.weekResetText)
 
 	        let fiveResetDisplayText: String = {
-	            if !hasUsageData { return "Waiting" }
-	            if fiveUnavailable { return UsageStaleThresholds.unavailableCopy }
+	            if !hasUsageData { return String(localized: "Waiting", comment: "Usage status before data is available.") }
+	            if fiveUnavailable { return UsageStaleThresholds.localizedUnavailableCopy }
 	            let rel = formatRelativeTimeUntil(fiveResetDate)
 	            if rel != "—" { return rel }
-	            if fiveIsStale { return "n/a" }
+	            if fiveIsStale { return String(localized: "n/a", comment: "Compact usage status when reset timing is unavailable.") }
 	            let fallback = data.resetDisplayFallback(kind: "5h", raw: data.fiveHourResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()
 
 	        let weekResetDisplayText: String = {
-	            if !hasUsageData { return "Waiting" }
-	            if weekUnavailable { return UsageStaleThresholds.unavailableCopy }
+	            if !hasUsageData { return String(localized: "Waiting", comment: "Usage status before data is available.") }
+	            if weekUnavailable { return UsageStaleThresholds.localizedUnavailableCopy }
 	            let s = formatWeeklyReset(weekResetDate)
 	            if s != "—" { return s }
-	            if weekIsStale { return "n/a" }
+	            if weekIsStale { return String(localized: "n/a", comment: "Compact usage status when reset timing is unavailable.") }
 	            let fallback = data.resetDisplayFallback(kind: "Wk", raw: data.weekResetText)
 	            return fallback.isEmpty ? "—" : fallback
 	        }()

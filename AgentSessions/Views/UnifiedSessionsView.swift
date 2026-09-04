@@ -1348,36 +1348,36 @@ struct UnifiedSessionsView: View {
 
 	    private var footerStatusText: String {
 	        if unified.launchState.overallPhase < .ready {
-	            return unified.launchState.overallPhase.statusDescription
+	            return String(localized: unified.launchState.overallPhase.statusDescription)
 	        }
 	        if unified.coreIndexingDisplayMode == .syncing {
 	            let progress = unified.coreIndexingProgress
 	            if progress.total > 0, let percent = progress.percent {
-	                return "Syncing updates \(progress.processed)/\(progress.total) (\(percent)%)…"
+	                return String(localized: "Syncing updates \(progress.processed)/\(progress.total) (\(percent)%)…", comment: "Footer progress while syncing changed sessions.")
 	            }
 	            if progress.processed > 0 {
-	                return "Syncing updates (\(progress.processed))…"
+	                return String(localized: "Syncing updates (\(progress.processed))…", comment: "Footer progress while syncing sessions when the total is unknown.")
 	            }
-	            return "Syncing updates…"
+	            return String(localized: "Syncing updates…", comment: "Footer status while syncing changed sessions.")
 	        }
 	        if unified.coreIndexingDisplayMode == .indexing || unified.isIndexing {
 	            let progress = unified.coreIndexingProgress
 	            if progress.total > 0 {
 	                if let percent = progress.percent {
-	                    return "Indexing \(progress.processed)/\(progress.total) sessions (\(percent)%)…"
+	                    return String(localized: "Indexing \(progress.processed)/\(progress.total) sessions (\(percent)%)…", comment: "Footer progress while indexing sessions.")
 	                }
-	                return "Indexing \(progress.processed)/\(progress.total) sessions…"
+	                return String(localized: "Indexing \(progress.processed)/\(progress.total) sessions…", comment: "Footer progress while indexing sessions without a percentage.")
 	            }
 	            if progress.processed > 0 {
-	                return "Indexing \(progress.processed) sessions…"
+	                return String(localized: "Indexing \(progress.processed) sessions…", comment: "Footer progress while indexing sessions when the total is unknown.")
 	            }
-	            return "Indexing sessions…"
+	            return String(localized: "Indexing sessions…", comment: "Footer status while indexing sessions.")
 	        }
 	        if unified.isProcessingTranscripts {
-	            return "Processing transcripts (core index)…"
+	            return String(localized: "Processing transcripts (core index)…", comment: "Footer status while indexing transcript content.")
 	        }
 	        if searchCoordinator.isRunning {
-	            return "Searching…"
+	            return String(localized: "Searching…", comment: "Footer status while session search is running.")
 	        }
 	        return ""
 	    }
@@ -1386,25 +1386,25 @@ struct UnifiedSessionsView: View {
 	        let visible = cachedRows.count
 	        let total = cachedTotalSessionCount
 	        let countText = visible != total
-	            ? "\(visible) / \(total) Sessions"
-	            : "\(total) Sessions"
+	            ? String(localized: "\(visible) / \(total) sessions", comment: "Footer count of visible sessions out of the total.")
+	            : String(localized: "\(total) sessions", comment: "Footer count of sessions.")
 	        if unified.showFavoritesOnly {
-	            return "\(countText) | Saved only"
+	            return String(localized: "\(countText) | Saved only", comment: "Footer session count while the saved-only filter is enabled.")
 	        }
 	        return countText
 	    }
 
 	    private var footerFreshnessText: String? {
 	        guard let date = cachedLatestModifiedAt else { return nil }
-	        return "Last: \(timeAgoShort(date))"
+	        return String(localized: "Last: \(timeAgoShort(date))", comment: "Footer timestamp for the newest visible session.")
 	    }
 
 	    private func timeAgoShort(_ date: Date, now: Date = Date()) -> String {
 	        let seconds = max(0, now.timeIntervalSince(date))
-	        if seconds < 60 { return "<1m ago" }
-	        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
-	        if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
-	        return "\(Int(seconds / 86400))d ago"
+	        if seconds < 60 { return String(localized: "<1m ago", comment: "Compact relative time under one minute.") }
+	        if seconds < 3600 { return String(localized: "\(Int(seconds / 60))m ago", comment: "Compact relative time in minutes.") }
+	        if seconds < 86400 { return String(localized: "\(Int(seconds / 3600))h ago", comment: "Compact relative time in hours.") }
+	        return String(localized: "\(Int(seconds / 86400))d ago", comment: "Compact relative time in days.")
 	    }
 
 	    private var footerQuotas: [QuotaData] {

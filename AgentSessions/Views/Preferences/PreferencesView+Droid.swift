@@ -165,7 +165,7 @@ extension PreferencesView {
                                     droidProjectsPathDebounce = work
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
                                 }
-                                .help(Text(verbatim: "Optional: scan for exported droid exec --output-format stream-json logs stored as JSONL"))
+                                .help("Optional: scan for exported droid exec --output-format stream-json logs stored as JSONL")
                             Button("Choose…", action: pickDroidProjectsFolder)
                                 .buttonStyle(.bordered)
                                 .help("Pick a projects folder to scan for stream-json logs")
@@ -373,8 +373,8 @@ extension PreferencesView {
 extension PreferencesView {
     func pickDroidBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Droid CLI Binary"
-        panel.message = "Choose the droid executable file"
+        panel.title = String(localized: "Select Droid CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the droid executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -390,8 +390,8 @@ extension PreferencesView {
 
     func pickDroidSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Droid Sessions Directory"
-        panel.message = "Choose a folder where Droid session logs are stored"
+        panel.title = String(localized: "Select Droid Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose a folder where Droid session logs are stored", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -413,8 +413,8 @@ extension PreferencesView {
 
     func pickDroidProjectsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Droid Projects Directory"
-        panel.message = "Choose a folder to scan for stream-json logs"
+        panel.title = String(localized: "Select Droid Projects Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose a folder to scan for stream-json logs", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -436,8 +436,8 @@ extension PreferencesView {
 
     func pickOpenClawBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select OpenClaw CLI Binary"
-        panel.message = "Choose the openclaw or clawdbot executable file"
+        panel.title = String(localized: "Select OpenClaw CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the openclaw or clawdbot executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -454,8 +454,8 @@ extension PreferencesView {
 
     func pickOpenClawSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select OpenClaw Sessions Directory"
-        panel.message = "Choose the OpenClaw state folder (contains agents/*/sessions)"
+        panel.title = String(localized: "Select OpenClaw Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the OpenClaw state folder (contains agents/*/sessions)", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

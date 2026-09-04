@@ -163,8 +163,8 @@ extension PreferencesView {
 
     func pickGrokBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Grok CLI Binary"
-        panel.message = "Choose the grok executable file"
+        panel.title = String(localized: "Select Grok CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the grok executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -204,8 +204,8 @@ extension PreferencesView {
 
     func pickGrokSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Grok Sessions Directory"
-        panel.message = "Choose the Grok sessions folder"
+        panel.title = String(localized: "Select Grok Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the Grok sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- Added Simplified Chinese translations for every entry currently in the app and Info.plist String Catalogs, covering onboarding, menus, notifications, accessibility labels, and macOS permission prompts.
+- Expanded Simplified Chinese localization across the remaining user-visible app surfaces, including Settings, session and transcript controls, the Quota Meter, analytics, menus, alerts, notifications, file panels, onboarding, accessibility labels, and macOS permission prompts, while keeping transcripts, paths, commands, IDs, and product/provider names verbatim.
 
 ### Bug Fixes
 - **Quota Meter no longer reconnects forever when Claude account access is unavailable.** A persistent Claude billing response becomes an actionable `Claude plan inactive` row after 90 seconds, with a one-shot notification and a compact Hide action; a long server-directed rate limit now stays on `rate limited · check plan`, with help explaining that the subscription may be inactive, instead of being erased by a failed fallback and returning to an endless spinner. Server retry timing also wins over stale cold-start work. A permission-only 403 still uses the normal fallback routes. A new agent selector in Quota Meter and Usage Tracking settings can independently hide Codex or Claude without stopping tracking, menu-bar data, the main-window footer, or session indexing.

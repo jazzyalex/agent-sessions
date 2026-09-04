@@ -93,26 +93,26 @@ extension OnboardingContent {
                     ),
                     Screen.Tip(
                         id: "use-agent-cockpit",
-                        title: "Use Agent Cockpit",
-                        description: "Open View > Agent Cockpit to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
+                        title: "Use Quota Meter",
+                        description: "Open View > Quota Meter to monitor active iTerm2 sessions from Codex CLI, Claude Code, and OpenCode."
                     )
                 ]
             ),
             Screen(
                 id: "cockpit-workflow",
                 symbolName: "sparkles.tv",
-                title: "Cockpit Workflow",
+                title: "Quota Meter Workflow",
                 body: "Keep live agent work visible without switching terminal tabs.",
                 bullets: [
                     Screen.Tip(
                         id: "pin-cockpit",
-                        title: "Pin Cockpit",
-                        description: "Keep Agent Cockpit in a screen corner so active and waiting sessions stay visible."
+                        title: "Pin Quota Meter",
+                        description: "Keep Quota Meter in a screen corner so active and waiting sessions stay visible."
                     ),
                     Screen.Tip(
                         id: "focus-live-agent",
                         title: "Focus a live agent",
-                        description: "Use Focus in iTerm2 from Cockpit when you need to jump back to a running agent."
+                        description: "Use Focus in iTerm2 from Quota Meter when you need to jump back to a running agent."
                     )
                 ]
             ),
@@ -120,12 +120,12 @@ extension OnboardingContent {
                 id: "live-session-context",
                 symbolName: "folder.badge.gearshape",
                 title: "Live Session Context",
-                body: "Cockpit rows expose useful session context.",
+                body: "Quota Meter rows expose useful session context.",
                 bullets: [
                     Screen.Tip(
                         id: "reveal-the-log",
                         title: "Reveal the log",
-                        description: "Open the session log in Finder from a live Cockpit row."
+                        description: "Open the session log in Finder from a live Quota Meter row."
                     ),
                     Screen.Tip(
                         id: "open-working-directory",
@@ -232,13 +232,13 @@ extension OnboardingContent {
                 bullets: [
                     Screen.Tip(
                         id: "star-important-sessions",
-                        title: "Star important sessions",
+                        title: "Save important sessions",
                         description: "Reopen them later from Saved Sessions."
                     ),
                     Screen.Tip(
                         id: "filter-to-favorites",
-                        title: "Filter to favorites",
-                        description: "Use favorites-only mode when you want a short working set."
+                        title: "Filter to saved sessions",
+                        description: "Use saved-only mode when you want a short working set."
                     )
                 ]
             ),

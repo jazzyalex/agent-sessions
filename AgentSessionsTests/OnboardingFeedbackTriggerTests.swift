@@ -158,7 +158,7 @@ final class WhatsNewCatalogTests: XCTestCase {
         let items = WhatsNewCatalog.assemble(for: "3.2")
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.kind, .highlight)
-        XCTAssertEqual(items.first?.title, "New: Cursor")
+        XCTAssertEqual(items.first.map { String(localized: $0.title) }, "New: Cursor")
     }
 
     func testEmptyVersionHasNoContent() {
@@ -180,7 +180,7 @@ final class WhatsNewCatalogTests: XCTestCase {
     /// authored highlights, then new-provider rows, then call-to-action rows.
     func testAuthoredHighlightsLeadProviderAndSupportRowsIn47() {
         let items = WhatsNewCatalog.assemble(for: "4.7")
-        XCTAssertEqual(items.map(\.title), [
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
             "Cloud sessions in the Quota Meter",
             "Headless runs show up too",
             "New: Kimi Code",
@@ -200,7 +200,7 @@ final class WhatsNewCatalogTests: XCTestCase {
     /// order as 4.7, and that Grok is not authored twice.
     func testAuthoredHighlightsLeadProviderAndSupportRowsIn48() {
         let items = WhatsNewCatalog.assemble(for: "4.8")
-        XCTAssertEqual(items.map(\.title), [
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
             "Analytics counts every agent",
             "The right CLI wins",
             "New: Grok CLI",
@@ -216,7 +216,7 @@ final class WhatsNewCatalogTests: XCTestCase {
     func testQwenReleaseHas50TeaserAndProviderHighlight() {
         XCTAssertNotNil(WhatsNewCatalog.teaser(for: "5.0"))
         XCTAssertTrue(WhatsNewCatalog.assemble(for: "5.0").contains {
-            $0.kind == .highlight && $0.title == "New: Qwen Code"
+            $0.kind == .highlight && String(localized: $0.title) == "New: Qwen Code"
         })
     }
 
@@ -224,7 +224,7 @@ final class WhatsNewCatalogTests: XCTestCase {
     /// follows, the support row is last, and Qwen is never authored twice.
     func testAuthoredHighlightsLeadProviderAndSupportRowsIn50() {
         let items = WhatsNewCatalog.assemble(for: "5.0")
-        XCTAssertEqual(items.map(\.title), [
+        XCTAssertEqual(items.map { String(localized: $0.title) }, [
             "Agents are plug-in adapters now",
             "Add the agent you use",
             "The agent switches reach everywhere",
@@ -242,11 +242,12 @@ final class WhatsNewCatalogTests: XCTestCase {
     func testDevinAndFxReleaseHave51TeaserAndProviderHighlights() {
         let teaser = WhatsNewCatalog.teaser(for: "5.1")
         XCTAssertNotNil(teaser)
-        XCTAssertTrue(teaser?.contains("Devin CLI") ?? false, "teaser: \(teaser ?? "nil")")
-        XCTAssertTrue(teaser?.contains("fx") ?? false, "teaser: \(teaser ?? "nil")")
+        let teaserText = teaser.map { String(localized: $0) }
+        XCTAssertTrue(teaserText?.contains("Devin CLI") ?? false, "teaser: \(teaserText ?? "nil")")
+        XCTAssertTrue(teaserText?.contains("fx") ?? false, "teaser: \(teaserText ?? "nil")")
 
         let items = WhatsNewCatalog.assemble(for: "5.1")
-        XCTAssertTrue(items.contains { $0.kind == .highlight && $0.title == "New: Devin CLI" })
-        XCTAssertTrue(items.contains { $0.kind == .highlight && $0.title == "New: fx" })
+        XCTAssertTrue(items.contains { $0.kind == .highlight && String(localized: $0.title) == "New: Devin CLI" })
+        XCTAssertTrue(items.contains { $0.kind == .highlight && String(localized: $0.title) == "New: fx" })
     }
 }

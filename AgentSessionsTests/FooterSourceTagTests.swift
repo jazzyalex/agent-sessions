@@ -8,13 +8,17 @@ import XCTest
 /// web path that happened to get reported.
 final class FooterSourceTagTests: XCTestCase {
 
+    private func localized(_ resource: LocalizedStringResource?) -> String? {
+        resource.map { String(localized: $0) }
+    }
+
     func testWebSourcesAreTaggedViaClaudeAI() {
-        XCTAssertEqual(CockpitFooterView.fallbackSourceTag(for: .webEndpoint), "via claude.ai")
-        XCTAssertEqual(CockpitFooterView.fallbackSourceTag(for: .cachedWeb), "via claude.ai")
+        XCTAssertEqual(localized(CockpitFooterView.fallbackSourceTag(for: .webEndpoint)), "via claude.ai")
+        XCTAssertEqual(localized(CockpitFooterView.fallbackSourceTag(for: .cachedWeb)), "via claude.ai")
     }
 
     func testProbeSourceIsTaggedViaCLIProbe() {
-        XCTAssertEqual(CockpitFooterView.fallbackSourceTag(for: .tmuxUsage), "via CLI probe")
+        XCTAssertEqual(localized(CockpitFooterView.fallbackSourceTag(for: .tmuxUsage)), "via CLI probe")
     }
 
     /// The common signed-in case carries no tag at all — an unlabelled meter is the

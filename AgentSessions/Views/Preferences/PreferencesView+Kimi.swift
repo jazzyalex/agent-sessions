@@ -163,8 +163,8 @@ extension PreferencesView {
 
     func pickKimiBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Kimi Code CLI Binary"
-        panel.message = "Choose the kimi executable file"
+        panel.title = String(localized: "Select Kimi Code CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the kimi executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -204,8 +204,8 @@ extension PreferencesView {
 
     func pickKimiSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Kimi Code Sessions Directory"
-        panel.message = "Choose the Kimi Code sessions folder"
+        panel.title = String(localized: "Select Kimi Code Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the Kimi Code sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

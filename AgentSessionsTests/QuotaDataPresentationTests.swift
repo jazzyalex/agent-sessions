@@ -3,6 +3,10 @@ import XCTest
 
 final class QuotaDataPresentationTests: XCTestCase {
 
+    private func localized(_ resource: LocalizedStringResource) -> String {
+        String(localized: resource)
+    }
+
     private func claudeQuota(transientReason: String?, stale: Bool = false) -> QuotaData {
         // provider/percent/reset fields have no memberwise defaults.
         var q = QuotaData(provider: .claude,
@@ -17,26 +21,30 @@ final class QuotaDataPresentationTests: XCTestCase {
 
     func testCaption_rateLimited_saysRateLimited() {
         let q = claudeQuota(transientReason: "Rate limited — retrying shortly")
-        XCTAssertEqual(q.reconnectingCaption, "rate limited — retrying…")
+        XCTAssertEqual(localized(q.reconnectingCaption), "rate limited — retrying…")
+        XCTAssertFalse(q.reconnectingCaptionUsesProviderName)
         XCTAssertTrue(q.isRateLimited)
     }
 
     func testCaption_transientUnavailable_saysRetrying() {
         let q = claudeQuota(transientReason: "Temporarily unavailable — retrying")
-        XCTAssertEqual(q.reconnectingCaption, "retrying…")
+        XCTAssertEqual(localized(q.reconnectingCaption), "retrying…")
+        XCTAssertFalse(q.reconnectingCaptionUsesProviderName)
         XCTAssertFalse(q.isRateLimited)
     }
 
     func testCaption_noReason_fallsBackToReconnecting() {
-        XCTAssertEqual(claudeQuota(transientReason: nil).reconnectingCaption, "reconnecting…")
-        XCTAssertEqual(claudeQuota(transientReason: "").reconnectingCaption, "reconnecting…")
+        XCTAssertEqual(localized(claudeQuota(transientReason: nil).reconnectingCaption), "reconnecting…")
+        XCTAssertEqual(localized(claudeQuota(transientReason: "").reconnectingCaption), "reconnecting…")
+        XCTAssertTrue(claudeQuota(transientReason: nil).reconnectingCaptionUsesProviderName)
     }
 
     func testCaption_unrecognizedReason_fallsBackToReconnecting() {
         // Unknown manager captions must never leak raw sentence-case prose
         // into the compact QM cell.
         let q = claudeQuota(transientReason: "Some future caption we have not mapped")
-        XCTAssertEqual(q.reconnectingCaption, "reconnecting…")
+        XCTAssertEqual(localized(q.reconnectingCaption), "reconnecting…")
+        XCTAssertTrue(q.reconnectingCaptionUsesProviderName)
     }
 
     func testQuotaMeterProviderVisibilityDefaultsToAllShown() {

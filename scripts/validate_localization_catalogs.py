@@ -39,20 +39,57 @@ EXPECTED_INFO_PLIST_KEYS = {
 }
 PLANNED_TRANSLATION_LOCALES = {"zh-Hans"}
 REQUIRED_INFO_COMMENT_KEYS = {"CFBundleDisplayName", "CFBundleName"}
-EXPECTED_LOCALIZABLE_KEY_COUNT = 145
+EXPECTED_LOCALIZABLE_KEY_COUNT = 1293
 EXPECTED_LOCALIZABLE_KEY_SHA256 = (
-    "ee5bd7bd62577e294b496c774117784d233c3299f87fe68a14065fe15a0ac5ee"
+    "b8f3437113ce07763b0c81553facbf8a9b385a357dd8b3f49dd1b7f417b0b492"
 )
 PRESERVED_TERMS = (
     "Agent Sessions",
+    "GitHub Copilot CLI",
+    "GitHub Discussions",
+    "Antigravity CLI",
+    "Claude Desktop",
     "Claude Code",
     "Codex CLI",
+    "Qwen Code",
+    "Kimi Code",
+    "Grok CLI",
+    "Devin CLI",
     "OpenCode",
+    "OpenClaw",
     "iTerm2",
+    "GitHub",
     "Codex",
     "Claude",
+    "Copilot",
+    "Antigravity",
+    "Cursor",
+    "Hermes",
+    "Droid",
+    "Qwen",
+    "Kimi",
+    "Grok",
+    "Devin",
+    "MIT License",
+    "Terminal App",
+    "VS Code",
     "Finder",
     "Terminal",
+    "macOS",
+    "Web API",
+    "OAuth",
+    "JSONL",
+    "JSON",
+    "Markdown",
+    "Sparkle",
+    "tmux",
+    "launchd",
+    "github.com/jazzyalex/agent-sessions",
+    "jazzyalex.github.io/agent-sessions",
+    "jazzyalex@gmail.com",
+    "fx",
+    "⌥⌘F",
+    "⌘F",
     "#side",
     "Option-Command-F",
     "Shift-Command-G",
@@ -63,9 +100,93 @@ PRESERVED_TERMS = (
     "Command-F",
     "Command-G",
 )
+# Xcode extracts these literals from controls that intentionally display raw
+# symbols, provider names, format fragments, or path examples. Keep this list
+# exact so any new extracted key must either enter the catalog or be reviewed
+# here as deliberately verbatim.
+EXPECTED_VERBATIM_EXTRACTED_KEYS = {
+    "",
+    " ",
+    " %@",
+    " ▸4h 59m",
+    "%@ %@",
+    "%@ --  %@",
+    "%@ —",
+    "%@ — %@",
+    "%@: %@%@",
+    "%lld",
+    "%lld%%",
+    "(%lld%%)",
+    "(%lld)",
+    "+",
+    "/path/to/agent",
+    "/path/to/agy",
+    "/path/to/claude",
+    "/path/to/codex",
+    "/path/to/copilot",
+    "/path/to/devin",
+    "/path/to/droid",
+    "/path/to/fx",
+    "/path/to/grok",
+    "/path/to/hermes",
+    "/path/to/kimi",
+    "/path/to/openclaw",
+    "/path/to/opencode",
+    "/path/to/pi",
+    "/path/to/qwen",
+    ">",
+    "@jazzyalex",
+    "A",
+    "AS",
+    "F",
+    "M",
+    "Pi",
+    "S",
+    "T",
+    "W",
+    "|",
+    "~/.copilot/session-state",
+    "~/.cursor",
+    "~/.cursor/chats/*/*/store.db",
+    "~/.cursor/projects/*/agent-transcripts/",
+    "~/.factory/projects",
+    "~/.factory/sessions",
+    "~/.fx/sessions",
+    "~/.grok/sessions",
+    "~/.hermes/sessions",
+    "~/.kimi-code/sessions",
+    "~/.local/share/devin/cli",
+    "~/.openclaw",
+    "~/.pi/agent/sessions",
+    "~/.qwen/projects",
+    "·",
+    "· %@",
+    "—",
+    "↻",
+    "−",
+    "★",
+}
 FORMAT_TOKEN = re.compile(
     r"%#@[^@]+@|%arg|%%|%(?:\d+\$)?(?:lld|llu|ld|lu|d|u|f|g|@)"
 )
+ARGUMENT_FORMAT_TOKEN = re.compile(
+    r"%(?:(\d+)\$)?(lld|llu|ld|lu|d|u|f|g|@)"
+)
+PLURAL_FORMAT_TOKEN = re.compile(r"%#@[^@]+@")
+INLINE_CODE_LITERAL = re.compile(r"`([^`\n]+)`")
+PRESERVED_LITERALS_BY_KEY = {
+    "Copy setup command: claude": ("claude",),
+    "Download from claude.ai/download or install via npm: npm install -g @anthropic/claude-cli": (
+        "claude.ai/download",
+        "npm install -g @anthropic/claude-cli",
+    ),
+    "Run codex --version to confirm resume support": ("codex --version",),
+    "Usage paused — the saved CLI token lapsed. Run any claude command in Terminal to refresh it, or paste a claude.ai session cookie in Settings. Last resort: the probe button in the Quota Meter toolbar (may consume tokens).": (
+        "claude",
+        "claude.ai",
+    ),
+    "via claude.ai": ("claude.ai",),
+}
 
 
 def fail(message: str) -> NoReturn:
@@ -137,6 +258,47 @@ def localization_values(localization: Any) -> list[str]:
     ]
 
 
+def format_signature(value: str) -> tuple[Any, ...]:
+    arguments: list[tuple[int, str]] = []
+    next_implicit_index = 1
+    for match in ARGUMENT_FORMAT_TOKEN.finditer(value):
+        explicit_index, kind = match.groups()
+        if explicit_index is None:
+            index = next_implicit_index
+            next_implicit_index += 1
+        else:
+            index = int(explicit_index)
+        arguments.append((index, kind))
+    return (
+        tuple(sorted(arguments)),
+        value.count("%%"),
+        tuple(sorted(PLURAL_FORMAT_TOKEN.findall(value))),
+        value.count("%arg"),
+    )
+
+
+def validate_format_tokens(
+    path: Path,
+    key: str,
+    locale: str,
+    source_localization: Any,
+    localization: Any,
+) -> None:
+    if locale == "en":
+        return
+    source_signatures = sorted(
+        format_signature(value) for value in localization_values(source_localization)
+    )
+    translated_signatures = sorted(
+        format_signature(value) for value in localization_values(localization)
+    )
+    if source_signatures != translated_signatures:
+        fail(
+            f"{display_path(path)}:{key}:{locale} must preserve format argument "
+            "positions and types"
+        )
+
+
 def has_translatable_text(value: str) -> bool:
     stripped = FORMAT_TOKEN.sub("", value)
     for term in PRESERVED_TERMS:
@@ -155,9 +317,12 @@ def validate_preserved_terms(
         return
     source_text = "\n".join(localization_values(source_localization))
     translated_text = "\n".join(localization_values(localization))
+    per_key_terms = PRESERVED_LITERALS_BY_KEY.get(key, ())
+    inline_code_terms = tuple(INLINE_CODE_LITERAL.findall(source_text))
+    protected_terms = set(PRESERVED_TERMS + per_key_terms + inline_code_terms)
     changed = sorted(
         term
-        for term in PRESERVED_TERMS
+        for term in protected_terms
         if source_text.count(term) != translated_text.count(term)
     )
     if changed:
@@ -277,6 +442,9 @@ def validate_shape(path: Path, catalog: dict[str, Any]) -> tuple[set[str], set[s
             validate_preserved_terms(
                 path, key, locale, source_localization, localization
             )
+            validate_format_tokens(
+                path, key, locale, source_localization, localization
+            )
             validate_translation_changed(
                 path, key, locale, source_localization, localization
             )
@@ -332,6 +500,19 @@ def english_payload(entry: dict[str, Any], path: Path, key: str) -> dict[str, An
     return en
 
 
+def validate_extracted_key_coverage(
+    original_strings: dict[str, Any], synced_strings: dict[str, Any]
+) -> None:
+    extracted_only = set(synced_strings) - set(original_strings)
+    if extracted_only != EXPECTED_VERBATIM_EXTRACTED_KEYS:
+        unexpected = sorted(extracted_only - EXPECTED_VERBATIM_EXTRACTED_KEYS)
+        missing = sorted(EXPECTED_VERBATIM_EXTRACTED_KEYS - extracted_only)
+        fail(
+            "extracted keys outside the catalog differ from the reviewed verbatim set; "
+            f"unexpected={unexpected[:5]}, missing={missing[:5]}"
+        )
+
+
 def validate_extraction_drift(
     extraction_root: Path,
     catalog_path: Path,
@@ -367,6 +548,8 @@ def validate_extraction_drift(
         synced_strings = synced.get("strings")
         if not isinstance(synced_strings, dict):
             fail("temporary synced catalog has no strings object")
+
+        validate_extracted_key_coverage(original_strings, synced_strings)
 
         stale = sorted(
             key

@@ -2,11 +2,15 @@ import XCTest
 @testable import AgentSessions
 
 final class UsageAuthStatusTests: XCTestCase {
+    private func localized(_ resource: LocalizedStringResource) -> String {
+        String(localized: resource)
+    }
+
     func testSignedOutClaudeCopyAndRemediation() {
         let s = UsageAuthStatus.make(provider: .claude, state: .signedOut)
         XCTAssertEqual(s.state, .signedOut)
         XCTAssertEqual(s.remediation, .showCommand("claude auth login"))
-        XCTAssertTrue(s.headline.localizedCaseInsensitiveContains("sign in"))
+        XCTAssertTrue(localized(s.headline).localizedCaseInsensitiveContains("sign in"))
     }
     func testSignedOutCodexCommand() {
         XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .signedOut).remediation,
@@ -23,9 +27,9 @@ final class UsageAuthStatusTests: XCTestCase {
         let status = UsageAuthStatus.make(provider: .claude, state: .accountUnavailable)
         XCTAssertTrue(status.state.isAlarming)
         XCTAssertEqual(status.remediation, .none)
-        XCTAssertEqual(status.chipLabel, "Claude plan inactive")
-        XCTAssertTrue(status.detail.localizedCaseInsensitiveContains("plan"))
-        XCTAssertFalse(status.detail.contains("claude auth login"))
+        XCTAssertEqual(localized(status.chipLabel), "Claude plan inactive")
+        XCTAssertTrue(localized(status.detail).localizedCaseInsensitiveContains("plan"))
+        XCTAssertFalse(localized(status.detail).contains("claude auth login"))
     }
     /// Claude with no CLI now offers the no-CLI ladder (rung 1 Web API mode,
     /// rung 2 guided install) rather than a bare install link (P3, spec §5).
@@ -44,14 +48,14 @@ final class UsageAuthStatusTests: XCTestCase {
     /// The chip drops the verbose "Runway paused — …" headline for a tight,
     /// provider-qualified label.
     func testChipLabelIsShortAndProviderQualified() {
-        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .expired).chipLabel, "Claude auth expired")
-        XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .signedOut).chipLabel, "Codex signed out")
-        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled).chipLabel, "Claude token needed")
+        XCTAssertEqual(localized(UsageAuthStatus.make(provider: .claude, state: .expired).chipLabel), "Claude auth expired")
+        XCTAssertEqual(localized(UsageAuthStatus.make(provider: .codex, state: .signedOut).chipLabel), "Codex signed out")
+        XCTAssertEqual(localized(UsageAuthStatus.make(provider: .claude, state: .cliNotInstalled).chipLabel), "Claude token needed")
     }
 
     /// Non-alarming states carry no chip label (nothing to surface).
     func testChipLabelEmptyWhenNotAlarming() {
-        XCTAssertEqual(UsageAuthStatus.make(provider: .claude, state: .ok).chipLabel, "")
-        XCTAssertEqual(UsageAuthStatus.make(provider: .codex, state: .unknown).chipLabel, "")
+        XCTAssertEqual(localized(UsageAuthStatus.make(provider: .claude, state: .ok).chipLabel), "")
+        XCTAssertEqual(localized(UsageAuthStatus.make(provider: .codex, state: .unknown).chipLabel), "")
     }
 }

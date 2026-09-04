@@ -163,8 +163,8 @@ extension PreferencesView {
 
     func pickFxBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select fx CLI Binary"
-        panel.message = "Choose the fx executable file"
+        panel.title = String(localized: "Select fx CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the fx executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -204,8 +204,8 @@ extension PreferencesView {
 
     func pickFxSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select fx Sessions Directory"
-        panel.message = "Choose the fx sessions folder"
+        panel.title = String(localized: "Select fx Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the fx sessions folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

@@ -136,8 +136,8 @@ extension PreferencesView {
 
     func pickQwenBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Qwen Code Binary"
-        panel.message = "Choose the qwen executable file"
+        panel.title = String(localized: "Select Qwen Code Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the qwen executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -176,8 +176,8 @@ extension PreferencesView {
 
     func pickQwenSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Qwen Code Projects Directory"
-        panel.message = "Choose the Qwen Code projects folder"
+        panel.title = String(localized: "Select Qwen Code Projects Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the Qwen Code projects folder", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

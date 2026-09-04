@@ -69,7 +69,7 @@ final class AnalyticsWindowController: NSObject, NSWindowDelegate {
             defer: false
         )
 
-        window.title = "Analytics"
+        window.title = String(localized: "Analytics", comment: "Title of the Analytics window.")
         window.contentView = hostingView
         // Ensure window follows system appearance when AppAppearance == .system
         window.appearance = nil

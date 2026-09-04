@@ -13,7 +13,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
 
     func testFeatureDescriptionIsDefinedForAllSources() {
         for source in SessionSource.allCases {
-            XCTAssertFalse(source.featureDescription.isEmpty, "\(source) missing featureDescription")
+            XCTAssertFalse(String(localized: source.featureDescription).isEmpty, "\(source) missing featureDescription")
         }
     }
 
@@ -213,7 +213,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
         XCTAssertEqual(items.count, 1)
         let item = items[0]
         XCTAssertEqual(item.kind, .highlight)
-        XCTAssertTrue(item.title.contains("Cursor"), "provider highlight should name Cursor")
+        XCTAssertTrue(String(localized: item.title).contains("Cursor"), "provider highlight should name Cursor")
         XCTAssertEqual(item.iconSystemName, SessionSource.cursor.iconName)
     }
 
@@ -230,7 +230,7 @@ final class NewProviderDiscoverabilityTests: XCTestCase {
     func testWhatsNewForVersion3_2IncludesProviderHighlight() {
         // The assembled What's New list for 3.2 should surface the Cursor highlight.
         let items = WhatsNewCatalog.assemble(for: "3.2")
-        let hasCursorHighlight = items.contains { $0.kind == .highlight && $0.title.contains("Cursor") }
+        let hasCursorHighlight = items.contains { $0.kind == .highlight && String(localized: $0.title).contains("Cursor") }
         XCTAssertTrue(hasCursorHighlight, "What's New for 3.2 should include the Cursor provider highlight")
     }
 }

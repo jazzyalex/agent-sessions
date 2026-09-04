@@ -7,7 +7,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var displayName: String {
+    var displayName: LocalizedStringResource {
         switch self {
         case .sessions: return "Sessions"
         case .messages: return "Messages"
@@ -15,7 +15,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
     }
 
     /// Shown in pickers/descriptions to clarify what changes when toggled.
-    var detailDescription: String {
+    var detailDescription: LocalizedStringResource {
         switch self {
         case .sessions: return "Counts unique conversations"
         case .messages: return "Counts total messages across conversations"
@@ -23,7 +23,7 @@ enum AnalyticsAggregationMetric: String, CaseIterable, Identifiable {
     }
 
     /// Axis label for charts that visualize this metric.
-    var axisLabel: String {
+    var axisLabel: LocalizedStringResource {
         switch self {
         case .sessions: return "Sessions"
         case .messages: return "Messages"
@@ -180,10 +180,15 @@ struct AnalyticsAgentBreakdown: Identifiable, Equatable {
     func details(for metric: AnalyticsAggregationMetric) -> String {
         switch metric {
         case .sessions:
-            let suffix = sessionCount == 1 ? "session" : "sessions"
-            return "\(AnalyticsSummary.formatNumber(sessionCount)) \(suffix) • \(durationFormatted)"
+            return String(
+                localized: "\(sessionCount) sessions • \(durationFormatted)",
+                comment: "Analytics agent row showing a localized session count and duration."
+            )
         case .messages:
-            return "\(AnalyticsSummary.formatNumber(messageCount)) messages • \(durationFormatted)"
+            return String(
+                localized: "\(messageCount) messages • \(durationFormatted)",
+                comment: "Analytics agent row showing a localized message count and duration."
+            )
         }
     }
 

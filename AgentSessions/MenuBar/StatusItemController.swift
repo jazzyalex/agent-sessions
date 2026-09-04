@@ -226,22 +226,22 @@ final class StatusItemController: NSObject {
                 claudeIndexer: claudeIndexer,
                 opencodeIndexer: opencodeIndexer
             )
-            menu.addItem(makeTitleItem("Live Sessions"))
-            menu.addItem(makeTitleItem("\(summary.activeCount) active • \(summary.waitingCount) waiting"))
+            menu.addItem(makeTitleItem(String(localized: "Live Sessions", comment: "Heading for active agent sessions in the menu bar menu.")))
+            menu.addItem(makeTitleItem(String(localized: "\(summary.activeCount) active • \(summary.waitingCount) waiting", comment: "Menu bar summary of active and waiting agent sessions.")))
             let cockpitVisible = AppWindowRouter.isAgentCockpitWindowVisible
             menu.addItem(makeActionItem(
-                title: cockpitVisible ? "Hide Quota Meter" : "Open Quota Meter",
+                title: cockpitVisible ? String(localized: "Hide Quota Meter", comment: "Menu command that hides the Quota Meter window.") : String(localized: "Open Quota Meter", comment: "Menu command that opens the Quota Meter window."),
                 action: cockpitVisible ? #selector(hideAgentCockpit) : #selector(openAgentCockpit)
             ))
             let sessionsVisible = AppWindowRouter.isAgentSessionsWindowVisible
             menu.addItem(makeActionItem(
-                title: sessionsVisible ? "Hide Agent Sessions" : "Open Agent Sessions",
+                title: sessionsVisible ? String(localized: "Hide Agent Sessions", comment: "Menu command that hides the main app window.") : String(localized: "Open Agent Sessions", comment: "Menu command that opens the main app window."),
                 action: sessionsVisible ? #selector(hideAgentSessions) : #selector(openAgentSessions)
             ))
         }
 
         let liveSessionsToggle = makeCheckboxItem(
-            title: "Show Active/Waiting sessions",
+            title: String(localized: "Show Active/Waiting sessions", comment: "Menu toggle for active and waiting session icons."),
             checked: showLiveSessionIcons,
             action: #selector(toggleShowLiveSessionIcons)
         )
@@ -260,7 +260,7 @@ final class StatusItemController: NSObject {
                 menu.addItem(makeActionItem(title: codexResetMenuTitle(label: "Wk:", percent: codexStatus.weekRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .codex, raw: codexStatus.weekResetText, lastUpdate: codexStatus.lastUpdate, eventTimestamp: codexStatus.lastEventTimestamp), has: codexStatus.hasWeekRateLimit), action: #selector(openUsagePreferences)))
                 // Reset credits (free "reset your usage now" grants), shown only when present.
                 if let creditsSummary = CodexResetCredits.menuSummaryLine(codexStatus.resetCredits, now: Date()) {
-                    menu.addItem(makeTitleItem("Reset credits"))
+                    menu.addItem(makeTitleItem(String(localized: "Reset credits", comment: "Heading for available usage reset credits.")))
                     menu.addItem(makeActionItem(title: creditsSummary, action: #selector(openUsagePreferences)))
                     let expiryLines = CodexResetCredits.menuExpiryLines(codexStatus.resetCredits, now: Date())
                     if expiryLines.count > 1 {
@@ -274,7 +274,7 @@ final class StatusItemController: NSObject {
             if claudeTrackingEnabled && (source == .claude || source == .both) {
                 menu.addItem(makeTitleItem("Claude"))
                 if claudeStatus.setupRequired {
-                    menu.addItem(makeActionItem(title: "Copy setup command: claude", action: #selector(copyClaudeCommand)))
+                    menu.addItem(makeActionItem(title: String(localized: "Copy setup command: claude", comment: "Menu command that copies the verbatim Claude setup command."), action: #selector(copyClaudeCommand)))
                 }
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "5h:", percent: claudeStatus.sessionRemainingPercent, reset: staleAwareResetText(kind: "5h", source: .claude, raw: claudeStatus.sessionResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
                 menu.addItem(makeActionItem(title: claudeResetLine(label: "Wk:", percent: claudeStatus.weekAllModelsRemainingPercent, reset: staleAwareResetText(kind: "Wk", source: .claude, raw: claudeStatus.weekAllModelsResetText, lastUpdate: claudeStatus.lastUpdate, eventTimestamp: nil)), action: #selector(openUsagePreferences)))
@@ -297,71 +297,72 @@ final class StatusItemController: NSObject {
                 // say what; this one line says when it comes back. Mirrors the
                 // footer / HUD idle cells' tooltip.
                 if let auth = claudeStatus.authStatus, auth.state == .idle {
-                    menu.addItem(makeTitleItem(auth.detail))
+                    menu.addItem(makeTitleItem(String(localized: auth.detail)))
                 }
                 // Calm transient caption (P2) — beneath the Claude meters, no alarm.
-                if let reason = claudeStatus.transientReason {
-                    menu.addItem(makeTitleItem(reason))
+                if claudeStatus.transientReason != nil {
+                    let caption = QuotaData.claude(from: claudeStatus).reconnectingCaption
+                    menu.addItem(makeTitleItem(String(localized: caption)))
                 }
                 // Honest source label (P4): CLI-probe fallback vs OAuth endpoint.
                 if claudeStatus.currentSource == .tmuxUsage {
-                    menu.addItem(makeTitleItem("via CLI probe"))
+                    menu.addItem(makeTitleItem(String(localized: "via CLI probe", comment: "Menu label identifying the current usage data source.")))
                 }
             }
 
             menu.addItem(NSMenuItem.separator())
 
-            menu.addItem(makeTitleItem("Menu Bar Label"))
+            menu.addItem(makeTitleItem(String(localized: "Menu Bar Label", comment: "Heading for menu bar label settings.")))
             let showCodexResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showCodexResetTimes) as? Bool ?? true
             let showClaudeResetIndicators = d.object(forKey: PreferencesKey.MenuBar.showClaudeResetTimes) as? Bool ?? true
-            let codexToggle = makeCheckboxItem(title: "Show Codex reset indicators", checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
+            let codexToggle = makeCheckboxItem(title: String(localized: "Show Codex reset indicators", comment: "Menu toggle for Codex reset indicators."), checked: showCodexResetIndicators, action: #selector(toggleShowCodexResetTimes))
             codexToggle.isEnabled = codexTrackingEnabled
             menu.addItem(codexToggle)
-            let claudeToggle = makeCheckboxItem(title: "Show Claude reset indicators", checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
+            let claudeToggle = makeCheckboxItem(title: String(localized: "Show Claude reset indicators", comment: "Menu toggle for Claude reset indicators."), checked: showClaudeResetIndicators, action: #selector(toggleShowClaudeResetTimes))
             claudeToggle.isEnabled = claudeTrackingEnabled
             menu.addItem(claudeToggle)
 
             menu.addItem(NSMenuItem.separator())
 
-            menu.addItem(makeTitleItem("Source"))
-            let srcCodex = makeRadioItem(title: MenuBarSource.codex.title, selected: source == .codex, action: #selector(setSourceCodex))
+            menu.addItem(makeTitleItem(String(localized: "Source", comment: "Heading for menu bar usage source choices.")))
+            let srcCodex = makeRadioItem(title: String(localized: MenuBarSource.codex.title), selected: source == .codex, action: #selector(setSourceCodex))
             srcCodex.isEnabled = codexTrackingEnabled
             menu.addItem(srcCodex)
-            let srcClaude = makeRadioItem(title: MenuBarSource.claude.title, selected: source == .claude, action: #selector(setSourceClaude))
+            let srcClaude = makeRadioItem(title: String(localized: MenuBarSource.claude.title), selected: source == .claude, action: #selector(setSourceClaude))
             srcClaude.isEnabled = claudeTrackingEnabled
             menu.addItem(srcClaude)
-            let srcBoth = makeRadioItem(title: MenuBarSource.both.title, selected: source == .both, action: #selector(setSourceBoth))
+            let srcBoth = makeRadioItem(title: String(localized: MenuBarSource.both.title), selected: source == .both, action: #selector(setSourceBoth))
             srcBoth.isEnabled = codexTrackingEnabled && claudeTrackingEnabled
             menu.addItem(srcBoth)
 
-            menu.addItem(makeTitleItem("Style"))
-            menu.addItem(makeRadioItem(title: MenuBarStyleKind.bars.title, selected: style == .bars, action: #selector(setStyleBars)))
-            menu.addItem(makeRadioItem(title: MenuBarStyleKind.numbers.title, selected: style == .numbers, action: #selector(setStyleNumbers)))
+            menu.addItem(makeTitleItem(String(localized: "Style", comment: "Heading for menu bar display style choices.")))
+            menu.addItem(makeRadioItem(title: String(localized: MenuBarStyleKind.bars.title), selected: style == .bars, action: #selector(setStyleBars)))
+            menu.addItem(makeRadioItem(title: String(localized: MenuBarStyleKind.numbers.title), selected: style == .numbers, action: #selector(setStyleNumbers)))
 
-            menu.addItem(makeTitleItem("Scope"))
-            menu.addItem(makeRadioItem(title: MenuBarScope.fiveHour.title, selected: scope == .fiveHour, action: #selector(setScope5h)))
-            menu.addItem(makeRadioItem(title: MenuBarScope.weekly.title, selected: scope == .weekly, action: #selector(setScopeWeekly)))
-            menu.addItem(makeRadioItem(title: MenuBarScope.both.title, selected: scope == .both, action: #selector(setScopeBoth)))
+            menu.addItem(makeTitleItem(String(localized: "Scope", comment: "Heading for menu bar quota scope choices.")))
+            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.fiveHour.title), selected: scope == .fiveHour, action: #selector(setScope5h)))
+            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.weekly.title), selected: scope == .weekly, action: #selector(setScopeWeekly)))
+            menu.addItem(makeRadioItem(title: String(localized: MenuBarScope.both.title), selected: scope == .both, action: #selector(setScopeBoth)))
 
             menu.addItem(NSMenuItem.separator())
 
             if codexTrackingEnabled {
-                menu.addItem(makeActionItem(title: "Hard Refresh Codex", action: #selector(refreshCodexHard)))
+                menu.addItem(makeActionItem(title: String(localized: "Hard Refresh Codex", comment: "Menu command that force-refreshes Codex usage."), action: #selector(refreshCodexHard)))
             }
             if claudeTrackingEnabled {
-                menu.addItem(makeActionItem(title: "Hard Refresh Claude", action: #selector(refreshClaudeHard)))
+                menu.addItem(makeActionItem(title: String(localized: "Hard Refresh Claude", comment: "Menu command that force-refreshes Claude usage."), action: #selector(refreshClaudeHard)))
             }
             menu.addItem(NSMenuItem.separator())
         }
 
-        menu.addItem(makeActionItem(title: "Open Settings…", action: #selector(openMenuBarPreferences)))
-        menu.addItem(makeActionItem(title: "Hide Menu Bar Item", action: #selector(hideMenuBar)))
+        menu.addItem(makeActionItem(title: String(localized: "Open Settings…", comment: "Menu command that opens Settings."), action: #selector(openMenuBarPreferences)))
+        menu.addItem(makeActionItem(title: String(localized: "Hide Menu Bar Item", comment: "Menu command that hides the app menu bar item."), action: #selector(hideMenuBar)))
         menu.addItem(makeActionItem(
             title: DockIconPreferenceController.dockIconMenuTitle(defaults: d),
             action: #selector(toggleHideDockIcon)
         ))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(makeActionItem(title: "Quit", action: #selector(quitApp)))
+        menu.addItem(makeActionItem(title: String(localized: "Quit", comment: "Menu command that quits the app."), action: #selector(quitApp)))
 
         return menu
     }
@@ -416,10 +417,10 @@ final class StatusItemController: NSObject {
     private func authAlertText(provider: AuthProvider, state: UsageAuthState) -> String {
         let name = provider.displayName
         switch state {
-        case .signedOut: return "\(name) signed out — Fix…"
-        case .expired: return "\(name) session expired — Fix…"
-        case .accountUnavailable: return "\(name) account access unavailable — Fix…"
-        case .cliNotInstalled: return "\(name) CLI not installed — Fix…"
+        case .signedOut: return String(localized: "\(name) signed out — Fix…", comment: "Menu command for repairing a signed-out provider; provider name remains verbatim.")
+        case .expired: return String(localized: "\(name) session expired — Fix…", comment: "Menu command for repairing an expired provider session; provider name remains verbatim.")
+        case .accountUnavailable: return String(localized: "\(name) account access unavailable — Fix…", comment: "Menu command for unavailable provider account access; provider name remains verbatim.")
+        case .cliNotInstalled: return String(localized: "\(name) CLI not installed — Fix…", comment: "Menu command for a missing provider CLI; provider name remains verbatim.")
         default: return name
         }
     }
@@ -526,12 +527,13 @@ final class StatusItemController: NSObject {
     private func resetLine(label: String, percent: Int, reset: String) -> String {
         let trimmed = reset.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == UsageStaleThresholds.unavailableCopy {
-            return "\(label) --  \(trimmed)"
+            return "\(label) --  \(UsageStaleThresholds.localizedUnavailableCopy)"
         }
         let mode = UsageDisplayMode.current()
         let clampedLeft = max(0, min(100, percent))
         let displayPercent = mode.numericPercent(fromLeft: clampedLeft)
-        return "\(label) \(displayPercent)% \(mode.suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
+        let suffix = String(localized: mode.suffix)
+        return "\(label) \(displayPercent)% \(suffix)  \(trimmed.isEmpty ? "—" : trimmed)"
     }
 
     /// Per-line presentation for the Codex 5h/Wk menu rows: real data uses the
@@ -544,9 +546,9 @@ final class StatusItemController: NSObject {
         if has {
             return resetLine(label: label, percent: percent, reset: reset)
         } else if codexStatus.lastUpdate == nil {
-            return "\(label) —"
+            return String(localized: "\(label) —", comment: "Menu bar quota row before the first successful refresh; the quota label remains verbatim.")
         } else {
-            return "\(label) \(UsageLimitAbsenceCopy.label(suspect: codexStatus.usageFormatSuspect))"
+            return String(localized: "\(label) \(UsageLimitAbsenceCopy.localizedLabel(suspect: codexStatus.usageFormatSuspect))", comment: "Menu bar quota row for an absent or unverifiable limit; the quota label remains verbatim.")
         }
     }
 
@@ -558,11 +560,12 @@ final class StatusItemController: NSObject {
         let quota = QuotaData.claude(from: claudeStatus)
         switch quota.presentationState {
         case .needsAction:
-            return "\(label) --  Usage unavailable"
+            return String(localized: "\(label) --  Usage unavailable", comment: "Menu bar quota row when usage needs action; the quota label remains verbatim.")
         case .idle:
-            return "\(label) --  No active session"
+            return String(localized: "\(label) --  No active session", comment: "Menu bar quota row when there is no active session; the quota label remains verbatim.")
         case .reconnecting:
-            return "\(label) --  \(quota.reconnectingCaption)"
+            let caption = String(localized: quota.reconnectingCaption)
+            return String(localized: "\(label) --  \(caption)", comment: "Menu bar quota row while reconnecting; the quota label remains verbatim.")
         case .live:
             return resetLine(label: label, percent: percent, reset: reset)
         }
@@ -575,17 +578,17 @@ extension StatusItemController {
         return formatResetDisplayForMenu(kind: kind, source: source, raw: raw, lastUpdate: lastUpdate, eventTimestamp: eventTimestamp)
     }
 
-    private func presentFailureAlert(title: String, diagnostics: Any) {
+    private func presentFailureAlert(title: LocalizedStringResource, diagnostics: Any) {
         guard let win = NSApp.windows.first else { return }
         let alert = NSAlert()
-        alert.messageText = title
+        alert.messageText = String(localized: title)
         if let d = diagnostics as? CodexProbeDiagnostics {
             alert.informativeText = "Exit: \(d.exitCode)\nScript: \(d.scriptPath)\nWORKDIR: \(d.workdir)\n\n— stdout —\n\(d.stdout)\n\n— stderr —\n\(d.stderr)"
         } else if let d = diagnostics as? ClaudeProbeDiagnostics {
             alert.informativeText = "Exit: \(d.exitCode)\nScript: \(d.scriptPath)\nWORKDIR: \(d.workdir)\n\n— stdout —\n\(d.stdout)\n\n— stderr —\n\(d.stderr)"
         }
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: String(localized: "OK", comment: "Confirmation button in a probe failure alert."))
         alert.beginSheetModal(for: win) { _ in }
     }
 }

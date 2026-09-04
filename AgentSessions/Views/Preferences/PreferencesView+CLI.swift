@@ -484,8 +484,8 @@ extension PreferencesView {
 
     func pickAntigravitySessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Antigravity Artifact Directory"
-        panel.message = "Choose the folder where Antigravity brain artifacts are stored"
+        panel.title = String(localized: "Select Antigravity Artifact Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the folder where Antigravity brain artifacts are stored", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

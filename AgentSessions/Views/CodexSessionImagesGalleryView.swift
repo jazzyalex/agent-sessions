@@ -404,7 +404,8 @@ struct CodexSessionImagesGalleryView: View {
 
             Spacer()
 
-            Text("\(viewModel.items.count) image\(viewModel.items.count == 1 ? "" : "s")")
+            let imageCount = viewModel.items.count
+            Text("\(imageCount) images")
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
         }

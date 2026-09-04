@@ -150,7 +150,7 @@ final class AuthFixWindowController {
             backing: .buffered,
             defer: false
         )
-        win.title = "Fix Usage Tracking"
+        win.title = String(localized: "Fix Usage Tracking", comment: "Title of the usage authentication repair window.")
         win.contentView = hv
         win.isReleasedWhenClosed = false
         win.center()

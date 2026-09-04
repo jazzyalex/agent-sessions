@@ -115,7 +115,7 @@ final class ClaudeUsageModelAuthWiringTests: XCTestCase {
         let quota = QuotaData.claude(from: model)
         XCTAssertEqual(quota.presentationState, .reconnecting)
         XCTAssertTrue(quota.isRateLimited)
-        XCTAssertEqual(quota.reconnectingCaption, "rate limited — retrying…")
+        XCTAssertEqual(String(localized: quota.reconnectingCaption), "rate limited — retrying…")
     }
 
     /// Recovery is an explicit command, not an ambiguous nil from any producer.

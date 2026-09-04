@@ -26,6 +26,14 @@ enum UsageStaleThresholds {
 
     static let outdatedCopy = "Data is old. Check manually for latest"
     static let unavailableCopy = "Unavailable in recent logs"
+
+    static var localizedOutdatedCopy: String {
+        String(localized: "Data is old. Check manually for latest", comment: "Usage status shown when quota data is stale.")
+    }
+
+    static var localizedUnavailableCopy: String {
+        String(localized: "Unavailable in recent logs", comment: "Usage status shown when recent logs contain no quota data.")
+    }
 }
 
 /// Single source of truth for "dropped window" copy so the strip, menu bar,
@@ -41,6 +49,16 @@ enum UsageLimitAbsenceCopy {
     /// Inline label for an absent window: `cantVerify` when the format is
     /// suspect, else the calm `noLimit`.
     static func label(suspect: Bool) -> String { suspect ? cantVerify : noLimit }
+
+    static func localizedLabel(suspect: Bool) -> String {
+        suspect
+            ? String(localized: "can't verify", comment: "Inline quota status when a provider format cannot be verified.")
+            : String(localized: "no limit", comment: "Inline quota status when a provider does not report this limit.")
+    }
+
+    static var localizedSuspectHelp: String {
+        String(localized: "Codex changed its usage format — can't verify", comment: "Help text for an unrecognized Codex usage format.")
+    }
 }
 
 func isResetInfoUnavailable(raw: String) -> Bool {

@@ -168,7 +168,7 @@ extension PreferencesView {
                         .help("Show a compact token such as ▸2h in the Quota Meter when fresh 5h usage samples project exhaustion before reset.")
                 }
 
-                Text("Cockpit run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")
+                Text("Quota Meter run-out tokens use fresh 5h usage velocity and can show longer before-reset ETAs than notification alerts. This display setting is independent of notification delivery.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -263,7 +263,7 @@ extension PreferencesView {
                 get: { UserDefaults.standard.object(forKey: PreferencesKey.Advanced.hideDockIcon) as? Bool ?? false },
                 set: { DockIconPreferenceController.setDockIconHidden($0) }
             ))
-            .help("Removes Agent Sessions from the Dock when the menu bar item or a pinned Cockpit keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.")
+            .help("Removes Agent Sessions from the Dock when the menu bar item or a pinned Quota Meter keeps the app reachable. If neither path is available, Agent Sessions restores the Dock icon.")
 
             sectionHeader("Claude Archived Sessions")
             VStack(alignment: .leading, spacing: 8) {

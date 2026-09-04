@@ -76,7 +76,7 @@ enum UsageDisplayMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// Human-readable label for Preferences.
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .left:
             return "Left % (Codex-style)"
@@ -109,7 +109,7 @@ enum UsageDisplayMode: String, CaseIterable, Identifiable {
     }
 
     /// Suffix text appropriate for the current mode (\"left\" or \"used\").
-    var suffix: String {
+    var suffix: LocalizedStringResource {
         switch self {
         case .left:
             return "left"
@@ -138,7 +138,7 @@ enum QuotaMeterOnTrackGlyph: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .smile:
             return "Smile"
@@ -148,7 +148,7 @@ enum QuotaMeterOnTrackGlyph: String, CaseIterable, Identifiable {
     }
 
     /// One-line explanation shown under the selector for the active option.
-    var detail: String {
+    var detail: LocalizedStringResource {
         switch self {
         case .smile:
             return "Shows a smiling face while you’re working but on track to fit the 5-hour window."
@@ -185,7 +185,7 @@ enum QuotaMeterChrome: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .always:
             return "Always"
@@ -197,7 +197,7 @@ enum QuotaMeterChrome: String, CaseIterable, Identifiable {
     }
 
     /// One-line explanation shown under the selector for the active option.
-    var detail: String {
+    var detail: LocalizedStringResource {
         switch self {
         case .always:
             return "Toolbar stays visible. The window never resizes under the pointer."
@@ -266,7 +266,7 @@ enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .automatic:
             return "Auto"
@@ -290,7 +290,7 @@ enum QuotaMeterRunwayVisibility: String, CaseIterable, Identifiable {
     }
 
     /// One-line explanation shown under the selector for the active option.
-    var detail: String {
+    var detail: LocalizedStringResource {
         switch self {
         case .automatic:
             return "Shows the session runway only when it’s running low."

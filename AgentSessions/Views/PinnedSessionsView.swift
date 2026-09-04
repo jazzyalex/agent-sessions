@@ -19,7 +19,7 @@ struct PinnedSessionsView: View {
         let id: RowKey
         let title: String
         let sourceLabel: String
-        let statusLabel: String
+        let statusLabel: LocalizedStringResource
         let statusHelp: String
         let lastSyncLabel: String
         let sizeLabel: String
@@ -82,11 +82,11 @@ struct PinnedSessionsView: View {
 
             Table(rows, selection: $selection) {
                 TableColumn("Title") { row in
-                    Text(row.title)
+                    Text(verbatim: row.title)
                         .lineLimit(1)
                 }
                 TableColumn("Source") { row in
-                    Text(row.sourceLabel)
+                    Text(verbatim: row.sourceLabel)
                         .foregroundStyle(.secondary)
                 }
                 TableColumn("Status") { row in
@@ -95,11 +95,11 @@ struct PinnedSessionsView: View {
                         .help(row.statusHelp)
                 }
                 TableColumn("Last Sync") { row in
-                    Text(row.lastSyncLabel)
+                    Text(verbatim: row.lastSyncLabel)
                         .foregroundStyle(.secondary)
                 }
                 TableColumn("Size") { row in
-                    Text(row.sizeLabel)
+                    Text(verbatim: row.sizeLabel)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -127,7 +127,7 @@ struct PinnedSessionsView: View {
             Button("Delete", role: .destructive) { deleteArchivedSelection() }
         } message: {
             let count = pendingDeleteSelection.count
-            Text("This will remove \(count) session\(count == 1 ? "" : "s") from Saved and move their local archive copies to the Trash. Original session files are not deleted.")
+            Text("This will remove \(count) sessions from Saved and move their local archive copies to the Trash. Original session files are not deleted.")
         }
         .onAppear {
             archiveManager.syncPinnedSessionsNow()
@@ -172,10 +172,10 @@ struct PinnedSessionsView: View {
         }
     }
 
-    private func archiveStatusLabel(for info: SessionArchiveInfo?) -> String {
+    private func archiveStatusLabel(for info: SessionArchiveInfo?) -> LocalizedStringResource {
         guard let info else {
             let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-            return pins ? "Saving…" : "Saved"
+            return pins ? LocalizedStringResource("Saving…") : LocalizedStringResource("Saved")
         }
         if info.upstreamMissing { return "Upstream missing" }
         switch info.status {
@@ -189,15 +189,15 @@ struct PinnedSessionsView: View {
 
     private func archiveStatusHelp(for info: SessionArchiveInfo?) -> String {
         let pins = UserDefaults.standard.object(forKey: PreferencesKey.Archives.starPinsSessions) as? Bool ?? true
-        guard pins else { return "Archiving is disabled in Settings." }
+        guard pins else { return String(localized: "Archiving is disabled in Settings.") }
         guard let info else {
-            return "Saved-copy metadata not initialized yet. Try “Show Saved Copy” to retry saving."
+            return String(localized: "Saved-copy metadata not initialized yet. Try “Show Saved Copy” to retry saving.")
         }
         var parts: [String] = []
         if let err = info.lastError, !err.isEmpty {
-            parts.append("Error: \(err)")
+            parts.append(String(localized: "Error: \(err)"))
         }
-        parts.append("Upstream: \(info.upstreamPath)")
+        parts.append(String(localized: "Upstream: \(info.upstreamPath)"))
         return parts.joined(separator: "\n")
     }
 

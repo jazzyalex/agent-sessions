@@ -2843,7 +2843,7 @@ private struct HUDLimitsProviderEntry {
     /// The same `QuotaData` value's compact reconnecting caption (e.g. "rate
     /// limited — retrying…"), carried alongside `presentationState` so every
     /// HUD surface renders the actual cause instead of a generic spinner.
-    var reconnectingCaption: String = "reconnecting…"
+    var reconnectingCaption: LocalizedStringResource = "reconnecting…"
     /// True when the provider explicitly returned a rate-limit response. Unlike
     /// a short reconnect attempt, this can be a long server-directed pause and
     /// should render without an endlessly spinning activity indicator.
@@ -4825,8 +4825,15 @@ private struct HUDLimitsAuthCell: View {
 /// The tooltip carries the full explanation.
 private struct HUDLimitsIdleCell: View {
     let source: UsageTrackingSource
-    var detail: String = ""
+    var detail: LocalizedStringResource = ""
     var enlarged: Bool = false
+
+    private var resolvedDetail: String {
+        let localizedDetail = String(localized: detail)
+        return localizedDetail.isEmpty
+            ? String(localized: "Usage will update after the next session.", comment: "Tooltip for an idle usage meter.")
+            : localizedDetail
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -4839,7 +4846,7 @@ private struct HUDLimitsIdleCell: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        .help(detail.isEmpty ? "Usage will update after the next session." : detail)
+        .help(resolvedDetail)
     }
 }
 
@@ -4882,7 +4889,7 @@ private func isProbeFailed(_ s: ProbeCoordinator.ProbeRowState) -> Bool {
 private struct HUDLimitsRetryCell: View {
     let source: UsageTrackingSource
     var enlarged: Bool = false
-    var caption: String = "reconnecting…"
+    var caption: LocalizedStringResource = "reconnecting…"
 
     var body: some View {
         HStack(spacing: 8) {
@@ -5066,8 +5073,8 @@ private struct HUDLimitsProviderText: View {
     // Reset labels carry their own "↻ " prefix so the calm absent states can
     // drop it ("no limit" / "can't verify" read wrong with a reset glyph).
     private func fiveHourResetLabel() -> String? {
-        if fiveAbsent { return UsageLimitAbsenceCopy.label(suspect: suspect) }
-        if isResetInfoUnavailable(raw: entry.fiveHourResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
+        if fiveAbsent { return UsageLimitAbsenceCopy.localizedLabel(suspect: suspect) }
+        if isResetInfoUnavailable(raw: entry.fiveHourResetText) { return "↻ \(UsageStaleThresholds.localizedUnavailableCopy)" }
         let raw = entry.fiveHourResetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return "↻ —" }
         let date = UsageResetText.resetDate(kind: "5h", source: entry.source, raw: entry.fiveHourResetText, now: now)
@@ -5077,8 +5084,8 @@ private struct HUDLimitsProviderText: View {
     }
 
     private func weekResetLabel() -> String? {
-        if weekAbsent { return UsageLimitAbsenceCopy.label(suspect: suspect) }
-        if isResetInfoUnavailable(raw: entry.weekResetText) { return "↻ \(UsageStaleThresholds.unavailableCopy)" }
+        if weekAbsent { return UsageLimitAbsenceCopy.localizedLabel(suspect: suspect) }
+        if isResetInfoUnavailable(raw: entry.weekResetText) { return "↻ \(UsageStaleThresholds.localizedUnavailableCopy)" }
         let raw = entry.weekResetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return "↻ —" }
         let date = UsageResetText.resetDate(kind: "Wk", source: entry.source, raw: entry.weekResetText, now: now)
@@ -5122,7 +5129,7 @@ private struct HUDLimitsProviderText: View {
                 // (state first), sized to the combined 5h region so the variable-
                 // width burn chip has room instead of colliding with "no limit".
                 HStack(spacing: 6 * scale) {
-                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
+                    Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: suspect))")
                         .foregroundStyle(.secondary)
                     if let chip = fiveHourBurnChip {
                         Text(chip).foregroundStyle(hudProjectionColor(colorScheme))
@@ -5199,7 +5206,7 @@ private struct HUDLimitsProviderText: View {
                                     // Dropped 5h window: state first, then the burn
                                     // chip — "5h: no limit  30K tk/h" — never the
                                     // jumbled "— 30K tk/h no limit".
-                                    Text("5h: \(UsageLimitAbsenceCopy.label(suspect: suspect))")
+                                    Text("5h: \(UsageLimitAbsenceCopy.localizedLabel(suspect: suspect))")
                                         .foregroundStyle(.secondary)
                                     if let chip = fiveHourBurnChip {
                                         Text(chip)

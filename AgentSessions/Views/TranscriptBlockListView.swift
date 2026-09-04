@@ -3945,7 +3945,7 @@ final class SelectableBlockTextView: NSTextView {
     /// is its own text view, so "the block" is simply this view's full string
     /// (no charIndex→block mapping needed, unlike Terminal's single big view).
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = NSMenu(title: "Transcript")
+        let menu = NSMenu(title: String(localized: "Transcript", comment: "Title of a transcript context menu."))
         menu.autoenablesItems = false
 
         let crossBlockActive = selectionController?.isCrossBlockSelectionActive ?? false
@@ -3954,24 +3954,24 @@ final class SelectableBlockTextView: NSTextView {
         // "Copy" routes through the overridden copy(_:), which assembles a
         // cross-block selection when one is active and otherwise copies this
         // row's local selection.
-        let copyItem = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+        let copyItem = NSMenuItem(title: String(localized: "Copy", comment: "Command in a transcript or image context menu."), action: #selector(copy(_:)), keyEquivalent: "")
         copyItem.target = self
         copyItem.isEnabled = hasSelection
         menu.addItem(copyItem)
 
-        let copyBlockItem = NSMenuItem(title: "Copy Block", action: #selector(copyBlockText(_:)), keyEquivalent: "")
+        let copyBlockItem = NSMenuItem(title: String(localized: "Copy Block", comment: "Command in a transcript or image context menu."), action: #selector(copyBlockText(_:)), keyEquivalent: "")
         copyBlockItem.target = self
         copyBlockItem.isEnabled = !string.isEmpty
         menu.addItem(copyBlockItem)
 
         menu.addItem(.separator())
 
-        let speakItem = NSMenuItem(title: "Speak", action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
+        let speakItem = NSMenuItem(title: String(localized: "Speak", comment: "Command in a transcript or image context menu."), action: #selector(speakSelectionOrBlock(_:)), keyEquivalent: "")
         speakItem.target = self
         speakItem.isEnabled = selectedRange().length > 0 || !string.isEmpty
         menu.addItem(speakItem)
 
-        let stopItem = NSMenuItem(title: "Stop Speaking", action: #selector(stopSpeakingAction(_:)), keyEquivalent: "")
+        let stopItem = NSMenuItem(title: String(localized: "Stop Speaking", comment: "Command in a transcript or image context menu."), action: #selector(stopSpeakingAction(_:)), keyEquivalent: "")
         stopItem.target = self
         stopItem.isEnabled = selectionController?.isSpeaking ?? false
         menu.addItem(stopItem)
@@ -4164,7 +4164,7 @@ struct BlockCardHeader: View {
                             Capsule(style: .continuous)
                                 .fill(Color(nsColor: .systemYellow).opacity(0.9))
                         )
-                        .help("\(mode.findMatchCount) find match\(mode.findMatchCount == 1 ? "" : "es") in this collapsed card")
+                        .help("\(mode.findMatchCount) find matches in this collapsed card")
                         .accessibilityLabel("\(mode.findMatchCount) find matches, collapsed")
                 }
             }

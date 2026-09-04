@@ -420,15 +420,15 @@ final class OnboardingStewardCardTests: XCTestCase {
     /// someone who does not run this agent can stop at the first two words.
     @MainActor
     func testTitleAsksWhetherTheyUseTheAgent() {
-        XCTAssertEqual(StewardCard.titleText(for: Self.qwen), "Use Qwen Code?")
-        XCTAssertEqual(StewardCard.titleText(for: Self.grok), "Use Grok CLI?")
+        XCTAssertEqual(String(localized: StewardCard.titleText(for: Self.qwen)), "Use Qwen Code?")
+        XCTAssertEqual(String(localized: StewardCard.titleText(for: Self.grok)), "Use Grok CLI?")
     }
 
     /// Qwen keeps its own reason: it is the one agent that cannot be checked here
     /// at all, and softening that into the generic plea loses the whole point.
     @MainActor
     func testQwenCopyNamesTheReasonItCannotBeChecked() {
-        let body = StewardCard.bodyText(for: Self.qwen)
+        let body = String(localized: StewardCard.bodyText(for: Self.qwen))
 
         XCTAssertTrue(body.hasPrefix("Looking for a steward"), body)
         XCTAssertTrue(body.contains("free tier ended"), body)
@@ -437,7 +437,7 @@ final class OnboardingStewardCardTests: XCTestCase {
 
     @MainActor
     func testGenericCopyLeadsWithTheAsk() {
-        let body = StewardCard.bodyText(for: Self.grok)
+        let body = String(localized: StewardCard.bodyText(for: Self.grok))
 
         XCTAssertTrue(body.hasPrefix("Looking for a steward"), body)
         XCTAssertTrue(body.contains("nothing shared"), body)
@@ -471,7 +471,7 @@ final class OnboardingStewardCardTests: XCTestCase {
             iconTint: .blue,
             title: "Use Qwen Code?",
             message: "Looking for a steward.",
-            actions: [SlotCardAction(title: "Become the steward", isProminent: true, perform: {})],
+            actions: [SlotCardAction(id: "become-steward", title: "Become the steward", isProminent: true, perform: {})],
             dismissHelp: "Don't ask again",
             onDismiss: {},
             paneWidth: 0
@@ -488,7 +488,7 @@ final class OnboardingStewardCardTests: XCTestCase {
     @MainActor
     func testCopyQuotesNoDateOrVersion() {
         for agent in StewardAskEligibility.stewardlessAgents {
-            let copy = StewardCard.titleText(for: agent) + " " + StewardCard.bodyText(for: agent)
+            let copy = String(localized: StewardCard.titleText(for: agent)) + " " + String(localized: StewardCard.bodyText(for: agent))
             XCTAssertNil(
                 copy.range(of: #"\b(20\d\d|\d+\.\d+)\b"#, options: .regularExpression),
                 "\(agent.stewardName) copy pins a date or version: \(copy)"

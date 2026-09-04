@@ -259,8 +259,8 @@ extension PreferencesView {
 
     func pickOpenCodeBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select OpenCode CLI Binary"
-        panel.message = "Choose the opencode executable file"
+        panel.title = String(localized: "Select OpenCode CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the opencode executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -279,8 +279,8 @@ extension PreferencesView {
 
     func pickOpenCodeSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select OpenCode Sessions Directory"
-        panel.message = "Choose a folder where OpenCode session logs are stored"
+        panel.title = String(localized: "Select OpenCode Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose a folder where OpenCode session logs are stored", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

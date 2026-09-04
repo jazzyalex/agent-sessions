@@ -173,8 +173,8 @@ extension PreferencesView {
 
     func pickHermesBinary() {
         let panel = NSOpenPanel()
-        panel.title = "Select Hermes CLI Binary"
-        panel.message = "Choose the hermes executable file"
+        panel.title = String(localized: "Select Hermes CLI Binary", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose the hermes executable file", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -188,8 +188,8 @@ extension PreferencesView {
 
     func pickHermesSessionsFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Select Hermes Sessions Directory"
-        panel.message = "Choose a folder where Hermes canonical session JSON files are stored"
+        panel.title = String(localized: "Select Hermes Sessions Directory", comment: "Title in a file selection panel.")
+        panel.message = String(localized: "Choose a folder where Hermes canonical session JSON files are stored", comment: "Instructions in a file selection panel.")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

@@ -5,7 +5,7 @@ enum MenuBarScope: String, CaseIterable, Identifiable {
     case weekly
     case both
     var id: String { rawValue }
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .fiveHour: return "5h only"
         case .weekly: return "Weekly only"
@@ -18,7 +18,7 @@ enum MenuBarStyleKind: String, CaseIterable, Identifiable {
     case bars
     case numbers
     var id: String { rawValue }
-    var title: String { self == .bars ? "Bars" : "Numbers only" }
+    var title: LocalizedStringResource { self == .bars ? "Bars" : "Numbers only" }
 }
 
 enum MenuBarSource: String, CaseIterable, Identifiable {
@@ -26,7 +26,7 @@ enum MenuBarSource: String, CaseIterable, Identifiable {
     case claude
     case both
     var id: String { rawValue }
-    var title: String {
+    var title: LocalizedStringResource {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude"

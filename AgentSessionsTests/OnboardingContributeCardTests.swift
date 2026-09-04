@@ -482,7 +482,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// travels with the invitation or not at all.
     func testFrozenPrivacySentenceIsPresentInTheCardBody() {
         XCTAssertTrue(
-            ContributeCard.bodyText.hasSuffix("Never share real transcripts, keys, or private paths."),
+            String(localized: ContributeCard.bodyText).hasSuffix("Never share real transcripts, keys, or private paths."),
             "the privacy warning must remain the last thing the card says"
         )
     }
@@ -490,9 +490,9 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// The whole copy, pinned literally.
     @MainActor
     func testCardCopyIsFrozen() {
-        XCTAssertEqual(ContributeCard.titleText, "Help add your agent")
+        XCTAssertEqual(String(localized: ContributeCard.titleText), "Help add your agent")
         XCTAssertEqual(
-            ContributeCard.bodyText,
+            String(localized: ContributeCard.bodyText),
             "Agent Sessions adds new agents from user contributions — a pull request, your coding agent "
                 + "working from our brief, or a sanitized sample. Never share real transcripts, keys, or "
                 + "private paths."
@@ -505,7 +505,7 @@ final class OnboardingContributeCardTests: XCTestCase {
     /// agents" fails too.
     @MainActor
     func testCopyStatesNoSourceCount() {
-        let copy = ContributeCard.titleText + " " + ContributeCard.bodyText
+        let copy = String(localized: ContributeCard.titleText) + " " + String(localized: ContributeCard.bodyText)
 
         XCTAssertNil(
             copy.rangeOfCharacter(from: .decimalDigits),

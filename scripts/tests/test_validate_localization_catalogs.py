@@ -123,13 +123,53 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
             callback()
         self.assertIn(message, stderr.getvalue())
 
+    def test_extracted_key_coverage_accepts_reviewed_verbatim_set(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            validator.validate_extracted_key_coverage(
+                {"Cataloged": {}}, {"Cataloged": {}, "raw-path": {}}
+            )
+
+    def test_extracted_key_coverage_rejects_unexpected_key(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            self.assert_validation_fails(
+                lambda: validator.validate_extracted_key_coverage(
+                    {"Cataloged": {}},
+                    {"Cataloged": {}, "raw-path": {}, "Forgotten UI": {}},
+                ),
+                "unexpected=['Forgotten UI']",
+            )
+
+    def test_extracted_key_coverage_rejects_stale_allowlist_key(self) -> None:
+        with mock.patch.object(
+            validator, "EXPECTED_VERBATIM_EXTRACTED_KEYS", {"raw-path"}
+        ):
+            self.assert_validation_fails(
+                lambda: validator.validate_extracted_key_coverage(
+                    {"Cataloged": {}}, {"Cataloged": {}}
+                ),
+                "missing=['raw-path']",
+            )
+
     def test_current_catalogs_pass_full_validation(self) -> None:
         counts = validator.validate_catalogs(
             validator.LOCALIZABLE,
             validator.INFO_PLIST,
             skip_xcstringstool=False,
         )
-        self.assertEqual(counts, (145, 6, {"zh-Hans"}))
+        self.assertEqual(counts, (1293, 6, {"zh-Hans"}))
+
+    def test_current_catalog_uses_current_product_terms(self) -> None:
+        strings = validator.load_catalog(validator.LOCALIZABLE)["strings"]
+        stale_terms = ("cockpit", "quick meter", "favorite")
+        stale_keys = [
+            key for key in strings
+            if any(term in key.lower() for term in stale_terms)
+        ]
+        self.assertEqual(stale_keys, [])
 
     def test_complete_zh_hans_in_both_catalogs_passes(self) -> None:
         app_strings = {"Hello": string_entry("Hello")}
@@ -187,6 +227,93 @@ class LocalizationCatalogValidatorTests(unittest.TestCase):
         self.assert_validation_fails(
             lambda: self.validate_fixture(app_strings),
             "must preserve literal terms",
+        )
+
+    def test_per_key_command_literal_must_be_preserved(self) -> None:
+        key = "Copy setup command: claude"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "复制设置命令：克劳德"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve literal terms",
+        )
+
+    def test_recovery_ladder_literals_must_be_preserved(self) -> None:
+        key = (
+            "Usage paused — the saved CLI token lapsed. Run any claude command "
+            "in Terminal to refresh it, or paste a claude.ai session cookie in "
+            "Settings. Last resort: the probe button in the Quota Meter toolbar "
+            "(may consume tokens)."
+        )
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": (
+                    "用量已暂停 — 保存的 CLI 令牌已失效。请在终端中运行任意克劳德"
+                    "命令以刷新令牌，或在设置中粘贴会话 Cookie。"
+                ),
+            }
+        }
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            self.validate_fixture({key: entry})
+        self.assertIn("must preserve literal terms", stderr.getvalue())
+        self.assertIn("claude", stderr.getvalue())
+        self.assertIn("claude.ai", stderr.getvalue())
+
+    def test_inline_code_literal_must_be_preserved(self) -> None:
+        key = "Run `codex login` to continue"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "运行 `登录` 以继续"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve literal terms",
+        )
+
+    def test_format_arguments_may_reorder_with_positions(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": "已处理 %2$lld 个文件：%1$@",
+            }
+        }
+        info_strings = self.info_strings()
+        self.add_zh_hans(info_strings)
+        self.assertEqual(
+            self.validate_fixture({key: entry}, info_strings),
+            (1, 6, {"zh-Hans"}),
+        )
+
+    def test_format_argument_type_swap_fails(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {
+                "state": "translated",
+                "value": "已处理 %1$lld 个文件：%2$@",
+            }
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve format argument positions and types",
+        )
+
+    def test_missing_format_argument_fails(self) -> None:
+        key = "%@ processed %lld files"
+        entry = string_entry(key)
+        entry["localizations"]["zh-Hans"] = {
+            "stringUnit": {"state": "translated", "value": "%@ 已处理文件"}
+        }
+        self.assert_validation_fails(
+            lambda: self.validate_fixture({key: entry}),
+            "must preserve format argument positions and types",
         )
 
     def test_unknown_locale_fails(self) -> None:

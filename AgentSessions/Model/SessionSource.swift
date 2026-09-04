@@ -77,7 +77,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    public var featureDescription: String {
+    public var featureDescription: LocalizedStringResource {
         switch self {
         case .codex:    return "Track your Codex CLI coding sessions"
         case .claude:   return "Browse your Claude Code conversations"
